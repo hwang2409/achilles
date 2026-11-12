@@ -31,19 +31,6 @@ def _loopback(value: str) -> bool:
     return urlparse(value).hostname in {"127.0.0.1", "localhost", "::1"}
 
 
-def _request_is_same_origin(request, origins: list[str]) -> bool:
-    peer = request.client.host if request.client else ""
-    host = urlparse(f"//{request.headers.get('host', '')}").hostname
-    origin = request.headers.get("origin") or (
-        f"{request.url.scheme}://{request.headers.get('host', '')}"
-    )
-    if not _loopback(f"http://{peer}") or not _loopback(f"http://{host or ''}"):
-        return False
-    if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
-        return False
-    return origin in origins
-
-
 def _discovery(request):
     path = Path(
         os.environ.get(
@@ -56,9 +43,12 @@ def _discovery(request):
         if not isinstance(document, dict) or not _loopback(str(document["url"])):
             raise ValueError
         os.kill(int(document["pid"]), 0)
-        origins = document.get("origins", [])
-        if not isinstance(origins, list) or not _request_is_same_origin(request, origins):
-            raise HTTPException(403, "same-origin request required")
+        origin = (
+            str(request.headers.get("origin", ""))
+            or f"{request.url.scheme}://{request.headers.get('host', '')}"
+        )
+        if origin not in document.get("origins", []):
+            raise HTTPException(403, "origin is not allowed")
         return JSONResponse(
             {
                 key: document[key]
@@ -128,6 +118,11 @@ def create_app() -> Starlette:
             }
         )
 
+    async def credential(request):
+        page_id = request.path_params["id"]
+        token = await anyio.to_thread.run_sync(store.ensure_credential, page_id)
+        return JSONResponse({"credential": token})
+
     async def session(request):
         body = await request.json()
         expected, session_id = body.get("expected_session_id"), body.get("session_id")
@@ -140,6 +135,33 @@ def create_app() -> Starlette:
             return JSONResponse({"session_id": winner}, status_code=409)
         return JSONResponse({"session_id": session_id})
 
+    async def records(request):
+        value = request.headers.get("authorization", "")
+        if not value.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        page = await anyio.to_thread.run_sync(store.authenticate, value[7:])
+        if page is None or page["id"] != request.path_params["id"]:
+            raise HTTPException(403, "forbidden")
+        rows = await anyio.to_thread.run_sync(
+            store.records, page["id"], request.path_params["collection"]
+        )
+        return JSONResponse(rows)
+
+    async def rollback_tool(request):
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        body = await request.json()
+        if not isinstance(body.get("version"), int) or body["version"] < 1:
+            raise HTTPException(400, "version must be a positive integer")
+        try:
+            await anyio.to_thread.run_sync(
+                store.rollback_tool, row["id"], request.path_params["name"], body["version"]
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return JSONResponse({"ok": True})
+
     async def create_mode(request):
         row = await run_in_threadpool(store.page, request.path_params["id"])
         if row is None:
@@ -148,7 +170,7 @@ def create_app() -> Starlette:
         enabled = body.get("enabled")
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled must be boolean")
-        row = store.set_create_mode(row["id"], enabled)
+        row = await run_in_threadpool(store.set_create_mode, row["id"], enabled)
         return JSONResponse({"id": row["id"], "create_mode": bool(row["create_mode"])})
 
     mcp, mcp_lifespan = build_mcp(store)
@@ -156,8 +178,11 @@ def create_app() -> Starlette:
         lifespan=mcp_lifespan,
         routes=[
             Route("/api/zeta/discovery", _discovery),
+            Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/home/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
+            Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),
@@ -168,23 +193,15 @@ def create_app() -> Starlette:
     return PageAuthMiddleware(app, store)
 
 
-def _static_root() -> Path:
-    return Path(__file__).parents[2] / "apps/web/dist"
+def _asset(request):
+    path = Path(__file__).parents[2] / "apps/web/dist/assets" / request.path_params["path"]
+    if not path.is_file():
+        raise HTTPException(404, "asset not found")
+    return FileResponse(path)
 
 
-def _static_file(root: Path, request_path: str) -> Path:
-    root = root.resolve()
-    candidate = (root / request_path).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise HTTPException(404, "static file not found")
-    if not candidate.is_file():
-        raise HTTPException(404, "static file not found")
-    return candidate
-
-
-async def _asset(request):
-    return FileResponse(_static_file(_static_root() / "assets", request.path_params["path"]))
-
-
-async def _app(request):
-    return FileResponse(_static_file(_static_root(), "index.html"))
+def _app(request):
+    path = Path(__file__).parents[2] / "apps/web/dist/index.html"
+    if not path.exists():
+        raise HTTPException(404, "web assets are not built")
+    return FileResponse(path)
