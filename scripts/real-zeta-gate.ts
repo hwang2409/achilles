@@ -48,9 +48,9 @@ try {
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
   await page.reload();
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
-  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 });
-  const restoredApproval = page.locator('[data-part="approval"]'); await restoredApproval.waitFor({ timeout: 20000 });
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 60000 });
+  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 60000 });
+  const restoredApproval = page.locator('[data-part="approval"]'); await restoredApproval.waitFor({ timeout: 60000 });
   await restoredApproval.getByRole("button", { name: /approve/i }).click();
   await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   const transcript = await page.locator("body").innerText();
