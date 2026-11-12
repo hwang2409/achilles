@@ -193,6 +193,14 @@ class PageStore:
         encoded = json.dumps(validate_layout(layout, set()), sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         with self._connect() as db:
+            principal = db.execute(
+                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+            ).fetchone()
+            if principal is None or not principal[0]:
+                raise PermissionError("forbidden: create mode is off")
+            hook = getattr(self, "before_create_commit", None)
+            if hook is not None:
+                hook()
             db.execute("BEGIN IMMEDIATE")
             principal = db.execute(
                 "SELECT create_mode FROM page WHERE id=?", (principal_id,)
