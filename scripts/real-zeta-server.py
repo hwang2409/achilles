@@ -44,7 +44,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 "servers": {
                     "achilles": {
                         "transport": "streamable-http",
-                        "url": "http://127.0.0.1:5191/mcp/",
+                        "url": f"{os.environ['ZETA_PROOF_ORIGIN']}/mcp/",
                     }
                 }
             }
@@ -90,6 +90,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
         document["schemas"] = [schema["name"] for schema in tool_schemas]
+        document["schema_documents"] = tool_schemas
         control.write_text(json.dumps(document))
         control.chmod(0o600)
         return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()

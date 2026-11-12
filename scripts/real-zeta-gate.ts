@@ -166,7 +166,6 @@ try {
   await page
     .getByText("approval complete", { exact: true })
     .waitFor({ timeout: 20000 });
-  const transcript = await page.locator("body").innerText();
   const beforeReloadCreates = requests().filter(
     (frame) => frame.method === "new_session",
   ).length;
@@ -275,20 +274,42 @@ try {
       `missing generated tool on next catalog: ${JSON.stringify(refreshedNames)}`,
     );
   const sessionBeforeToolTurn = await homeSessionId();
-  const pidBeforeToolTurn = JSON.parse(await Bun.file(control).text()).pid;
+  const controlBeforeTool = JSON.parse(await Bun.file(control).text());
+  const pidBeforeToolTurn = controlBeforeTool.pid;
+  const resumesBeforeToolTurn = requests().filter(
+    (frame) => frame.method === "resume" || frame.method === "new_session",
+  ).length;
   await field.fill("annotate from the live zeta session");
   await field.press("Enter");
   const annotationApproval = page.locator('[data-part="approval"]');
-  await annotationApproval.waitFor({ timeout: 20000 });
+  await annotationApproval.waitFor({ timeout: 20000 }).catch(async (error) => {
+    throw new Error(
+      `${error}\nbackend=${await Bun.file(control).text()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+    );
+  });
   await annotationApproval.getByRole("button", { name: /approve/i }).click();
   await page
     .getByText("annotation complete", { exact: true })
-    .waitFor({ timeout: 20000 });
+    .waitFor({ timeout: 20000 })
+    .catch(async (error) => {
+      throw new Error(
+        `${error}\nbackend=${await Bun.file(control).text()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+      );
+    });
   if ((await homeSessionId()) !== sessionBeforeToolTurn)
     throw new Error("generated tool turn changed the home session id");
   const controlAfterTool = JSON.parse(await Bun.file(control).text());
   if (controlAfterTool.pid !== pidBeforeToolTurn)
     throw new Error("generated tool turn changed the zeta server pid");
+  const resumesAfterToolTurn = requests().filter(
+    (frame) => frame.method === "resume" || frame.method === "new_session",
+  ).length;
+  if (resumesAfterToolTurn !== resumesBeforeToolTurn)
+    throw new Error("generated tool turn remounted or resumed the zeta session");
+  if (!controlAfterTool.schemas.includes("achilles__annotate_trace"))
+    throw new Error(
+      `backend did not receive generated tool catalog: ${JSON.stringify(controlAfterTool.schemas)}`,
+    );
   const homeRecords = await (
     await fetch(`${origin}/api/pages/home/records/trace_annotations`, {
       headers: { Authorization: `Bearer ${credential}` },
@@ -298,38 +319,18 @@ try {
     throw new Error(
       `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)}`,
     );
-  const created = await homeMcp(3, "tools/call", {
-    name: "create_page",
-    arguments: {
-      route: "/created",
-      title: "created",
-      layout: { blocks: [{ type: "text", text: "created" }] },
-    },
-  });
-  if (created.result?.isError)
-    throw new Error(`create_page failed: ${JSON.stringify(created)}`);
-  const homeAfterCreate = first;
-  const createdPageId =
-    created.result?.structuredContent?.page_id ??
-    JSON.parse(created.result?.content?.[0]?.text ?? "{}").page_id;
-  if (!createdPageId)
-    throw new Error(`created page id missing: ${JSON.stringify(created)}`);
-  const createdPage = await (
-    await fetch(`${origin}/api/pages/${createdPageId}`)
-  ).json();
+  const createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!createdPage.zeta_session_id || createdPage.zeta_session_id === first)
     throw new Error("created page did not get its own zeta session");
+  const createdPageId = createdPage.id;
   const secondCredential = (
     await Bun.file(join(achillesHome, `credentials/${createdPageId}`)).text()
   ).trim();
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
-    secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ??
-    [];
+    secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
   if (secondNames.includes("annotate_trace"))
-    throw new Error(
-      `second page received annotate_trace: ${JSON.stringify(secondNames)}`,
-    );
+    throw new Error(`second page received annotate_trace: ${JSON.stringify(secondNames)}`);
   const crossPage = await mcp(secondCredential, 11, "tools/call", {
     name: "annotate_trace",
     arguments: { text: "must reject" },
@@ -337,15 +338,12 @@ try {
   if (!crossPage.result?.isError)
     throw new Error("second page annotate_trace call was accepted");
   const secondRecords = await (
-    await fetch(
-      `${origin}/api/pages/${createdPageId}/records/trace_annotations`,
-      { headers: { Authorization: `Bearer ${secondCredential}` } },
-    )
+    await fetch(`${origin}/api/pages/${createdPageId}/records/trace_annotations`, {
+      headers: { Authorization: `Bearer ${secondCredential}` },
+    })
   ).json();
   if (!Array.isArray(secondRecords) || secondRecords.length !== 0)
-    throw new Error(
-      `second page was mutated: ${JSON.stringify(secondRecords)}`,
-    );
+    throw new Error(`second page was mutated: ${JSON.stringify(secondRecords)}`);
   const versionTwo = {
     ...toolBundle,
     input_schema: {
@@ -364,9 +362,13 @@ try {
   await field.fill("observe version two");
   await field.press("Enter");
   await page.getByText("v2 turn", { exact: true }).waitFor({ timeout: 20000 });
-  const v2Schemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
+  const v2Control = JSON.parse(await Bun.file(control).text());
+  const v2Schemas = v2Control.schemas ?? [];
   if (!v2Schemas.some((name: string) => name === "achilles__annotate_trace"))
     throw new Error("live session did not see generated tool version two");
+  const v2Schema = v2Control.schema_documents.find(
+    (schema: { name: string }) => schema.name === "achilles__annotate_trace",
+  );
   const rollback = await fetch(
     `${origin}/api/pages/home/tools/annotate_trace/rollback`,
     {
@@ -380,12 +382,17 @@ try {
   await field.fill("observe rollback");
   await field.press("Enter");
   await page.getByText("rollback turn", { exact: true }).waitFor({ timeout: 20000 });
-  const rollbackSchemas =
-    JSON.parse(await Bun.file(control).text()).schemas ?? [];
+  const rollbackControl = JSON.parse(await Bun.file(control).text());
+  const rollbackSchemas = rollbackControl.schemas ?? [];
   if (
     !rollbackSchemas.some((name: string) => name === "achilles__annotate_trace")
   )
     throw new Error("live session lost generated tool after rollback");
+  const rollbackSchema = rollbackControl.schema_documents.find(
+    (schema: { name: string }) => schema.name === "achilles__annotate_trace",
+  );
+  if (JSON.stringify(rollbackSchema) === JSON.stringify(v2Schema))
+    throw new Error("rollback did not change the live generated schema");
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
