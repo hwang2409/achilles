@@ -38,6 +38,18 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
     home.mkdir(parents=True, exist_ok=True)
+    (home / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "achilles": {
+                        "transport": "streamable-http",
+                        "url": "http://127.0.0.1:5191/mcp/",
+                    }
+                }
+            }
+        )
+    )
     advance(home, expected_epoch=0)
     manager = SessionManager(home)
     pending = manager.create(provider="codex", model="offline", cwd=cwd, name="pending proof")
@@ -48,8 +60,32 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("proof-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("approval complete")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "create",
+                    "achilles__create_page",
+                    {
+                        "route": "/proof",
+                        "title": "proof",
+                        "layout": {"blocks": [{"type": "text", "text": "from zeta"}]},
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("annotation complete")]),
+        ScriptedTurn(content=[TextContent("v2 turn")]),
+        ScriptedTurn(content=[TextContent("rollback turn")]),
     ]
-    backend = FakeBackend(turns)
+
+    def record_request(messages, tool_schemas):
+        document = json.loads(control.read_text())
+        document["schemas"] = [schema["name"] for schema in tool_schemas]
+        control.write_text(json.dumps(document))
+        control.chmod(0o600)
+        return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()
+
+    backend = FakeBackend(turns, request_serializer=record_request)
     return (
         ZetaServer(
             home=home,
@@ -75,6 +111,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 "port": websocket.port,
                 "token": websocket.controller_token,
                 "pending_session": pending_session,
+                "pid": os.getpid(),
             }
         ),
         encoding="utf-8",

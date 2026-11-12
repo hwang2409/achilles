@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 from datetime import UTC, datetime
@@ -23,7 +24,7 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def validate_layout(layout: Any) -> dict[str, Any]:
+def validate_layout(layout: Any, assigned_tools: set[str] | None = None) -> dict[str, Any]:
     if (
         not isinstance(layout, dict)
         or set(layout) != {"blocks"}
@@ -34,17 +35,27 @@ def validate_layout(layout: Any) -> dict[str, Any]:
         if not isinstance(block, dict) or not isinstance(block.get("type"), str):
             raise ValueError("each block must have a type")
         kind = block["type"]
-        if kind not in BLOCK_KEYS:
-            raise ValueError(f"unknown layout block: {kind}")
-        if set(block) != BLOCK_KEYS[kind]:
-            raise ValueError(f"invalid keys for {kind} block")
+        if kind not in BLOCK_KEYS or set(block) != BLOCK_KEYS[kind]:
+            raise ValueError(
+                f"invalid keys for {kind} block"
+                if kind in BLOCK_KEYS
+                else f"unknown layout block: {kind}"
+            )
         if kind == "form":
-            raise ValueError("unknown tool reference")
-        if kind == "list" and not isinstance(block.get("collection"), str):
-            raise ValueError("list reference must be a string")
-        if kind == "detail" and (
-            not isinstance(block["fields"], list)
-            or not all(isinstance(field, str) for field in block["fields"])
+            if not isinstance(block["title"], str) or not isinstance(block["tool"], str):
+                raise ValueError("form fields must be strings")
+            if assigned_tools is None or block["tool"] not in assigned_tools:
+                raise ValueError("unknown tool reference")
+        elif kind == "text" and not isinstance(block["text"], str):
+            raise ValueError("text must be a string")
+        elif kind == "metric" and not all(isinstance(block[x], str) for x in ("label", "value")):
+            raise ValueError("metric fields must be strings")
+        elif kind == "list" and not all(isinstance(block[x], str) for x in ("title", "collection")):
+            raise ValueError("list fields must be strings")
+        elif kind == "detail" and (
+            not isinstance(block["title"], str)
+            or not isinstance(block["fields"], list)
+            or not all(isinstance(x, str) for x in block["fields"])
         ):
             raise ValueError("detail fields must be strings")
     return layout
@@ -53,40 +64,31 @@ def validate_layout(layout: Any) -> dict[str, Any]:
 class PageStore:
     def __init__(self, root: Path):
         self.root = root
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.root.chmod(0o700)
-        for directory in (root / "pages", root / "bundles", root / "credentials"):
-            directory.mkdir(mode=0o700, exist_ok=True)
+        for directory in (root, root / "pages", root / "bundles", root / "credentials"):
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
-        database = root / "achilles.sqlite3"
-        self.db = sqlite3.connect(database, check_same_thread=False)
-        database.chmod(0o600)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA foreign_keys=ON")
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA busy_timeout=5000")
-        for sidecar in (root / "achilles.sqlite3-wal", root / "achilles.sqlite3-shm"):
-            if sidecar.exists():
-                sidecar.chmod(0o600)
-        self.db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS page (
-              id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
-              zeta_session_id TEXT, active_layout_version INTEGER, created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL, create_mode INTEGER NOT NULL DEFAULT 0,
-              credential_hash TEXT
-            );
-            CREATE TABLE IF NOT EXISTS layout_version (
-              page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
-              digest TEXT NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL,
-              PRIMARY KEY(page_id, version)
-            );
-            CREATE TABLE IF NOT EXISTS audit (
-              id INTEGER PRIMARY KEY, page_id TEXT NOT NULL REFERENCES page(id),
-              action TEXT NOT NULL, version_digest TEXT, created_at TEXT NOT NULL
-            );
-            """
-        )
+        self._database = root / "achilles.sqlite3"
+        self.db = self._connect()
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if version not in (0, 1, 2):
+            raise RuntimeError(f"unsupported Achilles database version: {version}")
+        self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS page (
+          id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+          zeta_session_id TEXT, active_layout_version INTEGER,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT
+        );
+        CREATE TABLE IF NOT EXISTS layout_version (
+          page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
+          digest TEXT NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL,
+          PRIMARY KEY(page_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS audit (
+          id INTEGER PRIMARY KEY, page_id TEXT NOT NULL REFERENCES page(id),
+          action TEXT NOT NULL, version_digest TEXT, created_at TEXT NOT NULL
+        );
+        """)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(page)")}
         if "create_mode" not in columns:
             self.db.execute("ALTER TABLE page ADD COLUMN create_mode INTEGER NOT NULL DEFAULT 0")
@@ -99,66 +101,128 @@ class PageStore:
         )
         self.db.execute("PRAGMA user_version = 2")
         self.db.commit()
+        self._chmod_db()
         self.ensure_credential("home")
 
+    def _connect(self):
+        connection = sqlite3.connect(self._database, timeout=5)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=5000")
+        return connection
+
+    def _chmod_db(self):
+        for path in (
+            self._database,
+            Path(str(self._database) + "-wal"),
+            Path(str(self._database) + "-shm"),
+        ):
+            if path.exists():
+                path.chmod(0o600)
+
     def ensure_credential(self, page_id: str) -> str:
-        row = self.db.execute("SELECT credential_hash FROM page WHERE id=?", (page_id,)).fetchone()
-        if row is None:
-            raise KeyError(page_id)
-        path = self.root / "credentials" / page_id
-        if row["credential_hash"] and path.exists():
-            return path.read_text().strip()
-        token = secrets.token_urlsafe(32)
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        self.db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
-        self.db.commit()
-        path.write_text(token)
-        path.chmod(0o600)
-        return token
+        with self._connect() as db:
+            row = db.execute("SELECT credential_hash FROM page WHERE id=?", (page_id,)).fetchone()
+            if row is None:
+                raise KeyError(page_id)
+            path = self.root / "credentials" / page_id
+            if row["credential_hash"] and path.exists():
+                return path.read_text().strip()
+            token = secrets.token_urlsafe(32)
+            digest = hashlib.sha256(token.encode()).hexdigest()
+            db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, token.encode())
+            finally:
+                os.close(fd)
+            return token
 
     def authenticate(self, token: str) -> sqlite3.Row | None:
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        return self.db.execute("SELECT * FROM page WHERE credential_hash=?", (digest,)).fetchone()
+        with self._connect() as db:
+            return db.execute(
+                "SELECT * FROM page WHERE credential_hash=?",
+                (hashlib.sha256(token.encode()).hexdigest(),),
+            ).fetchone()
 
     def page(self, key: str) -> sqlite3.Row | None:
-        return self.db.execute("SELECT * FROM page WHERE id=? OR route=?", (key, key)).fetchone()
+        with self._connect() as db:
+            return db.execute("SELECT * FROM page WHERE id=? OR route=?", (key, key)).fetchone()
+
+    def layout(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT document FROM layout_version WHERE page_id=? ORDER BY version DESC LIMIT 1",
+                (page_id,),
+            ).fetchone()
+            return json.loads(row[0]) if row else {"blocks": []}
 
     def set_create_mode(self, page_id: str, enabled: bool) -> sqlite3.Row:
-        self.db.execute(
-            "UPDATE page SET create_mode=?, updated_at=? WHERE id=?", (enabled, now(), page_id)
-        )
-        self.db.commit()
+        with self._connect() as db:
+            db.execute(
+                "UPDATE page SET create_mode=?, updated_at=? WHERE id=?",
+                (int(enabled), now(), page_id),
+            )
+            db.commit()
         row = self.page(page_id)
         if row is None:
             raise KeyError(page_id)
         return row
 
-    def create_page(self, route: str, title: str, layout: Any) -> tuple[sqlite3.Row, str]:
+    def save_session(
+        self, page_id: str, expected: str | None, session_id: str
+    ) -> tuple[bool, str | None]:
+        with self._connect() as db:
+            row = db.execute("SELECT zeta_session_id FROM page WHERE id=?", (page_id,)).fetchone()
+            if row is None:
+                raise KeyError(page_id)
+            if row[0] != expected:
+                return False, row[0]
+            db.execute(
+                "UPDATE page SET zeta_session_id=?,updated_at=? WHERE id=? AND zeta_session_id IS ?",  # noqa: E501
+                (session_id, now(), page_id, expected),
+            )
+            db.commit()
+            return True, session_id
+
+    def create_page(
+        self, route: str, title: str, layout: Any, principal_id: str = "home"
+    ) -> tuple[sqlite3.Row, str]:
         if not route.startswith("/") or route == "/" or not title:
             raise ValueError("invalid page route or title")
-        document = validate_layout(layout)
-        encoded = json.dumps(document, sort_keys=True, separators=(",", ":"))
+        encoded = json.dumps(validate_layout(layout, set()), sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
-        (self.root / "bundles" / f"{digest}.json").write_text(encoded + "\n")
-        page_id = secrets.token_hex(12)
-        stamp = now()
-        try:
-            self.db.execute("BEGIN")
-            self.db.execute(
-                "INSERT INTO page(id,route,title,zeta_session_id,active_layout_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",  # noqa: E501
-                (page_id, route, title, secrets.token_hex(16), 1, stamp, stamp),
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            principal = db.execute(
+                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+            ).fetchone()
+            if principal is None or not principal[0]:
+                raise PermissionError("forbidden: create mode is off")
+            path = self.root / "bundles" / f"{digest}.json"
+            if not path.exists():
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                try:
+                    os.write(fd, (encoded + "\n").encode())
+                finally:
+                    os.close(fd)
+            page_id = secrets.token_hex(12)
+            stamp = now()
+            db.execute(
+                "INSERT INTO page(id,route,title,active_layout_version,created_at,updated_at) VALUES(?,?,?,?,?,?)",  # noqa: E501
+                (page_id, route, title, 1, stamp, stamp),
             )
-            self.db.execute(
+            db.execute(
                 "INSERT INTO layout_version VALUES(?,?,?,?,?)", (page_id, 1, digest, encoded, stamp)
             )
-            self.db.execute(
+            db.execute(
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                 (page_id, "create_page", digest, stamp),
             )
-            self.db.commit()
-        except Exception:
-            self.db.rollback()
-            raise
+            db.commit()
+        workspace = self.root / "pages" / page_id / "workspace"
+        workspace.mkdir(mode=0o700, parents=True)
+        workspace.chmod(0o700)
         self.ensure_credential(page_id)
         row = self.page(page_id)
         assert row is not None

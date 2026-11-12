@@ -15,6 +15,7 @@ def test_layout_rejects_unknown_tool_reference() -> None:
 
 def test_create_page_commits_layout_and_audit(tmp_path) -> None:
     store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
     page, digest = store.create_page(
         "/reports", "reports", {"blocks": [{"type": "text", "text": "hello"}]}
     )

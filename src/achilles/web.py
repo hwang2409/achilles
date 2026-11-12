@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 import anyio
 from starlette.applications import Starlette
-from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, JSONResponse
@@ -31,17 +29,16 @@ def _loopback(value: str) -> bool:
     return urlparse(value).hostname in {"127.0.0.1", "localhost", "::1"}
 
 
-def _request_is_same_origin(request, origins: list[str]) -> bool:
+def _same_origin(request) -> bool:
     peer = request.client.host if request.client else ""
-    host = urlparse(f"//{request.headers.get('host', '')}").hostname
-    origin = request.headers.get("origin") or (
-        f"{request.url.scheme}://{request.headers.get('host', '')}"
+    host = request.headers.get("host", "")
+    origin = request.headers.get("origin") or f"{request.url.scheme}://{host}"
+    return (
+        _loopback(f"http://{peer}")
+        and _loopback(f"http://{host}")
+        and origin == f"{request.url.scheme}://{host}"
+        and request.headers.get("sec-fetch-site") in (None, "same-origin")
     )
-    if not _loopback(f"http://{peer}") or not _loopback(f"http://{host or ''}"):
-        return False
-    if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
-        return False
-    return origin in origins
 
 
 def _discovery(request):
@@ -56,9 +53,12 @@ def _discovery(request):
         if not isinstance(document, dict) or not _loopback(str(document["url"])):
             raise ValueError
         os.kill(int(document["pid"]), 0)
-        origins = document.get("origins", [])
-        if not isinstance(origins, list) or not _request_is_same_origin(request, origins):
-            raise HTTPException(403, "same-origin request required")
+        origin = (
+            request.headers.get("origin")
+            or f"{request.url.scheme}://{request.headers.get('host', '')}"
+        )
+        if not _same_origin(request) or origin not in document.get("origins", []):
+            raise HTTPException(403, "origin is not allowed")
         return JSONResponse(
             {
                 key: document[key]
@@ -79,6 +79,8 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request, call_next):
         if request.url.path.startswith("/mcp"):
+            if not request.client or not _loopback(f"http://{request.client.host}"):
+                return JSONResponse({"error": "loopback required"}, status_code=403)
             value = request.headers.get("authorization", "")
             if not value.startswith("Bearer "):
                 return JSONResponse({"error": "missing bearer"}, status_code=401)
@@ -86,22 +88,8 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
             if page is None:
                 return JSONResponse({"error": "invalid bearer"}, status_code=401)
             request.scope.setdefault("state", {})["page"] = page
+            request.scope["state"]["token"] = value[7:]
         return await call_next(request)
-
-
-def _save_session(expected: str | None, session_id: str) -> tuple[bool, str | None]:
-    db = _database()
-    try:
-        changed = db.execute(
-            "UPDATE page SET zeta_session_id=?, updated_at=? "
-            "WHERE id='home' AND zeta_session_id IS ?",
-            (session_id, datetime.now(UTC).isoformat(), expected),
-        ).rowcount
-        db.commit()
-        winner = db.execute("SELECT zeta_session_id FROM page WHERE id='home'").fetchone()[0]
-        return changed == 1, winner
-    finally:
-        db.close()
 
 
 def create_app() -> Starlette:
@@ -109,9 +97,9 @@ def create_app() -> Starlette:
 
     async def page(request):
         key = request.path_params["route"]
-        row = await run_in_threadpool(
-            lambda: store.page(key if key.startswith("/") else f"/{key}") or store.page(key)
-        )
+        row = await anyio.to_thread.run_sync(store.page, key if key.startswith("/") else f"/{key}")
+        if row is None:
+            row = await anyio.to_thread.run_sync(store.page, key)
         if row is None:
             raise HTTPException(404, "page not found")
         return JSONResponse(
@@ -126,7 +114,20 @@ def create_app() -> Starlette:
                     "create_mode",
                 )
             }
+            | {
+                "workspace": str(store.root / "pages" / row["id"] / "workspace"),
+                "layout": await anyio.to_thread.run_sync(store.layout, row["id"]),
+            }
         )
+
+    async def credential(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        token = await anyio.to_thread.run_sync(store.ensure_credential, row["id"])
+        return JSONResponse({"credential": token}, headers={"cache-control": "no-store"})
 
     async def session(request):
         body = await request.json()
@@ -135,28 +136,43 @@ def create_app() -> Starlette:
             raise HTTPException(400, "invalid expected session")
         if not isinstance(session_id, str) or not session_id:
             raise HTTPException(400, "invalid session")
-        won, winner = await run_in_threadpool(_save_session, expected, session_id)
-        if not won:
-            return JSONResponse({"session_id": winner}, status_code=409)
-        return JSONResponse({"session_id": session_id})
+        page_id = request.path_params["id"]
+        try:
+            saved, actual = await anyio.to_thread.run_sync(
+                store.save_session, page_id, expected, session_id
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "page not found") from exc
+        if not saved:
+            return JSONResponse({"session_id": actual}, status_code=409)
+        return JSONResponse({"session_id": actual})
 
     async def create_mode(request):
-        row = await run_in_threadpool(store.page, request.path_params["id"])
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
         body = await request.json()
         enabled = body.get("enabled")
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled must be boolean")
-        row = store.set_create_mode(row["id"], enabled)
-        return JSONResponse({"id": row["id"], "create_mode": bool(row["create_mode"])})
+        row = await anyio.to_thread.run_sync(store.set_create_mode, row["id"], enabled)
+        return JSONResponse(
+            {
+                "id": row["id"],
+                "create_mode": bool(row["create_mode"]),
+                "notifications": ["notifications/tools/list_changed"],
+            }
+        )
 
     mcp, mcp_lifespan = build_mcp(store)
     app = Starlette(
         lifespan=mcp_lifespan,
         routes=[
             Route("/api/zeta/discovery", _discovery),
-            Route("/api/pages/home/session", session, methods=["PUT"]),
+            Route("/api/pages/{id}/session", session, methods=["PUT"]),
+            Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
@@ -172,19 +188,16 @@ def _static_root() -> Path:
     return Path(__file__).parents[2] / "apps/web/dist"
 
 
-def _static_file(root: Path, request_path: str) -> Path:
-    root = root.resolve()
-    candidate = (root / request_path).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise HTTPException(404, "static file not found")
-    if not candidate.is_file():
+def _static_file(root: Path, name: str) -> Path:
+    candidate = (root / name).resolve()
+    if root.resolve() not in candidate.parents or not candidate.is_file():
         raise HTTPException(404, "static file not found")
     return candidate
 
 
-async def _asset(request):
+def _asset(request):
     return FileResponse(_static_file(_static_root() / "assets", request.path_params["path"]))
 
 
-async def _app(request):
+def _app(request):
     return FileResponse(_static_file(_static_root(), "index.html"))

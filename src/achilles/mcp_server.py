@@ -11,16 +11,21 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 from .pages import PageStore
 
 
-def _page(context):
+def _token(context):
     request = context.request
-    return request.scope.get("state", {}).get("page") if request else None
+    return request.scope.get("state", {}).get("token") if request else None
+
+
+def _text(value: Any) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(value, sort_keys=True))]
+    )
 
 
 def build_mcp(store: PageStore):
     async def list_tools(context, _params) -> ListToolsResult:
-        page = await anyio.to_thread.run_sync(_page, context)
-        if not page or not page["create_mode"]:
-            return ListToolsResult(tools=[])
+        token = _token(context)
+        principal = await anyio.to_thread.run_sync(store.authenticate, token) if token else None
         return ListToolsResult(
             tools=[
                 Tool(
@@ -38,36 +43,28 @@ def build_mcp(store: PageStore):
                     },
                 )
             ]
+            if principal and principal["create_mode"]
+            else []
         )
 
     async def call_tool(context, params) -> CallToolResult:
-        page = await anyio.to_thread.run_sync(_page, context)
-        if not page or not page["create_mode"]:
+        token = _token(context)
+        principal = await anyio.to_thread.run_sync(store.authenticate, token) if token else None
+        if not principal or params.name != "create_page":
             return CallToolResult(
-                isError=True,
-                content=[TextContent(type="text", text="forbidden: create mode is off")],
-            )
-        if params.name != "create_page":
-            return CallToolResult(
-                isError=True, content=[TextContent(type="text", text="unknown tool")]
+                isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         try:
-            args = params.arguments or {}
             created, digest = await anyio.to_thread.run_sync(
-                store.create_page, args["route"], args["title"], args["layout"]
+                store.create_page,
+                (params.arguments or {})["route"],
+                (params.arguments or {})["title"],
+                (params.arguments or {})["layout"],
+                principal["id"],
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
             return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {"page_id": created["id"], "route": created["route"], "digest": digest}
-                    ),
-                )
-            ]
-        )
+        return _text({"page_id": created["id"], "route": created["route"], "digest": digest})
 
     server = Server("achilles", on_list_tools=list_tools, on_call_tool=call_tool)
     app = server.streamable_http_app(
