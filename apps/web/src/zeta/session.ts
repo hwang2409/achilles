@@ -10,10 +10,12 @@ type Status = {
 type HistoryPage = { messages?: unknown[]; next_offset?: number | null };
 type LoadedPage = { offset: number; rows: unknown[]; nextOffset: number | null };
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string) {
-  const binding = { mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
+export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string) {
+  const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   if (id) {
+    const status = await client.request("status", {}) as { session?: { session_id?: string } | null };
+    if (status.session?.session_id === id) return id;
     try { await client.request("resume", { session_id: id, ...binding }); }
     catch (error) {
       if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error;

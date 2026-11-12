@@ -14,9 +14,9 @@ FULCRUM_DIR=$PWD/.cache/fulcrum bun scripts/fulcrum.ts
 git clone https://github.com/hwang2409/zeta .cache/zeta
 git -C .cache/zeta checkout --detach "$(cat zeta.rev)"
 uv sync --project .cache/zeta --frozen
-ZETA_CHECKOUT=$PWD/.cache/zeta bun scripts/real-zeta-gate.ts
 (cd apps/web && bun run typecheck)
 (cd apps/web && bun run build)
+ZETA_CHECKOUT=$PWD/.cache/zeta bun scripts/real-zeta-gate.ts
 
 start the web app with `uv run achilles serve --host 127.0.0.1 --port 5190` after building the web assets.
 ```

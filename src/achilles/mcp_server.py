@@ -25,7 +25,8 @@ def _text(value: Any) -> CallToolResult:
 
 def build_mcp(store: PageStore):
     async def list_tools(context, _params) -> ListToolsResult:
-        page = _page(context)
+        principal = _page(context)
+        page = await anyio.to_thread.run_sync(store.page, principal["id"]) if principal else None
         if not page:
             return ListToolsResult(tools=[])
         tools: list[Tool] = []
@@ -46,36 +47,19 @@ def build_mcp(store: PageStore):
                             "additionalProperties": False,
                         },
                     ),
-                    Tool(
-                        name="create_tool",
-                        description="create a page-local data tool",
-                        inputSchema={
-                            "type": "object",
-                            "properties": {"bundle": {"type": "object"}},
-                            "required": ["bundle"],
-                            "additionalProperties": False,
-                        },
-                    ),
                 ]
-            )
-        for bundle in await anyio.to_thread.run_sync(store.page_tools, page["id"]):
-            tools.append(
-                Tool(
-                    name=bundle["name"],
-                    description=bundle["description"],
-                    inputSchema=bundle["input_schema"],
-                )
             )
         return ListToolsResult(tools=tools)
 
     async def call_tool(context, params) -> CallToolResult:
-        page = _page(context)
+        principal = _page(context)
+        page = await anyio.to_thread.run_sync(store.page, principal["id"]) if principal else None
         if not page:
             return CallToolResult(
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         args = params.arguments or {}
-        if params.name in {"create_page", "create_tool"}:
+        if params.name == "create_page":
             if not page["create_mode"]:
                 return CallToolResult(
                     isError=True,
@@ -87,11 +71,7 @@ def build_mcp(store: PageStore):
                         store.create_page, args["route"], args["title"], args["layout"]
                     )
                     result = {"page_id": created["id"], "route": created["route"], "digest": digest}
-                else:
-                    created, digest = await anyio.to_thread.run_sync(
-                        store.create_tool, page["id"], args["bundle"]
-                    )
-                    result = {**created, "digest": digest}
+
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 return CallToolResult(
                     isError=True, content=[TextContent(type="text", text=str(exc))]

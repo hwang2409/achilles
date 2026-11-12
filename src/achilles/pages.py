@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 from datetime import UTC, datetime
@@ -42,6 +43,12 @@ def validate_layout(layout: Any) -> dict[str, Any]:
             raise ValueError(f"invalid keys for {kind} block")
         if kind == "form":
             raise ValueError("unknown tool reference")
+        if kind == "text" and not isinstance(block["text"], str):
+            raise ValueError("text must be a string")
+        if kind == "metric" and not all(
+            isinstance(block[field], str) for field in ("label", "value")
+        ):
+            raise ValueError("metric fields must be strings")
         if kind == "list" and not isinstance(block.get("collection"), str):
             raise ValueError("list reference must be a string")
         if kind == "detail" and (
@@ -56,12 +63,16 @@ class PageStore:
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.root.chmod(0o700)
         (root / "pages").mkdir(mode=0o700, exist_ok=True)
         (root / "bundles").mkdir(mode=0o700, exist_ok=True)
         (root / "credentials").mkdir(mode=0o700, exist_ok=True)
         self.db = sqlite3.connect(root / "achilles.sqlite3", check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if version not in (0, 1, 2):
+            raise RuntimeError(f"unsupported Achilles database version: {version}")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.executescript(
@@ -114,6 +125,7 @@ class PageStore:
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
             (stamp, stamp),
         )
+        self.db.execute("PRAGMA user_version = 2")
         self.db.commit()
         for private_path in (
             root / "achilles.sqlite3",
@@ -135,8 +147,11 @@ class PageStore:
         digest = hashlib.sha256(token.encode()).hexdigest()
         self.db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
         self.db.commit()
-        path.write_text(token)
-        path.chmod(0o600)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, token.encode())
+        finally:
+            os.close(fd)
         return token
 
     def authenticate(self, token: str) -> sqlite3.Row | None:
@@ -145,6 +160,15 @@ class PageStore:
 
     def page(self, key: str) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM page WHERE id=? OR route=?", (key, key)).fetchone()
+
+    def layout(self, page_id: str) -> dict[str, Any]:
+        row = self.db.execute(
+            "SELECT document FROM layout_version WHERE page_id=? ORDER BY version DESC LIMIT 1",
+            (page_id,),
+        ).fetchone()
+        if row is None:
+            return {"blocks": []}
+        return json.loads(row[0])
 
     def set_create_mode(self, page_id: str, enabled: bool) -> sqlite3.Row:
         self.db.execute(
@@ -163,15 +187,23 @@ class PageStore:
         encoded = json.dumps(document, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         bundle_path = self.root / "bundles" / f"{digest}.json"
-        bundle_path.write_text(encoded + "\n")
-        bundle_path.chmod(0o600)
+        try:
+            fd = os.open(bundle_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            if bundle_path.read_text() != encoded + "\n":
+                raise ValueError("bundle digest already exists with different content")
+        else:
+            try:
+                os.write(fd, (encoded + "\n").encode())
+            finally:
+                os.close(fd)
         page_id = secrets.token_hex(12)
         stamp = now()
         try:
             self.db.execute("BEGIN")
             self.db.execute(
                 "INSERT INTO page(id,route,title,zeta_session_id,active_layout_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",  # noqa: E501
-                (page_id, route, title, secrets.token_hex(16), 1, stamp, stamp),
+                (page_id, route, title, None, 1, stamp, stamp),
             )
             self.db.execute(
                 "INSERT INTO layout_version VALUES(?,?,?,?,?)", (page_id, 1, digest, encoded, stamp)
@@ -184,6 +216,9 @@ class PageStore:
         except Exception:
             self.db.rollback()
             raise
+        workspace = self.root / "pages" / page_id / "workspace"
+        workspace.mkdir(mode=0o700, parents=True)
+        workspace.chmod(0o700)
         self.ensure_credential(page_id)
         row = self.page(page_id)
         assert row is not None

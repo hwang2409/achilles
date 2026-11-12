@@ -38,6 +38,18 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
     home.mkdir(parents=True, exist_ok=True)
+    (home / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "achilles": {
+                        "transport": "streamable-http",
+                        "url": "http://127.0.0.1:5191/mcp/",
+                    }
+                }
+            }
+        )
+    )
     advance(home, expected_epoch=0)
     manager = SessionManager(home)
     pending = manager.create(provider="codex", model="offline", cwd=cwd, name="pending proof")
