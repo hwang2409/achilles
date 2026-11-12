@@ -66,8 +66,8 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                     "create",
                     "achilles__create_page",
                     {
-                        "route": "/proof",
-                        "title": "proof",
+                        "route": "/created",
+                        "title": "created",
                         "layout": {"blocks": [{"type": "text", "text": "from zeta"}]},
                     },
                 )

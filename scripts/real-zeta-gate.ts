@@ -62,12 +62,12 @@ try {
   const mcp = async (id: number, method: string, params: object) => fetch(`${origin}/mcp/`, { method: "POST", headers: mcpHeaders, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }).then(async (response) => { if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} ${await response.text()}`); return response.json(); });
   const mode = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
   if (!mode.ok) throw new Error(`create mode toggle failed: ${mode.status}`);
-  await mcp(1, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
-  const catalog = await mcp(2, "tools/list", {});
-  const names = catalog.result?.tools?.map((tool: { name: string }) => `achilles__${tool.name}`) ?? [];
-  if (!names.includes("achilles__create_page")) throw new Error(`missing achilles__create_page catalog assertion: ${JSON.stringify(names)}`);
-  const created = await mcp(3, "tools/call", { name: "create_page", arguments: { route: "/created", title: "created", layout: { blocks: [{ type: "text", text: "created" }] } } });
-  if (created.result?.isError) throw new Error(`create_page failed: ${JSON.stringify(created)}`);
+  await field.fill("create page"); await field.press("Enter");
+  const createApproval = page.locator('[data-part="approval"]'); await createApproval.waitFor({ timeout: 20000 });
+  const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
+  if (!backendSchemas.includes("achilles__create_page")) throw new Error(`backend did not receive achilles__create_page catalog: ${JSON.stringify(backendSchemas)}`);
+  await createApproval.getByRole("button", { name: /approve/i }).click();
+  await page.getByText("annotation complete", { exact: true }).waitFor({ timeout: 20000 });
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   let createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (createdPage.zeta_session_id) throw new Error("created page got a session before navigation");
