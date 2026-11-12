@@ -11,13 +11,10 @@ the small control plane for agent products and judges. slice 0 provides the pyth
 
 ## run
 
-```sh
-uv sync --group test
-uv run achilles --version
-uv run pytest
+see `AGENTS.md` for the complete clean-worktree setup and check sequence.
 
-FULCRUM_DIR=/path/to/fulcrum bun scripts/fulcrum.ts
-(cd apps/web && bun run typecheck && bun run build)
+```sh
+uv run achilles --version
 ```
 
 `FULCRUM_DIR` must point to a clean checkout at the exact commit in `fulcrum.rev`. the web package keeps ordinary dependencies in a committed lockfile; the setup script installs those dependencies with `--frozen-lockfile`, then extracts local tarballs so changing fulcrum archive integrity does not change the lockfile.
