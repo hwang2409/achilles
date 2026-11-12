@@ -8,6 +8,11 @@ def test_layout_rejects_unknown_key() -> None:
         validate_layout({"blocks": [{"type": "text", "text": "ok", "extra": True}]})
 
 
+def test_layout_rejects_unknown_tool_reference() -> None:
+    with pytest.raises(ValueError, match="unknown tool reference"):
+        validate_layout({"blocks": [{"type": "form", "title": "x", "tool": "other-page"}]})
+
+
 def test_create_page_commits_layout_and_audit(tmp_path) -> None:
     store = PageStore(tmp_path)
     page, digest = store.create_page(

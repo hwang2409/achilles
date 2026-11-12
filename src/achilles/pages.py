@@ -38,10 +38,10 @@ def validate_layout(layout: Any) -> dict[str, Any]:
             raise ValueError(f"unknown layout block: {kind}")
         if set(block) != BLOCK_KEYS[kind]:
             raise ValueError(f"invalid keys for {kind} block")
-        if kind in {"list", "form"} and not isinstance(
-            block.get("collection", block.get("tool")), str
-        ):
-            raise ValueError(f"{kind} reference must be a string")
+        if kind == "form":
+            raise ValueError("unknown tool reference")
+        if kind == "list" and not isinstance(block.get("collection"), str):
+            raise ValueError("list reference must be a string")
         if kind == "detail" and (
             not isinstance(block["fields"], list)
             or not all(isinstance(field, str) for field in block["fields"])
