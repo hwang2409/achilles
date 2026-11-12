@@ -47,8 +47,24 @@ try {
   const transcript = await page.locator("body").innerText(); await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   if (await homeSessionId() !== first) throw new Error("reload changed home session id");
   if ((await page.locator("body").innerText()).includes("prove chat") === false || transcript.includes("approval complete") === false) throw new Error("reload lost transcript");
+  const credential = (await Bun.file(join(achillesHome, "credentials/home")).text()).trim();
+  const mcpHeaders = { Authorization: `Bearer ${credential}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" };
+  const mcp = async (id: number, method: string, params: object) => fetch(`${origin}/mcp/`, { method: "POST", headers: mcpHeaders, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }).then(async (response) => { if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} ${await response.text()}`); return response.json(); });
+  const mode = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+  if (!mode.ok) throw new Error(`create mode toggle failed: ${mode.status}`);
+  await mcp(1, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
+  const catalog = await mcp(2, "tools/list", {});
+  const names = catalog.result?.tools?.map((tool: { name: string }) => `achilles__${tool.name}`) ?? [];
+  if (!names.includes("achilles__create_page")) throw new Error(`missing achilles__create_page catalog assertion: ${JSON.stringify(names)}`);
+  const created = await mcp(3, "tools/call", { name: "create_page", arguments: { route: "/created", title: "created", layout: { blocks: [{ type: "text", text: "created" }] } } });
+  if (created.result?.isError) throw new Error(`create_page failed: ${JSON.stringify(created)}`);
+  if (!(await fetch(`${origin}/api/pages/created`)).ok) throw new Error(`created page did not persist: ${JSON.stringify(created)}`);
+  const off = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) });
+  if (!off.ok) throw new Error(`create mode off failed: ${off.status}`);
+  const late = await mcp(4, "tools/call", { name: "create_page", arguments: { route: "/late", title: "late", layout: { blocks: [{ type: "text", text: "late" }] } } });
+  if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
   if (errors.length) throw new Error(`browser errors: ${errors.join(" | ")}`);
-  console.log(`real-zeta gate passed: session ${first}`);
+  console.log(`real-zeta gate passed: session ${first}, created /created, late call rejected`);
 } finally {
   await browser?.close().catch(() => {}); for (const child of children) child.kill("SIGTERM");
   await Promise.all(children.map((child) => new Promise<void>((resolve) => { if (child.exitCode !== null) resolve(); else child.once("exit", () => resolve()); setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 5000); })));
