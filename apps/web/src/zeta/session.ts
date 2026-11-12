@@ -14,10 +14,13 @@ type LoadedPage = { offset: number; rows: unknown[]; nextOffset: number | null }
 export async function openHomeSession(client: ZetaClient, storedId: string | null) {
   let id = storedId;
   if (id) {
-    try { await client.request("resume", { session_id: id }); }
-    catch (error) {
-      if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error;
-      id = null;
+    const status = await client.request("status", {}) as Status;
+    if (status.session?.session_id !== id) {
+      try { await client.request("resume", { session_id: id }); }
+      catch (error) {
+        if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error;
+        id = null;
+      }
     }
   }
   if (!id) {
