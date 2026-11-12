@@ -5,12 +5,16 @@ type Status = { session?: { session_id: string } | null; state: "idle" | "runnin
 type HistoryPage = { messages?: unknown[]; next_offset?: number | null };
 type LoadedPage = { offset: number; rows: unknown[]; nextOffset: number | null };
 
+export async function rebindPage(client: ZetaClient, sessionId: string, binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> }) {
+  return client.request("resume", { session_id: sessionId, ...binding });
+}
+
 export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string) {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   if (id) {
     const status = await client.request("status", {}) as Status;
-    try { await client.request("resume", { session_id: id, ...binding }); }
+    try { await rebindPage(client, id, binding); }
     catch (error) { if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error; id = null; }
   }
   if (!id) {
