@@ -6,7 +6,7 @@ const fulcrum = process.env.FULCRUM_DIR;
 if (!fulcrum) throw new Error("FULCRUM_DIR is required");
 const pin = (await readFile(resolve(root, "fulcrum.rev"), "utf8")).trim();
 const vendor = resolve(root, "vendor/fulcrum");
-const packages = ["core", "react", "virtual", "markdown", "highlight"];
+const packages = ["core", "react", "virtual", "markdown", "highlight", "zeta"];
 
 function git(...args: string[]) {
   const result = Bun.spawnSync(["git", "-C", fulcrum, ...args]);

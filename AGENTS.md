@@ -13,6 +13,8 @@ git -C .cache/fulcrum checkout --detach "$(cat fulcrum.rev)"
 FULCRUM_DIR=$PWD/.cache/fulcrum bun scripts/fulcrum.ts
 (cd apps/web && bun run typecheck)
 (cd apps/web && bun run build)
+
+start the web app with `uv run achilles serve --host 127.0.0.1 --port 5190` after building the web assets.
 ```
 
 clone fulcrum once into the ignored cache; never use a fulcrum worktree or the user's fulcrum checkout. use the pin in `fulcrum.rev`.

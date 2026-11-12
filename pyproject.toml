@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "a small control plane for agent products and judges"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["starlette>=0.40,<1", "uvicorn>=0.32,<1"]
 
 [project.scripts]
 achilles = "achilles.cli:main"
