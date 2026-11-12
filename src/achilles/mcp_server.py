@@ -18,7 +18,7 @@ def _page(context):
 
 def build_mcp(store: PageStore):
     async def list_tools(context, _params) -> ListToolsResult:
-        page = _page(context)
+        page = await anyio.to_thread.run_sync(_page, context)
         if not page or not page["create_mode"]:
             return ListToolsResult(tools=[])
         return ListToolsResult(
@@ -41,7 +41,7 @@ def build_mcp(store: PageStore):
         )
 
     async def call_tool(context, params) -> CallToolResult:
-        page = _page(context)
+        page = await anyio.to_thread.run_sync(_page, context)
         if not page or not page["create_mode"]:
             return CallToolResult(
                 isError=True,
