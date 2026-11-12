@@ -52,7 +52,7 @@ try {
   const restoredApproval = page.locator('[data-part="approval"]');
   await restoredApproval.waitFor({ timeout: 60000 });
   await restoredApproval.getByRole("button", { name: /approve/i }).click();
-  await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 }).catch(async (error) => { throw new Error(`${error}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}\nframes=${redact(frames.join("\\n"))}`); });
   const transcript = await page.locator("body").innerText(); const beforeReloadCreates = requests().filter((frame) => frame.method === "new_session").length; await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   if (requests().filter((frame) => frame.method === "new_session").length !== beforeReloadCreates) throw new Error("reload created a second session");
   if (await homeSessionId() !== first) throw new Error("reload changed home session id");
