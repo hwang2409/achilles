@@ -61,12 +61,14 @@ def _loopback(value: str) -> bool:
 def _request_is_same_origin(request, origins: list[str]) -> bool:
     peer = request.client.host if request.client else ""
     host = urlparse(f"//{request.headers.get('host', '')}").hostname
-    origin = request.headers.get("origin", "")
+    origin = request.headers.get("origin") or (
+        f"{request.url.scheme}://{request.headers.get('host', '')}"
+    )
     if not _loopback(f"http://{peer}") or not _loopback(f"http://{host or ''}"):
         return False
     if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
         return False
-    return bool(origin and origin in origins)
+    return origin in origins
 
 
 def _discovery(request):
