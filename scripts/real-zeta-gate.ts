@@ -13,6 +13,7 @@ const zetaHome = join(temp, "zeta-home"); const achillesHome = join(temp, "achil
 const cwd = join(temp, "cwd"); const control = join(temp, "control.json");
 const port = 5191; const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = []; const logs = new Map<ChildProcess, string>();
+const redact = (text: string) => text.replace(/(bearer\\.|controller_token|observer_token)[^\\s,}\\"]*/gi, "$1[redacted]");
 const start = (command: string, args: string[], env: NodeJS.ProcessEnv, cwdArg = root) => {
   const child = spawn(command, args, { cwd: cwdArg, env, stdio: ["ignore", "pipe", "pipe"] }); children.push(child);
   logs.set(child, ""); child.stdout?.on("data", (data) => logs.set(child, logs.get(child)! + data)); child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + data)); return child;
@@ -34,7 +35,7 @@ try {
   browser = await chromium.launch({ headless: true }); const page = await browser.newPage(); const errors: string[] = []; const frames: string[] = [];
   page.on("websocket", (socket) => { socket.on("framesent", (event) => frames.push(String(event.payload))); socket.on("framereceived", (event) => frames.push(String(event.payload))); });
   page.on("pageerror", (e) => errors.push(e.message)); page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-  await page.goto(origin); const field = page.getByRole("textbox", { name: "message" }); await field.waitFor({ timeout: 20000 }).catch(async () => { throw new Error(`composer missing: ${await page.locator("body").innerText()} errors=${errors.join(" | ")} logs=${logs.get(zetaProcess)} discovery=${await Bun.file(join(zetaHome, "run/serve.ws.json")).text()}`); });
+  await page.goto(origin); const field = page.getByRole("textbox", { name: "message" }); await field.waitFor({ timeout: 20000 }).catch(async () => { throw new Error(`composer missing: ${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`); });
   const homeSessionId = async () => page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId(); if (!first) throw new Error("home session id missing");
   const requests = () => frames.map((frame) => { try { return JSON.parse(frame); } catch { return null; } }).filter(Boolean);
@@ -44,7 +45,8 @@ try {
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
   await approval.getByRole("button", { name: /approve/i }).click(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
-  const transcript = await page.locator("body").innerText(); await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  const transcript = await page.locator("body").innerText(); const beforeReloadCreates = requests().filter((frame) => frame.method === "new_session").length; await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  if (requests().filter((frame) => frame.method === "new_session").length !== beforeReloadCreates) throw new Error("reload created a second session");
   if (await homeSessionId() !== first) throw new Error("reload changed home session id");
   if ((await page.locator("body").innerText()).includes("prove chat") === false || transcript.includes("approval complete") === false) throw new Error("reload lost transcript");
   const credential = (await Bun.file(join(achillesHome, "credentials/home")).text()).trim();
@@ -87,10 +89,15 @@ try {
   if (homeAfterOff !== first) throw new Error("create-mode toggle changed home session id");
   const late = await mcp(4, "tools/call", { name: "create_page", arguments: { route: "/late", title: "late", layout: { blocks: [{ type: "text", text: "late" }] } } });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
-  if (errors.length) throw new Error(`browser errors: ${errors.join(" | ")}`);
+  if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
+  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   console.log(`real-zeta gate passed: session ${first}, created /created, late call rejected`);
 } finally {
   await browser?.close().catch(() => {}); for (const child of children) child.kill("SIGTERM");
-  await Promise.all(children.map((child) => new Promise<void>((resolve) => { if (child.exitCode !== null) resolve(); else child.once("exit", () => resolve()); setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 5000); })));
+  await Promise.all(children.map((child) => new Promise<void>((resolve, reject) => {
+    if (child.exitCode !== null) return resolve();
+    const timer = setTimeout(() => reject(new Error("child did not exit after SIGTERM")), 5000);
+    child.once("exit", () => { clearTimeout(timer); resolve(); });
+  })));
   await rm(temp, { recursive: true, force: true });
 }

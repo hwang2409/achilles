@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 import anyio
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, JSONResponse
@@ -77,12 +79,29 @@ class PageAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def _save_session(expected: str | None, session_id: str) -> tuple[bool, str | None]:
+    db = _database()
+    try:
+        changed = db.execute(
+            "UPDATE page SET zeta_session_id=?, updated_at=? "
+            "WHERE id='home' AND zeta_session_id IS ?",
+            (session_id, datetime.now(UTC).isoformat(), expected),
+        ).rowcount
+        db.commit()
+        winner = db.execute("SELECT zeta_session_id FROM page WHERE id='home'").fetchone()[0]
+        return changed == 1, winner
+    finally:
+        db.close()
+
+
 def create_app() -> Starlette:
     store = PageStore(_home())
 
     async def page(request):
         key = request.path_params["route"]
-        row = store.page(key if key.startswith("/") else f"/{key}") or store.page(key)
+        row = await run_in_threadpool(
+            lambda: store.page(key if key.startswith("/") else f"/{key}") or store.page(key)
+        )
         if row is None:
             raise HTTPException(404, "page not found")
         return JSONResponse(
@@ -106,17 +125,9 @@ def create_app() -> Starlette:
             raise HTTPException(400, "invalid expected session")
         if not isinstance(session_id, str) or not session_id:
             raise HTTPException(400, "invalid session")
-        current = store.page("home")["zeta_session_id"]
-        if current != expected:
-            return JSONResponse({"session_id": current}, status_code=409)
-        store.db.execute(
-            "UPDATE page SET zeta_session_id=?, updated_at=? WHERE id='home'",
-            (
-                session_id,
-                __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat(),
-            ),
-        )
-        store.db.commit()
+        won, winner = await run_in_threadpool(_save_session, expected, session_id)
+        if not won:
+            return JSONResponse({"session_id": winner}, status_code=409)
         return JSONResponse({"session_id": session_id})
 
     async def rollback_tool(request):
@@ -135,7 +146,7 @@ def create_app() -> Starlette:
         return JSONResponse({"ok": True})
 
     async def create_mode(request):
-        row = store.page(request.path_params["id"])
+        row = await run_in_threadpool(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
         body = await request.json()

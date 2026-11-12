@@ -25,7 +25,7 @@ def _text(value: Any) -> CallToolResult:
 
 def build_mcp(store: PageStore):
     async def list_tools(context, _params) -> ListToolsResult:
-        page = _page(context)
+        page = await anyio.to_thread.run_sync(_page, context)
         if not page:
             return ListToolsResult(tools=[])
         tools: list[Tool] = []
@@ -69,7 +69,7 @@ def build_mcp(store: PageStore):
         return ListToolsResult(tools=tools)
 
     async def call_tool(context, params) -> CallToolResult:
-        page = _page(context)
+        page = await anyio.to_thread.run_sync(_page, context)
         if not page:
             return CallToolResult(
                 isError=True, content=[TextContent(type="text", text="forbidden")]

@@ -56,14 +56,20 @@ class PageStore:
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        (root / "pages").mkdir(mode=0o700, exist_ok=True)
-        (root / "bundles").mkdir(mode=0o700, exist_ok=True)
-        (root / "credentials").mkdir(mode=0o700, exist_ok=True)
-        self.db = sqlite3.connect(root / "achilles.sqlite3", check_same_thread=False)
+        self.root.chmod(0o700)
+        for directory in (root / "pages", root / "bundles", root / "credentials"):
+            directory.mkdir(mode=0o700, exist_ok=True)
+            directory.chmod(0o700)
+        database = root / "achilles.sqlite3"
+        self.db = sqlite3.connect(database, check_same_thread=False)
+        database.chmod(0o600)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=5000")
+        for sidecar in (root / "achilles.sqlite3-wal", root / "achilles.sqlite3-shm"):
+            if sidecar.exists():
+                sidecar.chmod(0o600)
         self.db.executescript(
             """
             CREATE TABLE IF NOT EXISTS page (
