@@ -48,6 +48,7 @@ try {
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
   await approval.getByRole("button", { name: /approve/i }).click();
   await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  await page.reload(); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   console.log("expected skip: reload during pending approval waits for zeta #1270 (-32004 a turn is already running)");
   const credential = (await Bun.file(join(achillesHome, "credentials/home")).text()).trim();
   const mcpHeaders = { Authorization: `Bearer ${credential}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" };
