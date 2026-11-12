@@ -22,6 +22,7 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => { for (l
 let browser;
 try {
   await Bun.spawn(["git", "init", cwd]).exited; await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
+  await Bun.$`mkdir -p ${join(achillesHome, "pages/home/workspace")}`;
   const env = { ...process.env, PYTHONPATH: zeta, ZETA_HOME: zetaHome, ACHILLES_HOME: achillesHome, ZETA_PROOF_WORKTREE: root, ZETA_PROOF_CWD: cwd, ZETA_PROOF_CONTROL: control, ZETA_PROOF_ORIGIN: origin };
   const zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
   await waitFor(async () => (await Bun.file(join(zetaHome, "run/serve.ws.json")).exists()), "zeta discovery");
