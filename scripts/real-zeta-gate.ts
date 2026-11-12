@@ -13,7 +13,7 @@ const zetaHome = join(temp, "zeta-home"); const achillesHome = join(temp, "achil
 const cwd = join(temp, "cwd"); const control = join(temp, "control.json");
 const port = 5191; const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = []; const logs = new Map<ChildProcess, string>();
-const redact = (text: string) => text.replace(/(bearer\\.|controller_token|observer_token)[^\\s,}\\"]*/gi, "$1[redacted]");
+const redact = (text: string) => text.replace(/(bearer\.|controller_token|observer_token)[^\s,}\"]*/gi, "$1[redacted]");
 const start = (command: string, args: string[], env: NodeJS.ProcessEnv, cwdArg = root) => {
   const child = spawn(command, args, { cwd: cwdArg, env, stdio: ["ignore", "pipe", "pipe"] }); children.push(child);
   logs.set(child, ""); child.stdout?.on("data", (data) => logs.set(child, logs.get(child)! + data)); child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + data)); return child;
@@ -26,6 +26,7 @@ try {
   const zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
   await waitFor(async () => (await Bun.file(join(zetaHome, "run/serve.ws.json")).exists()), "zeta discovery");
   const pending = JSON.parse(await Bun.file(join(zetaHome, "run/serve.ws.json")).text());
+  const secrets = [pending.controller_token, pending.observer_token].filter(Boolean);
   const discovery = join(temp, "discovery.json"); await Bun.write(discovery, JSON.stringify({ ...pending, url: `ws://127.0.0.1:${pending.port}` }));
   const appEnv = { ...env, ACHILLES_ZETA_DISCOVERY: discovery };
   const seed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); db.commit(); db.close()"], env);
@@ -44,7 +45,13 @@ try {
   await field.fill("prove chat"); await field.press("Enter");
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
-  await approval.getByRole("button", { name: /approve/i }).click(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 60000 });
+  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 60000 });
+  const restoredApproval = page.locator('[data-part="approval"]');
+  await restoredApproval.waitFor({ timeout: 60000 });
+  await restoredApproval.getByRole("button", { name: /approve/i }).click();
+  await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   const transcript = await page.locator("body").innerText(); const beforeReloadCreates = requests().filter((frame) => frame.method === "new_session").length; await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   if (requests().filter((frame) => frame.method === "new_session").length !== beforeReloadCreates) throw new Error("reload created a second session");
   if (await homeSessionId() !== first) throw new Error("reload changed home session id");
@@ -81,6 +88,8 @@ try {
   const late = await mcp(4, "tools/call", { name: "create_page", arguments: { route: "/late", title: "late", layout: { blocks: [{ type: "text", text: "late" }] } } });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
+  const captured = [...logs.values()].join("\n");
+  if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
   if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   console.log(`real-zeta gate passed: session ${first}, created /created, late call rejected`);
 } finally {

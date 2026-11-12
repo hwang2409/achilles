@@ -97,6 +97,7 @@ class PageStore:
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
             (stamp, stamp),
         )
+        self.db.execute("PRAGMA user_version = 2")
         self.db.commit()
         self.ensure_credential("home")
 
