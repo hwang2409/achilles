@@ -51,7 +51,7 @@ jobs:
           version: "0.8.17"
           python-version: "3.12"
       - run: uv sync --group test
-      - run: bun x playwright install --with-deps chromium
+      - run: bun x playwright install chromium
         working-directory: apps/web
       - run: |
           tmp=$(mktemp -d)
