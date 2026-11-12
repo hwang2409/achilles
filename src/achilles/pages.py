@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,44 @@ BLOCK_KEYS: dict[str, frozenset[str]] = {
     "metric": frozenset({"type", "label", "value"}),
 }
 
+_PAGE_ROUTE = re.compile(r"^/(?:[a-z0-9][a-z0-9-]{0,62})(?:/(?:[a-z0-9][a-z0-9-]{0,62})){0,7}$")
+_RESERVED_ROUTES = {"api", "assets", "mcp"}
+
+
+def validate_page_route(route: str) -> None:
+    if not isinstance(route, str) or not _PAGE_ROUTE.fullmatch(route):
+        raise ValueError("invalid page route")
+    if route.split("/")[1] in _RESERVED_ROUTES:
+        raise ValueError("reserved page route")
+
+
+def _validate_block(block: Any, assigned_tools: set[str]) -> None:
+    if not isinstance(block, dict) or not isinstance(block.get("type"), str):
+        raise ValueError("each block must have a type")
+    kind = block["type"]
+    if kind not in BLOCK_KEYS or set(block) != BLOCK_KEYS[kind]:
+        raise ValueError(
+            f"invalid keys for {kind} block"
+            if kind in BLOCK_KEYS
+            else f"unknown layout block: {kind}"
+        )
+    if kind == "form" and (
+        not isinstance(block["title"], str) or block["tool"] not in assigned_tools
+    ):
+        raise ValueError("unknown tool reference")
+    if kind == "text" and not isinstance(block["text"], str):
+        raise ValueError("text must be a string")
+    if kind == "metric" and not all(isinstance(block[x], str) for x in ("label", "value")):
+        raise ValueError("metric fields must be strings")
+    if kind == "list" and not all(isinstance(block[x], str) for x in ("title", "collection")):
+        raise ValueError("list fields must be strings")
+    if kind == "detail" and (
+        not isinstance(block["title"], str)
+        or not isinstance(block["fields"], list)
+        or not all(isinstance(x, str) for x in block["fields"])
+    ):
+        raise ValueError("detail fields must be strings")
+
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
@@ -31,33 +71,9 @@ def validate_layout(layout: Any, assigned_tools: set[str] | None = None) -> dict
         or not isinstance(layout["blocks"], list)
     ):
         raise ValueError("layout must contain only a blocks list")
+    tools = assigned_tools or set()
     for block in layout["blocks"]:
-        if not isinstance(block, dict) or not isinstance(block.get("type"), str):
-            raise ValueError("each block must have a type")
-        kind = block["type"]
-        if kind not in BLOCK_KEYS or set(block) != BLOCK_KEYS[kind]:
-            raise ValueError(
-                f"invalid keys for {kind} block"
-                if kind in BLOCK_KEYS
-                else f"unknown layout block: {kind}"
-            )
-        if kind == "form":
-            if not isinstance(block["title"], str) or not isinstance(block["tool"], str):
-                raise ValueError("form fields must be strings")
-            if assigned_tools is None or block["tool"] not in assigned_tools:
-                raise ValueError("unknown tool reference")
-        elif kind == "text" and not isinstance(block["text"], str):
-            raise ValueError("text must be a string")
-        elif kind == "metric" and not all(isinstance(block[x], str) for x in ("label", "value")):
-            raise ValueError("metric fields must be strings")
-        elif kind == "list" and not all(isinstance(block[x], str) for x in ("title", "collection")):
-            raise ValueError("list fields must be strings")
-        elif kind == "detail" and (
-            not isinstance(block["title"], str)
-            or not isinstance(block["fields"], list)
-            or not all(isinstance(x, str) for x in block["fields"])
-        ):
-            raise ValueError("detail fields must be strings")
+        _validate_block(block, tools)
     return layout
 
 
@@ -120,6 +136,23 @@ class PageStore:
             if path.exists():
                 path.chmod(0o600)
 
+    def _atomic_private_write(self, path: Path, content: bytes) -> None:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
+
     def ensure_credential(self, page_id: str) -> str:
         with self._connect() as db:
             row = db.execute("SELECT credential_hash FROM page WHERE id=?", (page_id,)).fetchone()
@@ -131,11 +164,8 @@ class PageStore:
             token = secrets.token_urlsafe(32)
             digest = hashlib.sha256(token.encode()).hexdigest()
             db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                os.write(fd, token.encode())
-            finally:
-                os.close(fd)
+            self._atomic_private_write(path, token.encode())
+            db.commit()
             return token
 
     def authenticate(self, token: str) -> sqlite3.Row | None:
@@ -188,8 +218,9 @@ class PageStore:
     def create_page(
         self, route: str, title: str, layout: Any, principal_id: str = "home"
     ) -> tuple[sqlite3.Row, str]:
-        if not route.startswith("/") or route == "/" or not title:
-            raise ValueError("invalid page route or title")
+        validate_page_route(route)
+        if not title:
+            raise ValueError("invalid page title")
         encoded = json.dumps(validate_layout(layout, set()), sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         with self._connect() as db:
@@ -209,16 +240,26 @@ class PageStore:
                 raise PermissionError("forbidden: create mode is off")
             path = self.root / "bundles" / f"{digest}.json"
             if not path.exists():
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                try:
-                    os.write(fd, (encoded + "\n").encode())
-                finally:
-                    os.close(fd)
+                self._atomic_private_write(path, (encoded + "\n").encode())
             page_id = secrets.token_hex(12)
+            workspace = self.root / "pages" / page_id / "workspace"
+            workspace.mkdir(mode=0o700, parents=True)
+            workspace.chmod(0o700)
+            token = secrets.token_urlsafe(32)
+            self._atomic_private_write(self.root / "credentials" / page_id, token.encode())
             stamp = now()
             db.execute(
-                "INSERT INTO page(id,route,title,active_layout_version,created_at,updated_at) VALUES(?,?,?,?,?,?)",  # noqa: E501
-                (page_id, route, title, 1, stamp, stamp),
+                "INSERT INTO page(id,route,title,active_layout_version,created_at,"
+                "updated_at,credential_hash) VALUES(?,?,?,?,?,?,?)",
+                (
+                    page_id,
+                    route,
+                    title,
+                    1,
+                    stamp,
+                    stamp,
+                    hashlib.sha256(token.encode()).hexdigest(),
+                ),
             )
             db.execute(
                 "INSERT INTO layout_version VALUES(?,?,?,?,?)", (page_id, 1, digest, encoded, stamp)
@@ -228,10 +269,6 @@ class PageStore:
                 (page_id, "create_page", digest, stamp),
             )
             db.commit()
-        workspace = self.root / "pages" / page_id / "workspace"
-        workspace.mkdir(mode=0o700, parents=True)
-        workspace.chmod(0o700)
-        self.ensure_credential(page_id)
         row = self.page(page_id)
         assert row is not None
         return row, digest

@@ -14,6 +14,12 @@ from starlette.testclient import TestClient
 import achilles.web as web
 
 
+@pytest.fixture(autouse=True)
+def isolated_homes(monkeypatch, tmp_path):
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+
+
 def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "achilles"
     home.mkdir(mode=0o755)

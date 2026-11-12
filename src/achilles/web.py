@@ -158,6 +158,7 @@ def create_app() -> Starlette:
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled must be boolean")
         row = await anyio.to_thread.run_sync(store.set_create_mode, row["id"], enabled)
+        await notify_tools_changed(row["id"])
         return JSONResponse(
             {
                 "id": row["id"],
@@ -166,7 +167,7 @@ def create_app() -> Starlette:
             }
         )
 
-    mcp, mcp_lifespan = build_mcp(store)
+    mcp, mcp_lifespan, notify_tools_changed = build_mcp(store)
     app = Starlette(
         lifespan=mcp_lifespan,
         routes=[
