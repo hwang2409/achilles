@@ -134,6 +134,9 @@ class PageStore:
         ):
             if private_path.exists():
                 private_path.chmod(0o600)
+        home_workspace = root / "pages" / "home" / "workspace"
+        home_workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
+        home_workspace.chmod(0o700)
         self.ensure_credential("home")
 
     def ensure_credential(self, page_id: str) -> str:
