@@ -29,3 +29,5 @@ fulcrum upgrades are explicit pull requests that change `fulcrum.rev`.
 
 this repository is public. never commit real traces, transcripts, tokens, `.env` files, hostnames, private network addresses, or real message recipients. fixtures are synthetic only; raw traces stay on the home server.
 do not add a framework, orm, queue, or migration framework before a slice needs it.
+
+page-bound MCP tools belong only to the page's top-level Zeta session. child sessions never receive them; bindings use only the standard `Authorization` header and are never echoed.
