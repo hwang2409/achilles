@@ -12,8 +12,8 @@ try {
   await page.getByRole("button", { name: /fixture failure/ }).click();
   if (!page.url().includes("/verdicts/")) throw new Error("verdict route missing");
   const timeline = page.getByLabel("trace timeline");
-  await timeline.getByText("the child found a failure").waitFor();
-  await timeline.getByRole("button", { name: /fixture-child-1/ }).click();
+  await timeline.getByText("fixture-child-1").waitFor();
+  await timeline.getByText("fixture-child-1").click();
   await timeline.getByText("build failed in fixture").waitFor();
   if (errors.length) throw new Error(errors.join("\n"));
 } finally { await browser.close(); }
