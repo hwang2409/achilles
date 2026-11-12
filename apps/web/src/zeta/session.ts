@@ -1,3 +1,4 @@
+// adapted from gamma@6cd69671 src/session.ts
 import { fromZetaEvent, fromZetaHistory, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import type { RunEvent } from "@fulcrum/core";
 
@@ -72,8 +73,40 @@ export async function loadSession(client: ZetaClient, id: string): Promise<Sessi
     }
     pages.splice(pages.length - 1, 1, ...refreshed);
   }
-  const status = await client.request("status", {}) as Status;
-  if (client.finishReplay(id, revision)) lease.store.resync(snapshot(allRows(), status));
+  let status = await client.request("status", {}) as Status;
+  while (!client.finishReplay(id, revision)) {
+    const nextRevision = client.replayRevision(id);
+    const tailPage = pages.at(-1);
+    if (tailPage) {
+      const refreshed: LoadedPage[] = [];
+      for (let offset: number | null = tailPage.offset; offset !== null;) {
+        const next = await page(offset);
+        refreshed.push(next);
+        offset = next.nextOffset;
+      }
+      pages.splice(pages.length - 1, 1, ...refreshed);
+    }
+    status = await client.request("status", {}) as Status;
+    if (client.finishReplay(id, nextRevision)) break;
+  }
+  lease.store.resync(snapshot(allRows(), status));
   void signal;
   return lease;
+}
+
+export async function coordinateHomeSession(client: ZetaClient) {
+  const page = await fetch("/api/pages/home", { cache: "no-store" }).then((response) => response.json()) as { zeta_session_id: string | null };
+  const id = await openHomeSession(client, page.zeta_session_id);
+  let lease = await loadSession(client, id);
+  const saved = await fetch("/api/pages/home/session", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
+  if (saved.status === 409) {
+    const winner = (await saved.json()).session_id;
+    if (typeof winner !== "string") throw new Error("session mapping changed without a winner");
+    lease.release();
+    await client.request("resume", { session_id: winner });
+    lease = await loadSession(client, winner);
+    return { id: winner, store: lease.store, release: () => lease.release() };
+  }
+  if (!saved.ok) throw new Error(`could not save session mapping (${saved.status})`);
+  return { id, store: lease.store, release: () => lease.release() };
 }

@@ -1,3 +1,4 @@
+// adapted from gamma@6cd69671 src/connection.ts
 import { createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
 
 /**

@@ -4,7 +4,8 @@ import { createApprovalDecider } from "./zeta/approvals";
 import { createRunStore } from "@fulcrum/core";
 import { createConnection } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { loadSession, openHomeSession } from "./zeta/session";
+// adapted from gamma@6cd69671 src/session.ts
+import { coordinateHomeSession } from "./zeta/session";
 import "./style.css";
 
 const renderers: Renderers = {
@@ -28,22 +29,9 @@ export function App() {
       setClient(next);
       void (async () => {
         try {
-          const page = await fetch("/api/pages/home", { cache: "no-store" }).then((response) => response.json());
-          const id = await openHomeSession(next, page.zeta_session_id);
-          if (!live) return;
-          const lease = await loadSession(next, id);
-          const saved = await fetch("/api/pages/home/session", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
-          if (saved.status === 409) {
-            const winner = (await saved.json()).session_id;
-            if (typeof winner !== "string") throw new Error("session mapping changed without a winner");
-            lease.release();
-            await next.request("resume", { session_id: winner });
-            const winningLease = await loadSession(next, winner);
-            if (live) { setSessionId(winner); setStore(winningLease.store); } else winningLease.release();
-          } else {
-            if (!saved.ok) throw new Error(`could not save session mapping (${saved.status})`);
-            setSessionId(id); setStore(lease.store);
-          }
+          const home = await coordinateHomeSession(next);
+          if (!live) { home.release(); return; }
+          setSessionId(home.id); setStore(home.store);
         } catch (caught) { if (live) setError(caught instanceof Error ? caught.message : String(caught)); }
       })();
     });

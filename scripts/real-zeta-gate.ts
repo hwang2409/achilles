@@ -26,6 +26,7 @@ try {
   const zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
   await waitFor(async () => (await Bun.file(join(zetaHome, "run/serve.ws.json")).exists()), "zeta discovery");
   const pending = JSON.parse(await Bun.file(join(zetaHome, "run/serve.ws.json")).text());
+  const secrets = [pending.controller_token, pending.observer_token].filter(Boolean);
   const discovery = join(temp, "discovery.json"); await Bun.write(discovery, JSON.stringify({ ...pending, url: `ws://127.0.0.1:${pending.port}` }));
   const appEnv = { ...env, ACHILLES_ZETA_DISCOVERY: discovery };
   const seed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); db.commit(); db.close()"], env);
@@ -46,7 +47,10 @@ try {
   await field.fill("prove chat"); await field.press("Enter");
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
-  await approval.getByRole("button", { name: /approve/i }).click(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  await page.reload();
+  const restoredApproval = page.locator('[data-part="approval"]'); await restoredApproval.waitFor({ timeout: 20000 });
+  await restoredApproval.getByRole("button", { name: /approve/i }).click();
+  await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   const transcript = await page.locator("body").innerText();
   const beforeReloadCreates = requests().filter((frame) => frame.method === "new_session").length;
   await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
@@ -54,6 +58,8 @@ try {
   if (await homeSessionId() !== first) throw new Error("reload changed home session id");
   if ((await page.locator("body").innerText()).includes("prove chat") === false || transcript.includes("approval complete") === false) throw new Error("reload lost transcript");
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
+  const captured = [...logs.values()].join("\n");
+  if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
   if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   console.log(`real-zeta gate passed: session ${first}`);
 } finally {

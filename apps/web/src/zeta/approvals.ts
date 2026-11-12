@@ -1,3 +1,4 @@
+// adapted from gamma@6cd69671 src/approvals.ts
 export type ApprovalMethod = "approve" | "deny";
 export type ApprovalStore = {
   getState(): { outline: readonly { id: string }[] };
