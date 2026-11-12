@@ -38,7 +38,7 @@ def serve(db: Path, root: Path, host: str, port: int):
                 if target.suffix == ".js"
                 else "text/html"
             )
-            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Type", content_type + "; charset=utf-8")
             self.end_headers()
             self.wfile.write(target.read_bytes())
 
