@@ -47,7 +47,7 @@ try {
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 }).catch(async (error) => { throw new Error(`${error}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}\nframes=${redact(frames.join("\\n"))}`); });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
   await page.reload();
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 60000 });
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 60000 }).catch(async (error) => { throw new Error(`${error} body=${await page.locator("body").innerText()} frames=${redact(frames.slice(-12).join("\n"))}`); });
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 60000 });
   const restoredApproval = page.locator('[data-part="approval"]');
   await restoredApproval.waitFor({ timeout: 60000 });

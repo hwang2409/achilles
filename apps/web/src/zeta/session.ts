@@ -11,7 +11,7 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
   if (id) {
     const status = await client.request("status", {}) as Status;
     try { await client.request("resume", { session_id: id, ...binding }); }
-    catch (error) { if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error; id = null; }
+    catch (error) { const value = error as { code?: unknown; data?: { code?: unknown } }; if (value.code === -32004) return id; if (value.data?.code !== "session_not_found") throw error; id = null; }
   }
   if (!id) {
     const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
