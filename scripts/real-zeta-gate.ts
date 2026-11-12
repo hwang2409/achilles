@@ -56,7 +56,7 @@ try {
   const transcript = await page.locator("body").innerText(); const beforeReloadCreates = requests().filter((frame) => frame.method === "new_session").length; await page.reload(); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   if (requests().filter((frame) => frame.method === "new_session").length !== beforeReloadCreates) throw new Error("reload created a second session");
   if (await homeSessionId() !== first) throw new Error("reload changed home session id");
-  if ((await page.locator("body").innerText()).includes("prove chat") === false || transcript.includes("approval complete") === false) throw new Error("reload lost transcript");
+  if ((await page.locator("body").innerText()).includes("prove chat") === false || transcript.includes("approval complete") === false) throw new Error(`reload lost transcript body=${await page.locator("body").innerText()} prior=${transcript}`);
   const credential = (await Bun.file(join(achillesHome, "credentials/home")).text()).trim();
   const mcpHeaders = { Authorization: `Bearer ${credential}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" };
   const mcp = async (id: number, method: string, params: object) => fetch(`${origin}/mcp/`, { method: "POST", headers: mcpHeaders, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }).then(async (response) => { if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} ${await response.text()}`); return response.json(); });
