@@ -52,7 +52,9 @@ try {
   console.log("expected skip: reload during pending approval waits for zeta #1270 (-32004 a turn is already running)");
   const credential = (await Bun.file(join(achillesHome, "credentials/home")).text()).trim();
   const mcpHeaders = { Authorization: `Bearer ${credential}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" };
-  const mcp = async (id: number, method: string, params: object) => fetch(`${origin}/mcp/`, { method: "POST", headers: mcpHeaders, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }).then(async (response) => { if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} ${await response.text()}`); return response.json(); });
+  let mcpSession = "";
+  const mcp = async (id: number, method: string, params: object) => { const headers = mcpSession ? { ...mcpHeaders, "mcp-session-id": mcpSession } : mcpHeaders; const response = await fetch(`${origin}/mcp/`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }); const next = response.headers.get("mcp-session-id"); if (next) mcpSession = next; if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} session=${mcpSession} ${await response.text()}`); return response.json(); };
+
   const mode = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
   if (!mode.ok) throw new Error(`create mode toggle failed: ${mode.status}`);
   await field.fill("create page"); await field.press("Enter");
@@ -75,6 +77,7 @@ try {
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== createdPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
+  await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const invalid = await mcp(5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
   const crossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
@@ -83,6 +86,17 @@ try {
   if (!off.ok) throw new Error(`create mode off failed: ${off.status}`);
   const homeAfterOff = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   if (homeAfterOff !== first) throw new Error("create-mode toggle changed home session id");
+  await field.fill("catalog off"); await field.press("Enter");
+  await page.getByText("v2 turn", { exact: true }).waitFor({ timeout: 20000 });
+  await waitFor(async () => { const schemas = JSON.parse(await Bun.file(control).text()).schemas ?? []; return !schemas.includes("achilles__create_page"); }, "catalog removal after toggle off");
+  const on = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+  if (!on.ok) throw new Error(`create mode on failed: ${on.status}`);
+  await field.fill("catalog on"); await field.press("Enter");
+  await page.getByText("rollback turn", { exact: true }).waitFor({ timeout: 20000 });
+  const refreshed = await mcp(7, "tools/list", {});
+  if (!refreshed.result?.tools?.some((tool: { name: string }) => tool.name === "create_page")) throw new Error("catalog addition after toggle on missing");
+  const finalOff = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) });
+  if (!finalOff.ok) throw new Error(`final create mode off failed: ${finalOff.status}`);
   const late = await mcp(4, "tools/call", { name: "create_page", arguments: { route: "/late", title: "late", layout: { blocks: [{ type: "text", text: "late" }] } } });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);

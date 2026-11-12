@@ -82,7 +82,7 @@ def build_mcp(store: PageStore):
         notification_options=NotificationOptions(tools_changed=True), **kwargs
     )
     app = server.streamable_http_app(
-        streamable_http_path="/", json_response=True, stateless_http=True, host="127.0.0.1"
+        streamable_http_path="/", json_response=True, stateless_http=False, host="127.0.0.1"
     )
 
     @asynccontextmanager
