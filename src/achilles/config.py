@@ -31,7 +31,14 @@ def load_manifest(path: Path) -> Manifest:
         raise ValueError("invalid manifest")
     judge = data["judges"][0]
     if (
-        set(judge) != {"id", "version", "kind", "urgent"}
+        not isinstance(data["product"], str)
+        or not data["product"]
+        or type(data["schema"]) is not int
+        or set(judge) != {"id", "version", "kind", "urgent"}
+        or not isinstance(judge["id"], str)
+        or not judge["id"]
+        or type(judge["version"]) is not int
+        or judge["version"] < 0
         or judge["kind"] != "fixture"
         or judge["urgent"] != "always"
     ):

@@ -23,10 +23,11 @@ def serve(db: Path, root: Path, host: str, port: int):
                     return
                 self.send_json(value)
                 return
-            relative = self.path.lstrip("/") or "index.html"
-            target = (root / relative).resolve()
-            if not str(target).startswith(str(root.resolve())) or not target.is_file():
-                target = (root / "index.html").resolve()
+            relative = self.path.split("?", 1)[0].lstrip("/") or "index.html"
+            resolved_root = root.resolve()
+            target = (resolved_root / relative).resolve()
+            if not target.is_relative_to(resolved_root) or not target.is_file():
+                target = resolved_root / "index.html"
             if not target.exists():
                 self.send_error(404)
                 return

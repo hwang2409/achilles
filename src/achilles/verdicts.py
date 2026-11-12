@@ -114,6 +114,16 @@ def complete(path: Path, vid: str, outcome: str, response: dict) -> None:
     db.commit()
 
 
+def counts(path: Path) -> tuple[int, int, int]:
+    db = connect(path)
+    return tuple(db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] for _ in [0]) + (
+        db.execute("SELECT COUNT(*) FROM verdicts").fetchone()[0],
+        db.execute(
+            "SELECT COUNT(*) FROM deliveries WHERE outcome IN ('sent','duplicate')"
+        ).fetchone()[0],
+    )
+
+
 def list_verdicts(path: Path) -> list[dict]:
     db = connect(path)
     rows = db.execute(
@@ -147,8 +157,8 @@ def detail(path: Path, vid: str) -> dict | None:
     if not r:
         return None
     x = dict(r)
-    x["verdict"] = json.loads(x.pop("verdict_json"))
+    verdict = json.loads(x.pop("verdict_json"))
     x["trace"] = json.loads(x.pop("trace_json"))
     x["delivery_outcome"] = x.pop("outcome")
     x.pop("response_json")
-    return x
+    return {**x, **verdict}

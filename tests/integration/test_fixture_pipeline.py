@@ -2,9 +2,11 @@ import json
 import socket
 import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from support.process import start_ready, stop
 
 
 def call(path: Path, request: dict) -> dict:
@@ -17,7 +19,7 @@ def call(path: Path, request: dict) -> dict:
 def test_fixture_pipeline_twice(tmp_path: Path) -> None:
     sock = Path("/tmp") / f"achilles-{uuid.uuid4().hex}.sock"
     record = tmp_path / "record.json"
-    proc = subprocess.Popen(
+    proc, _ = start_ready(
         [
             sys.executable,
             "fixtures/notify/server.py",
@@ -25,17 +27,9 @@ def test_fixture_pipeline_twice(tmp_path: Path) -> None:
             str(sock),
             "--record",
             str(record),
-        ],
-        stdout=subprocess.PIPE,
-        text=True,
+        ]
     )
     try:
-        assert proc.stdout is not None
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            line = proc.stdout.readline()
-            if line:
-                break
         args = [
             "achilles",
             "run",
@@ -54,16 +48,30 @@ def test_fixture_pipeline_twice(tmp_path: Path) -> None:
         assert first["runs"] == second["runs"] == 1
         assert first["verdicts"] == second["verdicts"] == 1
         assert first["notifications"] == second["notifications"] == 1
-        assert json.loads(record.read_text())["notifications"] == 1
+        assert first["existing"] is False and second["existing"] is True
+        assert (
+            len(
+                json.loads(
+                    subprocess.run(
+                        ["achilles", "verdict", "list", "--db", str(tmp_path / "db"), "--json"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    ).stdout
+                )
+            )
+            == 1
+        )
+        record_data = json.loads(record.read_text())
+        assert record_data["notifications"] == 1 and record_data["requests"] == 1
     finally:
-        proc.terminate()
-        proc.wait(timeout=5)
+        stop(proc)
 
 
 def test_notifier_duplicate_key(tmp_path: Path) -> None:
     sock = Path("/tmp") / f"achilles-{uuid.uuid4().hex}.sock"
     record = tmp_path / "record.json"
-    proc = subprocess.Popen(
+    proc, _ = start_ready(
         [
             sys.executable,
             "fixtures/notify/server.py",
@@ -71,13 +79,9 @@ def test_notifier_duplicate_key(tmp_path: Path) -> None:
             str(sock),
             "--record",
             str(record),
-        ],
-        stdout=subprocess.PIPE,
-        text=True,
+        ]
     )
     try:
-        assert proc.stdout is not None
-        proc.stdout.readline()
         request = {
             "version": 1,
             "key": "verdict:test",
@@ -87,7 +91,7 @@ def test_notifier_duplicate_key(tmp_path: Path) -> None:
         }
         assert call(sock, request)["outcome"] == "sent"
         assert call(sock, request)["outcome"] == "duplicate"
-        assert json.loads(record.read_text())["notifications"] == 1
+        record_data = json.loads(record.read_text())
+        assert record_data["notifications"] == 1 and record_data["requests"] == 2
     finally:
-        proc.terminate()
-        proc.wait(timeout=5)
+        stop(proc)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import load_manifest
 from .trace import load_fixture
-from .verdicts import complete, list_verdicts, prepare
+from .verdicts import complete, counts, prepare
 
 
 def run_once(manifest_path: Path, fixture_path: Path, db_path: Path, socket_path: Path) -> dict:
@@ -17,10 +17,10 @@ def run_once(manifest_path: Path, fixture_path: Path, db_path: Path, socket_path
             s.sendall((json.dumps(prepared["request"]) + "\n").encode())
             response = json.loads(s.recv(65536))
             complete(db_path, prepared["verdict_id"], response["outcome"], response)
-    rows = list_verdicts(db_path)
+    run_count, verdict_count, notification_count = counts(db_path)
     return {
-        "runs": 1,
-        "verdicts": len(rows),
-        "notifications": sum(1 for x in rows if x["delivery_outcome"] in {"sent", "duplicate"}),
+        "runs": run_count,
+        "verdicts": verdict_count,
+        "notifications": notification_count,
         "existing": not notify,
     }
