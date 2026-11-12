@@ -119,6 +119,21 @@ def create_app() -> Starlette:
         store.db.commit()
         return JSONResponse({"session_id": session_id})
 
+    async def rollback_tool(request):
+        row = store.page(request.path_params["id"])
+        if row is None:
+            raise HTTPException(404, "page not found")
+        body = await request.json()
+        if not isinstance(body.get("version"), int) or body["version"] < 1:
+            raise HTTPException(400, "version must be a positive integer")
+        try:
+            await anyio.to_thread.run_sync(
+                store.rollback_tool, row["id"], request.path_params["name"], body["version"]
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return JSONResponse({"ok": True})
+
     async def create_mode(request):
         row = store.page(request.path_params["id"])
         if row is None:
@@ -137,6 +152,7 @@ def create_app() -> Starlette:
             Route("/api/zeta/discovery", _discovery),
             Route("/api/pages/home/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),

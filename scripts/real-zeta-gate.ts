@@ -55,7 +55,16 @@ try {
   await mcp(1, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const catalog = await mcp(2, "tools/list", {});
   const names = catalog.result?.tools?.map((tool: { name: string }) => `achilles__${tool.name}`) ?? [];
-  if (!names.includes("achilles__create_page")) throw new Error(`missing achilles__create_page catalog assertion: ${JSON.stringify(names)}`);
+  if (!names.includes("achilles__create_page") || !names.includes("achilles__create_tool")) throw new Error(`missing achilles__create_tool catalog assertion: ${JSON.stringify(names)}`);
+  const toolBundle = { format_version: 1, kind: "data_operation", name: "annotate_trace", description: "add an annotation", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false }, output_schema: { type: "object" }, implementation: { operation: "insert", collection: "trace_annotations", data_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false } } };
+  const generated = await mcp(7, "tools/call", { name: "create_tool", arguments: { bundle: toolBundle } });
+  if (generated.result?.isError) throw new Error(`create_tool failed: ${JSON.stringify(generated)}`);
+  const refreshed = await mcp(8, "tools/list", {});
+  const refreshedNames = refreshed.result?.tools?.map((tool: { name: string }) => `achilles__${tool.name}`) ?? [];
+  if (!refreshedNames.includes("achilles__annotate_trace")) throw new Error(`missing generated tool on next catalog: ${JSON.stringify(refreshedNames)}`);
+  const annotation = await mcp(9, "tools/call", { name: "annotate_trace", arguments: { text: "note" } });
+  if (annotation.result?.isError) throw new Error(`generated tool failed: ${JSON.stringify(annotation)}`);
+  if ((await (await fetch(`${origin}/api/pages/home`)).json()).id !== "home") throw new Error("home page disappeared");
   const created = await mcp(3, "tools/call", { name: "create_page", arguments: { route: "/created", title: "created", layout: { blocks: [{ type: "text", text: "created" }] } } });
   if (created.result?.isError) throw new Error(`create_page failed: ${JSON.stringify(created)}`);
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
