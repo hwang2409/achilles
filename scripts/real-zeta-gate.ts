@@ -44,7 +44,7 @@ try {
   if (requests().filter((frame) => frame.method === "resume" && frame.params?.session_id === "stale-session-id").length !== 1) throw new Error("stale session was not resumed exactly once");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1) throw new Error("stale session did not create exactly one replacement");
   await field.fill("prove chat"); await field.press("Enter");
-  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 });
+  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 }).catch(async (error) => { throw new Error(`${error}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}\nframes=${redact(frames.join("\\n"))}`); });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
   await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 60000 });
