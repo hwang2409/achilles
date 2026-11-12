@@ -1,0 +1,27 @@
+{
+  "name": "@achilles/web",
+  "private": true,
+  "packageManager": "bun@1.4.4",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "vite": "^6.0.0",
+    "@fulcrum/core": "file:../../vendor/fulcrum/fulcrum-core.tgz",
+    "@fulcrum/highlight": "file:../../vendor/fulcrum/fulcrum-highlight.tgz",
+    "@fulcrum/markdown": "file:../../vendor/fulcrum/fulcrum-markdown.tgz",
+    "@fulcrum/react": "file:../../vendor/fulcrum/fulcrum-react.tgz",
+    "@fulcrum/virtual": "file:../../vendor/fulcrum/fulcrum-virtual.tgz"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

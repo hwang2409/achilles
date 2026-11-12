@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+bun.lock
+apps/web/bun.lock
+vendor/
+.cache/
+*.tsbuildinfo
