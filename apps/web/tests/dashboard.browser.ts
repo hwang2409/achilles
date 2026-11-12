@@ -19,5 +19,6 @@ try {
   await childCard.click();
   await page.getByText("run: fixture-child-1").waitFor();
   await page.getByText("build failed in fixture", { exact: true }).first().waitFor();
+  if (process.env.SCREENSHOT) await page.screenshot({ path: process.env.SCREENSHOT, fullPage: true });
   if (errors.length) throw new Error(errors.join("\n"));
 } finally { await browser.close(); }

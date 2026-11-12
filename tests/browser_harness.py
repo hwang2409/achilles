@@ -58,7 +58,11 @@ with tempfile.TemporaryDirectory() as directory:
                 "0",
             ]
         )
-        env = {**os.environ, "ACHILLES_URL": f"http://127.0.0.1:{ready['port']}"}
+        env = {
+            **os.environ,
+            "ACHILLES_URL": f"http://127.0.0.1:{ready['port']}",
+            "SCREENSHOT": os.environ.get("SCREENSHOT", ""),
+        }
         subprocess.run(["bun", "run", "apps/web/tests/dashboard.browser.ts"], check=True, env=env)
     finally:
         if web is not None:
