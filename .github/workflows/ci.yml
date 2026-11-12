@@ -52,6 +52,7 @@ jobs:
           python-version: "3.12"
       - run: uv sync --group test
       - run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
       - run: |
           tmp=$(mktemp -d)
           python fixtures/notify/server.py --socket "$tmp/notify.sock" --record "$tmp/record.json" > "$tmp/notify.log" &

@@ -48,12 +48,12 @@ def main():
                         "outcome": "rejected",
                         "message_id": "fixture:invalid",
                     }
-                c.sendall((json.dumps(response) + "\n").encode())
                 open(a.record, "w").write(
                     json.dumps(
                         {"requests": requests, "notifications": len(seen), "keys": sorted(seen)}
                     )
                 )
+                c.sendall((json.dumps(response) + "\n").encode())
 
 
 if __name__ == "__main__":
