@@ -69,8 +69,12 @@ try {
   const created = await mcp(3, "tools/call", { name: "create_page", arguments: { route: "/created", title: "created", layout: { blocks: [{ type: "text", text: "created" }] } } });
   if (created.result?.isError) throw new Error(`create_page failed: ${JSON.stringify(created)}`);
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
-  const createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (!createdPage.zeta_session_id || createdPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session");
+  let createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (createdPage.zeta_session_id) throw new Error("created page got a session before navigation");
+  await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (!createdPage.zeta_session_id || createdPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
+  await page.goto(origin); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
