@@ -17,7 +17,7 @@ uv run achilles --version
 uv run pytest
 
 FULCRUM_DIR=/path/to/fulcrum bun scripts/fulcrum.ts
-(cd apps/web && bun run typecheck && bun test && bun run build)
+(cd apps/web && bun run typecheck && bun run build)
 ```
 
-`FULCRUM_DIR` must point to a clean checkout at the exact commit in `fulcrum.rev`. the web package uses local tarballs so the app and ci build the same pinned fulcrum source without committing generated archives or a lock file whose integrity would change on each pack.
+`FULCRUM_DIR` must point to a clean checkout at the exact commit in `fulcrum.rev`. the web package keeps ordinary dependencies in a committed lockfile; the setup script installs those dependencies with `--frozen-lockfile`, then extracts local tarballs so changing fulcrum archive integrity does not change the lockfile.

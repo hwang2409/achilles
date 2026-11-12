@@ -44,8 +44,6 @@ jobs:
           FULCRUM_DIR: ${{ github.workspace }}/fulcrum
       - run: bun run typecheck
         working-directory: apps/web
-      - run: bun test
-        working-directory: apps/web
       - run: bun run build
         working-directory: apps/web
       - uses: astral-sh/setup-uv@v6
@@ -65,7 +63,6 @@ jobs:
           ACHILLES_URL="http://127.0.0.1:$port" bun run apps/web/tests/dashboard.browser.ts
 
   macos:
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'macos')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

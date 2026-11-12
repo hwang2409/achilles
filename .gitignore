@@ -8,3 +8,5 @@ apps/web/bun.lock
 vendor/
 .cache/
 *.tsbuildinfo
+.env
+.env.*

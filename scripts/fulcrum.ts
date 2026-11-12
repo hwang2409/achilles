@@ -34,7 +34,7 @@ const fulcrumDependencies = Object.fromEntries(Object.entries(packageJson.depend
 for (const name of Object.keys(fulcrumDependencies)) delete packageJson.dependencies[name];
 await writeFile(packageFile, `${JSON.stringify(packageJson, null, 2)}\n`);
 try {
-  run(["bun", "install", "--no-progress"], app);
+  run(["bun", "install", "--frozen-lockfile", "--no-progress"], app);
 } finally {
   await writeFile(packageFile, `${JSON.stringify({ ...packageJson, dependencies: { ...packageJson.dependencies, ...fulcrumDependencies } }, null, 2)}\n`);
 }
