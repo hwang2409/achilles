@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 const root = new URL("..", import.meta.url).pathname;
-const zeta = join(root, ".cache/zeta");
+const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
 if (!/^[0-9a-f]{40}$/.test(zetaRef)) throw new Error("zeta.rev must contain one sha");
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));

@@ -60,6 +60,8 @@ jobs:
       - run: uv sync --project zeta --frozen
       - run: bunx playwright install --with-deps chromium
       - run: bun run ../../scripts/real-zeta-gate.ts
+        env:
+          ZETA_CHECKOUT: ${{ github.workspace }}/zeta
         working-directory: apps/web
 
   macos:
