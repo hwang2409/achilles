@@ -14,7 +14,8 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
   const binding = { mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   if (id) {
-    try { await client.request("resume", { session_id: id, ...binding }); }
+    const status = await client.request("status", {}) as Status;
+    if (status.session?.session_id !== id) try { await client.request("resume", { session_id: id, ...binding }); }
     catch (error) {
       if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error;
       id = null;
@@ -73,8 +74,23 @@ export async function loadSession(client: ZetaClient, id: string): Promise<Sessi
     }
     pages.splice(pages.length - 1, 1, ...refreshed);
   }
-  const status = await client.request("status", {}) as Status;
-  if (client.finishReplay(id, revision)) lease.store.resync(snapshot(allRows(), status));
+  let status = await client.request("status", {}) as Status;
+  while (!client.finishReplay(id, revision)) {
+    const nextRevision = client.replayRevision(id);
+    const tailPage = pages.at(-1);
+    if (tailPage) {
+      const refreshed: LoadedPage[] = [];
+      for (let offset: number | null = tailPage.offset; offset !== null;) {
+        const next = await page(offset);
+        refreshed.push(next);
+        offset = next.nextOffset;
+      }
+      pages.splice(pages.length - 1, 1, ...refreshed);
+    }
+    status = await client.request("status", {}) as Status;
+    if (client.finishReplay(id, nextRevision)) break;
+  }
+  lease.store.resync(snapshot(allRows(), status));
   void signal;
   return lease;
 }
