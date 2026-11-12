@@ -73,6 +73,15 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 )
             ]
         ),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "annotate",
+                    "achilles__annotate_trace",
+                    {"text": "from zeta"},
+                )
+            ]
+        ),
         ScriptedTurn(content=[TextContent("annotation complete")]),
         ScriptedTurn(content=[TextContent("v2 turn")]),
         ScriptedTurn(content=[TextContent("rollback turn")]),

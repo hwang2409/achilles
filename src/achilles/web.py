@@ -147,6 +147,23 @@ def create_app() -> Starlette:
             return JSONResponse({"session_id": actual}, status_code=409)
         return JSONResponse({"session_id": actual})
 
+    async def records(request):
+        page_id = request.path_params["id"]
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        collection = request.path_params["collection"]
+        with store._connect() as db:
+            rows = db.execute(
+                "SELECT record_id, document FROM page_record "
+                "WHERE page_id=? AND collection=? ORDER BY created_at",
+                (page_id, collection),
+            ).fetchall()
+        return JSONResponse([{"record_id": row[0], **json.loads(row[1])} for row in rows])
+
     async def create_mode(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
@@ -174,6 +191,7 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),
