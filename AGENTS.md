@@ -7,5 +7,5 @@ worktrees live only under `.worktrees/<name>` under the checkout. integrate with
 do not edit zeta, homelab, fulcrum, or gamma from achilles. report any needed change instead.
 fulcrum upgrades are explicit pull requests that change `fulcrum.rev`.
 
-this repository is public. never commit real traces, transcripts, tokens, `.env` files, hostnames, tailnet addresses, or real message recipients. fixtures are synthetic only; raw traces stay on neenerair.
+this repository is public. never commit real traces, transcripts, tokens, `.env` files, hostnames, tailnet addresses, or real message recipients. fixtures are synthetic only; raw traces stay on the home server.
 do not add a framework, orm, queue, or migration framework before a slice needs it.
