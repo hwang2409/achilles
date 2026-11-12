@@ -63,6 +63,8 @@ def _discovery(request):
             raise ValueError
         os.kill(int(document["pid"]), 0)
         origin = str(request.headers.get("origin", ""))
+        if not origin:
+            origin = f"{request.url.scheme}://{request.headers.get('host', '')}"
         origins = document.get("origins", [])
         if origin not in origins:
             raise HTTPException(403, "origin is not allowed")
@@ -82,8 +84,9 @@ def _discovery(request):
 def _page(request):
     db = _database()
     row = db.execute(
-        "SELECT id, route, title, zeta_session_id, active_layout_version FROM page WHERE route = ?",
-        (request.path_params["route"],),
+        "SELECT id, route, title, zeta_session_id, active_layout_version "
+        "FROM page WHERE id = ? OR route = ?",
+        (request.path_params["route"], request.path_params["route"]),
     ).fetchone()
     if row is None:
         raise HTTPException(404, "page not found")
@@ -114,6 +117,13 @@ async def _session(request):
     return JSONResponse({"session_id": session_id})
 
 
+async def _asset(request):
+    path = Path(__file__).parents[2] / "apps/web/dist/assets" / request.path_params["path"]
+    if not path.is_file():
+        raise HTTPException(404, "asset not found")
+    return FileResponse(path)
+
+
 async def _app(request):
     path = Path(__file__).parents[2] / "apps/web/dist/index.html"
     if not path.exists():
@@ -127,6 +137,8 @@ def create_app() -> Starlette:
             Route("/api/zeta/discovery", _discovery),
             Route("/api/pages/home/session", _session, methods=["PUT"]),
             Route("/api/pages/{route:path}", _page),
+            Route("/", _app),
+            Route("/assets/{path:path}", _asset),
             Route("/{path:path}", _app),
         ]
     )

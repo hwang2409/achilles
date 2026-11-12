@@ -46,6 +46,21 @@ jobs:
         working-directory: apps/web
       - run: bun run build
         working-directory: apps/web
+      - id: zeta-pin
+        run: echo "sha=$(tr -d '[:space:]' < zeta.rev)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: hwang2409/zeta
+          ref: ${{ steps.zeta-pin.outputs.sha }}
+          path: zeta
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.17"
+          python-version: "3.12"
+      - run: uv sync --project zeta --frozen
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run ../../scripts/real-zeta-gate.ts
+        working-directory: apps/web
 
   macos:
     runs-on: macos-latest
