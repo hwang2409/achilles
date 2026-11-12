@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
@@ -24,7 +25,10 @@ def _home() -> Path:
 def _database() -> sqlite3.Connection:
     root = _home()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    db = sqlite3.connect(root / "achilles.sqlite3")
+    root.chmod(0o700)
+    path = root / "achilles.sqlite3"
+    db = sqlite3.connect(path)
+    path.chmod(0o600)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("PRAGMA busy_timeout=5000")
@@ -38,6 +42,9 @@ def _database() -> sqlite3.Connection:
         "INSERT OR IGNORE INTO page VALUES ('home', '/', 'home', NULL, NULL, ?, ?)", (now, now)
     )
     db.commit()
+    for sidecar in (root / "achilles.sqlite3-wal", root / "achilles.sqlite3-shm"):
+        if sidecar.exists():
+            sidecar.chmod(0o600)
     return db
 
 
@@ -82,17 +89,28 @@ def _discovery(request):
 
 
 def _page(request):
-    db = _database()
-    row = db.execute(
-        "SELECT id, route, title, zeta_session_id, active_layout_version "
-        "FROM page WHERE id = ? OR route = ?",
-        (request.path_params["route"], request.path_params["route"]),
-    ).fetchone()
+    with _database() as db:
+        row = db.execute(
+            "SELECT id, route, title, zeta_session_id, active_layout_version "
+            "FROM page WHERE id = ? OR route = ?",
+            (request.path_params["route"], request.path_params["route"]),
+        ).fetchone()
     if row is None:
         raise HTTPException(404, "page not found")
     return JSONResponse(
         dict(zip(("id", "route", "title", "zeta_session_id", "active_layout_version"), row))
     )
+
+
+def _save_session(expected: str | None, session_id: str) -> tuple[bool, str | None]:
+    with _database() as db:
+        changed = db.execute(
+            "UPDATE page SET zeta_session_id = ?, updated_at = ? "
+            "WHERE id = 'home' AND zeta_session_id IS ?",
+            (session_id, _now(), expected),
+        ).rowcount
+        winner = db.execute("SELECT zeta_session_id FROM page WHERE id = 'home'").fetchone()[0]
+    return changed == 1, winner
 
 
 async def _session(request):
@@ -103,17 +121,9 @@ async def _session(request):
         raise HTTPException(400, "invalid expected session")
     if not isinstance(session_id, str) or not session_id:
         raise HTTPException(400, "invalid session")
-    db = _database()
-    current = db.execute("SELECT zeta_session_id FROM page WHERE id = 'home'").fetchone()[0]
-    if current != expected:
-        db.close()
-        return JSONResponse({"session_id": current}, status_code=409)
-    db.execute(
-        "UPDATE page SET zeta_session_id = ?, updated_at = ? WHERE id = 'home'",
-        (session_id, _now()),
-    )
-    db.commit()
-    db.close()
+    won, winner = await run_in_threadpool(_save_session, expected, session_id)
+    if not won:
+        return JSONResponse({"session_id": winner}, status_code=409)
     return JSONResponse({"session_id": session_id})
 
 

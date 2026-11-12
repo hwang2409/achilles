@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createRunStore } from "@fulcrum/core";
@@ -19,6 +19,7 @@ export function App() {
   const [client, setClient] = useState<ZetaClient | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const turn = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => store.getState().turn : () => "idle" as const);
   useEffect(() => {
     let live = true;
     const unsubscribe = connection.subscribe(() => {
@@ -29,13 +30,14 @@ export function App() {
         try {
           const page = await fetch("/api/pages/home", { cache: "no-store" }).then((response) => response.json());
           const id = await openHomeSession(next, page.zeta_session_id);
+          if (!live) return;
           const lease = await loadSession(next, id);
-          if (!live) return lease.release();
           const saved = await fetch("/api/pages/home/session", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
           if (saved.status === 409) {
             const winner = (await saved.json()).session_id;
             if (typeof winner !== "string") throw new Error("session mapping changed without a winner");
             lease.release();
+            await next.request("resume", { session_id: winner });
             const winningLease = await loadSession(next, winner);
             if (live) { setSessionId(winner); setStore(winningLease.store); } else winningLease.release();
           } else {
@@ -55,5 +57,5 @@ export function App() {
     const delivery_id = crypto.randomUUID(); track(delivery_id);
     await client.request(intent.steer ? "steer" : "send", { session_id: sessionId, text, delivery_id });
   };
-  return <RunProvider store={store}><main className="shell"><header><h1>home</h1><span data-session-id={sessionId}>zeta session</span></header><section className="transcript"><Timeline renderers={appRenderers} /></section><Composer state="idle" onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
+  return <RunProvider store={store}><main className="shell"><header><h1>home</h1><span data-session-id={sessionId}>zeta session</span></header><section className="transcript"><Timeline renderers={appRenderers} /></section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
 }

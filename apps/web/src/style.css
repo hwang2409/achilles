@@ -1,4 +1,4 @@
-:root { font-family: system-ui, sans-serif; color: #e8e8ec; background: #15161a; }
+:root { font-family: system-ui, sans-serif; color: #e8e8ec; background: #15161a; --fulcrum-bg: #15161a; --fulcrum-surface: #202229; --fulcrum-surface-raised: #292b34; --fulcrum-text: #e8e8ec; --fulcrum-muted: #9296a5; --fulcrum-border: #363840; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 .shell { height: 100vh; max-width: 58rem; margin: auto; display: flex; flex-direction: column; padding: 1rem; }

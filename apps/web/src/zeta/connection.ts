@@ -9,7 +9,6 @@ export type ConnectionState =
   | { phase: "connected"; authority: ZetaRole }
   | { phase: "not_running"; attempt: number; retryAt: number; lost: boolean }
   | { phase: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; attempt: number; retryAt: number; lost: boolean }
-  | { phase: "observer_limit"; attempt: number; lost: boolean }
   | { phase: "dropped"; attempt: number; retryAt: number; lost: true }
   | { phase: "unresponsive" | "incompatible"; attempt: number; retryAt: number; lost: boolean };
 
@@ -18,7 +17,7 @@ export type ConnectionEvent =
   | { type: "connected"; authority: ZetaRole }
   | { type: "not_running"; now: number }
   | { type: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; now: number }
-  | { type: "observer_limit" | "unresponsive" | "incompatible"; now: number }
+  | { type: "unresponsive" | "incompatible"; now: number }
   | { type: "closed"; now: number };
 
 /** The command that starts a server this page may connect to. The origin is exact: localhost and 127.0.0.1 differ. */
@@ -46,7 +45,6 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
       const attempt = state.attempt + 1;
       const retryAt = event.now + backoff(attempt);
       if (event.type === "auth_failed") return { phase: "auth_failed", reason: event.reason, origins: event.origins, attempt, retryAt, lost };
-      if (event.type === "observer_limit") return { phase: "observer_limit", attempt, lost };
       return { phase: event.type, attempt, retryAt, lost };
     }
   }
@@ -123,7 +121,6 @@ export function createConnection({
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
-  let desiredRole: ZetaRole = "controller";
   const listeners = new Set<() => void>();
   const send = (event: ConnectionEvent) => {
     const next = reduceConnection(state, event);
@@ -170,15 +167,10 @@ export function createConnection({
         return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
       } finally { clearTimeout(connectTimeout); }
     };
-    let authority = desiredRole;
-    let opened = await openRole(authority);
+    const authority = "controller" as const;
+    const opened = await openRole(authority);
     if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    if (opened.kind === "busy" && authority === "controller") {
-      desiredRole = authority = "observer";
-      opened = await openRole(authority);
-      if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    }
-    if (opened.kind === "busy") return send({ type: "observer_limit", now: now() });
+    if (opened.kind === "busy") return send({ type: "incompatible", now: now() });
     if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
     // The process runs and the origin is allowed, so a refused upgrade means the token was refused.
@@ -203,7 +195,6 @@ export function createConnection({
       if (state.phase === "connected" || state.phase === "connecting" || stopped) return;
       if (timer !== null) { clearTimer(timer); timer = null; }
       // A slot may have freed since both roles were refused: start again as a fresh open does, controller first.
-      if (state.phase === "observer_limit") desiredRole = "controller";
       void attempt();
     },
     stop() {
