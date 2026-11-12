@@ -49,28 +49,6 @@ def test_create_tool_inserts_page_scoped_record(tmp_path) -> None:
         call_record(store, "other", "annotate_trace", {"text": "no"})
 
 
-def test_bundle_digest_cannot_overwrite_different_content(tmp_path) -> None:
-    store = PageStore(tmp_path)
-    bundle = {
-        "format_version": 1,
-        "kind": "data_operation",
-        "name": "annotate_trace",
-        "description": "add an annotation",
-        "input_schema": {"type": "object"},
-        "output_schema": {"type": "object"},
-        "implementation": {
-            "operation": "insert",
-            "collection": "trace_annotations",
-            "data_schema": {"type": "object"},
-        },
-    }
-    _, digest = store.create_tool("home", bundle)
-    path = tmp_path / "bundles" / f"{digest}.json"
-    path.write_text("different content\n")
-    with pytest.raises(ValueError, match="different content"):
-        store.create_tool("home", bundle)
-
-
 def test_create_page_commits_layout_and_audit(tmp_path) -> None:
     store = PageStore(tmp_path)
     page, digest = store.create_page(

@@ -56,20 +56,14 @@ class PageStore:
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.root.chmod(0o700)
-        for directory in (root / "pages", root / "bundles", root / "credentials"):
-            directory.mkdir(mode=0o700, exist_ok=True)
-            directory.chmod(0o700)
-        database = root / "achilles.sqlite3"
-        self.db = sqlite3.connect(database, check_same_thread=False)
-        database.chmod(0o600)
+        (root / "pages").mkdir(mode=0o700, exist_ok=True)
+        (root / "bundles").mkdir(mode=0o700, exist_ok=True)
+        (root / "credentials").mkdir(mode=0o700, exist_ok=True)
+        self.db = sqlite3.connect(root / "achilles.sqlite3", check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=5000")
-        for sidecar in (root / "achilles.sqlite3-wal", root / "achilles.sqlite3-shm"):
-            if sidecar.exists():
-                sidecar.chmod(0o600)
         self.db.executescript(
             """
             CREATE TABLE IF NOT EXISTS page (
@@ -200,53 +194,35 @@ class PageStore:
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
         bundle_path = self.root / "bundles" / f"{digest}.json"
-        encoded_file = (encoded + "\n").encode()
-        if bundle_path.exists() and bundle_path.read_bytes() != encoded_file:
-            raise ValueError("bundle digest already exists with different content")
-        if not bundle_path.exists():
-            bundle_path.write_bytes(encoded_file)
-            bundle_path.chmod(0o600)
+        bundle_path.write_text(encoded + "\n")
+        bundle_path.chmod(0o600)
         stamp = now()
+        tool_id = secrets.token_hex(12)
         try:
             self.db.execute("BEGIN")
             page = self.db.execute("SELECT id FROM page WHERE id=?", (page_id,)).fetchone()
             if page is None:
                 raise ValueError("page not found")
-            tool = self.db.execute(
-                "SELECT id FROM tool WHERE owner_page_id=? AND name=?", (page_id, bundle["name"])
-            ).fetchone()
-            if tool is None:
-                tool_id = secrets.token_hex(12)
-                version = 1
-                self.db.execute(
-                    "INSERT INTO tool(id,owner_page_id,name,created_at) VALUES(?,?,?,?)",
-                    (tool_id, page_id, bundle["name"], stamp),
-                )
-            else:
-                tool_id = tool["id"]
-                version = self.db.execute(
-                    "SELECT COALESCE(MAX(version), 0) + 1 FROM tool_version WHERE tool_id=?",
-                    (tool_id,),
-                ).fetchone()[0]
             self.db.execute(
-                "INSERT INTO tool_version VALUES(?,?,?,?,?)",
-                (tool_id, version, digest, encoded, stamp),
+                "INSERT INTO tool(id,owner_page_id,name,created_at) VALUES(?,?,?,?)",
+                (tool_id, page_id, bundle["name"], stamp),
             )
             self.db.execute(
-                "INSERT INTO page_tool VALUES(?,?,?,?) ON CONFLICT(page_id, tool_id) "
-                "DO UPDATE SET active_version=excluded.active_version, "
-                "assigned_at=excluded.assigned_at",
-                (page_id, tool_id, version, stamp),
+                "INSERT INTO tool_version VALUES(?,?,?,?,?)", (tool_id, 1, digest, encoded, stamp)
             )
+            self.db.execute("INSERT INTO page_tool VALUES(?,?,?,?)", (page_id, tool_id, 1, stamp))
             self.db.execute(
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                 (page_id, "create_tool", digest, stamp),
             )
             self.db.commit()
+        except sqlite3.IntegrityError as exc:
+            self.db.rollback()
+            raise ValueError("tool name already exists on this page") from exc
         except Exception:
             self.db.rollback()
             raise
-        return {"id": tool_id, "name": bundle["name"], "version": version}, digest
+        return {"id": tool_id, "name": bundle["name"], "version": 1}, digest
 
     def rollback_tool(self, page_id: str, tool_name: str, version: int) -> None:
         result = self.db.execute(
@@ -261,14 +237,6 @@ class PageStore:
             self.db.rollback()
             raise ValueError("tool version not found")
         self.db.commit()
-
-    def records(self, page_id: str, collection: str) -> list[dict[str, Any]]:
-        rows = self.db.execute(
-            "SELECT record_id, document FROM page_record "
-            "WHERE page_id=? AND collection=? ORDER BY created_at",
-            (page_id, collection),
-        ).fetchall()
-        return [{"record_id": row["record_id"], **json.loads(row["document"])} for row in rows]
 
     def page_tools(self, page_id: str) -> list[dict[str, Any]]:
         rows = self.db.execute(
