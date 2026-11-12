@@ -1,6 +1,6 @@
 # achilles
 
-the small control plane for agent products and judges. slice 0 provides the python cli and a minimal web app; later slices add trace ingestion, judging, and delivery.
+a web application for one zeta session. the home page provides a durable zeta chat surface; later slices add page and tool generation.
 
 ## layout
 

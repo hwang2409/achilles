@@ -24,7 +24,7 @@ jobs:
       - run: uv run pytest
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - id: pin
@@ -36,7 +36,7 @@ jobs:
           path: fulcrum
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.4
+          bun-version: 1.3.13
       - run: bun install --frozen-lockfile
         working-directory: fulcrum
       - run: bun scripts/fulcrum.ts
@@ -45,6 +45,23 @@ jobs:
       - run: bun run typecheck
         working-directory: apps/web
       - run: bun run build
+        working-directory: apps/web
+      - id: zeta-pin
+        run: echo "sha=$(tr -d '[:space:]' < zeta.rev)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: hwang2409/zeta
+          ref: ${{ steps.zeta-pin.outputs.sha }}
+          path: zeta
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.17"
+          python-version: "3.12"
+      - run: uv sync --project zeta --frozen
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run ../../scripts/real-zeta-gate.ts
+        env:
+          ZETA_CHECKOUT: ${{ github.workspace }}/zeta
         working-directory: apps/web
 
   macos:

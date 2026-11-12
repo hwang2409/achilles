@@ -16,11 +16,13 @@
     "@fulcrum/highlight": "file:../../vendor/fulcrum/fulcrum-highlight.tgz",
     "@fulcrum/markdown": "file:../../vendor/fulcrum/fulcrum-markdown.tgz",
     "@fulcrum/react": "file:../../vendor/fulcrum/fulcrum-react.tgz",
-    "@fulcrum/virtual": "file:../../vendor/fulcrum/fulcrum-virtual.tgz"
+    "@fulcrum/virtual": "file:../../vendor/fulcrum/fulcrum-virtual.tgz",
+    "@fulcrum/zeta": "file:../../vendor/fulcrum/fulcrum-zeta.tgz"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "playwright": "^1.52.0"
   }
 }

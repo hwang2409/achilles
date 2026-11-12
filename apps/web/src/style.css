@@ -1,3 +1,7 @@
-:root { font-family: system-ui, sans-serif; color: #202124; }
+:root { font-family: system-ui, sans-serif; color: #e8e8ec; background: #15161a; --fulcrum-bg: #15161a; --fulcrum-surface: #202229; --fulcrum-surface-raised: #292b34; --fulcrum-text: #e8e8ec; --fulcrum-muted: #9296a5; --fulcrum-border: #363840; }
+* { box-sizing: border-box; }
 body { margin: 0; }
-main { max-width: 48rem; margin: 6rem auto; padding: 0 2rem; }
+.shell { height: 100vh; max-width: 58rem; margin: auto; display: flex; flex-direction: column; padding: 1rem; }
+header { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #363840; padding-bottom: .75rem; }
+h1 { font-size: 1.1rem; margin: 0; } header span { color: #9296a5; font-size: .8rem; }
+.transcript { flex: 1; min-height: 0; overflow: auto; padding: 1rem 0; }
