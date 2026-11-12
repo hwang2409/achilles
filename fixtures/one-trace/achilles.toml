@@ -1,0 +1,8 @@
+schema = 1
+product = "fixture-product"
+trace_sources = ["fixture"]
+[[judges]]
+id = "fixture-failure"
+version = 1
+kind = "fixture"
+urgent = "always"

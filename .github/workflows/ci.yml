@@ -48,6 +48,21 @@ jobs:
         working-directory: apps/web
       - run: bun run build
         working-directory: apps/web
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.17"
+          python-version: "3.12"
+      - run: uv sync --group test
+      - run: bun x playwright install --with-deps chromium
+      - run: |
+          tmp=$(mktemp -d)
+          python fixtures/notify/server.py --socket "$tmp/notify.sock" --record "$tmp/record.json" > "$tmp/notify.log" &
+          while ! grep -q '"ready": true' "$tmp/notify.log"; do sleep 0.1; done
+          uv run achilles run --once --manifest fixtures/one-trace/achilles.toml --fixture fixtures/one-trace/trace.json --db "$tmp/db" --notify-socket "$tmp/notify.sock"
+          uv run achilles serve --db "$tmp/db" --web-root apps/web/dist --port 0 > "$tmp/web.log" &
+          while ! grep -q '"ready": true' "$tmp/web.log"; do sleep 0.1; done
+          port=$(python -c 'import json; print(json.load(open("'"$tmp"'/web.log"))["port"])')
+          ACHILLES_URL="http://127.0.0.1:$port" bun run apps/web/tests/dashboard.browser.ts
 
   macos:
     if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'macos')

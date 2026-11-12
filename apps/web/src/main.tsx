@@ -1,9 +1,10 @@
 import { createRoot } from "react-dom/client";
+import { useEffect, useState } from "react";
 import { initialState } from "@fulcrum/core";
 import "./style.css";
 
-function App() {
-  return <main><h1>achilles</h1><p>the judge dashboard is coming soon.</p><p>fulcrum run state: {initialState.agent}</p></main>;
-}
-
+type Verdict = { id:string; label:string; run_id:string; delivery_outcome:string; urgent:boolean; evidence_ids:string[]; trace?: {runs: Run[]}; };
+type Run = {source_run_id:string; parent_run_id:string|null; messages:{id:string;content:{text:string}[]}[]; outcome:string};
+function Timeline({run, runs}:{run:Run; runs:Run[]}) { const child=runs.find(x=>x.parent_run_id===run.source_run_id); return <section aria-label="trace timeline"><h3>{run.source_run_id}</h3>{run.messages.map(m=><p key={m.id}>{m.content.map(x=>x.text).join(" ")}</p>)}{child&&<button onClick={()=>{ const e=new CustomEvent("child",{detail:child}); window.dispatchEvent(e); }}>{child.source_run_id} — build failed in fixture</button>}</section> }
+function App() { const [list,setList]=useState<Verdict[]>([]); const [detail,setDetail]=useState<Verdict|null>(null); const [run,setRun]=useState<Run|null>(null); useEffect(()=>{fetch('/api/verdicts').then(r=>r.json()).then(setList); const f=(e:Event)=>setRun((e as CustomEvent<Run>).detail); window.addEventListener('child',f); return()=>window.removeEventListener('child',f)},[]); useEffect(()=>{const id=location.pathname.split('/').pop(); if(id&&id!=='verdicts')fetch('/api/verdicts/'+id).then(r=>r.ok?r.json():null).then((v:Verdict|null)=>{setDetail(v);setRun(v?.trace?.runs[0]??null)})},[]); const open=(v:Verdict)=>{history.pushState({},'',`/verdicts/${v.id}`);fetch('/api/verdicts/'+v.id).then(r=>r.json()).then((x:Verdict)=>{setDetail(x);setRun(x.trace?.runs[0]??null)})}; return <main><h1>achilles verdicts</h1>{!detail&&<>{list.map(v=><button className="verdict" key={v.id} onClick={()=>open(v)}>{v.label} — {v.id}</button>)}</>}{detail&&<><h2>{detail.label}</h2><p>delivery: {detail.delivery_outcome}</p>{run&&<Timeline run={run} runs={detail.trace!.runs}/>}</>}</main> }
 createRoot(document.getElementById("root")!).render(<App />);
