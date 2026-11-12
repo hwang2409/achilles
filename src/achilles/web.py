@@ -118,6 +118,11 @@ def create_app() -> Starlette:
             }
         )
 
+    async def credential(request):
+        page_id = request.path_params["id"]
+        token = await anyio.to_thread.run_sync(store.ensure_credential, page_id)
+        return JSONResponse({"credential": token})
+
     async def session(request):
         body = await request.json()
         expected, session_id = body.get("expected_session_id"), body.get("session_id")
@@ -130,8 +135,20 @@ def create_app() -> Starlette:
             return JSONResponse({"session_id": winner}, status_code=409)
         return JSONResponse({"session_id": session_id})
 
+    async def records(request):
+        value = request.headers.get("authorization", "")
+        if not value.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        page = await anyio.to_thread.run_sync(store.authenticate, value[7:])
+        if page is None or page["id"] != request.path_params["id"]:
+            raise HTTPException(403, "forbidden")
+        rows = await anyio.to_thread.run_sync(
+            store.records, page["id"], request.path_params["collection"]
+        )
+        return JSONResponse(rows)
+
     async def rollback_tool(request):
-        row = store.page(request.path_params["id"])
+        row = await anyio.to_thread.run_sync(store.page, request.path_params["id"])
         if row is None:
             raise HTTPException(404, "page not found")
         body = await request.json()
@@ -153,7 +170,7 @@ def create_app() -> Starlette:
         enabled = body.get("enabled")
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled must be boolean")
-        row = store.set_create_mode(row["id"], enabled)
+        row = await run_in_threadpool(store.set_create_mode, row["id"], enabled)
         return JSONResponse({"id": row["id"], "create_mode": bool(row["create_mode"])})
 
     mcp, mcp_lifespan = build_mcp(store)
@@ -161,9 +178,11 @@ def create_app() -> Starlette:
         lifespan=mcp_lifespan,
         routes=[
             Route("/api/zeta/discovery", _discovery),
+            Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/home/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
+            Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),

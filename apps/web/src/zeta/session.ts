@@ -10,17 +10,18 @@ type Status = {
 type HistoryPage = { messages?: unknown[]; next_offset?: number | null };
 type LoadedPage = { offset: number; rows: unknown[]; nextOffset: number | null };
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null) {
+export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string) {
+  const binding = { mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   if (id) {
-    try { await client.request("resume", { session_id: id }); }
+    try { await client.request("resume", { session_id: id, ...binding }); }
     catch (error) {
       if ((error as { data?: { code?: unknown } }).data?.code !== "session_not_found") throw error;
       id = null;
     }
   }
   if (!id) {
-    const created = await client.request("new_session", {}) as { session?: { session_id?: string } };
+    const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
     id = created.session?.session_id ?? null;
     if (!id) throw new Error("zeta did not return a session id");
   }

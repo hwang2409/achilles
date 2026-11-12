@@ -29,7 +29,8 @@ export function App() {
       void (async () => {
         try {
           const page = await fetch("/api/pages/home", { cache: "no-store" }).then((response) => response.json());
-          const id = await openHomeSession(next, page.zeta_session_id);
+          const credential = await fetch("/api/pages/home/credential", { cache: "no-store" }).then((response) => response.json()).then((value) => value.credential as string);
+          const id = await openHomeSession(next, page.zeta_session_id, credential);
           if (!live) return;
           const lease = await loadSession(next, id);
           const saved = await fetch("/api/pages/home/session", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
@@ -37,7 +38,7 @@ export function App() {
             const winner = (await saved.json()).session_id;
             if (typeof winner !== "string") throw new Error("session mapping changed without a winner");
             lease.release();
-            await next.request("resume", { session_id: winner });
+            await next.request("resume", { session_id: winner, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] });
             const winningLease = await loadSession(next, winner);
             if (live) { setSessionId(winner); setStore(winningLease.store); } else winningLease.release();
           } else {

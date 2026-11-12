@@ -48,8 +48,28 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("proof-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("approval complete")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "annotate",
+                    "achilles__annotate_trace",
+                    {"text": "from zeta", "id": "proof-annotation"},
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("annotation complete")]),
+        ScriptedTurn(content=[TextContent("v2 turn")]),
+        ScriptedTurn(content=[TextContent("rollback turn")]),
     ]
-    backend = FakeBackend(turns)
+
+    def record_request(messages, tool_schemas):
+        document = json.loads(control.read_text())
+        document["schemas"] = [schema["name"] for schema in tool_schemas]
+        control.write_text(json.dumps(document))
+        control.chmod(0o600)
+        return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()
+
+    backend = FakeBackend(turns, request_serializer=record_request)
     return (
         ZetaServer(
             home=home,
@@ -75,6 +95,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 "port": websocket.port,
                 "token": websocket.controller_token,
                 "pending_session": pending_session,
+                "pid": os.getpid(),
             }
         ),
         encoding="utf-8",
