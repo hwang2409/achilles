@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import tempfile
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -109,11 +110,11 @@ class PageStore:
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
         self._database = root / "achilles.sqlite3"
-        self.db = self._connect()
-        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        db = self._connect()
+        version = db.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, 1, 2, 3):
             raise RuntimeError(f"unsupported Achilles database version: {version}")
-        self.db.executescript("""
+        db.executescript("""
         CREATE TABLE IF NOT EXISTS page (
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           zeta_session_id TEXT, active_layout_version INTEGER,
@@ -150,18 +151,19 @@ class PageStore:
           PRIMARY KEY(page_id, collection, record_id)
         );
         """)
-        columns = {row[1] for row in self.db.execute("PRAGMA table_info(page)")}
+        columns = {row[1] for row in db.execute("PRAGMA table_info(page)")}
         if "create_mode" not in columns:
-            self.db.execute("ALTER TABLE page ADD COLUMN create_mode INTEGER NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE page ADD COLUMN create_mode INTEGER NOT NULL DEFAULT 0")
         if "credential_hash" not in columns:
-            self.db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
+            db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         stamp = now()
-        self.db.execute(
+        db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
             (stamp, stamp),
         )
-        self.db.execute("PRAGMA user_version = 3")
-        self.db.commit()
+        db.execute("PRAGMA user_version = 3")
+        db.commit()
+        db.close()
         self._chmod_db()
         self.ensure_credential("home")
         workspace = self.root / "pages" / "home" / "workspace"
@@ -187,6 +189,19 @@ class PageStore:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=5000")
         return connection
+
+    @contextmanager
+    def transaction(self):
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def _chmod_db(self):
         for path in (
@@ -215,7 +230,7 @@ class PageStore:
             raise
 
     def ensure_credential(self, page_id: str) -> str:
-        with self._connect() as db:
+        with self.transaction() as db:
             row = db.execute("SELECT credential_hash FROM page WHERE id=?", (page_id,)).fetchone()
             if row is None:
                 raise KeyError(page_id)
@@ -226,7 +241,6 @@ class PageStore:
             digest = hashlib.sha256(token.encode()).hexdigest()
             db.execute("UPDATE page SET credential_hash=? WHERE id=?", (digest, page_id))
             self._atomic_private_write(path, token.encode())
-            db.commit()
             return token
 
     def authenticate(self, token: str) -> sqlite3.Row | None:
@@ -249,12 +263,11 @@ class PageStore:
             return json.loads(row[0]) if row else {"blocks": []}
 
     def set_create_mode(self, page_id: str, enabled: bool) -> sqlite3.Row:
-        with self._connect() as db:
+        with self.transaction() as db:
             db.execute(
                 "UPDATE page SET create_mode=?, updated_at=? WHERE id=?",
                 (int(enabled), now(), page_id),
             )
-            db.commit()
         row = self.page(page_id)
         if row is None:
             raise KeyError(page_id)
@@ -263,12 +276,11 @@ class PageStore:
     def save_session(
         self, page_id: str, expected: str | None, session_id: str
     ) -> tuple[bool, str | None]:
-        with self._connect() as db:
+        with self.transaction() as db:
             updated = db.execute(
                 "UPDATE page SET zeta_session_id=?,updated_at=? WHERE id=? AND zeta_session_id IS ?",  # noqa: E501
                 (session_id, now(), page_id, expected),
             ).rowcount
-            db.commit()
             row = db.execute("SELECT zeta_session_id FROM page WHERE id=?", (page_id,)).fetchone()
             if row is None:
                 raise KeyError(page_id)
@@ -282,7 +294,7 @@ class PageStore:
             raise ValueError("invalid page title")
         encoded = json.dumps(validate_layout(layout, set()), sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
-        with self._connect() as db:
+        with self.transaction() as db:
             principal = db.execute(
                 "SELECT create_mode FROM page WHERE id=?", (principal_id,)
             ).fetchone()
@@ -291,7 +303,6 @@ class PageStore:
             hook = getattr(self, "before_create_commit", None)
             if hook is not None:
                 hook()
-            db.execute("BEGIN IMMEDIATE")
             principal = db.execute(
                 "SELECT create_mode FROM page WHERE id=?", (principal_id,)
             ).fetchone()
@@ -327,7 +338,6 @@ class PageStore:
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                 (page_id, "create_page", digest, stamp),
             )
-            db.commit()
         row = self.page(page_id)
         assert row is not None
         return row, digest
@@ -338,8 +348,7 @@ class PageStore:
         digest = bundle_digest(bundle)
         stamp = now()
         try:
-            with self._connect() as db:
-                db.execute("BEGIN IMMEDIATE")
+            with self.transaction() as db:
                 principal = db.execute(
                     "SELECT create_mode FROM page WHERE id=?", (page_id,)
                 ).fetchone()
@@ -393,8 +402,7 @@ class PageStore:
         return [{"name": r[0], **json.loads(r[1]), "version": r[2]} for r in rows]
 
     def rollback_tool(self, page_id: str, name: str, version: int) -> None:
-        with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        with self.transaction() as db:
             row = db.execute(
                 """SELECT pt.tool_id FROM page_tool pt JOIN tool t ON t.id=pt.tool_id
                 WHERE pt.page_id=? AND t.name=? AND EXISTS (

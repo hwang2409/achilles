@@ -22,7 +22,7 @@ def _home() -> Path:
 
 def _database():
     """compatibility entry point used by the real-zeta fixture seeder."""
-    return PageStore(_home()).db
+    return PageStore(_home())._connect()
 
 
 def _loopback(value: str) -> bool:

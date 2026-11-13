@@ -78,6 +78,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 )
             ]
         ),
+        ScriptedTurn(content=[TextContent("annotation complete")]),
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
@@ -95,10 +96,32 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
-        document["request_count"] = document.get("request_count", 0) + 1
+        request_count = document.get("request_count", 0) + 1
+        document["request_count"] = request_count
         document["last_message"] = str(messages[-1]) if messages else ""
         document["schemas"] = [schema["name"] for schema in tool_schemas]
         document["schema_documents"] = tool_schemas
+        returned_calls = turns[request_count - 1].tool_calls if request_count <= len(turns) else []
+        document["schemas_include_annotate_trace"] = (
+            "achilles__annotate_trace" in document["schemas"]
+        )
+        document["returned_tool_calls"] = [
+            {
+                "id": call.id,
+                "name": call.name,
+                "schemas_include_name": call.name in document["schemas"],
+            }
+            for call in returned_calls
+        ]
+        document["tool_results"] = [
+            {
+                "call_id": message.tool_result.tool_call_id,
+                "is_error": message.tool_result.is_error,
+                "content": "[redacted]",
+            }
+            for message in messages
+            if message.tool_result is not None
+        ]
         control.write_text(json.dumps(document))
         control.chmod(0o600)
         return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()

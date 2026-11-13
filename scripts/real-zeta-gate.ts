@@ -160,15 +160,18 @@ try {
     throw new Error("stale session was not resumed first");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
+  const assistantReady = page.getByText("assistant ready", { exact: true });
+  const assistantReadyBefore = await assistantReady.count();
+  const approval = page.locator('[data-part="approval"][data-state="pending"]');
+  const approvalBefore = await approval.count();
   await field.fill("prove chat");
   await field.press("Enter");
-  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 }).catch(async () => { throw new Error(`assistant missing body=${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
-  const approval = page.locator('[data-part="approval"]');
-  await approval.waitFor({ timeout: 20000 });
-  await approval.getByRole("button", { name: /approve/i }).click();
-  await page
-    .getByText("approval complete", { exact: true })
-    .waitFor({ timeout: 20000 });
+  await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async () => { throw new Error(`assistant missing body=${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
+  await waitFor(async () => (await approval.count()) > approvalBefore, "initial approval");
+  await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  const approvalComplete = page.getByText("approval complete", { exact: true });
+  const approvalCompleteBefore = await approvalComplete.count();
+  await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
   const credential = (
     await Bun.file(join(achillesHome, "credentials/home")).text()
   ).trim();
@@ -209,24 +212,29 @@ try {
     capabilities: {},
     clientInfo: { name: "gate", version: "1" },
   });
+  const catalogReady = page.getByText("catalog ready", { exact: true });
+  const catalogReadyBefore = await catalogReady.count();
   await field.fill("catalog refresh");
   await field.press("Enter");
-  await page.getByText("catalog ready", { exact: true }).waitFor({ timeout: 20000 });
+  await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore, "catalog ready");
   const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
   if (!backendSchemas.includes("achilles__create_page"))
     throw new Error(
       `backend did not receive achilles__create_page catalog: ${JSON.stringify(backendSchemas)}`,
     );
+  const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
+  const createApprovalBefore = await createApproval.count();
+  const annotationComplete = page.getByText("annotation complete", { exact: true });
+  const annotationCompleteBefore = await annotationComplete.count();
   await field.fill("create page");
   await field.press("Enter");
-  const createApproval = page.locator('[data-part="approval"]');
-  await createApproval.waitFor({ timeout: 20000 }).catch(async () => {
+  await waitFor(async () => (await createApproval.count()) > createApprovalBefore, "create page approval").catch(async () => {
     throw new Error(
       `backend did not receive achilles__create_page catalog: ${await Bun.file(control).text()}`,
     );
   });
-  await createApproval.getByRole("button", { name: /approve/i }).click();
-  await page.getByText("annotation complete", { exact: true }).waitFor({ timeout: 20000 });
+  await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
   const catalog = await homeMcp(2, "tools/list", {});
   const names =
     catalog.result?.tools?.map(
@@ -268,12 +276,16 @@ try {
   });
   if (generated.result?.isError)
     throw new Error(`create_tool failed: ${JSON.stringify(generated)}`);
+  await homeMcp(8, "tools/list", {});
   const sessionBeforeToolTurn = await homeSessionId();
   const controlBeforeTool = JSON.parse(await Bun.file(control).text());
   const pidBeforeToolTurn = controlBeforeTool.pid;
   const resumesBeforeToolTurn = requests().filter(
     (frame) => frame.method === "resume" || frame.method === "new_session",
   ).length;
+  const annotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
+  const annotationApprovalBefore = await annotationApproval.count();
+  const generatedAnnotationCompleteBefore = await annotationComplete.count();
   await field.fill("annotate from the live zeta session");
   await field.press("Enter");
   await waitFor(async () => {
@@ -283,17 +295,13 @@ try {
   const nextTurnCatalog = JSON.parse(await Bun.file(control).text());
   if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
-  const annotationApproval = page.locator('[data-part="approval"]');
-  await annotationApproval.waitFor({ timeout: 20000 }).catch(async () => {
+  await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async () => {
     throw new Error(
-      `backend did not receive achilles__annotate_trace catalog: ${await Bun.file(control).text()}`,
+      `annotation approval missing: backend=${await Bun.file(control).text()} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
     );
   });
-  await annotationApproval.getByRole("button", { name: /approve/i }).click();
-  await page
-    .getByText("annotation complete", { exact: true })
-    .waitFor({ timeout: 20000 })
-    .catch(async (error) => {
+  await annotationApproval.nth(annotationApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  await waitFor(async () => (await annotationComplete.count()) > generatedAnnotationCompleteBefore, "generated tool completion").catch(async (error) => {
       throw new Error(
         `${error}\nbackend=${await Bun.file(control).text()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
       );
@@ -312,6 +320,11 @@ try {
     throw new Error(
       `backend did not receive generated tool catalog: ${JSON.stringify(controlAfterTool.schemas)}`,
     );
+  const annotationResult = controlAfterTool.tool_results?.find(
+    (result: { call_id: string }) => result.call_id === "annotate",
+  );
+  if (!annotationResult || annotationResult.is_error)
+    throw new Error(`generated tool result was missing or failed: ${JSON.stringify(controlAfterTool.tool_results)}`);
   const homeRecords = await (
     await fetch(`${origin}/api/pages/home/records/trace_annotations`, {
       headers: { Authorization: `Bearer ${credential}` },
@@ -319,7 +332,7 @@ try {
   ).json();
   if (!Array.isArray(homeRecords) || homeRecords.length !== 1)
     throw new Error(
-      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)}`,
+      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${await Bun.file(control).text()} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${await page.locator("body").innerText()}`,
     );
   const createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!createdPage.zeta_session_id || createdPage.zeta_session_id === first)
@@ -426,7 +439,10 @@ try {
   reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!reconnectPage.zeta_session_id || reconnectPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
   if (reconnectPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
-  await page.goto(origin); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  await page.goto(origin);
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  if ((await page.getByText("approval complete", { exact: true }).count()) === 0)
+    throw new Error("reconnected home did not render prior approval completion");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));

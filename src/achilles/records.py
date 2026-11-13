@@ -19,9 +19,7 @@ def _check(validator: Draft202012Validator, value: Any, label: str) -> None:
 def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) -> Any:
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")
-    db = store.db
-    db.execute("BEGIN")
-    try:
+    with store.transaction() as db:
         principal = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
         if principal is None or not principal[0]:
             raise PermissionError("forbidden: create mode is off")
@@ -97,8 +95,4 @@ def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) 
             )
             result = {"record_id": record_id, **document}
         _check(Draft202012Validator(bundle["output_schema"]), result, "tool output")
-        db.commit()
         return result
-    except Exception:
-        db.rollback()
-        raise
