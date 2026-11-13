@@ -12,6 +12,7 @@ import uvicorn
 from starlette.testclient import TestClient
 
 import achilles.web as web
+from achilles.mcp_server import _remove_connection
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +48,17 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
+
+
+def test_mcp_connection_cleanup_removes_sessions_safely() -> None:
+    class Session:
+        def __init__(self, connection):
+            self._connection = connection
+
+    connection = object()
+    sessions = {"home": {Session(connection), Session(connection)}}
+    _remove_connection(sessions, "home", connection)
+    assert sessions == {}
 
 
 @contextmanager

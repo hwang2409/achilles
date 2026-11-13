@@ -56,6 +56,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("proof-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("approval complete")]),
+        ScriptedTurn(content=[TextContent("catalog ready")]),
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
