@@ -150,6 +150,12 @@ class PageStore:
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           PRIMARY KEY(page_id, collection, record_id)
         );
+        CREATE TABLE IF NOT EXISTS chat (
+          session_id TEXT PRIMARY KEY, page_id TEXT NOT NULL REFERENCES page(id),
+          title TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_state TEXT
+        );
+        CREATE INDEX IF NOT EXISTS chat_updated_at ON chat(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS chat_page_updated_at ON chat(page_id, updated_at DESC);
         """)
         columns = {row[1] for row in db.execute("PRAGMA table_info(page)")}
         if "create_mode" not in columns:
@@ -160,6 +166,11 @@ class PageStore:
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
             (stamp, stamp),
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at) "
+            "SELECT zeta_session_id,id,created_at,updated_at FROM page "
+            "WHERE zeta_session_id IS NOT NULL"
         )
         db.execute("PRAGMA user_version = 3")
         db.commit()
@@ -275,17 +286,96 @@ class PageStore:
             raise KeyError(page_id)
         return row
 
+    def chats(
+        self,
+        limit: int,
+        before: tuple[str, str] | None = None,
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        with self._connect() as db:
+            if before is not None:
+                updated_at, session_id = before
+                clauses.append("(c.updated_at < ? OR (c.updated_at = ? AND c.session_id < ?))")
+                parameters.extend((updated_at, updated_at, session_id))
+            if query is not None:
+                escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                clauses.append("c.title LIKE ? ESCAPE '\\' COLLATE NOCASE")
+                parameters.append(f"%{escaped}%")
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            rows = db.execute(
+                "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
+                "c.title,c.created_at,c.updated_at,c.last_state FROM chat c "
+                f"JOIN page p ON p.id=c.page_id {where} "
+                "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
+                (*parameters, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def register_chat(self, page_id: str, session_id: str) -> dict[str, Any]:
+        with self.transaction() as db:
+            if db.execute("SELECT 1 FROM page WHERE id=?", (page_id,)).fetchone() is None:
+                raise KeyError(page_id)
+            stamp = now()
+            db.execute(
+                "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at) "
+                "VALUES(?,?,?,?)",
+                (session_id, page_id, stamp, stamp),
+            )
+            row = db.execute(
+                "SELECT page_id FROM chat WHERE session_id=?", (session_id,)
+            ).fetchone()
+            if row["page_id"] != page_id:
+                raise ValueError("session belongs to another page")
+            db.execute("UPDATE chat SET updated_at=? WHERE session_id=?", (stamp, session_id))
+        return self.chat(session_id)
+
+    def chat(self, session_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT session_id,page_id,title,created_at,updated_at,last_state "
+                "FROM chat WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(session_id)
+        return dict(row)
+
+    def update_chat(self, session_id: str, changes: dict[str, str | None]) -> dict[str, Any]:
+        assignments = [f"{key}=?" for key in changes]
+        with self.transaction() as db:
+            updated = db.execute(
+                f"UPDATE chat SET {','.join(assignments)},updated_at=? WHERE session_id=?",
+                (*changes.values(), now(), session_id),
+            ).rowcount
+            if not updated:
+                raise KeyError(session_id)
+        return self.chat(session_id)
+
     def save_session(
         self, page_id: str, expected: str | None, session_id: str
     ) -> tuple[bool, str | None]:
         with self.transaction() as db:
+            stamp = now()
             updated = db.execute(
                 "UPDATE page SET zeta_session_id=?,updated_at=? WHERE id=? AND zeta_session_id IS ?",  # noqa: E501
-                (session_id, now(), page_id, expected),
+                (session_id, stamp, page_id, expected),
             ).rowcount
             row = db.execute("SELECT zeta_session_id FROM page WHERE id=?", (page_id,)).fetchone()
             if row is None:
                 raise KeyError(page_id)
+            if updated:
+                owner = db.execute(
+                    "SELECT page_id FROM chat WHERE session_id=?", (session_id,)
+                ).fetchone()
+                if owner is not None and owner["page_id"] != page_id:
+                    raise ValueError("session belongs to another page")
+                db.execute(
+                    "INSERT INTO chat(session_id,page_id,created_at,updated_at) VALUES(?,?,?,?) "
+                    "ON CONFLICT(session_id) DO UPDATE SET updated_at=excluded.updated_at",
+                    (session_id, page_id, stamp, stamp),
+                )
             return updated == 1, row[0]
 
     def create_page(
