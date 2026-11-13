@@ -62,6 +62,7 @@ export async function gateShell(
   await capture("10-narrow-drawer-review-390x844.png");
   await page.keyboard.press("Escape");
   if ((await sidebar.getAttribute("aria-hidden")) !== "true") throw new Error("escape did not close the drawer");
+  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   if (!(await menu.evaluate((button) => button === document.activeElement))) throw new Error("closing the drawer did not restore menu focus");
   const overflow = page.getByRole("button", { name: "chat options" });
   await overflow.click();
