@@ -1,15 +1,21 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
 import { createRunStore } from "@fulcrum/core";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, supportsFeature, type ConnectionState } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { applyApprovalMode, loadSession, openHomeSession } from "./zeta/session";
-import { VimComposer, vimEnabled } from "./composer/VimComposer";
 import type { SessionLease } from "@fulcrum/zeta";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
+const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
+
+function vimEnabled() {
+  if (matchMedia("(pointer: coarse)").matches) return false;
+  try { return JSON.parse(localStorage.getItem("achilles-settings") ?? "null")?.vim === true; }
+  catch { return false; }
+}
 type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type Attachment = { page: Page; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null };
 
@@ -79,12 +85,17 @@ export function App() {
   }, [client, pendingApprovalMode, sessionId, turn]);
   if (error) return <main className="shell"><p role="alert">{error}</p></main>;
   const failure = connectionFailure(connectionState);
-  if (failure) return <main className="shell"><p role="alert">{failure}</p></main>;
+  if (failure && (!store || !client || !sessionId || !page)) return <main className="shell"><p role="alert">{failure}</p></main>;
   if (!store || !client || !sessionId || !page) return <main className="shell"><p role="status">connecting to zeta…</p></main>;
   const approval = createApprovalDecider(client, store); const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} onApprove={r => approval("approve", r)} onDeny={r => approval("deny", r)} /> };
   const send = async (text: string, intent: { steer: boolean }, track: (id: string) => void) => { const delivery_id = crypto.randomUUID(); track(delivery_id); await client.request(intent.steer ? "steer" : "send", { session_id: sessionId, text, delivery_id }); };
   const toggle = async () => { setToggleError(null); setToggling(true); try { const response = await fetch(`/api/pages/${page.id}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !page.create_mode }) }); if (!response.ok) throw new Error(`could not update create mode (${response.status})`); const result = await response.json() as { create_mode: boolean }; setPage({ ...page, create_mode: result.create_mode }); } catch (caught) { setToggleError(caught instanceof Error ? caught.message : String(caught)); } finally { setToggling(false); } };
-  return <RunProvider store={store}><main className="shell"><header><div><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span>{page.approval_mode === "allow" && <span aria-label="auto-approve">auto-approve</span>}</div><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button>{toggleError && <p role="alert">{toggleError}</p>}</header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={page.id} credential={credential} refreshKey={refreshKey} />)}</section>{vimEnabled() ? <VimComposer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" />}</main></RunProvider>;
+  const composerState = failure ? "read-only" as const : turn === "running" ? "steerable" as const : "idle" as const;
+  const composerProps = composerState === "read-only"
+    ? { state: composerState, reason: failure!, onSubmit: send, onStop: () => client.request("abort", { session_id: sessionId }), placeholder: "message zeta" }
+    : { state: composerState, onSubmit: send, onStop: () => client.request("abort", { session_id: sessionId }), placeholder: "message zeta" };
+  const stockComposer = <Composer {...composerProps} />;
+  return <RunProvider store={store}><main className="shell">{failure && <p role="alert">{failure}</p>}<header><div><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span>{page.approval_mode === "allow" && <span aria-label="auto-approve">auto-approve</span>}</div><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button>{toggleError && <p role="alert">{toggleError}</p>}</header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={page.id} credential={credential} refreshKey={refreshKey} />)}</section>{vimEnabled() ? <Suspense fallback={stockComposer}><LazyVimComposer {...composerProps} /></Suspense> : stockComposer}</main></RunProvider>;
 }
 
 function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {

@@ -3,8 +3,9 @@ import { join } from "node:path";
 import type { Page } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
+type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
 
-export async function gateVim(page: Page, control: string, waitFor: WaitFor) {
+export async function gateVim(page: Page, control: string, waitFor: WaitFor, whileDisconnected: WhileDisconnected) {
   const screenshotDir = process.env.VIM_SCREENSHOT_DIR;
   const screenshot = async (name: string) => {
     if (!screenshotDir) return;
@@ -35,7 +36,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor) {
   await field.press("Escape");
   await screenshot("normal-blurred");
   if (await field.evaluate((element) => element === document.activeElement)) throw new Error("second vim escape did not blur the composer");
-  if (await field.textContent() !== "hello") throw new Error("vim escape cleared the draft");
+  const blurredDraft = await field.textContent();
+  if (blurredDraft !== "hello") throw new Error(`vim escape changed the draft: ${JSON.stringify(blurredDraft)}`);
   await page.keyboard.press("i");
   if (!(await field.evaluate((element) => element === document.activeElement))) throw new Error("page-level i did not refocus the composer");
   if (await field.textContent() !== "hello") throw new Error("refocusing the vim composer changed the draft");
@@ -48,4 +50,16 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor) {
   }, "vim message on this backend turn");
   const current = JSON.parse(await Bun.file(control).text());
   if (current.last_message.includes("helo") || !current.last_message.includes("hello")) throw new Error(`vim backend message was not exactly "hello": ${current.last_message}`);
+
+  await field.fill("kept draft");
+  await whileDisconnected(async () => {
+    await page.getByRole("alert").filter({ hasText: "connection to zeta was lost" }).waitFor({ state: "visible", timeout: 20_000 });
+    const keptDraft = await page.getByRole("textbox", { name: "message" }).textContent().catch(() => null);
+    if (keptDraft !== "kept draft") throw new Error(`vim read-only draft-kept assertion failed: expected "kept draft", got ${JSON.stringify(keptDraft)}`);
+    await page.locator('.vim-composer[data-state="read-only"]').waitFor({ state: "visible", timeout: 20_000 });
+    await screenshot("connection-lost");
+  });
+  await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
+  const reconnectedDraft = await field.textContent();
+  if (reconnectedDraft !== "kept draft") throw new Error(`vim reconnect changed the kept draft: ${JSON.stringify(reconnectedDraft)}`);
 }

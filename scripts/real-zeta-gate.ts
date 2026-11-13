@@ -596,7 +596,19 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
-  await gateVim(page, control, waitFor);
+  await gateVim(page, control, waitFor, async (check) => {
+    const previousPid = JSON.parse(await Bun.file(control).text()).pid;
+    ignoreBrowserErrors = true;
+    zetaProcess.kill("SIGTERM");
+    if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta shutdown timeout during vim read-only gate");
+    try {
+      await check();
+    } finally {
+      zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
+      await waitFor(async () => JSON.parse(await Bun.file(control).text()).pid !== previousPid, "zeta restart after vim read-only gate");
+      ignoreBrowserErrors = false;
+    }
+  });
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
