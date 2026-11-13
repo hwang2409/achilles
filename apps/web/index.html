@@ -14,8 +14,8 @@
         const settings = {
           ...defaults,
           theme: themes.includes(saved.theme) ? saved.theme : defaults.theme,
-          uiFont: saved.uiFont in uiFonts ? saved.uiFont : defaults.uiFont,
-          codeFont: saved.codeFont in codeFonts ? saved.codeFont : defaults.codeFont,
+          uiFont: Object.hasOwn(uiFonts, saved.uiFont) ? saved.uiFont : defaults.uiFont,
+          codeFont: Object.hasOwn(codeFonts, saved.codeFont) ? saved.codeFont : defaults.codeFont,
           size: [13, 14, 15, 16].includes(saved.size) ? saved.size : defaults.size,
           density: ["comfortable", "compact"].includes(saved.density) ? saved.density : defaults.density,
           vim: typeof saved.vim === "boolean" ? saved.vim : defaults.vim,

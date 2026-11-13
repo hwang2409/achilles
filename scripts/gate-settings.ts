@@ -11,6 +11,10 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   if (screenshots) await page.screenshot({ path: `${screenshots}/default.png` });
   await openSettings(page);
+  const unnamedControls = await page.getByRole("dialog", { name: "settings" }).locator("button, input, select, textarea").evaluateAll((controls) => controls.filter((control) => !(control.getAttribute("aria-label") || control.getAttribute("aria-labelledby") || control.textContent?.trim())).map((control) => control.outerHTML));
+  if (unnamedControls.length) throw new Error(`settings controls have no accessible name: ${unnamedControls.join(", ")}`);
+  await page.getByRole("switch", { name: "vim mode" }).waitFor();
+  await page.getByRole("switch", { name: "auto-approve default" }).waitFor();
   if (screenshots) await page.screenshot({ path: `${screenshots}/dialog.png` });
   await page.getByRole("option", { name: /gruvbox-light/ }).click();
   await page.getByRole("button", { name: "IBM Plex Sans" }).click();

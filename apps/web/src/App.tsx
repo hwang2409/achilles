@@ -38,14 +38,14 @@ async function attachPage(client: ZetaClient, key: string): Promise<Attachment> 
   if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
   const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
   page.server_forces_ask = page.approval_mode === "ask";
-  const desiredApprovalMode = page.server_forces_ask || (page.zeta_session_id === null && !getSettings().autoApproveDefault) ? "ask" : "allow";
-  let session = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, desiredApprovalMode);
+  const newSessionApprovalMode = page.server_forces_ask || !getSettings().autoApproveDefault ? "ask" : "allow";
+  let session = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, newSessionApprovalMode, page.server_forces_ask);
   let lease = await loadSession(client, session.id);
   const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: session.id }) });
   if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
-  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); session = await openHomeSession(client, actual, credential, page.workspace, desiredApprovalMode); lease = await loadSession(client, session.id); }
+  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); session = await openHomeSession(client, actual, credential, page.workspace, newSessionApprovalMode, page.server_forces_ask); lease = await loadSession(client, session.id); }
   page.approval_mode = session.approvalMode;
-  return { page, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? desiredApprovalMode : null };
+  return { page, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null };
 }
 
 export function App() {

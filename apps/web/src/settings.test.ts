@@ -20,6 +20,7 @@ describe("parseSettings", () => {
       density: "compact",
       autoApproveDefault: false,
     });
+    expect(parseSettings(JSON.stringify({ uiFont: "constructor", codeFont: "__proto__" }))).toEqual(defaultSettings);
     expect(parseSettings(JSON.stringify(["gruvbox-light"]))).toEqual(defaultSettings);
   });
 });

@@ -216,7 +216,7 @@ try {
     throw new Error("replacement session did not report ask settings");
   if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === first))
     throw new Error("ask-mode replacement session sent a no-op set_settings frame");
-  if (await page.getByLabel("auto-approve").count())
+  if (await page.getByLabel("auto-approve", { exact: true }).count())
     throw new Error("ask-mode session showed the auto-approve marker");
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
@@ -490,6 +490,12 @@ try {
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
+  const askDefaultPage = await homeMcp(16, "tools/call", {
+    name: "create_page",
+    arguments: { route: "/ask-default", title: "ask default", layout: { blocks: [] } },
+  });
+  if (askDefaultPage.result?.isError || (await fetch(`${origin}/api/pages/ask-default`)).status !== 200)
+    throw new Error(`could not create ask-default gate page: ${JSON.stringify(askDefaultPage)}`);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -539,7 +545,7 @@ try {
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
   if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
-  if (await page.getByLabel("auto-approve").count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
@@ -567,6 +573,12 @@ try {
 
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
+  const staleAskDefault = start(
+    "uv",
+    ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-ask-default' WHERE id='ask-default'\"); db.commit(); db.close()"],
+    env,
+  );
+  await new Promise<void>((resolve, reject) => staleAskDefault.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`ask-default seed exited ${code}`))));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: "allow" });
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "allow-mode achilles restart");
   await page.goto(`${origin}/allow`);
@@ -574,7 +586,7 @@ try {
   await allowField.waitFor({ timeout: 20000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await page.getByLabel("auto-approve").waitFor({ state: "visible" });
+  await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
   if (approvalModeResponse("set_settings", allowSession) !== "allow")
     throw new Error("allow-mode session settings were not applied");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
@@ -596,6 +608,32 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
+
+  await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ v: 1, autoApproveDefault: false })));
+  const newSessionsBeforeAskDefault = requests().filter((frame) => frame.method === "new_session").length;
+  await page.goto(`${origin}/ask-default`);
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  const askDefaultSession = await homeSessionId();
+  if (!askDefaultSession) throw new Error("ask-default page session id missing");
+  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeAskDefault + 1)
+    throw new Error("stale ask-default session did not create exactly one replacement");
+  if (approvalModeResponse("session_settings", askDefaultSession) !== "ask")
+    throw new Error("stale-id replacement did not use the ask default");
+  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === askDefaultSession))
+    throw new Error("ask-default replacement sent a set_settings frame");
+  if (await page.getByLabel("auto-approve", { exact: true }).count())
+    throw new Error("ask-default replacement showed the auto-approve marker");
+  const askSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === askDefaultSession).length;
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  if (await homeSessionId() !== askDefaultSession) throw new Error("reload changed ask-default session id");
+  if (approvalModeResponse("session_settings", askDefaultSession) !== "ask")
+    throw new Error("reloaded user-created ask chat did not stay ask");
+  const askSetSettingsAfterReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === askDefaultSession).length;
+  if (askSetSettingsAfterReload !== askSetSettingsBeforeReload)
+    throw new Error("reloading a user-created ask chat sent set_settings");
+  if (await page.getByLabel("auto-approve", { exact: true }).count())
+    throw new Error("reloaded user-created ask chat showed the auto-approve marker");
   await gateSettings(page, origin);
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");

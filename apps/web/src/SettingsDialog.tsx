@@ -3,7 +3,6 @@ import {
   AUTO_THEME,
   defaultSettings,
   resetSettings,
-  themeChoices,
   updateSettings,
   useSettings,
   type CodeFont,
@@ -18,6 +17,7 @@ const swatches = ["bg", "fg", "accent", "ok", "warn", "danger"];
 const uiFonts: Array<[UiFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "system"]];
 const codeFonts: Array<[CodeFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "system mono"]];
 const densities: Array<[Density, string]> = [["comfortable", "comfortable"], ["compact", "compact"]];
+const displayedThemes: readonly ThemeChoice[] = ["auto", "github-dark", "gruvbox-dark", "gruvbox-light", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "github-light", "one-dark"];
 
 function Swatch({ theme }: { theme: ThemeChoice }) {
   return <span className="settings-swatch" aria-hidden="true" data-fulcrum-theme={theme === AUTO_THEME ? undefined : theme}>
@@ -29,7 +29,7 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
   const options = useRef<Array<HTMLButtonElement | null>>([]);
   const focus = (index: number) => options.current[index]?.focus();
   const onKeyDown = (event: KeyboardEvent, index: number) => {
-    const last = themeChoices.length - 1;
+    const last = displayedThemes.length - 1;
     const next: Record<string, number> = {
       ArrowDown: Math.min(last, index + 2),
       ArrowUp: Math.max(0, index - 2),
@@ -41,7 +41,7 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
     if (event.key in next) { event.preventDefault(); focus(next[event.key]!); }
   };
   return <div className="theme-options" role="listbox" aria-label="theme">
-    {themeChoices.map((theme, index) => <button
+    {displayedThemes.map((theme, index) => <button
       key={theme}
       ref={(node) => { options.current[index] = node; }}
       type="button"
@@ -63,8 +63,8 @@ function Segments<T extends string | number>({ label, value, choices, onChange }
   </div>;
 }
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange(value: boolean): void }) {
-  return <button className="settings-toggle" type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange(value: boolean): void }) {
+  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
 }
 
 function Row({ title, description, children }: { title: string; description: string; children: ReactNode }) {
@@ -94,8 +94,8 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
         <Row title="theme" description="fulcrum palettes. auto follows the OS."><ThemeList value={settings.theme} onChange={(theme) => updateSettings({ theme })} /></Row>
         <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} onChange={(uiFont) => updateSettings({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
         <Row title="size" description="achilles chrome."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} onChange={(size) => updateSettings({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} onChange={(density) => updateSettings({ density })} /></div></Row>
-        <Row title="vim mode" description="in the composer only."><div className="setting-explanation"><Toggle checked={settings.vim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
-        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle checked={settings.autoApproveDefault} onChange={(autoApproveDefault) => updateSettings({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
+        <Row title="vim mode" description="in the composer only."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
+        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} onChange={(autoApproveDefault) => updateSettings({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
       </div>
       <footer><button type="button" className="settings-link" onClick={() => resetSettings()} disabled={JSON.stringify(settings) === JSON.stringify(defaultSettings)}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
     </div>

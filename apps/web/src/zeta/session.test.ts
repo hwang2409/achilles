@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, loadSession } from "./session";
+import { applyApprovalMode, loadSession, openHomeSession } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -24,6 +24,35 @@ describe("applyApprovalMode", () => {
 
     expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "allow", pending: false });
     expect(methods).toEqual(["session_settings"]);
+  });
+});
+
+describe("openHomeSession", () => {
+  test("preserves the approval mode of a resumed session", async () => {
+    const methods: string[] = [];
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume") return {};
+      if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
+      throw new Error(`unexpected ${method}`);
+    } };
+
+    expect(await openHomeSession(client as never, "existing", "token", "/tmp", "allow", false)).toMatchObject({ id: "existing", approvalMode: "ask" });
+    expect(methods).toEqual(["resume", "session_settings"]);
+  });
+
+  test("applies the selected default to a stale session replacement", async () => {
+    const methods: string[] = [];
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume") throw { data: { code: "session_not_found" } };
+      if (method === "new_session") return { session: { session_id: "replacement" } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
+      throw new Error(`unexpected ${method}`);
+    } };
+
+    expect(await openHomeSession(client as never, "stale", "token", "/tmp", "ask", false)).toMatchObject({ id: "replacement", approvalMode: "ask" });
+    expect(methods).toEqual(["resume", "new_session", "session_settings"]);
   });
 });
 
