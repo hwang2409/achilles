@@ -207,7 +207,8 @@ def create_app() -> Starlette:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         next_cursor = _chat_cursor(rows[-1]["updated_at"], rows[-1]["session_id"]) if rows else None
-        return JSONResponse({"chats": rows, "next": next_cursor})
+        approval_count = await anyio.to_thread.run_sync(store.approval_count)
+        return JSONResponse({"chats": rows, "next": next_cursor, "approval_count": approval_count})
 
     async def register_chat(request):
         if not _same_origin(request):

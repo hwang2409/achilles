@@ -313,6 +313,12 @@ class PageStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def approval_count(self) -> int:
+        with self._connect() as db:
+            return int(
+                db.execute("SELECT COUNT(*) FROM chat WHERE last_state='approval'").fetchone()[0]
+            )
+
     def register_chat(self, page_id: str, session_id: str) -> dict[str, Any]:
         with self.transaction() as db:
             if db.execute("SELECT 1 FROM page WHERE id=?", (page_id,)).fetchone() is None:

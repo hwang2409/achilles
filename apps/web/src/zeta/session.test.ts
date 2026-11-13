@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, loadSession } from "./session";
+import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -24,6 +24,28 @@ describe("applyApprovalMode", () => {
 
     expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "allow", pending: false });
     expect(methods).toEqual(["session_settings"]);
+  });
+});
+
+describe("openHomeSession", () => {
+  test("chooses the creation mode from the server and default", () => {
+    expect(creationApprovalMode("allow")).toBe("allow");
+    expect(creationApprovalMode("allow", false)).toBe("ask");
+    expect(creationApprovalMode("ask")).toBe("ask");
+  });
+
+  test("preserves a resumed chat mode when the server does not force ask", async () => {
+    const methods: string[] = [];
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume") return { session: { name: "existing" } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
+      throw new Error(`unexpected ${method}`);
+    } };
+
+    const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow");
+    expect(result.approvalMode).toBe("ask");
+    expect(methods).toEqual(["resume", "session_settings"]);
   });
 });
 

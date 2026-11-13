@@ -27,10 +27,15 @@ export async function applyApprovalMode(client: ZetaClient, sessionId: string, m
   }
 }
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, approvalMode = "allow") {
+export function creationApprovalMode(serverMode: string | null | undefined, autoApproveDefault = true) {
+  return serverMode === "ask" || !autoApproveDefault ? "ask" : "allow";
+}
+
+export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, serverMode?: string | null, autoApproveDefault = true) {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   let name: string | null = null;
+  let created = false;
   if (id) {
     try {
       const resumed = await rebindPage(client, id, binding) as { session?: { name?: string | null } };
@@ -42,12 +47,16 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
     }
   }
   if (!id) {
-    const created = await client.request("new_session", binding) as { session?: { session_id?: string; name?: string | null } };
-    id = created.session?.session_id ?? null;
-    name = created.session?.name ?? null;
+    const result = await client.request("new_session", binding) as { session?: { session_id?: string; name?: string | null } };
+    id = result.session?.session_id ?? null;
+    name = result.session?.name ?? null;
+    created = true;
     if (!id) throw new Error("zeta did not return a session id");
   }
-  return { id, name, ...await applyApprovalMode(client, id, approvalMode) };
+  const desiredMode = creationApprovalMode(serverMode, autoApproveDefault);
+  if (created || serverMode === "ask") return { id, name, ...await applyApprovalMode(client, id, desiredMode) };
+  const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
+  return { id, name, approvalMode: settings.approval_mode, pending: false };
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
