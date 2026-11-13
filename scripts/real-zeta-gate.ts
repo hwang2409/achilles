@@ -150,6 +150,7 @@ try {
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
+  errors.length = 0; // discovery can return 503 while the setup restart replaces zeta
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
