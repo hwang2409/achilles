@@ -22,7 +22,7 @@ def _home() -> Path:
 
 def _database():
     """compatibility entry point used by the real-zeta fixture seeder."""
-    return PageStore(_home()).db
+    return PageStore(_home())._connect()
 
 
 def _loopback(value: str) -> bool:
@@ -147,6 +147,37 @@ def create_app() -> Starlette:
             return JSONResponse({"session_id": actual}, status_code=409)
         return JSONResponse({"session_id": actual})
 
+    async def records(request):
+        page_id = request.path_params["id"]
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        collection = request.path_params["collection"]
+        return JSONResponse(await anyio.to_thread.run_sync(store.records, page_id, collection))
+
+    async def rollback_tool(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        page_id = request.path_params["id"]
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        body = await request.json()
+        try:
+            await anyio.to_thread.run_sync(
+                store.rollback_tool, page_id, request.path_params["name"], body["version"]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        await notify_tools_changed(page_id)
+        return JSONResponse({"ok": True})
+
     async def create_mode(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
@@ -175,6 +206,8 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
+            Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),
             Route("/", _app),

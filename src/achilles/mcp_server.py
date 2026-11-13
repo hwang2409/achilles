@@ -10,6 +10,7 @@ from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from .pages import PageStore
+from .records import call_record
 
 
 def _token(context):
@@ -37,6 +38,10 @@ def _text(value: Any) -> CallToolResult:
 def build_mcp(store: PageStore):
     sessions: dict[str, set] = {}
 
+    async def principal(context):
+        token = _token(context)
+        return await anyio.to_thread.run_sync(store.authenticate, token) if token else None
+
     async def remove_connection(page_id: str, connection) -> None:
         _remove_connection(sessions, page_id, connection)
 
@@ -45,57 +50,93 @@ def build_mcp(store: PageStore):
             await session.send_tool_list_changed()
 
     async def list_tools(context, _params) -> ListToolsResult:
-        token = _token(context)
-        principal = await anyio.to_thread.run_sync(store.authenticate, token) if token else None
-        if principal:
-            page_sessions = sessions.setdefault(principal["id"], set())
-            page_sessions.add(context.session)
-            connection = context.session._connection
-            cleanup_key = f"achilles-session-cleanup:{principal['id']}"
-            if not connection.state.get(cleanup_key):
-                connection.state[cleanup_key] = True
-                connection.exit_stack.push_async_callback(
-                    remove_connection, principal["id"], connection
-                )
-        return ListToolsResult(
-            tools=[
-                Tool(
-                    name="create_page",
-                    description="create a new Achilles page",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "route": {"type": "string"},
-                            "title": {"type": "string"},
-                            "layout": {"type": "object"},
+        page = await principal(context)
+        if not page:
+            return ListToolsResult(tools=[])
+        page_sessions = sessions.setdefault(page["id"], set())
+        page_sessions.add(context.session)
+        connection = context.session._connection
+        cleanup_key = f"achilles-session-cleanup:{page['id']}"
+        if not connection.state.get(cleanup_key):
+            connection.state[cleanup_key] = True
+            connection.exit_stack.push_async_callback(remove_connection, page["id"], connection)
+        tools: list[Tool] = []
+        if page["create_mode"]:
+            tools.extend(
+                [
+                    Tool(
+                        name="create_page",
+                        description="create a new Achilles page",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "route": {"type": "string"},
+                                "title": {"type": "string"},
+                                "layout": {"type": "object"},
+                            },
+                            "required": ["route", "title", "layout"],
+                            "additionalProperties": False,
                         },
-                        "required": ["route", "title", "layout"],
-                        "additionalProperties": False,
-                    },
+                    ),
+                    Tool(
+                        name="create_tool",
+                        description="create a page-local data tool",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {"bundle": {"type": "object"}},
+                            "required": ["bundle"],
+                            "additionalProperties": False,
+                        },
+                    ),
+                ]
+            )
+        for bundle in await anyio.to_thread.run_sync(store.page_tools, page["id"]):
+            tools.append(
+                Tool(
+                    name=bundle["name"],
+                    description=bundle["description"],
+                    inputSchema=bundle["input_schema"],
                 )
-            ]
-            if principal and principal["create_mode"]
-            else []
-        )
+            )
+        return ListToolsResult(tools=tools)
 
     async def call_tool(context, params) -> CallToolResult:
-        token = _token(context)
-        principal = await anyio.to_thread.run_sync(store.authenticate, token) if token else None
-        if not principal or params.name != "create_page":
+        page = await principal(context)
+        if not page:
             return CallToolResult(
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
+        args = params.arguments or {}
+        if params.name in {"create_page", "create_tool"}:
+            if not page["create_mode"]:
+                return CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text="forbidden: create mode is off")],
+                )
+            try:
+                if params.name == "create_page":
+                    created, digest = await anyio.to_thread.run_sync(
+                        store.create_page, args["route"], args["title"], args["layout"], page["id"]
+                    )
+                    result = {"page_id": created["id"], "route": created["route"], "digest": digest}
+                else:
+                    created, digest = await anyio.to_thread.run_sync(
+                        store.create_tool, page["id"], args["bundle"]
+                    )
+                    result = {**created, "digest": digest}
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
+                return CallToolResult(
+                    isError=True, content=[TextContent(type="text", text=str(exc))]
+                )
+            await notify(page["id"])
+            return _text(result)
         try:
-            created, digest = await anyio.to_thread.run_sync(
-                store.create_page,
-                (params.arguments or {})["route"],
-                (params.arguments or {})["title"],
-                (params.arguments or {})["layout"],
-                principal["id"],
+            result = await anyio.to_thread.run_sync(
+                call_record, store, page["id"], params.name, args
             )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
+        except (PermissionError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
-        return _text({"page_id": created["id"], "route": created["route"], "digest": digest})
+        return _text(result)
 
     server = Server("achilles", on_list_tools=list_tools, on_call_tool=call_tool)
     original_options = server.create_initialization_options
