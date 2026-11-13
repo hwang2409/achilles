@@ -17,8 +17,6 @@ def _check(validator: Draft202012Validator, value: Any, label: str) -> None:
 
 
 def _insert(db, page_id, collection, version, schema, arguments):
-    if "record_id" in arguments:
-        raise ValueError("record_id is reserved")
     document = arguments
     _check(schema, document, "record")
     record_id = str(arguments.get("id") or secrets.token_hex(12))

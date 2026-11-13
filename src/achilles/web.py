@@ -159,7 +159,15 @@ def create_app() -> Starlette:
         return JSONResponse(await anyio.to_thread.run_sync(store.records, page_id, collection))
 
     async def rollback_tool(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
         page_id = request.path_params["id"]
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
         body = await request.json()
         try:
             await anyio.to_thread.run_sync(

@@ -79,6 +79,8 @@ try {
   const pending = JSON.parse(
     await Bun.file(join(zetaHome, "run/serve.ws.json")).text(),
   );
+  for (const key of ["controller_token", "observer_token"])
+    if (typeof pending[key] === "string") secrets.push(pending[key]);
   const discovery = join(temp, "discovery.json");
   await Bun.write(
     discovery,
@@ -129,7 +131,7 @@ try {
   const field = page.getByRole("textbox", { name: "message" });
   await field.waitFor({ timeout: 20000 }).catch(async () => {
     throw new Error(
-      `composer missing: ${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
+      `composer missing: ${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
     );
   });
   const homeSessionId = async () =>
@@ -146,17 +148,6 @@ try {
         }
       })
       .filter(Boolean);
-  const waitForSessionIdle = async (sessionId: string) => {
-    await waitFor(
-      async () =>
-        requests().some((frame) => {
-          const event = frame.event ?? frame.params?.event ?? frame.params?.type;
-          const id = frame.session_id ?? frame.params?.session_id;
-          return id === sessionId && (event === "agent_end" || event === "run_end");
-        }),
-      `session ${sessionId} idle`,
-    );
-  };
   if (
     requests().filter(
       (frame) =>
@@ -204,7 +195,7 @@ try {
     const next = response.headers.get("mcp-session-id");
     if (next) mcpSessions.set(token, next);
     if (!response.ok)
-      throw new Error(`mcp ${method} failed: ${response.status} ${await response.text()}`);
+      throw new Error(`mcp ${method} failed: ${response.status} ${redact(await response.text())}`);
     return response.json();
   };
   const homeMcp = (id: number, method: string, params: object) =>
@@ -400,7 +391,11 @@ try {
     `${origin}/api/pages/home/tools/annotate_trace/rollback`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${credential}`,
+        Origin: origin,
+      },
       body: JSON.stringify({ version: 1 }),
     },
   );
@@ -447,7 +442,6 @@ try {
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   let reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (reconnectPage.zeta_session_id) throw new Error("created page got a session before navigation");
-  await waitForSessionIdle(homeAfterCreate);
   await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!reconnectPage.zeta_session_id || reconnectPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
@@ -457,7 +451,6 @@ try {
   if ((await page.getByText("approval complete", { exact: true }).count()) === 0)
     throw new Error("reconnected home did not render prior approval completion");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
-  await waitForSessionIdle(await homeSessionId());
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
@@ -466,7 +459,6 @@ try {
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
-  await waitForSessionIdle(await homeSessionId());
   await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");

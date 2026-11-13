@@ -13,6 +13,7 @@ from starlette.testclient import TestClient
 
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
+from achilles.pages import PageStore
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,41 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
+
+
+def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "annotate_trace",
+        "description": "annotate",
+        "input_schema": {"type": "object"},
+        "output_schema": {"type": "object"},
+        "implementation": {
+            "operation": "insert",
+            "collection": "annotations",
+            "data_schema": {"type": "object"},
+        },
+    }
+    store.create_tool("home", bundle)
+    store.create_tool("home", bundle)
+    store.set_create_mode("home", True)
+    other = store.create_page("/other", "other", {"blocks": [{"type": "text", "text": "x"}]})
+    home_token = store.ensure_credential("home")
+    other_token = store.ensure_credential(other[0]["id"])
+    client = TestClient(web.create_app())
+    path = "/api/pages/home/tools/annotate_trace/rollback"
+    headers = {"authorization": f"Bearer {other_token}", "origin": "http://testserver"}
+    assert client.post(path, headers=headers, json={"version": 1}).status_code == 403
+    headers = {
+        "authorization": f"Bearer {home_token}",
+        "origin": "http://evil.test",
+        "host": "testserver",
+    }
+    assert client.post(path, headers=headers, json={"version": 1}).status_code == 403
+    assert store.page_tools("home")[0]["version"] == 2
 
 
 def test_mcp_connection_cleanup_removes_sessions_safely() -> None:

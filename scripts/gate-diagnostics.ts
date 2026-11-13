@@ -36,6 +36,3 @@ export const controlSnapshot = (text: string, secrets: readonly string[] = []): 
     return diagnostic(text, secrets);
   }
 };
-
-export const failureMessage = (parts: unknown[], secrets: readonly string[] = []): string =>
-  parts.map((part) => diagnostic(part, secrets)).join(" ");
