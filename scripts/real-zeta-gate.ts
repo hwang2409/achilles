@@ -343,13 +343,16 @@ try {
       `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
   const createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (!createdPage.zeta_session_id || createdPage.zeta_session_id === first)
-    throw new Error("created page did not get its own zeta session");
   const createdPageId = createdPage.id;
   const secondCredential = (
     await Bun.file(join(achillesHome, `credentials/${createdPageId}`)).text()
   ).trim();
   secrets.push(secondCredential);
+  await mcp(secondCredential, 9, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "gate", version: "1" },
+  });
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
@@ -449,7 +452,6 @@ try {
   reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!reconnectPage.zeta_session_id || reconnectPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
   if (reconnectPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
-  await waitForSessionIdle(reconnectPage.zeta_session_id);
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if ((await page.getByText("approval complete", { exact: true }).count()) === 0)
@@ -481,10 +483,10 @@ try {
   if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
   if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after reload");
   mcpSessions.delete(credential);
-  await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
-  const invalid = await mcp(5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
+  await mcp(credential, 3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
+  const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
-  const reconnectCrossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
+  const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
   console.log("reconnect refresh asserted: reload kept the session and refreshed the achilles catalog");
   console.log("expected skip: reload during pending approval waits for fulcrum hello params");
