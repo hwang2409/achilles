@@ -97,11 +97,12 @@ async function tail(path: string) {
   try { return (await readFile(path, "utf8")).trim().split("\n").slice(-8).join("\n"); } catch { return ""; }
 }
 async function waitForSpawnedServe(path: string, pid: number, ws: number) {
-  for (;;) {
+  for (let i = 0; i < 150; i++) {
     const value = await readDiscovery(path) as Partial<Discovery> | null;
     if (value?.pid === pid && value.port === ws) return;
     await Bun.sleep(100);
   }
+  throw new Error("timed out waiting for zeta serve discovery");
 }
 async function chooseServe(requestedOrigin: string): Promise<{ origin: string }> {
   const discovery = resolve(home, "run/serve.ws.json");
@@ -114,7 +115,9 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
   const args = ["zeta", "serve", "--ws", String(ws), "--ws-origin", requestedOrigin];
   const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
-  const outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]);
+  let outcome: "ready" | "exited";
+  try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
+  catch (error) { child.kill(); await child.exited; throw new Error(`${error instanceof Error ? error.message : error}. fix the error and retry:\n${await tail(logPath)}`); }
   if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
   const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
@@ -136,12 +139,14 @@ async function startAchilles(appOrigin: string) {
   await mkdir(cache, { recursive: true }); const logPath = resolve(cache, "achilles.log"); const log = Bun.file(logPath);
   const args = ["uv", "run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)];
   const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
-  for (;;) {
+  let ready = false;
+  for (let i = 0; i < 150; i++) {
     const outcome = await Promise.race([fetch(`${appOrigin}/`).then(() => "ready" as const).catch(() => "wait" as const), child.exited.then(() => "exited" as const)]);
-    if (outcome === "ready") break;
+    if (outcome === "ready") { ready = true; break; }
     if (outcome === "exited") throw new Error(`achilles exited during startup:\n${await tail(logPath)}`);
     await Bun.sleep(100);
   }
+  if (!ready) { child.kill(); await child.exited; throw new Error(`timed out waiting for achilles:\n${await tail(logPath)}`); }
   const identity = await processIdentity(child.pid); if (!identity) throw new Error("achilles disappeared during startup");
   await writeFile(resolve(cache, "achilles.json"), JSON.stringify(identity)); child.unref();
   console.log(`achilles is ready at ${appOrigin}`);
