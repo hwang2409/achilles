@@ -15,7 +15,7 @@ const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
 const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
-const port = 5191 + Math.floor(Math.random() * 1000);
+const port = 5200 + Math.floor(Math.random() * 1000);
 const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
@@ -211,8 +211,10 @@ try {
     throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
-  if (approvalModeResponse("set_settings", first) !== "ask")
-    throw new Error("ask-mode session settings were not applied to the replacement session");
+  if (approvalModeResponse("session_settings", first) !== "ask")
+    throw new Error("replacement session did not report ask settings");
+  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === first))
+    throw new Error("ask-mode replacement session sent a no-op set_settings frame");
   if (await page.getByLabel("auto-approve").count())
     throw new Error("ask-mode session showed the auto-approve marker");
   const assistantReady = page.getByText("assistant ready", { exact: true });
@@ -565,10 +567,14 @@ try {
   await page.getByLabel("auto-approve").waitFor({ state: "visible" });
   if (approvalModeResponse("set_settings", allowSession) !== "allow")
     throw new Error("allow-mode session settings were not applied");
+  const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
   await allowField.waitFor({ timeout: 20000 });
   if (approvalModeResponse("session_settings", allowSession) !== "allow")
     throw new Error("reloaded allow-mode session did not report allow settings");
+  const allowSetSettingsAfterReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
+  if (allowSetSettingsAfterReload !== allowSetSettingsBeforeReload)
+    throw new Error("reloading an allow-mode session sent a no-op set_settings frame");
   const allowApprovalBefore = await approval.count();
   const beforeAllowTurn = JSON.parse(await Bun.file(control).text());
   await allowField.fill("run the allow-mode tool");

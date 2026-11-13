@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
 import { createRunStore } from "@fulcrum/core";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, supportsFeature, type ConnectionState } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { loadSession, openHomeSession } from "./zeta/session";
+import { applyApprovalMode, loadSession, openHomeSession } from "./zeta/session";
 import type { SessionLease } from "@fulcrum/zeta";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
 type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
-type Attachment = { page: Page; sessionId: string; lease: SessionLease };
+type Attachment = { page: Page; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null };
 
 function connectionFailure(state: ConnectionState): string | null {
   switch (state.phase) {
@@ -41,25 +41,40 @@ async function attachPage(client: ZetaClient, key: string): Promise<Attachment> 
   const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: session.id }) });
   if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
   if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); session = await openHomeSession(client, actual, credential, page.workspace, page.approval_mode ?? "allow"); lease = await loadSession(client, session.id); }
+  const desiredApprovalMode = page.approval_mode ?? "allow";
   page.approval_mode = session.approvalMode;
-  return { page, sessionId: session.id, lease };
+  return { page, sessionId: session.id, lease, pendingApprovalMode: session.pending ? desiredApprovalMode : null };
 }
 
 export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [page, setPage] = useState<Page | null>(null); const [store, setStore] = useState<ReturnType<typeof createRunStore> | null>(null);
   const [client, setClient] = useState<ZetaClient | null>(null); const [sessionId, setSessionId] = useState<string | null>(null); const [error, setError] = useState<string | null>(null);
+  const [pendingApprovalMode, setPendingApprovalMode] = useState<string | null>(null);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const turn = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => store.getState().turn : () => "idle" as const);
+  const previousTurn = useRef(turn);
   useEffect(() => { let live = true; let attempt = 0; let attachment: Attachment | null = null; const key = location.pathname === "/" ? "home" : location.pathname.slice(1);
     const unsubscribe = connection.subscribe(() => { const next = connection.client; if (!next || connection.state.phase !== "connected") return; const current = ++attempt; setClient(next); setError(null);
       void (async () => { try {
         const attached = await attachPage(next, key); if (!live || current !== attempt) { attached.lease.release(); return; }
         attachment?.lease.release(); attachment = attached;
-        setSessionId(attached.sessionId); setPage(attached.page); setStore(attached.lease.store);
+        previousTurn.current = attached.lease.store.getState().turn;
+        setSessionId(attached.sessionId); setPage(attached.page); setStore(attached.lease.store); setPendingApprovalMode(attached.pendingApprovalMode);
       } catch (caught) { if (live && current === attempt) setError(attachmentError(caught)); } })(); });
     return () => { live = false; attachment?.lease.release(); unsubscribe(); connection.stop(); };
   }, [connection]);
+  useEffect(() => {
+    const previous = previousTurn.current; previousTurn.current = turn;
+    if (previous !== "running" || turn !== "idle" || !client || !sessionId || !pendingApprovalMode) return;
+    let live = true;
+    void applyApprovalMode(client, sessionId, pendingApprovalMode).then((result) => {
+      if (!live) return;
+      setPage((current) => current ? { ...current, approval_mode: result.approvalMode } : current);
+      setPendingApprovalMode(result.pending ? pendingApprovalMode : null);
+    }).catch((caught) => { if (live) setError(attachmentError(caught)); });
+    return () => { live = false; };
+  }, [client, pendingApprovalMode, sessionId, turn]);
   if (error) return <main className="shell"><p role="alert">{error}</p></main>;
   const failure = connectionFailure(connectionState);
   if (failure) return <main className="shell"><p role="alert">{failure}</p></main>;
