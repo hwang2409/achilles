@@ -168,10 +168,32 @@ async function startAchilles(appOrigin: string) {
   await writeFile(resolve(cache, "achilles.json"), JSON.stringify(identity)); child.unref();
   console.log(`achilles is ready at ${appOrigin}`);
 }
+async function zetaInstallCommand() {
+  const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
+  return `git clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${shellQuote(pin)} && uv tool install --editable .cache/zeta`;
+}
+async function zetaUpgradeCommand() {
+  const listed = Bun.spawnSync(["uv", "tool", "list", "--show-paths"]);
+  const toolDir = listed.exitCode === 0 ? listed.stdout.toString().match(/^zeta .+ \((.+)\)$/m)?.[1] : undefined;
+  if (toolDir) {
+    try {
+      const receipt = await readFile(resolve(toolDir, "uv-receipt.toml"), "utf8");
+      const checkout = receipt.match(/(?:editable|(?<!install-)path) = "([^"]+)"/)?.[1];
+      if (checkout) return `git -C ${shellQuote(checkout)} pull`;
+    } catch {}
+  }
+  return "uv tool upgrade zeta";
+}
 async function prerequisites() {
-  const missing: string[] = [];
-  for (const command of ["uv", "bun", "git", "zeta"]) { const result = Bun.spawnSync(["sh", "-c", `command -v ${command}`]); if (result.exitCode) missing.push(`${command}: install ${command} and put it on PATH`); }
-  if (missing.length) { for (const item of missing) console.error(`missing prerequisite: ${item}`); process.exit(1); }
+  const fixes: Record<string, string> = {
+    bun: "curl -fsSL https://bun.sh/install | bash",
+    uv: "curl -LsSf https://astral.sh/uv/install.sh | sh",
+    git: process.platform === "darwin" ? "xcode-select --install" : "sudo apt-get install -y git",
+    zeta: await zetaInstallCommand(),
+  };
+  for (const command of ["bun", "uv", "git", "zeta"]) {
+    if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) { console.error(`missing ${command}: ${fixes[command]}`); process.exit(1); }
+  }
   await mkdir(home, { recursive: true });
   const checks: [string[], string[]][] = [
     [["zeta", "mcp", "--help"], ["add", "show", "remove"]],
@@ -182,7 +204,7 @@ async function prerequisites() {
   for (const [args, required] of checks) {
     const result = Bun.spawnSync(args, { cwd: home, env: { ...process.env, PWD: home } });
     const help = `${result.stdout.toString()}${result.stderr.toString()}`;
-    if (result.exitCode !== 0 || required.some((value) => !help.includes(value))) throw new Error("upgrade zeta: uv tool upgrade zeta");
+    if (result.exitCode !== 0 || required.some((value) => !help.includes(value))) throw new Error(`missing zeta mcp: ${await zetaUpgradeCommand()}`);
   }
 }
 async function dev() {
