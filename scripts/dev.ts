@@ -41,7 +41,7 @@ export function ownedProcessMatches(saved: ProcessIdentity, current: ProcessIden
 }
 
 function run(args: string[], cwd = root, capture = false) {
-  const result = Bun.spawnSync(args, { cwd, stdout: capture ? "pipe" : "inherit", stderr: capture ? "pipe" : "inherit", env: process.env });
+  const result = Bun.spawnSync(args, { cwd, stdout: capture ? "pipe" : "inherit", stderr: capture ? "pipe" : "inherit", env: { ...process.env, PWD: cwd } });
   if (result.exitCode !== 0) throw new Error(`${args.join(" ")} failed${capture ? `: ${result.stderr.toString().trim()}` : ""}`);
   return capture ? result.stdout.toString() : "";
 }
@@ -97,10 +97,10 @@ async function backupOnce(file: string) {
 async function ensureMcp(url: string) {
   const file = resolve(home, "mcp.json");
   let current: McpConfig | null = null;
-  const shown = Bun.spawnSync(["zeta", "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: process.env });
+  const shown = Bun.spawnSync(["zeta", "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: { ...process.env, PWD: home } });
   if (shown.exitCode === 0) {
     try { current = JSON.parse(shown.stdout.toString()).config; } catch { throw new Error("zeta mcp show returned invalid JSON"); }
-  } else if (!shown.stdout.toString().includes("unknown MCP server: achilles")) {
+  } else if (!`${shown.stdout.toString()}${shown.stderr.toString()}`.includes("unknown MCP server: achilles")) {
     throw new Error(`zeta mcp show failed: ${shown.stdout.toString().trim() || shown.stderr.toString().trim()}`);
   }
   const decision = mcpDecision(current, url);
@@ -131,7 +131,7 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   const ws = await freePort(); let control = await freePort(); while (control === ws) control = await freePort(); await mkdir(cache, { recursive: true });
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
   const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-origin", requestedOrigin];
-  const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: process.env, detached: true });
+  const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: { ...process.env, PWD: home }, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
   catch (error) { child.kill(); await child.exited; throw new Error(`${error instanceof Error ? error.message : error}. fix the error and retry:\n${await tail(logPath)}`); }
@@ -180,7 +180,7 @@ async function prerequisites() {
     [["zeta", "mcp", "remove", "--help"], ["--scope"]],
   ];
   for (const [args, required] of checks) {
-    const result = Bun.spawnSync(args, { cwd: home, env: process.env });
+    const result = Bun.spawnSync(args, { cwd: home, env: { ...process.env, PWD: home } });
     const help = `${result.stdout.toString()}${result.stderr.toString()}`;
     if (result.exitCode !== 0 || required.some((value) => !help.includes(value))) throw new Error("upgrade zeta: uv tool upgrade zeta");
   }
