@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
 import { createRunStore } from "@fulcrum/core";
 import { createApprovalDecider } from "./zeta/approvals";
-import { createConnection, supportsFeature } from "./zeta";
+import { createConnection, supportsFeature, type ConnectionState } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { loadSession, openHomeSession, rebindPage } from "./zeta/session";
 import type { SessionLease } from "@fulcrum/zeta";
@@ -11,6 +11,24 @@ import "./style.css";
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
 type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; layout: { blocks: Array<Record<string, unknown>> } };
 type Attachment = { page: Page; sessionId: string; lease: SessionLease };
+
+function connectionFailure(state: ConnectionState): string | null {
+  switch (state.phase) {
+    case "not_running": return "zeta serve is not running.";
+    case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
+    case "unresponsive": return "zeta is not responding.";
+    case "incompatible": return "this zeta version is not compatible with achilles.";
+    case "dropped": return "the connection to zeta was lost. retrying…";
+    default: return null;
+  }
+}
+
+function attachmentError(caught: unknown): string {
+  const message = caught instanceof Error ? caught.message : String(caught);
+  return message.includes("MCP server is not a trusted global server: achilles")
+    ? "achilles is not trusted by zeta. add it to $ZETA_HOME/mcp.json, then restart zeta serve."
+    : message;
+}
 
 async function attachPage(client: ZetaClient, key: string): Promise<Attachment> {
   const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" });
@@ -31,16 +49,19 @@ export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [page, setPage] = useState<Page | null>(null); const [store, setStore] = useState<ReturnType<typeof createRunStore> | null>(null);
   const [client, setClient] = useState<ZetaClient | null>(null); const [sessionId, setSessionId] = useState<string | null>(null); const [error, setError] = useState<string | null>(null);
+  const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const turn = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => store.getState().turn : () => "idle" as const);
   useEffect(() => { let live = true; const key = location.pathname === "/" ? "home" : location.pathname.slice(1);
     const unsubscribe = connection.subscribe(() => { const next = connection.client; if (!next || connection.state.phase !== "connected") return; setClient(next);
       void (async () => { try {
         const attached = await attachPage(next, key); if (!live) { attached.lease.release(); return; }
         setSessionId(attached.sessionId); setPage(attached.page); setStore(attached.lease.store);
-      } catch (caught) { if (live) setError(caught instanceof Error ? caught.message : String(caught)); } })(); });
+      } catch (caught) { if (live) setError(attachmentError(caught)); } })(); });
     return () => { live = false; unsubscribe(); connection.stop(); };
   }, [connection]);
   if (error) return <main className="shell"><p role="alert">{error}</p></main>;
+  const failure = connectionFailure(connectionState);
+  if (failure) return <main className="shell"><p role="alert">{failure}</p></main>;
   if (!store || !client || !sessionId || !page) return <main className="shell"><p role="status">connecting to zeta…</p></main>;
   const approval = createApprovalDecider(client, store); const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} onApprove={r => approval("approve", r)} onDeny={r => approval("deny", r)} /> };
   const send = async (text: string, intent: { steer: boolean }, track: (id: string) => void) => { const delivery_id = crypto.randomUUID(); track(delivery_id); await client.request(intent.steer ? "steer" : "send", { session_id: sessionId, text, delivery_id }); };
