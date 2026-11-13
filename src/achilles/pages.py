@@ -264,20 +264,15 @@ class PageStore:
         self, page_id: str, expected: str | None, session_id: str
     ) -> tuple[bool, str | None]:
         with self._connect() as db:
-            row = db.execute("SELECT zeta_session_id FROM page WHERE id=?", (page_id,)).fetchone()
-            if row is None:
-                raise KeyError(page_id)
-            if row[0] != expected:
-                return False, row[0]
             updated = db.execute(
                 "UPDATE page SET zeta_session_id=?,updated_at=? WHERE id=? AND zeta_session_id IS ?",  # noqa: E501
                 (session_id, now(), page_id, expected),
             ).rowcount
-            winner = db.execute(
-                "SELECT zeta_session_id FROM page WHERE id=?", (page_id,)
-            ).fetchone()[0]
             db.commit()
-            return updated == 1, winner
+            row = db.execute("SELECT zeta_session_id FROM page WHERE id=?", (page_id,)).fetchone()
+            if row is None:
+                raise KeyError(page_id)
+            return updated == 1, row[0]
 
     def create_page(
         self, route: str, title: str, layout: Any, principal_id: str = "home"
