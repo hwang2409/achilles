@@ -146,6 +146,17 @@ try {
         }
       })
       .filter(Boolean);
+  const waitForSessionIdle = async (sessionId: string) => {
+    await waitFor(
+      async () =>
+        requests().some((frame) => {
+          const event = frame.event ?? frame.params?.event ?? frame.params?.type;
+          const id = frame.session_id ?? frame.params?.session_id;
+          return id === sessionId && (event === "agent_end" || event === "run_end");
+        }),
+      `session ${sessionId} idle`,
+    );
+  };
   if (
     requests().filter(
       (frame) =>
@@ -433,15 +444,18 @@ try {
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   let reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (reconnectPage.zeta_session_id) throw new Error("created page got a session before navigation");
+  await waitForSessionIdle(homeAfterCreate);
   await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!reconnectPage.zeta_session_id || reconnectPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
   if (reconnectPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
+  await waitForSessionIdle(reconnectPage.zeta_session_id);
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if ((await page.getByText("approval complete", { exact: true }).count()) === 0)
     throw new Error("reconnected home did not render prior approval completion");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
+  await waitForSessionIdle(await homeSessionId());
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
@@ -450,6 +464,7 @@ try {
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
+  await waitForSessionIdle(await homeSessionId());
   await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
