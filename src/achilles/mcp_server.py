@@ -17,6 +17,17 @@ def _token(context):
     return request.scope.get("state", {}).get("token") if request else None
 
 
+def _remove_connection(sessions: dict[str, set], page_id: str, connection) -> None:
+    page_sessions = sessions.get(page_id)
+    if page_sessions is None:
+        return
+    page_sessions.difference_update(
+        session for session in tuple(page_sessions) if session._connection is connection
+    )
+    if not page_sessions:
+        sessions.pop(page_id, None)
+
+
 def _text(value: Any) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(value, sort_keys=True))]
@@ -27,9 +38,7 @@ def build_mcp(store: PageStore):
     sessions: dict[str, set] = {}
 
     async def remove_connection(page_id: str, connection) -> None:
-        sessions.get(page_id, set()).difference_update(
-            session for session in sessions.get(page_id, ()) if session._connection is connection
-        )
+        _remove_connection(sessions, page_id, connection)
 
     async def notify(page_id: str) -> None:
         print(f"mcp notify page={page_id} sessions={len(sessions.get(page_id, ()))}", flush=True)
