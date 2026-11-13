@@ -241,4 +241,3 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
 
   return { state, selectedId, listRefresh, toggleError, toggling, orphanError, retryOrphan, selectChat, continueWaitingChat, newChat, send, toggle, settleApprovalMode, recordLastState };
 }
-
