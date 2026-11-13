@@ -3,7 +3,6 @@ import { constants, existsSync } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
-import { withDevLock } from "./dev-lock";
 
 export const root = resolve(new URL("..", import.meta.url).pathname);
 export const port = Number(process.env.PORT ?? 5191);
@@ -245,4 +244,4 @@ async function dev() {
   const opener = process.platform === "darwin" ? "open" : "xdg-open";
   if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, selected.origin]); else console.log(`open ${selected.origin} in your browser`);
 }
-if (import.meta.main) { try { await withDevLock(dev); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); } }
+if (import.meta.main) { try { await dev(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); } }

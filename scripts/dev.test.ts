@@ -79,6 +79,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   const managed: number[] = [];
   let zetaPid = 0;
   let foreignPid = 0;
+  let crashedChildPid = 0;
 
   await mkdir(resolve(home, "run"), { recursive: true });
   await mkdir(bin, { recursive: true });
@@ -97,7 +98,7 @@ const server = Bun.serve({ port, hostname: "127.0.0.1", fetch(request) { return 
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => { server.stop(true); process.exit(0); });
 await new Promise(() => {});
 `);
-  await writeFile(resolve(bin, "uv"), `#!/bin/sh\nif [ "$1 $2 $3" = "run achilles serve" ]; then exec bun ${JSON.stringify(fakeServer)} "$@"; fi\nexit 0\n`);
+  await writeFile(resolve(bin, "uv"), `#!/bin/sh\nif [ "$1 $2 $3" = "run --no-project python" ]; then shift 3; exec python3 "$@"; fi\nif [ "$1 $2 $3" = "run achilles serve" ]; then exec bun ${JSON.stringify(fakeServer)} "$@"; fi\nexit 0\n`);
   await writeFile(resolve(bin, "open"), "#!/bin/sh\nexit 0\n");
   const fakeZeta = resolve(bin, "zeta");
   await writeFile(fakeZeta, `#!/usr/bin/env bun
@@ -138,7 +139,7 @@ process.exit(0);
     FAKE_SERVER_PIDS: serverPids,
   };
   const runDev = async (env = baseEnv) => {
-    const child = Bun.spawn(["bun", "scripts/dev.ts"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn(["make", "--silent", "dev"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
     const exitCode = await child.exited;
     return { exitCode, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
   };
@@ -173,13 +174,31 @@ process.exit(0);
     expect(thirdState.stamp).not.toBe(firstState.stamp);
 
     const block = resolve(temp, "block");
-    const held = Bun.spawn(["bun", "scripts/dev.ts"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
+    const held = Bun.spawn(["make", "--silent", "dev"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(`${block}.ready`).exists(), "first make dev to hold its lock");
+    const lockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     const concurrent = await runDev({ ...baseEnv, FAKE_ZETA_BLOCK: block });
-    expect(concurrent.exitCode).toBe(1);
-    expect(concurrent.stderr).toContain(`make dev is already running (pid ${held.pid})`);
+    expect(concurrent.exitCode).toBe(2);
+    expect(concurrent.stderr).toContain(`make dev is already running (pid ${lockPid})`);
     await writeFile(`${block}.release`, "release");
     expect(await held.exited).toBe(0);
+
+    const waiter = resolve(temp, "waiter.py");
+    const waiterReady = resolve(temp, "waiter-ready");
+    await writeFile(waiter, `import os\nimport signal\nfrom pathlib import Path\nPath(${JSON.stringify(waiterReady)}).write_text(str(os.getpid()))\nsignal.pause()\n`);
+    const crashed = Bun.spawn(["python3", "scripts/locked.py", "python3", waiter], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
+    crashedChildPid = Number(await readFile(waiterReady, "utf8"));
+    const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
+    const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    expect(await rejected.exited).toBe(1);
+    expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
+    process.kill(crashedLockPid, "SIGKILL");
+    await waitFor(() => !alive(crashedLockPid), "killed lock holder to exit");
+    const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    expect(await recovered.exited, await new Response(recovered.stderr).text()).toBe(0);
+    await stop(crashedChildPid);
+    crashedChildPid = 0;
 
     await stop(thirdState.pid);
     await rm(resolve(devCache, "achilles.json"));
@@ -193,7 +212,7 @@ process.exit(0);
   } finally {
     let started: number[] = [];
     try { started = (await readFile(serverPids, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line).pid); } catch {}
-    for (const pid of [foreignPid, ...started.reverse(), ...managed.reverse(), zetaPid]) await stop(pid);
+    for (const pid of [crashedChildPid, foreignPid, ...started.reverse(), ...managed.reverse(), zetaPid]) await stop(pid);
     await rm(devCache, { recursive: true, force: true });
     if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
     await rm(temp, { recursive: true, force: true });

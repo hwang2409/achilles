@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
-import { withDevLock } from "./dev-lock";
 import { ownedProcessMatches, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -30,4 +29,4 @@ async function stop() {
   }
 }
 
-try { await withDevLock(stop); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); }
+try { await stop(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); }
