@@ -3,6 +3,7 @@ import { constants, existsSync } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
+import { withDevLock } from "./dev-lock";
 
 export const root = resolve(new URL("..", import.meta.url).pathname);
 export const port = Number(process.env.PORT ?? 5191);
@@ -213,7 +214,7 @@ async function prerequisites() {
     zeta: await zetaInstallCommand(),
   };
   for (const command of ["bun", "uv", "git", "zeta"]) {
-    if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) { console.error(`missing ${command}: ${fixes[command]}`); process.exit(1); }
+    if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) throw new Error(`missing ${command}: ${fixes[command]}`);
   }
   await mkdir(home, { recursive: true });
   const checks: [string[], string[]][] = [
@@ -229,14 +230,19 @@ async function prerequisites() {
   }
 }
 async function dev() {
-  await prerequisites(); run(["uv", "sync", "--group", "test"]); const fulcrumStamp = await ensureFulcrum();
-  const webStamp = resolve(root, ".cache/web-build.stamp"); const hash = await digest([...(await filesUnder(resolve(root, "apps/web"))), fulcrumStamp]);
-  let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
-  if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");
+  await prerequisites();
+  const webStamp = resolve(root, ".cache/web-build.stamp");
+  // Test hook: skip dependency and web builds while exercising the real dev entry.
+  if (process.env.ACHILLES_DEV_SKIP_BUILD !== "1") {
+    run(["uv", "sync", "--group", "test"]); const fulcrumStamp = await ensureFulcrum();
+    const hash = await digest([...(await filesUnder(resolve(root, "apps/web"))), fulcrumStamp]);
+    let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
+    if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");
+  }
   const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin);
   const achillesStamp = await digest([webStamp, ...(await filesUnder(resolve(root, "src/achilles"))), resolve(root, "pyproject.toml"), resolve(root, "uv.lock")]);
   await ensureMcp(mcpUrl(port)); await startAchilles(selected.origin, achillesStamp);
   const opener = process.platform === "darwin" ? "open" : "xdg-open";
   if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, selected.origin]); else console.log(`open ${selected.origin} in your browser`);
 }
-if (import.meta.main) { try { await dev(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); } }
+if (import.meta.main) { try { await withDevLock(dev); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); } }
