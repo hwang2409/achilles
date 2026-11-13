@@ -1,39 +1,48 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { basename, dirname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 export const root = resolve(new URL("..", import.meta.url).pathname);
 export const port = Number(process.env.PORT ?? 5191);
-export const origin = `http://127.0.0.1:${port}`;
 const home = resolve(process.env.ZETA_HOME ?? `${process.env.HOME}/.zeta`);
 const cache = resolve(root, ".cache/dev");
 
-export async function mergeMcp(file: string, url: string): Promise<"changed" | "unchanged"> {
-  let value: Record<string, any> = {};
-  try { value = JSON.parse(await readFile(file, "utf8")); } catch (error: any) { if (error.code !== "ENOENT") throw error; }
-  const next = { ...value, servers: { ...(value.servers ?? {}) , achilles: { transport: "streamable-http", url } } };
-  if (JSON.stringify(value) === JSON.stringify(next)) return "unchanged";
-  if (existsSync(file) && !existsSync(`${file}.achilles-backup`)) await writeFile(`${file}.achilles-backup`, await readFile(file));
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
-  return "changed";
+type Discovery = { pid: number; port: number; origins: string[] };
+export type ServeDecision = { kind: "reuse"; document: Discovery; origin: string } | { kind: "start" } | { kind: "origin-missing"; command: string };
+export type ProcessIdentity = { pid: number; started: string; command: string };
+
+export function serveDecision(document: unknown, requestedOrigin: string, command: string | null): ServeDecision {
+  if (!document || typeof document !== "object") return { kind: "start" };
+  const value = document as Partial<Discovery>;
+  if (!Number.isInteger(value.pid) || !Number.isInteger(value.port) || !Array.isArray(value.origins) || !command || !/(^|[\/\s])zeta\s+serve(?:\s|$)/.test(command)) return { kind: "start" };
+  const origins = value.origins.filter((item): item is string => typeof item === "string");
+  const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
+  const allowed = origins.includes(requestedOrigin) ? requestedOrigin : origins.includes(alternate) ? alternate : null;
+  if (allowed) return { kind: "reuse", document: value as Discovery, origin: allowed };
+  const all = [...origins, requestedOrigin].map((item) => `--ws-origin ${JSON.stringify(item)}`).join(" ");
+  return { kind: "origin-missing", command: `zeta serve --ws ${value.port} ${all}` };
 }
 
-export type ServeDecision = { kind: "reuse"; document: any } | { kind: "start" } | { kind: "origin-missing"; command: string };
-export function serveDecision(document: any, allowedOrigin: string): ServeDecision {
-  if (!document || !Number.isInteger(document.port)) return { kind: "start" };
-  if (document.pid && !existsSync(`/proc/${document.pid}`) && process.platform !== "darwin") return { kind: "start" };
-  const origins = Array.isArray(document.origins) ? document.origins : [];
-  if (origins.length === 0 || origins.includes(allowedOrigin) || origins.includes(allowedOrigin.replace("127.0.0.1", "localhost"))) return { kind: "reuse", document };
-  const all = [...origins, allowedOrigin].map((item) => `--ws-origin ${JSON.stringify(item)}`).join(" ");
-  return { kind: "origin-missing", command: `zeta serve --ws ${document.port} ${all}` };
+export function ownedProcessMatches(saved: ProcessIdentity, current: ProcessIdentity | null): boolean {
+  return current !== null && saved.pid === current.pid && saved.started === current.started && saved.command === current.command;
 }
 
-function run(args: string[], cwd = root) {
-  const result = Bun.spawnSync(args, { cwd, stdout: "inherit", stderr: "inherit", env: process.env });
-  if (result.exitCode !== 0) throw new Error(`${args.join(" ")} failed`);
+function run(args: string[], cwd = root, capture = false) {
+  const result = Bun.spawnSync(args, { cwd, stdout: capture ? "pipe" : "inherit", stderr: capture ? "pipe" : "inherit", env: process.env });
+  if (result.exitCode !== 0) throw new Error(`${args.join(" ")} failed${capture ? `: ${result.stderr.toString().trim()}` : ""}`);
+  return capture ? result.stdout.toString() : "";
+}
+async function processIdentity(pid: number): Promise<ProcessIdentity | null> {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const started = Bun.spawnSync(["ps", "-p", String(pid), "-o", "lstart="]);
+  const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]);
+  if (started.exitCode || command.exitCode) return null;
+  return { pid, started: started.stdout.toString().trim(), command: command.stdout.toString().trim() };
+}
+async function readDiscovery(path: string): Promise<unknown> {
+  try { return JSON.parse(await readFile(path, "utf8")); } catch { return null; }
 }
 async function digest(paths: string[]) {
   const hash = createHash("sha256");
@@ -43,7 +52,7 @@ async function digest(paths: string[]) {
 async function filesUnder(dir: string): Promise<string[]> {
   const results: string[] = [];
   for await (const entry of new Bun.Glob("**/*").scan({ cwd: dir, onlyFiles: true, dot: true })) {
-    if (!entry.includes("node_modules/") && !entry.includes("dist/")) results.push(resolve(dir, entry));
+    if (!entry.includes("node_modules/") && !entry.includes("dist/") && !entry.endsWith(".tsbuildinfo")) results.push(resolve(dir, entry));
   }
   return results;
 }
@@ -52,7 +61,7 @@ async function ensureFulcrum() {
   const pin = (await readFile(resolve(root, "fulcrum.rev"), "utf8")).trim();
   if (!existsSync(resolve(fulcrum, ".git"))) { await mkdir(dirname(fulcrum), { recursive: true }); run(["git", "clone", "https://github.com/hwang2409/fulcrum", fulcrum]); }
   run(["git", "-C", fulcrum, "checkout", "--detach", pin]);
-  const stamp = resolve(fulcrum, ".achilles-stamp");
+  const stamp = resolve(root, ".cache/fulcrum-build.stamp");
   const sourceHash = await digest([resolve(root, "fulcrum.rev"), ...(await filesUnder(resolve(fulcrum, "packages")))]);
   let old = ""; try { old = await readFile(stamp, "utf8"); } catch {}
   if (old !== sourceHash) {
@@ -60,51 +69,96 @@ async function ensureFulcrum() {
     process.env.FULCRUM_DIR = fulcrum;
     run(["bun", "run", "scripts/fulcrum.ts"], root);
     await writeFile(stamp, sourceHash);
-  }
+  } else console.log("fulcrum build unchanged");
   return stamp;
 }
 async function freePort() {
   return await new Promise<number>((ok, fail) => { const server = createServer(); server.once("error", fail); server.listen(0, "127.0.0.1", () => { const value = (server.address() as any).port; server.close(() => ok(value)); }); });
 }
-async function waitFor(path: string, timeout = 15000) {
-  const until = Date.now() + timeout;
-  while (Date.now() < until) { if (existsSync(path)) { try { JSON.parse(await readFile(path, "utf8")); return; } catch {} } await Bun.sleep(100); }
-  throw new Error(`timed out waiting for ${basename(path)}`);
+async function backupOnce(file: string) {
+  if (!existsSync(file)) return;
+  const backup = `${file}.achilles-backup`;
+  let output;
+  try { output = await open(backup, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600); } catch (error: any) { if (error.code === "EEXIST") return; throw error; }
+  try { await output.writeFile(await readFile(file)); await output.sync(); } finally { await output.close(); }
 }
-async function startServe() {
+async function ensureMcp(url: string) {
+  const file = resolve(home, "mcp.json");
+  let current: any = null;
+  const shown = Bun.spawnSync(["zeta", "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: process.env });
+  if (shown.exitCode === 0) { try { current = JSON.parse(shown.stdout.toString()); } catch {} }
+  if (current?.config?.transport === "streamable-http" && current?.config?.url === url) { console.log("mcp.json: unchanged"); return; }
+  await mkdir(dirname(file), { recursive: true }); await backupOnce(file);
+  if (current) run(["zeta", "mcp", "remove", "achilles", "--scope", "user"], home);
+  run(["zeta", "mcp", "add", "--scope", "user", "--url", url, "achilles"], home);
+  console.log("mcp.json: changed");
+}
+async function tail(path: string) {
+  try { return (await readFile(path, "utf8")).trim().split("\n").slice(-8).join("\n"); } catch { return ""; }
+}
+async function waitForSpawnedServe(path: string, pid: number, ws: number) {
+  for (;;) {
+    const value = await readDiscovery(path) as Partial<Discovery> | null;
+    if (value?.pid === pid && value.port === ws) return;
+    await Bun.sleep(100);
+  }
+}
+async function chooseServe(requestedOrigin: string): Promise<{ origin: string }> {
   const discovery = resolve(home, "run/serve.ws.json");
-  let document: any = null; try { document = JSON.parse(await readFile(discovery, "utf8")); } catch {}
-  const decision = serveDecision(document, origin);
-  if (decision.kind === "reuse") { console.log(`reusing zeta serve on port ${document.port}`); return; }
-  if (decision.kind === "origin-missing") throw new Error(`zeta serve is running without ${origin}; stop it and run: ${decision.command}`);
+  const document = await readDiscovery(discovery) as Partial<Discovery> | null;
+  const identity = document?.pid ? await processIdentity(document.pid) : null;
+  const decision = serveDecision(document, requestedOrigin, identity?.command ?? null);
+  if (decision.kind === "reuse") { console.log(`reusing zeta serve on port ${decision.document.port}`); return { origin: decision.origin }; }
+  if (decision.kind === "origin-missing") throw new Error(`zeta serve is running without ${requestedOrigin}; leave it running and restart it with: ${decision.command}`);
   const ws = await freePort(); await mkdir(cache, { recursive: true });
-  const log = Bun.file(resolve(cache, "zeta-serve.log"));
-  const child = Bun.spawn(["zeta", "serve", "--ws", String(ws), "--ws-origin", origin], { stdout: log, stderr: log, env: process.env, detached: true });
-  await writeFile(resolve(cache, "zeta-serve.pid"), String(child.pid)); child.unref();
-  await waitFor(discovery); console.log(`started zeta serve on port ${ws}`);
+  const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
+  const args = ["zeta", "serve", "--ws", String(ws), "--ws-origin", requestedOrigin];
+  const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
+  const outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]);
+  if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
+  const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
+  await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
+  console.log(`started zeta serve on port ${ws}`); return { origin: requestedOrigin };
 }
-async function startAchilles() {
-  const pidFile = resolve(cache, "achilles.pid");
-  if (existsSync(pidFile)) { const pid = Number(await readFile(pidFile, "utf8")); try { process.kill(pid, 0); throw new Error(`port ${port} is already used by make dev (pid ${pid})`); } catch (error: any) { if (error.message.startsWith("port")) throw error; } }
-  const probe = createServer(); try { await new Promise<void>((ok, fail) => { probe.once("error", fail); probe.listen(port, "127.0.0.1", () => probe.close(() => ok())); }); } catch { throw new Error(`port ${port} is busy; stop the process using it before running make dev`); }
-  await mkdir(cache, { recursive: true }); const log = Bun.file(resolve(cache, "achilles.log"));
-  const child = Bun.spawn(["uv", "run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { stdout: log, stderr: log, env: process.env, detached: true });
-  await writeFile(pidFile, String(child.pid)); child.unref();
-  for (let i = 0; i < 150; i++) { try { await fetch(`${origin}/`); console.log(`achilles is ready at ${origin}`); return; } catch { await Bun.sleep(100); } }
-  throw new Error("timed out waiting for achilles");
+async function portIsFree() {
+  const probe = createServer();
+  try { await new Promise<void>((ok, fail) => { probe.once("error", fail); probe.listen(port, "127.0.0.1", () => probe.close(() => ok())); }); return true; } catch { return false; }
+}
+async function startAchilles(appOrigin: string) {
+  if (!(await portIsFree())) {
+    try {
+      const response = await fetch(`${appOrigin}/api/zeta/discovery`, { headers: { Origin: appOrigin } });
+      const value = await response.json();
+      if (response.ok && typeof value?.url === "string") { console.log(`achilles already running on ${port}; open ${appOrigin}`); return; }
+    } catch {}
+    throw new Error(`port ${port} is busy; leave that process running and use PORT=<free-port>`);
+  }
+  await mkdir(cache, { recursive: true }); const logPath = resolve(cache, "achilles.log"); const log = Bun.file(logPath);
+  const args = ["uv", "run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)];
+  const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
+  for (;;) {
+    const outcome = await Promise.race([fetch(`${appOrigin}/`).then(() => "ready" as const).catch(() => "wait" as const), child.exited.then(() => "exited" as const)]);
+    if (outcome === "ready") break;
+    if (outcome === "exited") throw new Error(`achilles exited during startup:\n${await tail(logPath)}`);
+    await Bun.sleep(100);
+  }
+  const identity = await processIdentity(child.pid); if (!identity) throw new Error("achilles disappeared during startup");
+  await writeFile(resolve(cache, "achilles.json"), JSON.stringify(identity)); child.unref();
+  console.log(`achilles is ready at ${appOrigin}`);
 }
 async function prerequisites() {
   const missing: string[] = [];
   for (const command of ["uv", "bun", "git", "zeta"]) { const result = Bun.spawnSync(["sh", "-c", `command -v ${command}`]); if (result.exitCode) missing.push(`${command}: install ${command} and put it on PATH`); }
-  const accounts = resolve(home, "accounts.json"); if (!existsSync(accounts) || (await stat(accounts)).size < 3) missing.push(`zeta login: run zeta login (no logged-in zeta home found at ${home})`);
   if (missing.length) { for (const item of missing) console.error(`missing prerequisite: ${item}`); process.exit(1); }
 }
 async function dev() {
-  await prerequisites(); await run(["uv", "sync", "--group", "test"]); const fulcrumStamp = await ensureFulcrum();
+  await prerequisites(); run(["uv", "sync", "--group", "test"]); const fulcrumStamp = await ensureFulcrum();
   const webStamp = resolve(root, ".cache/web-build.stamp"); const hash = await digest([...(await filesUnder(resolve(root, "apps/web"))), fulcrumStamp]);
   let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
   if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");
-  console.log(`mcp.json: ${await mergeMcp(resolve(home, "mcp.json"), `${origin}/mcp/`)}`); await startServe(); await startAchilles();
-  const opener = process.platform === "darwin" ? "open" : "xdg-open"; if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, origin]); else console.log(`open ${origin} in your browser`);
+  const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin);
+  await ensureMcp(`${selected.origin}/mcp/`); await startAchilles(selected.origin);
+  const opener = process.platform === "darwin" ? "open" : "xdg-open";
+  if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, selected.origin]); else console.log(`open ${selected.origin} in your browser`);
 }
-if (import.meta.main) { if (process.argv[2] === "stop") { console.log("use make stop"); } else await dev(); }
+if (import.meta.main) { try { await dev(); } catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); } }
