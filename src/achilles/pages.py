@@ -259,7 +259,7 @@ class PageStore:
             ).fetchone()[0]
             rows = db.execute(
                 "SELECT record_id, document FROM page_record "
-                "WHERE page_id=? AND collection=? ORDER BY created_at DESC, record_id DESC LIMIT ?",
+                "WHERE page_id=? AND collection=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (page_id, collection, limit),
             ).fetchall()
         return ([{**json.loads(row[1]), "record_id": row[0]} for row in rows], total)

@@ -114,12 +114,12 @@ def create_app() -> Starlette:
                     "title",
                     "zeta_session_id",
                     "active_layout_version",
-                    "create_mode",
                 )
             }
             | {
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "layout": await anyio.to_thread.run_sync(store.layout, row["id"]),
+                "create_mode": bool(row["create_mode"]),
             }
         )
 

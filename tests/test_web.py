@@ -91,7 +91,7 @@ def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
     token = store.ensure_credential("home")
     with store.transaction() as db:
         for index in range(101):
-            stamp = f"2025-01-01T00:{index // 60:02d}:{index % 60:02d}+00:00"
+            stamp = "2025-01-01T00:00:00+00:00"
             db.execute(
                 "INSERT INTO page_record("
                 "page_id,collection,record_id,version,document,created_at,updated_at"

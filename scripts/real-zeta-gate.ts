@@ -15,7 +15,7 @@ const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
 const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
-const port = 5191 + Math.floor(Math.random() * 1000);
+const port = 5200 + Math.floor(Math.random() * 1000);
 const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
@@ -254,21 +254,23 @@ try {
   });
   const catalogReady = page.getByText("catalog ready", { exact: true });
   const catalogReadyBefore = await catalogReady.count();
+  const catalogRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
   await field.fill("catalog refresh");
   await field.press("Enter");
-  await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore, "catalog ready");
+  await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
   const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
-  if (!backendSchemas.includes("achilles__create_page"))
+  if (!backendSchemas.includes("achilles__create_tool"))
     throw new Error(
-      `backend did not receive achilles__create_page catalog: ${JSON.stringify(backendSchemas)}`,
+      `backend did not receive achilles__create_tool catalog: ${JSON.stringify(backendSchemas)}`,
     );
   const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
   const createApprovalBefore = await createApproval.count();
+  const createRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
   const annotationComplete = page.getByText("annotation complete", { exact: true });
   const annotationCompleteBefore = await annotationComplete.count();
   await field.fill("create page");
   await field.press("Enter");
-  await waitFor(async () => (await createApproval.count()) > createApprovalBefore, "create page approval").catch(async () => {
+  await waitFor(async () => (await createApproval.count()) > createApprovalBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > createRequestBefore), "create page approval").catch(async () => {
     throw new Error(
       `backend did not receive achilles__create_page catalog: ${safeControl(await Bun.file(control).text())}`,
     );
@@ -367,7 +369,9 @@ try {
   );
   if (!annotationResult || annotationResult.is_error)
     throw new Error(`generated tool result was missing or failed: ${JSON.stringify(controlAfterTool.tool_results)}`);
-  await page.getByRole("cell", { name: "from zeta", exact: true }).waitFor({ state: "visible" });
+  await waitFor(async () => (await page.locator("tbody td").allTextContents()).includes("from zeta"), "record list inserted record value");
+  const recordValues = await page.locator("tbody td").allTextContents();
+  if (!recordValues.includes("from zeta")) throw new Error(`record list did not render inserted record value: ${JSON.stringify(recordValues)}`);
   const homeRecords = await (
     await fetch(`${origin}/api/pages/home/records/trace_annotations`, {
       headers: { Authorization: `Bearer ${credential}` },
