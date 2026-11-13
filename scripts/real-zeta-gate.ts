@@ -19,10 +19,13 @@ const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
 const redact = (text: string) =>
-  text.replace(
-    /(bearer\\.|controller_token|observer_token)[^\\s,}\\"]*/gi,
-    "$1[redacted]",
-  );
+  text
+    .replace(
+      /(authorization\s*["']?\s*:\s*["']?bearer\s+)[^\s,}\\"]*/gi,
+      "$1[redacted]",
+    )
+    .replace(/(bearer\s+)[^\s,}\\"]*/gi, "$1[redacted]")
+    .replace(/(controller_token|observer_token)[^\s,}\\"]*/gi, "$1[redacted]");
 const start = (
   command: string,
   args: string[],

@@ -14,8 +14,6 @@ from typing import Any
 from .tools import bundle_digest, canonical_bundle, validate_bundle
 
 BLOCK_KEYS: dict[str, frozenset[str]] = {
-    "chat": frozenset({"type"}),
-    "timeline": frozenset({"type"}),
     "list": frozenset({"type", "title", "collection"}),
     "detail": frozenset({"type", "title", "fields"}),
     "form": frozenset({"type", "title", "tool"}),
@@ -34,6 +32,44 @@ def validate_page_route(route: str) -> None:
         raise ValueError("reserved page route")
 
 
+def _validate_form(block: dict[str, Any], assigned_tools: set[str]) -> None:
+    if not isinstance(block["title"], str) or block["tool"] not in assigned_tools:
+        raise ValueError("unknown tool reference")
+
+
+def _validate_text(block: dict[str, Any]) -> None:
+    if not isinstance(block["text"], str):
+        raise ValueError("text must be a string")
+
+
+def _validate_metric(block: dict[str, Any]) -> None:
+    if not all(isinstance(block[key], str) for key in ("label", "value")):
+        raise ValueError("metric fields must be strings")
+
+
+def _validate_list(block: dict[str, Any]) -> None:
+    if not all(isinstance(block[key], str) for key in ("title", "collection")):
+        raise ValueError("list fields must be strings")
+
+
+def _validate_detail(block: dict[str, Any]) -> None:
+    if (
+        not isinstance(block["title"], str)
+        or not isinstance(block["fields"], list)
+        or not all(isinstance(x, str) for x in block["fields"])
+    ):
+        raise ValueError("detail fields must be strings")
+
+
+_BLOCK_VALIDATORS = {
+    "form": _validate_form,
+    "text": _validate_text,
+    "metric": _validate_metric,
+    "list": _validate_list,
+    "detail": _validate_detail,
+}
+
+
 def _validate_block(block: Any, assigned_tools: set[str]) -> None:
     if not isinstance(block, dict) or not isinstance(block.get("type"), str):
         raise ValueError("each block must have a type")
@@ -44,22 +80,9 @@ def _validate_block(block: Any, assigned_tools: set[str]) -> None:
             if kind in BLOCK_KEYS
             else f"unknown layout block: {kind}"
         )
-    if kind == "form" and (
-        not isinstance(block["title"], str) or block["tool"] not in assigned_tools
-    ):
-        raise ValueError("unknown tool reference")
-    if kind == "text" and not isinstance(block["text"], str):
-        raise ValueError("text must be a string")
-    if kind == "metric" and not all(isinstance(block[x], str) for x in ("label", "value")):
-        raise ValueError("metric fields must be strings")
-    if kind == "list" and not all(isinstance(block[x], str) for x in ("title", "collection")):
-        raise ValueError("list fields must be strings")
-    if kind == "detail" and (
-        not isinstance(block["title"], str)
-        or not isinstance(block["fields"], list)
-        or not all(isinstance(x, str) for x in block["fields"])
-    ):
-        raise ValueError("detail fields must be strings")
+    validator = _BLOCK_VALIDATORS.get(kind)
+    if validator:
+        validator(block, assigned_tools) if kind == "form" else validator(block)
 
 
 def now() -> str:
@@ -246,12 +269,15 @@ class PageStore:
                 raise KeyError(page_id)
             if row[0] != expected:
                 return False, row[0]
-            db.execute(
+            updated = db.execute(
                 "UPDATE page SET zeta_session_id=?,updated_at=? WHERE id=? AND zeta_session_id IS ?",  # noqa: E501
                 (session_id, now(), page_id, expected),
-            )
+            ).rowcount
+            winner = db.execute(
+                "SELECT zeta_session_id FROM page WHERE id=?", (page_id,)
+            ).fetchone()[0]
             db.commit()
-            return True, session_id
+            return updated == 1, winner
 
     def create_page(
         self, route: str, title: str, layout: Any, principal_id: str = "home"
