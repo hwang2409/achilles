@@ -50,7 +50,6 @@ let browser;
 try {
   await Bun.spawn(["git", "init", cwd]).exited;
   await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
-  await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const env = {
     ...process.env,
     PYTHONPATH: zeta,
@@ -61,7 +60,7 @@ try {
     ZETA_PROOF_CONTROL: control,
     ZETA_PROOF_ORIGIN: origin,
   };
-  const zetaProcess = start(
+  let zetaProcess = start(
     "uv",
     [
       "run",
@@ -123,12 +122,34 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(origin);
+  const setupAlert = page.getByRole("alert");
+  await setupAlert.waitFor({ timeout: 20000 });
+  if (!(await setupAlert.innerText()).includes("add it to $ZETA_HOME/mcp.json"))
+    throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
+  await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
+  const firstZetaPid = zetaProcess.pid;
+  zetaProcess.kill("SIGTERM");
+  await new Promise<void>((resolve) => zetaProcess.once("exit", () => resolve()));
+  zetaProcess = start(
+    "uv",
+    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
+    env,
+  );
+  await waitFor(async () => {
+    try {
+      return JSON.parse(await Bun.file(control).text()).pid !== firstZetaPid;
+    } catch {
+      return false;
+    }
+  }, "restarted zeta");
   const field = page.getByRole("textbox", { name: "message" });
   await field.waitFor({ timeout: 20000 }).catch(async () => {
     throw new Error(
       `composer missing: ${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
     );
   });
+  if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
+  await page.locator(".transcript").waitFor({ state: "visible" });
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
@@ -148,9 +169,9 @@ try {
       (frame) =>
         frame.method === "resume" &&
         frame.params?.session_id === "stale-session-id",
-    ).length !== 1
+    ).length !== 2
   )
-    throw new Error("stale session was not resumed first");
+    throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
   const assistantReady = page.getByText("assistant ready", { exact: true });

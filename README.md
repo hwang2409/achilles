@@ -30,6 +30,6 @@ add achilles as a trusted global server under `servers` in `$ZETA_HOME/mcp.json`
 }
 ```
 
-zeta binds the page credential header for each session. run achilles on the port in that url and pass the exact browser origin to zeta, for example `zeta serve --ws-origin http://127.0.0.1:5190` with `uv run achilles serve --host 127.0.0.1 --port 5190`, then open `http://127.0.0.1:5190`. if you use `http://localhost:5190`, make sure another dev server is not listening on `::1` and shadowing achilles; open the exact origin passed to `--ws-origin`.
+zeta binds the page credential header for each session. run `zeta serve --ws 18765 --ws-origin http://127.0.0.1:5190`, then `uv run achilles serve --host 127.0.0.1 --port 5190`, and open `http://127.0.0.1:5190`. if you use `http://localhost:5190` instead, pass that exact origin to `--ws-origin` and make sure another dev server is not listening on `::1` and shadowing achilles.
 
 `FULCRUM_DIR` must point to a clean checkout at the exact commit in `fulcrum.rev`. the web package keeps ordinary dependencies in a committed lockfile; the setup script installs those dependencies with `--frozen-lockfile`, then extracts local tarballs so changing fulcrum archive integrity does not change the lockfile.

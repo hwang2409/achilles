@@ -37,19 +37,8 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
     home.mkdir(parents=True, exist_ok=True)
-    (home / "mcp.json").write_text(
-        json.dumps(
-            {
-                "servers": {
-                    "achilles": {
-                        "transport": "streamable-http",
-                        "url": f"{os.environ['ZETA_PROOF_ORIGIN']}/mcp/",
-                    }
-                }
-            }
-        )
-    )
-    advance(home, expected_epoch=0)
+    if not (home / "storage-format.json").exists():
+        advance(home, expected_epoch=0)
     turns = [
         ScriptedTurn(
             content=[TextContent("assistant ready")],
