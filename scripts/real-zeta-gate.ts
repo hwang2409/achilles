@@ -60,7 +60,7 @@ try {
   const mode = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
   if (!mode.ok) throw new Error(`create mode toggle failed: ${mode.status}`);
   await field.fill("create page"); await field.press("Enter");
-  const createApproval = page.locator('[data-part="approval"]'); await createApproval.waitFor({ timeout: 20000 }).catch(async (error) => { throw new Error(`${error} body=${await page.locator("body").innerText()} control=${await Bun.file(control).text()} zeta=${redact(logs.get(zetaProcess) ?? "")}`); });
+  const createApproval = page.locator('[data-part="approval"]'); await createApproval.waitFor({ timeout: 20000 }).catch(async (error) => { throw new Error(`${error} body=${await page.locator("body").innerText()} control=${await Bun.file(control).text()} zeta=${redact(logs.get(zetaProcess) ?? "")} frames=${redact(frames.join("\\n"))}`); });
   const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
   if (!backendSchemas.includes("achilles__create_page")) throw new Error(`backend did not receive achilles__create_page catalog: ${JSON.stringify(backendSchemas)}`);
   await createApproval.getByRole("button", { name: /approve/i }).click();
