@@ -71,6 +71,7 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
   const [activeResult, setActiveResult] = useState(0);
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 759px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const loading = chats === null;
 
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
@@ -89,12 +90,12 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); onNewChat(); }
+      if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); onNewChat(); }
       if (event.key === "Escape" && drawer) { event.preventDefault(); setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); }
       if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [drawer, onNewChat]);
+  }, [drawer, loading, onNewChat]);
 
   const pages = useMemo(() => {
     const values = new Map<string, PageLink>();
@@ -128,7 +129,6 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
     setNext(result.chats.length ? result.next : null);
   };
 
-  const loading = chats === null;
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>

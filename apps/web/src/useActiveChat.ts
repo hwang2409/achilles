@@ -51,6 +51,21 @@ async function findChat(sessionId: string) {
   return null;
 }
 
+async function findWaitingChat() {
+  let before: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "200" });
+    if (before) params.set("before", before);
+    const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const result = await response.json() as { chats: Chat[]; next: string | null };
+    const found = result.chats.find((chat) => chat.last_state === "approval");
+    if (found) return found;
+    before = result.next;
+  } while (before);
+  return null;
+}
+
 async function attachPage(client: ZetaClient, key: string, selectedId: string | null): Promise<Attachment> {
   const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" });
   if (!loaded.ok) throw new Error("page not found");
@@ -136,6 +151,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     setSelectedId(chat.session_id);
   }, [selectedId]);
 
+  const continueWaitingChat = useCallback(async () => {
+    const waiting = await findWaitingChat();
+    if (waiting) selectChat(waiting);
+  }, [selectChat]);
+
   const finishRegistration = useCallback(async (pending: Orphan) => {
     try {
       await registerChat(pending);
@@ -219,6 +239,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, selectedId, listRefresh, toggleError, toggling, orphanError, retryOrphan, selectChat, newChat, send, toggle, settleApprovalMode, recordLastState };
+  return { state, selectedId, listRefresh, toggleError, toggling, orphanError, retryOrphan, selectChat, continueWaitingChat, newChat, send, toggle, settleApprovalMode, recordLastState };
 }
 

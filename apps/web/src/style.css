@@ -65,6 +65,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; font-size: 11px; }
 .chat-actions button { min-height: 40px; padding: 8px 10px; border-color: var(--fulcrum-accent); }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--fulcrum-ok); }
+.approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
 .header-overflow, .header-menu { display: none; }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
