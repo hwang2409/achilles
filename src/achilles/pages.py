@@ -287,21 +287,18 @@ class PageStore:
         return row
 
     def chats(
-        self, limit: int, before: str | None = None, query: str | None = None
+        self,
+        limit: int,
+        before: tuple[str, str] | None = None,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         parameters: list[Any] = []
         with self._connect() as db:
             if before is not None:
-                cursor = db.execute(
-                    "SELECT updated_at,session_id FROM chat WHERE session_id=?", (before,)
-                ).fetchone()
-                if cursor is None:
-                    raise ValueError("invalid cursor")
+                updated_at, session_id = before
                 clauses.append("(c.updated_at < ? OR (c.updated_at = ? AND c.session_id < ?))")
-                parameters.extend(
-                    (cursor["updated_at"], cursor["updated_at"], cursor["session_id"])
-                )
+                parameters.extend((updated_at, updated_at, session_id))
             if query is not None:
                 escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 clauses.append("c.title LIKE ? ESCAPE '\\' COLLATE NOCASE")

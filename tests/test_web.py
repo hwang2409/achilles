@@ -36,13 +36,13 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     home = tmp_path / "achilles"
     home.mkdir(mode=0o755)
     monkeypatch.setenv("ACHILLES_HOME", str(home))
-    client = TestClient(web.create_app())
+    client = chat_client()
     assert (
         client.put("/api/pages/home/session", json={"session_id": "session-a"}).status_code == 200
     )
 
     def save(value: str):
-        with TestClient(web.create_app()) as active:
+        with chat_client() as active:
             return active.put(
                 "/api/pages/home/session",
                 json={"expected_session_id": "session-a", "session_id": value},
@@ -89,11 +89,15 @@ def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
             )
     client = chat_client()
     first = client.get("/api/chats?limit=2").json()
-    second = client.get(f"/api/chats?limit=2&before={first[-1]['session_id']}").json()
-    assert [row["session_id"] for row in first] == ["d", "c"]
-    assert [row["session_id"] for row in second] == ["b", "a"]
-    assert first[0]["page_route"] == "/notes"
-    assert first[0]["page_title"] == "notes"
+    first_rows = first["chats"] if isinstance(first, dict) else first
+    cursor = first["next"] if isinstance(first, dict) else first_rows[-1]["session_id"]
+    assert [row["session_id"] for row in first_rows] == ["d", "c"]
+    assert client.patch("/api/chats/c", json={"title": "renamed"}).status_code == 200
+    second = client.get(f"/api/chats?limit=2&before={cursor}").json()
+    second_rows = second["chats"] if isinstance(second, dict) else second
+    assert [row["session_id"] for row in second_rows] == ["b", "a"]
+    assert first_rows[0]["page_route"] == "/notes"
+    assert first_rows[0]["page_title"] == "notes"
     assert client.get("/api/chats?limit=201").status_code == 400
     assert client.get("/api/chats?limit=invalid").status_code == 400
     assert client.get("/api/chats?before=missing").status_code == 400
@@ -113,9 +117,15 @@ def test_chat_search_escapes_like_wildcards(tmp_path: Path) -> None:
                 (session_id, "home", title, "2025-01-01", "2025-01-01"),
             )
     client = chat_client()
-    assert [row["session_id"] for row in client.get("/api/chats?q=%25").json()] == ["percent"]
-    assert [row["session_id"] for row in client.get("/api/chats?q=_").json()] == ["underscore"]
-    assert [row["session_id"] for row in client.get("/api/chats?q=PLAIN").json()] == ["plain"]
+    assert [row["session_id"] for row in client.get("/api/chats?q=%25").json()["chats"]] == [
+        "percent"
+    ]
+    assert [row["session_id"] for row in client.get("/api/chats?q=_").json()["chats"]] == [
+        "underscore"
+    ]
+    assert [row["session_id"] for row in client.get("/api/chats?q=PLAIN").json()["chats"]] == [
+        "plain"
+    ]
 
 
 def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) -> None:
@@ -168,6 +178,12 @@ def test_chat_routes_require_same_origin() -> None:
     client = TestClient(web.create_app(), client=("127.0.0.1", 1234))
     headers = {"host": "127.0.0.1:5190", "origin": "http://evil.test"}
     assert client.get("/api/chats", headers=headers).status_code == 403
+    assert (
+        client.put(
+            "/api/pages/home/session", headers=headers, json={"session_id": "session"}
+        ).status_code
+        == 403
+    )
     assert (
         client.post(
             "/api/pages/home/chats", headers=headers, json={"session_id": "session"}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 from pathlib import Path
@@ -46,6 +48,28 @@ def _same_origin(request) -> bool:
         and origin == f"{request.url.scheme}://{host}"
         and request.headers.get("sec-fetch-site") in (None, "same-origin")
     )
+
+
+def _chat_cursor(updated_at: str, session_id: str) -> str:
+    payload = json.dumps([updated_at, session_id], separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _parse_chat_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    try:
+        payload = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
+        value = json.loads(payload)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid cursor") from exc
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise ValueError("invalid cursor")
+    return value[0], value[1]
 
 
 def _discovery(request):
@@ -143,6 +167,8 @@ def create_app() -> Starlette:
         return JSONResponse({"credential": token}, headers={"cache-control": "no-store"})
 
     async def session(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
         body = await request.json()
         expected, session_id = body.get("expected_session_id"), body.get("session_id")
         if expected is not None and not isinstance(expected, str):
@@ -175,12 +201,13 @@ def create_app() -> Starlette:
             rows = await anyio.to_thread.run_sync(
                 store.chats,
                 limit,
-                request.query_params.get("before"),
+                _parse_chat_cursor(request.query_params.get("before")),
                 request.query_params.get("q"),
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return JSONResponse(rows)
+        next_cursor = _chat_cursor(rows[-1]["updated_at"], rows[-1]["session_id"]) if rows else None
+        return JSONResponse({"chats": rows, "next": next_cursor})
 
     async def register_chat(request):
         if not _same_origin(request):
