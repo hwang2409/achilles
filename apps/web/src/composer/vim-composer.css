@@ -50,6 +50,8 @@
 .vim-mode-chip[data-mode="normal"] { background: var(--fulcrum-accent); }
 .vim-mode-chip[data-mode="visual"] { background: var(--fulcrum-tok-function); }
 .vim-composer:not([data-focused]) { --rail: var(--fulcrum-muted); }
+.vim-composer:not([data-focused]) .cm-fat-cursor,
+.vim-composer:not([data-focused]) .cm-cursor { display: none; }
 .vim-composer:not([data-focused]) .vim-mode-chip {
   border: 1px solid var(--fulcrum-border);
   background: transparent;

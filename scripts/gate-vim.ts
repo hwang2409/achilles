@@ -1,14 +1,25 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { Page } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 
 export async function gateVim(page: Page, control: string, waitFor: WaitFor) {
+  const screenshotDir = process.env.VIM_SCREENSHOT_DIR;
+  const screenshot = async (name: string) => {
+    if (!screenshotDir) return;
+    await mkdir(screenshotDir, { recursive: true });
+    await page.screenshot({ path: join(screenshotDir, `${name}.png`) });
+  };
+  if (screenshotDir) await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ vim: true })));
   await page.reload();
   const composer = page.locator('.vim-composer[data-part="composer"]');
   const field = page.getByRole("textbox", { name: "message" });
   await composer.waitFor({ state: "visible", timeout: 20_000 });
+  await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   await field.fill("helo");
+  await screenshot("insert");
   await field.press("Escape");
   await field.press("0");
   await field.press("l");
@@ -16,7 +27,13 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor) {
   await field.press("l");
   await field.press("Escape");
   if (await field.textContent() !== "hello") throw new Error(`vim edit produced ${JSON.stringify(await field.textContent())}, not "hello"`);
+  await screenshot("normal");
+  await field.press("v");
+  await field.press("l");
+  await screenshot("visual");
   await field.press("Escape");
+  await field.press("Escape");
+  await screenshot("normal-blurred");
   if (await field.evaluate((element) => element === document.activeElement)) throw new Error("second vim escape did not blur the composer");
   if (await field.textContent() !== "hello") throw new Error("vim escape cleared the draft");
   await page.keyboard.press("i");
