@@ -62,7 +62,8 @@ async function ensureFulcrum() {
   if (!existsSync(resolve(fulcrum, ".git"))) { await mkdir(dirname(fulcrum), { recursive: true }); run(["git", "clone", "https://github.com/hwang2409/fulcrum", fulcrum]); }
   run(["git", "-C", fulcrum, "checkout", "--detach", pin]);
   const stamp = resolve(root, ".cache/fulcrum-build.stamp");
-  const sourceHash = await digest([resolve(root, "fulcrum.rev"), ...(await filesUnder(resolve(fulcrum, "packages")))]);
+  const tracked = run(["git", "-C", fulcrum, "ls-files", "packages"], root, true).trim().split("\n").filter(Boolean).map((path) => resolve(fulcrum, path));
+  const sourceHash = await digest([resolve(root, "fulcrum.rev"), ...tracked]);
   let old = ""; try { old = await readFile(stamp, "utf8"); } catch {}
   if (old !== sourceHash) {
     run(["bun", "install", "--frozen-lockfile"], fulcrum);
