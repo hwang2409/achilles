@@ -41,7 +41,7 @@ try {
   const homeSessionId = async () => page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId(); if (!first) throw new Error("home session id missing");
   const requests = () => frames.map((frame) => { try { return JSON.parse(frame); } catch { return null; } }).filter(Boolean);
-  if (requests().filter((frame) => frame.method === "resume" && frame.params?.session_id === "stale-session-id").length !== 1) throw new Error("stale session was not resumed exactly once");
+  if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "stale-session-id")) throw new Error("stale session was unexpectedly resumed");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1) throw new Error("stale session did not create exactly one replacement");
   const bindingRequests = requests().filter((frame) => ["new_session", "resume"].includes(frame.method));
   if (!bindingRequests.some((frame) => frame.params?.mcp_bindings?.[0]?.server === "achilles" && frame.params?.mcp_bindings?.[0]?.headers?.Authorization?.startsWith("Bearer "))) throw new Error("page binding was not sent on session attach");
