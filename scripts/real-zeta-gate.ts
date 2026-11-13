@@ -85,6 +85,8 @@ try {
   if (!finalOff.ok) throw new Error(`final create mode off failed: ${finalOff.status}`);
   const late = await mcp(4, "tools/call", { name: "create_page", arguments: { route: "/late", title: "late", layout: { blocks: [{ type: "text", text: "late" }] } } });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
+  const reconnectOn = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+  if (!reconnectOn.ok) throw new Error(`reconnect create mode on failed: ${reconnectOn.status}`);
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   let createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (createdPage.zeta_session_id) throw new Error("created page got a session before navigation");
@@ -106,11 +108,13 @@ try {
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
+  const beforeReconnect = JSON.parse(await Bun.file(control).text());
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
-    const schemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
-    return schemas.some((schema: string) => schema.startsWith("achilles__"));
-  }, "post-reconnect achilles catalog");
+    const state = JSON.parse(await Bun.file(control).text());
+    return state.request_count > (beforeReconnect.request_count ?? 0) && state.last_message.includes("post-reconnect catalog");
+  }, "post-reconnect backend request");
+  await page.getByText("post-reconnect complete", { exact: true }).waitFor({ timeout: 20000 });
   const postReconnect = JSON.parse(await Bun.file(control).text());
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
   if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);

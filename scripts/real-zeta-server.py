@@ -81,10 +81,13 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(content=[TextContent("annotation complete")]),
         ScriptedTurn(content=[TextContent("v2 turn")]),
         ScriptedTurn(content=[TextContent("rollback turn")]),
+        ScriptedTurn(content=[TextContent("post-reconnect complete")]),
     ]
 
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
+        document["request_count"] = document.get("request_count", 0) + 1
+        document["last_message"] = str(messages[-1]) if messages else ""
         document["schemas"] = [schema["name"] for schema in tool_schemas]
         control.write_text(json.dumps(document))
         control.chmod(0o600)
