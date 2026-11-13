@@ -422,12 +422,12 @@ try {
   const reconnectOn = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
   if (!reconnectOn.ok) throw new Error(`reconnect create mode on failed: ${reconnectOn.status}`);
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
-  let createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (createdPage.zeta_session_id) throw new Error("created page got a session before navigation");
+  let reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (reconnectPage.zeta_session_id) throw new Error("created page got a session before navigation");
   await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
-  createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (!createdPage.zeta_session_id || createdPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
-  if (createdPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
+  reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (!reconnectPage.zeta_session_id || reconnectPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
+  if (reconnectPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
   await page.goto(origin); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   app.kill("SIGTERM");
@@ -436,7 +436,7 @@ try {
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "achilles restart");
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== createdPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
+  if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
   await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
@@ -453,12 +453,12 @@ try {
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
   if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
   if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after reload");
-  mcpSession = "";
+  mcpSessions.delete(credential);
   await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const invalid = await mcp(5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
-  const crossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
-  if (!crossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
+  const reconnectCrossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
+  if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
   console.log("reconnect refresh asserted: reload kept the session and refreshed the achilles catalog");
   console.log("expected skip: reload during pending approval waits for fulcrum hello params");
 
