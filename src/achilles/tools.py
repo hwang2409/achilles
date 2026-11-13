@@ -41,8 +41,12 @@ def validate_bundle(bundle: Any) -> dict[str, Any]:
         raise ValueError("tool bundle has invalid keys")
     if bundle["format_version"] != 1 or bundle["kind"] != "data_operation":
         raise ValueError("unsupported tool bundle")
-    if not isinstance(bundle["name"], str) or not _NAME.fullmatch(bundle["name"]):
-        raise ValueError("invalid tool name")
+    if (
+        not isinstance(bundle["name"], str)
+        or not _NAME.fullmatch(bundle["name"])
+        or bundle["name"] in {"create_page", "create_tool"}
+    ):
+        raise ValueError("invalid or reserved tool name")
     if (
         not isinstance(bundle["description"], str)
         or not bundle["description"]

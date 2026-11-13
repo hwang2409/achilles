@@ -170,19 +170,6 @@ class PageStore:
         workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
         workspace.chmod(0o700)
 
-    def _write_bundle(self, digest: str, encoded: str) -> None:
-        path = self.root / "bundles" / f"{digest}.json"
-        if path.exists():
-            return
-        temporary = path.with_suffix(".tmp")
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            os.write(fd, (encoded + "\n").encode())
-        finally:
-            os.close(fd)
-        os.replace(temporary, path)
-        path.chmod(0o600)
-
     def _connect(self):
         connection = sqlite3.connect(self._database, timeout=5)
         connection.row_factory = sqlite3.Row
@@ -261,6 +248,15 @@ class PageStore:
                 (page_id,),
             ).fetchone()
             return json.loads(row[0]) if row else {"blocks": []}
+
+    def records(self, page_id: str, collection: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT record_id, document FROM page_record "
+                "WHERE page_id=? AND collection=? ORDER BY created_at",
+                (page_id, collection),
+            ).fetchall()
+        return [{**json.loads(row[1]), "record_id": row[0]} for row in rows]
 
     def set_create_mode(self, page_id: str, enabled: bool) -> sqlite3.Row:
         with self.transaction() as db:
@@ -371,7 +367,9 @@ class PageStore:
                         "SELECT COALESCE(MAX(version), 0) + 1 FROM tool_version WHERE tool_id=?",
                         (tool_id,),
                     ).fetchone()[0]
-                self._write_bundle(digest, encoded)
+                self._atomic_private_write(
+                    self.root / "bundles" / f"{digest}.json", (encoded + "\n").encode()
+                )
                 db.execute(
                     "INSERT INTO tool_version VALUES(?,?,?,?,?)",
                     (tool_id, version, digest, encoded, stamp),

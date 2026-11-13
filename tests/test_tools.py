@@ -1,5 +1,5 @@
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import pytest
 
@@ -29,6 +29,16 @@ BUNDLE = {
         },
     },
 }
+
+
+def test_sqlite_is_owned_by_pages_module():
+    source_root = __import__("pathlib").Path(__file__).parents[1] / "src"
+    offenders = [
+        path
+        for path in source_root.rglob("*.py")
+        if path.name != "pages.py" and "import sqlite3" in path.read_text()
+    ]
+    assert not offenders, "keep sqlite3 ownership in src/achilles/pages.py"
 
 
 def test_generated_tool_versions_and_page_scope(tmp_path):
@@ -70,14 +80,20 @@ def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
             "home", None if index == 0 else f"session-{index - 1}", f"session-{index}"
         )
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(
-            pool.map(
-                lambda item: item[0](item[1]),
-                [(write_record, i) for i in range(20)] + [(write_page, i) for i in range(20)],
-            )
-        )
-    assert len(results) == 40
+    pool = ThreadPoolExecutor(max_workers=8)
+    futures = [
+        pool.submit(operation, index)
+        for operation, index in [(write_record, i) for i in range(20)]
+        + [(write_page, i) for i in range(20)]
+    ]
+    done, pending = wait(futures, timeout=10)
+    for future in pending:
+        future.cancel()
+    pool.shutdown(wait=False, cancel_futures=True)
+    outcomes = [future.exception() for future in done]
+    assert not pending, "concurrent operation hung"
+    assert not [error for error in outcomes if error], f"worker failed: {outcomes}"
+    assert len(done) == 40, "expected 40 successful operations"
     with store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 20
 
@@ -86,6 +102,34 @@ def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
         call_record(store, "home", "annotate_trace", {"text": "late"})
     with store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 20
+
+
+def test_reserved_bundle_names_are_rejected(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    for name in ("create_page", "create_tool"):
+        with pytest.raises(ValueError, match="reserved"):
+            store.create_tool("home", {**BUNDLE, "name": name})
+
+
+def test_record_id_is_authoritative(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    store.create_tool("home", BUNDLE)
+    with pytest.raises(ValueError, match="invalid tool input"):
+        call_record(store, "home", "annotate_trace", {"text": "x", "record_id": "forged"})
+    result = call_record(store, "home", "annotate_trace", {"text": "x"})
+    assert result["record_id"] != "forged"
+    assert call_record(store, "home", "annotate_trace", {"text": "y"})["record_id"]
+
+
+def test_bundle_publish_cleans_stale_temp(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    digest = __import__("achilles.tools", fromlist=["bundle_digest"]).bundle_digest(BUNDLE)
+    (tmp_path / "bundles" / f"{digest}.tmp").write_text("stale")
+    store.create_tool("home", BUNDLE)
+    assert (tmp_path / "bundles" / f"{digest}.json").exists()
 
 
 def test_bundle_is_canonical_and_private(tmp_path):

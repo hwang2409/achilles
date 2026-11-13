@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { controlSnapshot, diagnostic } from "./gate-diagnostics";
 
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -18,14 +19,9 @@ const port = 5191 + Math.floor(Math.random() * 1000);
 const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
-const redact = (text: string) =>
-  text
-    .replace(
-      /(authorization\s*["']?\s*:\s*["']?bearer\s+)[^\s,}\\"]*/gi,
-      "$1[redacted]",
-    )
-    .replace(/(bearer\s+)[^\s,}\\"]*/gi, "$1[redacted]")
-    .replace(/(controller_token|observer_token)[^\s,}\\"]*/gi, "$1[redacted]");
+const secrets: string[] = [];
+const redact = (text: string) => diagnostic(text, secrets);
+const safeControl = (text: string) => controlSnapshot(text, secrets);
 const start = (
   command: string,
   args: string[],
@@ -48,7 +44,7 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => {
     if (await check()) return;
     await Bun.sleep(100);
   }
-  throw new Error(`timed out waiting for ${label}; backend catalog=${await Bun.file(control).text()}`);
+  throw new Error(`timed out waiting for ${label}; backend catalog=${safeControl(await Bun.file(control).text())}`);
 };
 let browser;
 try {
@@ -166,15 +162,16 @@ try {
   const approvalBefore = await approval.count();
   await field.fill("prove chat");
   await field.press("Enter");
-  await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async () => { throw new Error(`assistant missing body=${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
+  await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async () => { throw new Error(`assistant missing body=${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
   await waitFor(async () => (await approval.count()) > approvalBefore, "initial approval");
-  await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   const approvalComplete = page.getByText("approval complete", { exact: true });
   const approvalCompleteBefore = await approvalComplete.count();
+  await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
   const credential = (
     await Bun.file(join(achillesHome, "credentials/home")).text()
   ).trim();
+  secrets.push(credential);
   const mcpSessions = new Map<string, string>();
   const mcp = async (
     token: string,
@@ -230,7 +227,7 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await createApproval.count()) > createApprovalBefore, "create page approval").catch(async () => {
     throw new Error(
-      `backend did not receive achilles__create_page catalog: ${await Bun.file(control).text()}`,
+      `backend did not receive achilles__create_page catalog: ${safeControl(await Bun.file(control).text())}`,
     );
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
@@ -297,13 +294,13 @@ try {
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async () => {
     throw new Error(
-      `annotation approval missing: backend=${await Bun.file(control).text()} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
+      `annotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
     );
   });
   await annotationApproval.nth(annotationApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > generatedAnnotationCompleteBefore, "generated tool completion").catch(async (error) => {
       throw new Error(
-        `${error}\nbackend=${await Bun.file(control).text()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+        `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
       );
     });
   if ((await homeSessionId()) !== sessionBeforeToolTurn)
@@ -332,7 +329,7 @@ try {
   ).json();
   if (!Array.isArray(homeRecords) || homeRecords.length !== 1)
     throw new Error(
-      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${await Bun.file(control).text()} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${await page.locator("body").innerText()}`,
+      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
   const createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!createdPage.zeta_session_id || createdPage.zeta_session_id === first)
@@ -341,6 +338,7 @@ try {
   const secondCredential = (
     await Bun.file(join(achillesHome, `credentials/${createdPageId}`)).text()
   ).trim();
+  secrets.push(secondCredential);
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];

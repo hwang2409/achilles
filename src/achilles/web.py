@@ -156,13 +156,7 @@ def create_app() -> Starlette:
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
         collection = request.path_params["collection"]
-        with store._connect() as db:
-            rows = db.execute(
-                "SELECT record_id, document FROM page_record "
-                "WHERE page_id=? AND collection=? ORDER BY created_at",
-                (page_id, collection),
-            ).fetchall()
-        return JSONResponse([{"record_id": row[0], **json.loads(row[1])} for row in rows])
+        return JSONResponse(await anyio.to_thread.run_sync(store.records, page_id, collection))
 
     async def rollback_tool(request):
         page_id = request.path_params["id"]
