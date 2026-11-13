@@ -50,7 +50,10 @@ def _discovery(request):
     )
     try:
         document = json.loads(path.read_text())
-        if not isinstance(document, dict) or not _loopback(str(document["url"])):
+        if not isinstance(document, dict):
+            raise ValueError
+        port = document["port"]
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError
         os.kill(int(document["pid"]), 0)
         origin = (
@@ -61,8 +64,8 @@ def _discovery(request):
             raise HTTPException(403, "origin is not allowed")
         return JSONResponse(
             {
-                key: document[key]
-                for key in ("url", "controller_token", "observer_token", "origins")
+                "url": f"ws://127.0.0.1:{port}",
+                **{key: document[key] for key in ("controller_token", "observer_token", "origins")},
             },
             headers={"cache-control": "no-store"},
         )

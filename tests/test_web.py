@@ -169,11 +169,13 @@ def test_discovery_requires_same_origin_loopback(
     discovery.write_text(
         json.dumps(
             {
-                "url": "ws://127.0.0.1:8765",
-                "pid": os.getpid(),
-                "origins": ["http://127.0.0.1:5190"],
+                "port": 8765,
+                "token": "legacy-secret",
                 "controller_token": "controller-secret",
                 "observer_token": "observer-secret",
+                "pid": os.getpid(),
+                "origins": ["http://127.0.0.1:5190"],
+                "ws_auth": True,
             }
         )
     )
@@ -189,11 +191,13 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
     discovery.write_text(
         json.dumps(
             {
-                "url": "ws://127.0.0.1:8765",
-                "pid": os.getpid(),
-                "origins": ["http://127.0.0.1:5190"],
+                "port": 8765,
+                "token": "legacy-secret",
                 "controller_token": "controller-secret",
                 "observer_token": "observer-secret",
+                "pid": os.getpid(),
+                "origins": ["http://127.0.0.1:5190"],
+                "ws_auth": True,
             }
         )
     )
@@ -207,4 +211,29 @@ def test_discovery_allows_browser_same_origin(monkeypatch, tmp_path: Path) -> No
         },
     )
     assert response.status_code == 200
+    assert response.json()["url"] == "ws://127.0.0.1:8765"
     assert response.json()["controller_token"] == "controller-secret"
+
+
+@pytest.mark.parametrize("port", [True, "8765", 0, 65536])
+def test_discovery_rejects_invalid_port(monkeypatch, tmp_path: Path, port: object) -> None:
+    discovery = tmp_path / "discovery.json"
+    discovery.write_text(
+        json.dumps(
+            {
+                "port": port,
+                "token": "legacy-secret",
+                "controller_token": "controller-secret",
+                "observer_token": "observer-secret",
+                "pid": os.getpid(),
+                "origins": ["http://127.0.0.1:5190"],
+                "ws_auth": True,
+            }
+        )
+    )
+    monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(discovery))
+    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
+        "/api/zeta/discovery",
+        headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
+    )
+    assert response.status_code == 503

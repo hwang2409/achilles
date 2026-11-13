@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -46,11 +46,24 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => {
   }
   throw new Error(`timed out waiting for ${label}; backend catalog=${safeControl(await Bun.file(control).text())}`);
 };
+const waitForExit = (child: ChildProcess, timeoutMs: number) =>
+  new Promise<boolean>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+    let timer: ReturnType<typeof setTimeout>;
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    timer = setTimeout(() => {
+      child.removeListener("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+    child.once("exit", onExit);
+  });
 let browser;
 try {
   await Bun.spawn(["git", "init", cwd]).exited;
   await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
-  await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const env = {
     ...process.env,
     PYTHONPATH: zeta,
@@ -61,7 +74,7 @@ try {
     ZETA_PROOF_CONTROL: control,
     ZETA_PROOF_ORIGIN: origin,
   };
-  const zetaProcess = start(
+  let zetaProcess = start(
     "uv",
     [
       "run",
@@ -81,12 +94,7 @@ try {
   );
   for (const key of ["controller_token", "observer_token"])
     if (typeof pending[key] === "string") secrets.push(pending[key]);
-  const discovery = join(temp, "discovery.json");
-  await Bun.write(
-    discovery,
-    JSON.stringify({ ...pending, url: `ws://127.0.0.1:${pending.port}` }),
-  );
-  const appEnv = { ...env, ACHILLES_ZETA_DISCOVERY: discovery };
+  const appEnv = env;
   const seed = start(
     "uv",
     [
@@ -118,22 +126,53 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
+  let ignoreBrowserErrors = false;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
     socket.on("framereceived", (event) => frames.push(String(event.payload)));
   });
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => {
+    if (!ignoreBrowserErrors) errors.push(e.message);
+  });
   page.on("console", (m) => {
-    if (m.type() === "error") errors.push(m.text());
+    if (m.type() === "error" && !ignoreBrowserErrors) errors.push(m.text());
   });
   await page.goto(origin);
+  const setupAlert = page.getByRole("alert");
+  await setupAlert.waitFor({ timeout: 20000 });
+  if (!(await setupAlert.innerText()).includes("add it to $ZETA_HOME/mcp.json"))
+    throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
+  await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
+  const firstZetaPid = zetaProcess.pid;
+  ignoreBrowserErrors = true;
+  zetaProcess.kill("SIGTERM");
+  if (!(await waitForExit(zetaProcess, 15_000))) {
+    zetaProcess.kill("SIGKILL");
+    await waitForExit(zetaProcess, 5_000);
+    throw new Error("zeta shutdown timeout after 15 seconds");
+  }
+  zetaProcess = start(
+    "uv",
+    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
+    env,
+  );
+  await waitFor(async () => {
+    try {
+      return JSON.parse(await Bun.file(control).text()).pid !== firstZetaPid;
+    } catch {
+      return false;
+    }
+  }, "restarted zeta");
   const field = page.getByRole("textbox", { name: "message" });
   await field.waitFor({ timeout: 20000 }).catch(async () => {
     throw new Error(
       `composer missing: ${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
     );
   });
+  if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
+  await page.locator(".transcript").waitFor({ state: "visible" });
+  ignoreBrowserErrors = false;
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
@@ -153,9 +192,9 @@ try {
       (frame) =>
         frame.method === "resume" &&
         frame.params?.session_id === "stale-session-id",
-    ).length !== 1
+    ).length !== 2
   )
-    throw new Error("stale session was not resumed first");
+    throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
   const assistantReady = page.getByText("assistant ready", { exact: true });
@@ -500,7 +539,7 @@ try {
     children.map(
       (child) =>
         new Promise<void>((resolve, reject) => {
-          if (child.exitCode !== null) return resolve();
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
           const timer = setTimeout(
             () => reject(new Error("child did not exit after SIGTERM")),
             5000,
