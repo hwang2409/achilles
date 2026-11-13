@@ -12,6 +12,11 @@ const attempt = (action: () => unknown) => new Promise<unknown>((resolve) => res
 const unsentDraft = (current: string, sent: string) => current.startsWith(sent) ? current.slice(sent.length) : current;
 const isCoarsePointer = () => matchMedia("(pointer: coarse)").matches;
 
+export function vimEnabled() {
+  try { return JSON.parse(localStorage.getItem("achilles-settings") ?? "null")?.vim === true; }
+  catch { return false; }
+}
+
 type Send = { sent: string; delivered: boolean; deliveryId?: string };
 type Mode = "insert" | "normal" | "visual";
 
@@ -113,6 +118,10 @@ function InteractiveVimComposer({ state, onSubmit, onStop, label = "message", pl
       });
   }, [delivered, hasMessageDelivered]);
 
+  const stopRef = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    return () => { if (document.activeElement === button) viewRef.current?.focus(); };
+  }, []);
   const stop = useCallback(() => {
     if (inFlight.current.stop || !stopAction.current) return;
     inFlight.current.stop = true;
@@ -186,7 +195,10 @@ function InteractiveVimComposer({ state, onSubmit, onStop, label = "message", pl
         view.contentDOM.blur();
         return;
       }
-      if (modeBefore === "insert") return;
+      if (modeBefore === "insert") {
+        if (event.key === "Escape") queueMicrotask(() => syncVimState(view));
+        return;
+      }
       const ctrlRedo = event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r";
       const allowed = ctrlRedo || event.key === "Tab" || event.key === "Escape" || /^[0-9hjklwbeiaIoOAxdcypuvVG$]$/.test(event.key);
       if (!allowed) {
@@ -269,7 +281,7 @@ function InteractiveVimComposer({ state, onSubmit, onStop, label = "message", pl
         </p>
         <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
         {running && onStop ? (
-          <button type="button" data-part="composer-stop" data-action="stop" aria-label="stop the running turn" aria-disabled={stopping || undefined} onClick={stop}>
+          <button ref={stopRef} type="button" data-part="composer-stop" data-action="stop" aria-label="stop the running turn" aria-disabled={stopping || undefined} onClick={stop}>
             {stopping ? "stopping" : "stop"}
           </button>
         ) : null}
