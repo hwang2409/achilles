@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
 import { createRunStore } from "@fulcrum/core";
 import { createApprovalDecider } from "./zeta/approvals";
-import { createConnection } from "./zeta";
+import { createConnection, supportsFeature } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { loadSession, openHomeSession, rebindPage } from "./zeta/session";
 import "./style.css";
@@ -19,6 +19,7 @@ export function App() {
     const unsubscribe = connection.subscribe(() => { const next = connection.client; if (!next || connection.state.phase !== "connected") return; setClient(next);
       void (async () => { try {
         const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); if (!loaded.ok) throw new Error("page not found"); const current = await loaded.json() as Page;
+        if (!supportsFeature(next, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
         const credential = await fetch(`/api/pages/${current.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
         const binding = { cwd: current.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
         const id = await openHomeSession(next, current.zeta_session_id, credential, current.workspace); let lease = await loadSession(next, id); if (!live) { lease.release(); return; }

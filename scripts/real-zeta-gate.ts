@@ -93,8 +93,7 @@ try {
   if (!on.ok) throw new Error(`create mode on failed: ${on.status}`);
   await field.fill("catalog on"); await field.press("Enter");
   await page.getByText("rollback turn", { exact: true }).waitFor({ timeout: 20000 });
-  const refreshed = await mcp(7, "tools/list", {});
-  if (!refreshed.result?.tools?.some((tool: { name: string }) => tool.name === "create_page")) throw new Error("catalog addition after toggle on missing");
+  await waitFor(async () => { const schemas = JSON.parse(await Bun.file(control).text()).schemas ?? []; return schemas.includes("achilles__create_page"); }, "catalog addition after toggle on");
   const finalOff = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) });
   if (!finalOff.ok) throw new Error(`final create mode off failed: ${finalOff.status}`);
   const late = await mcp(4, "tools/call", { name: "create_page", arguments: { route: "/late", title: "late", layout: { blocks: [{ type: "text", text: "late" }] } } });
