@@ -188,6 +188,19 @@ try {
         }
       })
       .filter(Boolean);
+  const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
+    const messages = requests();
+    let requestIndex = messages.length - 1;
+    while (
+      requestIndex >= 0 &&
+      !(messages[requestIndex].method === method && messages[requestIndex].params?.session_id === sessionId)
+    ) requestIndex--;
+    if (requestIndex < 0) return undefined;
+    const response = messages
+      .slice(requestIndex + 1)
+      .find((frame) => frame.id === messages[requestIndex].id && frame.result);
+    return response?.result?.approval_mode;
+  };
   if (
     requests().filter(
       (frame) =>
@@ -198,6 +211,10 @@ try {
     throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
+  if (approvalModeResponse("set_settings", first) !== "ask")
+    throw new Error("ask-mode session settings were not applied to the replacement session");
+  if (await page.getByLabel("auto-approve").count())
+    throw new Error("ask-mode session showed the auto-approve marker");
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
@@ -455,6 +472,12 @@ try {
   );
   if (JSON.stringify(rollbackSchema) === JSON.stringify(v2Schema))
     throw new Error("rollback did not change the live generated schema");
+  const allowPage = await homeMcp(15, "tools/call", {
+    name: "create_page",
+    arguments: { route: "/allow", title: "allow mode", layout: { blocks: [] } },
+  });
+  if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
+    throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -503,6 +526,8 @@ try {
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
+  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
+  if (await page.getByLabel("auto-approve").count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
@@ -527,6 +552,34 @@ try {
   if (lateAnnotation.result?.isError) throw new Error(`generated tool failed after create mode: ${JSON.stringify(lateAnnotation)}`);
   const lateRecords = await (await fetch(`${origin}/api/pages/home/records/trace_annotations`, { headers: { Authorization: `Bearer ${credential}` } })).json();
   if (!Array.isArray(lateRecords) || lateRecords.length !== 2) throw new Error(`late generated tool result was not recorded: ${JSON.stringify(lateRecords)}`);
+
+  app.kill("SIGTERM");
+  await new Promise<void>((resolve) => app.once("exit", () => resolve()));
+  app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: "allow" });
+  await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "allow-mode achilles restart");
+  await page.goto(`${origin}/allow`);
+  const allowField = page.getByRole("textbox", { name: "message" });
+  await allowField.waitFor({ timeout: 20000 });
+  const allowSession = await homeSessionId();
+  if (!allowSession) throw new Error("allow-mode page session id missing");
+  await page.getByLabel("auto-approve").waitFor({ state: "visible" });
+  if (approvalModeResponse("set_settings", allowSession) !== "allow")
+    throw new Error("allow-mode session settings were not applied");
+  await page.reload();
+  await allowField.waitFor({ timeout: 20000 });
+  if (approvalModeResponse("session_settings", allowSession) !== "allow")
+    throw new Error("reloaded allow-mode session did not report allow settings");
+  const allowApprovalBefore = await approval.count();
+  const beforeAllowTurn = JSON.parse(await Bun.file(control).text());
+  await allowField.fill("run the allow-mode tool");
+  await allowField.press("Enter");
+  await page.getByText("allow complete", { exact: true }).waitFor({ timeout: 20000 });
+  const afterAllowTurn = JSON.parse(await Bun.file(control).text());
+  if ((afterAllowTurn.request_count ?? 0) < (beforeAllowTurn.request_count ?? 0) + 2)
+    throw new Error("allow-mode tool did not complete in this turn");
+  const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
+  if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
+  if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");

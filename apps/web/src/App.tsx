@@ -4,12 +4,12 @@ import { createRunStore } from "@fulcrum/core";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, supportsFeature, type ConnectionState } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { loadSession, openHomeSession, rebindPage } from "./zeta/session";
+import { loadSession, openHomeSession } from "./zeta/session";
 import type { SessionLease } from "@fulcrum/zeta";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
-type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; approval_mode?: "allow" | "ask"; layout: { blocks: Array<Record<string, unknown>> } };
+type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type Attachment = { page: Page; sessionId: string; lease: SessionLease };
 
 function connectionFailure(state: ConnectionState): string | null {
@@ -36,14 +36,13 @@ async function attachPage(client: ZetaClient, key: string): Promise<Attachment> 
   const page = await loaded.json() as Page;
   if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
   const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
-  const binding = { cwd: page.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
-  const id = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, page.approval_mode);
-  if (!client.features.includes("new_session_settings")) page.approval_mode = undefined;
-  let lease = await loadSession(client, id);
-  const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
+  let session = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, page.approval_mode ?? "allow");
+  let lease = await loadSession(client, session.id);
+  const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: session.id }) });
   if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
-  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); await rebindPage(client, actual, binding); lease = await loadSession(client, actual); return { page, sessionId: actual, lease }; }
-  return { page, sessionId: id, lease };
+  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); session = await openHomeSession(client, actual, credential, page.workspace, page.approval_mode ?? "allow"); lease = await loadSession(client, session.id); }
+  page.approval_mode = session.approvalMode;
+  return { page, sessionId: session.id, lease };
 }
 
 export function App() {

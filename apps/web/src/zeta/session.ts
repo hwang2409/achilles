@@ -9,10 +9,7 @@ export async function rebindPage(client: ZetaClient, sessionId: string, binding:
   return client.request("resume", { session_id: sessionId, ...binding });
 }
 
-const unsupportedSettings = (caught: unknown) => {
-  const code = (caught as { data?: { code?: unknown } }).data?.code;
-  return code === -32601 || code === "method_not_found";
-};
+type SessionSettings = { model: string; approval_mode?: string | null };
 
 export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, approvalMode = "allow") {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
@@ -27,33 +24,21 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
     }
   }
   if (!id) {
-    if (!client.features.includes("new_session_settings")) {
-      const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
-      id = created.session?.session_id ?? null;
-    } else {
-      let settings: { model?: string };
-      try {
-        settings = await client.request("session_settings", {}) as { model?: string };
-      } catch (caught) {
-        if (!unsupportedSettings(caught)) throw caught;
-        settings = {};
-      }
-      let model = settings.model;
-      const catalog = await client.request("model_catalog", {}) as { models?: string[]; providers?: Record<string, string> };
-      if (!model || !catalog.providers?.[model]) model = catalog.models?.[0];
-      if (!model) throw new Error("zeta did not provide a default model");
-      const created = await client.request("new_session", { ...binding, model, approval_mode: approvalMode }) as { session?: { session_id?: string } };
-      id = created.session?.session_id ?? null;
-    }
+    const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
+    id = created.session?.session_id ?? null;
     if (!id) throw new Error("zeta did not return a session id");
-  } else if (client.features.includes("new_session_settings")) {
-    const status = await client.request("status", {}) as Status;
-    if (status.state === "idle") {
-      const settings = await client.request("session_settings", {}) as { model?: string };
-      if (settings.model) await client.request("set_settings", { session_id: id, model: settings.model, approval_mode: approvalMode });
+  }
+  let settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
+  const status = await client.request("status", { session_id: id }) as Status;
+  if (status.state === "idle") {
+    try {
+      settings = await client.request("set_settings", { session_id: id, model: settings.model, approval_mode: approvalMode }) as SessionSettings;
+    } catch (caught) {
+      if ((caught as { code?: unknown }).code !== -32004) throw caught;
+      settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
     }
   }
-  return id;
+  return { id, approvalMode: settings.approval_mode };
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
