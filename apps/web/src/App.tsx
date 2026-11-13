@@ -9,7 +9,7 @@ import type { SessionLease } from "@fulcrum/zeta";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
-type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; layout: { blocks: Array<Record<string, unknown>> } };
+type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; approval_mode?: "allow" | "ask"; layout: { blocks: Array<Record<string, unknown>> } };
 type Attachment = { page: Page; sessionId: string; lease: SessionLease };
 
 function connectionFailure(state: ConnectionState): string | null {
@@ -37,7 +37,8 @@ async function attachPage(client: ZetaClient, key: string): Promise<Attachment> 
   if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
   const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
   const binding = { cwd: page.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
-  const id = await openHomeSession(client, page.zeta_session_id, credential, page.workspace);
+  const id = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, page.approval_mode);
+  if (!client.features.includes("new_session_settings")) page.approval_mode = undefined;
   let lease = await loadSession(client, id);
   const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
   if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
@@ -66,7 +67,7 @@ export function App() {
   if (!store || !client || !sessionId || !page) return <main className="shell"><p role="status">connecting to zeta…</p></main>;
   const approval = createApprovalDecider(client, store); const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} onApprove={r => approval("approve", r)} onDeny={r => approval("deny", r)} /> };
   const send = async (text: string, intent: { steer: boolean }, track: (id: string) => void) => { const delivery_id = crypto.randomUUID(); track(delivery_id); await client.request(intent.steer ? "steer" : "send", { session_id: sessionId, text, delivery_id }); };
-  return <RunProvider store={store}><main className="shell"><header><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span></header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} />)}</section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
+  return <RunProvider store={store}><main className="shell"><header><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span>{page.approval_mode === "allow" && <span aria-label="auto-approve">auto-approve</span>}</header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} />)}</section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
 }
 
 function LayoutBlock({ block }: { block: Record<string, unknown> }) {

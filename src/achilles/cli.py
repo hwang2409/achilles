@@ -14,6 +14,9 @@ def main() -> None:
     serve.add_argument("--port", default=5190, type=int)
     args = parser.parse_args()
     if args.command == "serve":
+        from .web import approval_mode
+
+        approval_mode()
         import uvicorn
 
         uvicorn.run("achilles.web:create_app", factory=True, host=args.host, port=args.port)

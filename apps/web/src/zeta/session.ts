@@ -9,7 +9,12 @@ export async function rebindPage(client: ZetaClient, sessionId: string, binding:
   return client.request("resume", { session_id: sessionId, ...binding });
 }
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string) {
+const unsupportedSettings = (caught: unknown) => {
+  const code = (caught as { data?: { code?: unknown } }).data?.code;
+  return code === -32601 || code === "method_not_found";
+};
+
+export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, approvalMode = "allow") {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   if (id) {
@@ -22,9 +27,28 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
     }
   }
   if (!id) {
-    const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
-    id = created.session?.session_id ?? null;
+    if (!client.features.includes("new_session_settings")) {
+      const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
+      id = created.session?.session_id ?? null;
+    } else {
+      let settings: { model?: string };
+      try {
+        settings = await client.request("session_settings", {}) as { model?: string };
+      } catch (caught) {
+        if (!unsupportedSettings(caught)) throw caught;
+        settings = {};
+      }
+      if (!settings.model) throw new Error("zeta did not provide a default model");
+      const created = await client.request("new_session", { ...binding, model: settings.model, approval_mode: approvalMode }) as { session?: { session_id?: string } };
+      id = created.session?.session_id ?? null;
+    }
     if (!id) throw new Error("zeta did not return a session id");
+  } else if (client.features.includes("new_session_settings")) {
+    const status = await client.request("status", {}) as Status;
+    if (status.state === "idle") {
+      const settings = await client.request("session_settings", {}) as { model?: string };
+      if (settings.model) await client.request("set_settings", { session_id: id, model: settings.model, approval_mode: approvalMode });
+    }
   }
   return id;
 }
