@@ -46,6 +46,20 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => {
   }
   throw new Error(`timed out waiting for ${label}; backend catalog=${safeControl(await Bun.file(control).text())}`);
 };
+const waitForExit = (child: ChildProcess, timeoutMs: number) =>
+  new Promise<boolean>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+    let timer: ReturnType<typeof setTimeout>;
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    timer = setTimeout(() => {
+      child.removeListener("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+    child.once("exit", onExit);
+  });
 let browser;
 try {
   await Bun.spawn(["git", "init", cwd]).exited;
@@ -133,7 +147,11 @@ try {
   const firstZetaPid = zetaProcess.pid;
   ignoreBrowserErrors = true;
   zetaProcess.kill("SIGTERM");
-  await new Promise<void>((resolve) => zetaProcess.once("exit", () => resolve()));
+  if (!(await waitForExit(zetaProcess, 15_000))) {
+    zetaProcess.kill("SIGKILL");
+    await waitForExit(zetaProcess, 5_000);
+    throw new Error("zeta shutdown timeout after 15 seconds");
+  }
   zetaProcess = start(
     "uv",
     ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
