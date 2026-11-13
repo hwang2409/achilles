@@ -75,10 +75,11 @@ export type Connection = {
   stop(): void;
 };
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
+export const supportsFeature = (client: ZetaClient, feature: string) => client.features.includes(feature);
 
 async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) {
   const url = new URL(discovery.url);

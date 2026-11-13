@@ -12,6 +12,13 @@ import uvicorn
 from starlette.testclient import TestClient
 
 import achilles.web as web
+from achilles.mcp_server import _remove_connection
+
+
+@pytest.fixture(autouse=True)
+def isolated_homes(monkeypatch, tmp_path):
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
 
 
 def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> None:
@@ -37,10 +44,21 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     assert home.stat().st_mode & 0o777 == 0o700
     assert (home / "achilles.sqlite3").stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
+
+
+def test_mcp_connection_cleanup_removes_sessions_safely() -> None:
+    class Session:
+        def __init__(self, connection):
+            self._connection = connection
+
+    connection = object()
+    sessions = {"home": {Session(connection), Session(connection)}}
+    _remove_connection(sessions, "home", connection)
+    assert sessions == {}
 
 
 @contextmanager

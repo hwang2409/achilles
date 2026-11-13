@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
-from zeta.core.session import SessionManager
 from zeta.protocol.types import TextContent, ToolCall
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
@@ -38,18 +37,63 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
     home.mkdir(parents=True, exist_ok=True)
+    (home / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "achilles": {
+                        "transport": "streamable-http",
+                        "url": "http://127.0.0.1:5191/mcp/",
+                    }
+                }
+            }
+        )
+    )
     advance(home, expected_epoch=0)
-    manager = SessionManager(home)
-    pending = manager.create(provider="codex", model="offline", cwd=cwd, name="pending proof")
-    pending.store.close()
     turns = [
         ScriptedTurn(
             content=[TextContent("assistant ready")],
             tool_calls=[ToolCall("proof-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("approval complete")]),
+        ScriptedTurn(content=[TextContent("catalog ready")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "create",
+                    "achilles__create_page",
+                    {
+                        "route": "/created",
+                        "title": "created",
+                        "layout": {
+                            "blocks": [
+                                {
+                                    "type": "list",
+                                    "title": "created list",
+                                    "collection": "synthetic items",
+                                }
+                            ]
+                        },
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("annotation complete")]),
+        ScriptedTurn(content=[TextContent("v2 turn")]),
+        ScriptedTurn(content=[TextContent("rollback turn")]),
+        ScriptedTurn(content=[TextContent("post-reconnect complete")]),
     ]
-    backend = FakeBackend(turns)
+
+    def record_request(messages, tool_schemas):
+        document = json.loads(control.read_text())
+        document["request_count"] = document.get("request_count", 0) + 1
+        document["last_message"] = str(messages[-1]) if messages else ""
+        document["schemas"] = [schema["name"] for schema in tool_schemas]
+        control.write_text(json.dumps(document))
+        control.chmod(0o600)
+        return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()
+
+    backend = FakeBackend(turns, request_serializer=record_request)
     return (
         ZetaServer(
             home=home,
@@ -61,7 +105,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             backend_factory=lambda provider, model, selected_home: (backend, model or "offline"),
         ),
         control,
-        pending.metadata.session_id,
+        "stale-session-id",
     )
 
 
@@ -75,6 +119,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 "port": websocket.port,
                 "token": websocket.controller_token,
                 "pending_session": pending_session,
+                "pid": os.getpid(),
             }
         ),
         encoding="utf-8",
