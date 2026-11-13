@@ -1,5 +1,31 @@
 import { describe, expect, test } from "bun:test";
-import { loadSession } from "./session";
+import { applyApprovalMode, loadSession } from "./session";
+
+describe("applyApprovalMode", () => {
+  test("defers a mode change while the session is running", async () => {
+    const methods: string[] = [];
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
+      if (method === "status") return { state: "running" };
+      throw new Error(`unexpected ${method}`);
+    } };
+
+    expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "ask", pending: true });
+    expect(methods).toEqual(["session_settings", "status"]);
+  });
+
+  test("does not inspect or write a mode that already matches", async () => {
+    const methods: string[] = [];
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      return { model: "offline", approval_mode: "allow" };
+    } };
+
+    expect(await applyApprovalMode(client as never, "s", "allow")).toEqual({ approvalMode: "allow", pending: false });
+    expect(methods).toEqual(["session_settings"]);
+  });
+});
 
 describe("loadSession", () => {
   test("reconciles a tail event that arrives during refresh", async () => {

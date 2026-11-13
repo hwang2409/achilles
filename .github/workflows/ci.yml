@@ -39,7 +39,7 @@ jobs:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile
         working-directory: fulcrum
-      - run: bun test ./scripts/
+      - run: bun test ./scripts/ ./apps/web/src/
       - run: bun scripts/fulcrum.ts
         env:
           FULCRUM_DIR: ${{ github.workspace }}/fulcrum
