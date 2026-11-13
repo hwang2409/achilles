@@ -43,6 +43,8 @@ try {
   const requests = () => frames.map((frame) => { try { return JSON.parse(frame); } catch { return null; } }).filter(Boolean);
   if (requests().filter((frame) => frame.method === "resume" && frame.params?.session_id === "stale-session-id").length !== 1) throw new Error("stale session was not resumed exactly once");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1) throw new Error("stale session did not create exactly one replacement");
+  const bindingRequests = requests().filter((frame) => ["new_session", "resume"].includes(frame.method));
+  if (!bindingRequests.some((frame) => frame.params?.mcp_bindings?.[0]?.server === "achilles" && frame.params?.mcp_bindings?.[0]?.headers?.Authorization?.startsWith("Bearer "))) throw new Error("page binding was not sent on session attach");
   await field.fill("prove chat"); await field.press("Enter");
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 }).catch(async (error) => { throw new Error(`${error}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}\nframes=${redact(frames.join("\\n"))}`); });
   const approval = page.locator('[data-part="approval"]'); await approval.waitFor({ timeout: 20000 });
