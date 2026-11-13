@@ -31,8 +31,8 @@ export function serveDecision(document: any, allowedOrigin: string): ServeDecisi
   return { kind: "origin-missing", command: `zeta serve --ws ${document.port} ${all}` };
 }
 
-async function run(args: string[], cwd = root) {
-  const result = Bun.spawnSync(args, { cwd, stdout: "inherit", stderr: "inherit" });
+function run(args: string[], cwd = root) {
+  const result = Bun.spawnSync(args, { cwd, stdout: "inherit", stderr: "inherit", env: process.env });
   if (result.exitCode !== 0) throw new Error(`${args.join(" ")} failed`);
 }
 async function digest(paths: string[]) {
