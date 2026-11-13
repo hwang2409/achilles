@@ -112,14 +112,17 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
+  let ignoreBrowserErrors = false;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
     socket.on("framereceived", (event) => frames.push(String(event.payload)));
   });
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => {
+    if (!ignoreBrowserErrors) errors.push(e.message);
+  });
   page.on("console", (m) => {
-    if (m.type() === "error") errors.push(m.text());
+    if (m.type() === "error" && !ignoreBrowserErrors) errors.push(m.text());
   });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
@@ -128,6 +131,7 @@ try {
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const firstZetaPid = zetaProcess.pid;
+  ignoreBrowserErrors = true;
   zetaProcess.kill("SIGTERM");
   await new Promise<void>((resolve) => zetaProcess.once("exit", () => resolve()));
   zetaProcess = start(
@@ -150,7 +154,7 @@ try {
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
-  errors.length = 0; // discovery can return 503 while the setup restart replaces zeta
+  ignoreBrowserErrors = false;
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();

@@ -51,13 +51,14 @@ export function App() {
   const [client, setClient] = useState<ZetaClient | null>(null); const [sessionId, setSessionId] = useState<string | null>(null); const [error, setError] = useState<string | null>(null);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const turn = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => store.getState().turn : () => "idle" as const);
-  useEffect(() => { let live = true; let attempt = 0; const key = location.pathname === "/" ? "home" : location.pathname.slice(1);
+  useEffect(() => { let live = true; let attempt = 0; let attachment: Attachment | null = null; const key = location.pathname === "/" ? "home" : location.pathname.slice(1);
     const unsubscribe = connection.subscribe(() => { const next = connection.client; if (!next || connection.state.phase !== "connected") return; const current = ++attempt; setClient(next); setError(null);
       void (async () => { try {
         const attached = await attachPage(next, key); if (!live || current !== attempt) { attached.lease.release(); return; }
+        attachment?.lease.release(); attachment = attached;
         setSessionId(attached.sessionId); setPage(attached.page); setStore(attached.lease.store);
       } catch (caught) { if (live && current === attempt) setError(attachmentError(caught)); } })(); });
-    return () => { live = false; unsubscribe(); connection.stop(); };
+    return () => { live = false; attachment?.lease.release(); unsubscribe(); connection.stop(); };
   }, [connection]);
   if (error) return <main className="shell"><p role="alert">{error}</p></main>;
   const failure = connectionFailure(connectionState);
