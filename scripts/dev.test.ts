@@ -82,7 +82,9 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
 
   await mkdir(resolve(home, "run"), { recursive: true });
   await mkdir(bin, { recursive: true });
-  if (await Bun.file(resolve(devCache, "achilles.json")).exists()) throw new Error("refusing to replace an existing make dev process state");
+  for (const state of ["achilles.json", "zeta-serve.json", "lock"]) {
+    if (await Bun.file(resolve(devCache, state)).exists()) throw new Error("refusing to replace existing make dev state");
+  }
   await rm(devCache, { recursive: true, force: true });
   await mkdir(resolve(root, ".cache"), { recursive: true });
   await writeFile(webStamp, "test-web-stamp-1");
