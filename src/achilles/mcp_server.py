@@ -28,13 +28,11 @@ def build_mcp(store: PageStore):
 
     async def remove_connection(page_id: str, connection) -> None:
         sessions.get(page_id, set()).difference_update(
-            session
-            for session in sessions.get(page_id, ())
-            if session._connection is connection
+            session for session in sessions.get(page_id, ()) if session._connection is connection
         )
 
     async def notify(page_id: str) -> None:
-        print(f"mcp notify page={page_id} sessions={len(sessions.get(page_id, ())) }", flush=True)
+        print(f"mcp notify page={page_id} sessions={len(sessions.get(page_id, ()))}", flush=True)
         for session in list(sessions.get(page_id, ())):
             await session.send_tool_list_changed()
             print(f"mcp notify sent page={page_id}", flush=True)
