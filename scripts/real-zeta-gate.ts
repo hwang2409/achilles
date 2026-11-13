@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
+import { gateVim } from "./gate-vim";
 
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -595,6 +596,7 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
+  await gateVim(page, control, waitFor);
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
