@@ -5,10 +5,27 @@ import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, supportsFeature } from "./zeta";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { loadSession, openHomeSession, rebindPage } from "./zeta/session";
+import type { SessionLease } from "@fulcrum/zeta";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
 type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; layout: { blocks: Array<Record<string, unknown>> } };
+type Attachment = { page: Page; sessionId: string; lease: SessionLease };
+
+async function attachPage(client: ZetaClient, key: string): Promise<Attachment> {
+  const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" });
+  if (!loaded.ok) throw new Error("page not found");
+  const page = await loaded.json() as Page;
+  if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
+  const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
+  const binding = { cwd: page.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
+  const id = await openHomeSession(client, page.zeta_session_id, credential, page.workspace);
+  let lease = await loadSession(client, id);
+  const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
+  if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
+  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); await rebindPage(client, actual, binding); lease = await loadSession(client, actual); return { page, sessionId: actual, lease }; }
+  return { page, sessionId: id, lease };
+}
 
 export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
@@ -18,16 +35,8 @@ export function App() {
   useEffect(() => { let live = true; const key = location.pathname === "/" ? "home" : location.pathname.slice(1);
     const unsubscribe = connection.subscribe(() => { const next = connection.client; if (!next || connection.state.phase !== "connected") return; setClient(next);
       void (async () => { try {
-        const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); if (!loaded.ok) throw new Error("page not found"); const current = await loaded.json() as Page;
-        if (!supportsFeature(next, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
-        const credential = await fetch(`/api/pages/${current.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
-        const binding = { cwd: current.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
-        const id = await openHomeSession(next, current.zeta_session_id, credential, current.workspace); let lease = await loadSession(next, id); if (!live) { lease.release(); return; }
-        const saved = await fetch(`/api/pages/${current.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: current.zeta_session_id, session_id: id }) });
-        if (!saved.ok && saved.status !== 409) throw new Error(`could not save session mapping (${saved.status})`);
-        if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); await rebindPage(next, actual, binding); lease = await loadSession(next, actual); setSessionId(actual); }
-        else setSessionId(id);
-        setPage(current); setStore(lease.store);
+        const attached = await attachPage(next, key); if (!live) { attached.lease.release(); return; }
+        setSessionId(attached.sessionId); setPage(attached.page); setStore(attached.lease.store);
       } catch (caught) { if (live) setError(caught instanceof Error ? caught.message : String(caught)); } })(); });
     return () => { live = false; unsubscribe(); connection.stop(); };
   }, [connection]);

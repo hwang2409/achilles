@@ -13,10 +13,13 @@ const zetaHome = join(temp, "zeta-home"); const achillesHome = join(temp, "achil
 const cwd = join(temp, "cwd"); const control = join(temp, "control.json");
 const port = 5191; const origin = `http://127.0.0.1:${port}`;
 const children: ChildProcess[] = []; const logs = new Map<ChildProcess, string>();
-const redact = (text: string) => text.replace(/(bearer\.|controller_token|observer_token)[^\s,}\"]*/gi, "$1[redacted]");
+const redact = (text: string) => text
+  .replace(/(authorization\s*["']?\s*:\s*["']?bearer\s+)[^\s,}\"]*/gi, "$1[redacted]")
+  .replace(/(bearer\s+)[^\s,}\"]*/gi, "$1[redacted]")
+  .replace(/(controller_token|observer_token)[^\s,}\"]*/gi, "$1[redacted]");
 const start = (command: string, args: string[], env: NodeJS.ProcessEnv, cwdArg = root) => {
   const child = spawn(command, args, { cwd: cwdArg, env, stdio: ["ignore", "pipe", "pipe"] }); children.push(child);
-  logs.set(child, ""); child.stdout?.on("data", (data) => logs.set(child, logs.get(child)! + data)); child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + data)); return child;
+  logs.set(child, ""); child.stdout?.on("data", (data) => logs.set(child, logs.get(child)! + redact(String(data)))); child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + redact(String(data)))); return child;
 };
 const waitFor = async (check: () => Promise<boolean>, label: string) => { for (let i = 0; i < 300; i++) { if (await check()) return; await Bun.sleep(100); } throw new Error(`timed out waiting for ${label}`); };
 let browser;
@@ -35,13 +38,13 @@ try {
   let app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "achilles");
   browser = await chromium.launch({ headless: true }); const page = await browser.newPage(); const errors: string[] = []; const frames: string[] = [];
-  page.on("websocket", (socket) => { socket.on("framesent", (event) => frames.push(String(event.payload))); socket.on("framereceived", (event) => frames.push(String(event.payload))); });
-  page.on("pageerror", (e) => errors.push(e.message)); page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("websocket", (socket) => { socket.on("framesent", (event) => frames.push(redact(String(event.payload)))); socket.on("framereceived", (event) => frames.push(redact(String(event.payload)))); });
+  page.on("pageerror", (e) => errors.push(redact(e.message))); page.on("console", (m) => { if (m.type() === "error") errors.push(redact(m.text())); });
   await page.goto(origin); const field = page.getByRole("textbox", { name: "message" }); await field.waitFor({ timeout: 20000 }).catch(async () => { throw new Error(`composer missing: ${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`); });
   const homeSessionId = async () => page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId(); if (!first) throw new Error("home session id missing");
   const requests = () => frames.map((frame) => { try { return JSON.parse(frame); } catch { return null; } }).filter(Boolean);
-  if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "stale-session-id")) throw new Error("stale session was unexpectedly resumed");
+  if (requests().filter((frame) => frame.method === "resume" && frame.params?.session_id === "stale-session-id").length !== 1) throw new Error("stale session was not attempted exactly once");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1) throw new Error("stale session did not create exactly one replacement");
   const bindingRequests = requests().filter((frame) => ["new_session", "resume"].includes(frame.method));
   if (!bindingRequests.some((frame) => frame.params?.mcp_bindings?.[0]?.server === "achilles" && frame.params?.mcp_bindings?.[0]?.headers?.Authorization?.startsWith("Bearer "))) throw new Error("page binding was not sent on session attach");
@@ -53,7 +56,7 @@ try {
   const credential = (await Bun.file(join(achillesHome, "credentials/home")).text()).trim();
   const mcpHeaders = { Authorization: `Bearer ${credential}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" };
   let mcpSession = "";
-  const mcp = async (id: number, method: string, params: object) => { const headers = mcpSession ? { ...mcpHeaders, "mcp-session-id": mcpSession } : mcpHeaders; const response = await fetch(`${origin}/mcp/`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }); const next = response.headers.get("mcp-session-id"); if (next) mcpSession = next; if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} session=${mcpSession} ${await response.text()}`); return response.json(); };
+  const mcp = async (id: number, method: string, params: object) => { const headers = mcpSession ? { ...mcpHeaders, "mcp-session-id": mcpSession } : mcpHeaders; const response = await fetch(`${origin}/mcp/`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) }); const next = response.headers.get("mcp-session-id"); if (next) mcpSession = next; if (!response.ok) throw new Error(`mcp ${method} failed: ${response.status} (safe diagnostic: response body omitted)`); return response.json(); };
 
   await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const mode = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
@@ -88,7 +91,7 @@ try {
   await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
   if (!createdPage.zeta_session_id || createdPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
-  if (createdPage.layout?.blocks?.[0]?.text !== "from zeta" || !(await page.locator("body").innerText()).includes("from zeta")) throw new Error("created page layout did not render");
+  if (createdPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
   await page.goto(origin); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));

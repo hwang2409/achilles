@@ -65,7 +65,15 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                     {
                         "route": "/created",
                         "title": "created",
-                        "layout": {"blocks": [{"type": "text", "text": "from zeta"}]},
+                        "layout": {
+                            "blocks": [
+                                {
+                                    "type": "list",
+                                    "title": "created list",
+                                    "collection": "synthetic items",
+                                }
+                            ]
+                        },
                     },
                 )
             ]

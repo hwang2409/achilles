@@ -13,9 +13,13 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   if (id) {
-    const status = await client.request("status", {}) as Status;
-    if (status.session?.session_id !== id) id = null;
-    else await rebindPage(client, id, binding);
+    try {
+      await rebindPage(client, id, binding);
+    } catch (caught) {
+      const code = (caught as { data?: { code?: string } }).data?.code;
+      if (code !== "session_not_found") throw caught;
+      id = null;
+    }
   }
   if (!id) {
     const created = await client.request("new_session", binding) as { session?: { session_id?: string } };

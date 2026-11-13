@@ -41,10 +41,8 @@ def build_mcp(store: PageStore):
         _remove_connection(sessions, page_id, connection)
 
     async def notify(page_id: str) -> None:
-        print(f"mcp notify page={page_id} sessions={len(sessions.get(page_id, ()))}", flush=True)
         for session in list(sessions.get(page_id, ())):
             await session.send_tool_list_changed()
-            print(f"mcp notify sent page={page_id}", flush=True)
 
     async def list_tools(context, _params) -> ListToolsResult:
         token = _token(context)
@@ -52,7 +50,6 @@ def build_mcp(store: PageStore):
         if principal:
             page_sessions = sessions.setdefault(principal["id"], set())
             page_sessions.add(context.session)
-            print(f"mcp list page={principal['id']} sessions={len(page_sessions)}", flush=True)
             connection = context.session._connection
             cleanup_key = f"achilles-session-cleanup:{principal['id']}"
             if not connection.state.get(cleanup_key):
