@@ -268,15 +268,6 @@ try {
   });
   if (generated.result?.isError)
     throw new Error(`create_tool failed: ${JSON.stringify(generated)}`);
-  const refreshed = await homeMcp(8, "tools/list", {});
-  const refreshedNames =
-    refreshed.result?.tools?.map(
-      (tool: { name: string }) => `achilles__${tool.name}`,
-    ) ?? [];
-  if (!refreshedNames.includes("achilles__annotate_trace"))
-    throw new Error(
-      `missing generated tool on next catalog: ${JSON.stringify(refreshedNames)}`,
-    );
   const sessionBeforeToolTurn = await homeSessionId();
   const controlBeforeTool = JSON.parse(await Bun.file(control).text());
   const pidBeforeToolTurn = controlBeforeTool.pid;
@@ -285,6 +276,13 @@ try {
   ).length;
   await field.fill("annotate from the live zeta session");
   await field.press("Enter");
+  await waitFor(async () => {
+    const state = JSON.parse(await Bun.file(control).text());
+    return state.request_count > (controlBeforeTool.request_count ?? 0) && state.last_message.includes("annotate from the live zeta session");
+  }, "generated tool backend request");
+  const nextTurnCatalog = JSON.parse(await Bun.file(control).text());
+  if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
+    throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
   const annotationApproval = page.locator('[data-part="approval"]');
   await annotationApproval.waitFor({ timeout: 20000 }).catch(async () => {
     throw new Error(
