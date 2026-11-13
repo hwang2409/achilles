@@ -20,8 +20,9 @@ def test_create_page_commits_layout_and_audit(tmp_path) -> None:
         "/reports", "reports", {"blocks": [{"type": "text", "text": "hello"}]}
     )
     assert page["route"] == "/reports"
-    assert store.db.execute("SELECT digest FROM layout_version").fetchone()[0] == digest
-    assert store.db.execute("SELECT action FROM audit").fetchone()[0] == "create_page"
+    with store.transaction() as db:
+        assert db.execute("SELECT digest FROM layout_version").fetchone()[0] == digest
+        assert db.execute("SELECT action FROM audit").fetchone()[0] == "create_page"
     assert (tmp_path / "bundles" / f"{digest}.json").exists()
 
 
