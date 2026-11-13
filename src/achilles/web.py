@@ -121,7 +121,6 @@ def create_app() -> Starlette:
                     "title",
                     "zeta_session_id",
                     "active_layout_version",
-                    "create_mode",
                 )
             }
             | {
@@ -130,6 +129,7 @@ def create_app() -> Starlette:
             | {
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),
                 "layout": await anyio.to_thread.run_sync(store.layout, row["id"]),
+                "create_mode": bool(row["create_mode"]),
             }
         )
 
@@ -169,7 +169,15 @@ def create_app() -> Starlette:
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
         collection = request.path_params["collection"]
-        return JSONResponse(await anyio.to_thread.run_sync(store.records, page_id, collection))
+        raw_limit = request.query_params.get("limit", "100")
+        try:
+            limit = int(raw_limit)
+        except ValueError as exc:
+            raise HTTPException(400, "limit must be an integer") from exc
+        if not 1 <= limit <= 100:
+            raise HTTPException(400, "limit must be between 1 and 100")
+        records, total = await anyio.to_thread.run_sync(store.records, page_id, collection, limit)
+        return JSONResponse(records, headers={"x-achilles-total": str(total)})
 
     async def rollback_tool(request):
         if not _same_origin(request):

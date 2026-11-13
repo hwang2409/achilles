@@ -43,6 +43,7 @@ jobs:
       - run: bun scripts/fulcrum.ts
         env:
           FULCRUM_DIR: ${{ github.workspace }}/fulcrum
+      - run: bun test ./apps/web/src/
       - run: bun run typecheck
         working-directory: apps/web
       - run: bun run build
