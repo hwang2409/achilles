@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
+import { gateShell } from "./gate-shell";
 
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -229,6 +230,7 @@ try {
   const approvalCompleteBefore = await approvalComplete.count();
   await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+  await gateShell(page, first, waitFor);
   const credential = (
     await Bun.file(join(achillesHome, "credentials/home")).text()
   ).trim();

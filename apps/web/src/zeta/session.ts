@@ -30,9 +30,11 @@ export async function applyApprovalMode(client: ZetaClient, sessionId: string, m
 export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, approvalMode = "allow") {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
+  let name: string | null = null;
   if (id) {
     try {
-      await rebindPage(client, id, binding);
+      const resumed = await rebindPage(client, id, binding) as { session?: { name?: string | null } };
+      name = resumed.session?.name ?? null;
     } catch (caught) {
       const code = (caught as { data?: { code?: string } }).data?.code;
       if (code !== "session_not_found") throw caught;
@@ -40,11 +42,12 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
     }
   }
   if (!id) {
-    const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
+    const created = await client.request("new_session", binding) as { session?: { session_id?: string; name?: string | null } };
     id = created.session?.session_id ?? null;
+    name = created.session?.name ?? null;
     if (!id) throw new Error("zeta did not return a session id");
   }
-  return { id, ...await applyApprovalMode(client, id, approvalMode) };
+  return { id, name, ...await applyApprovalMode(client, id, approvalMode) };
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
