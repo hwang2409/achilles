@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -81,12 +81,7 @@ try {
   );
   for (const key of ["controller_token", "observer_token"])
     if (typeof pending[key] === "string") secrets.push(pending[key]);
-  const discovery = join(temp, "discovery.json");
-  await Bun.write(
-    discovery,
-    JSON.stringify({ ...pending, url: `ws://127.0.0.1:${pending.port}` }),
-  );
-  const appEnv = { ...env, ACHILLES_ZETA_DISCOVERY: discovery };
+  const appEnv = env;
   const seed = start(
     "uv",
     [
