@@ -45,7 +45,7 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => {
     if (await check()) return;
     await Bun.sleep(100);
   }
-  throw new Error(`timed out waiting for ${label}`);
+  throw new Error(`timed out waiting for ${label}; backend catalog=${await Bun.file(control).text()}`);
 };
 let browser;
 try {
@@ -207,6 +207,24 @@ try {
     capabilities: {},
     clientInfo: { name: "gate", version: "1" },
   });
+  await field.fill("catalog refresh");
+  await field.press("Enter");
+  await page.getByText("catalog ready", { exact: true }).waitFor({ timeout: 20000 });
+  const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
+  if (!backendSchemas.includes("achilles__create_page"))
+    throw new Error(
+      `backend did not receive achilles__create_page catalog: ${JSON.stringify(backendSchemas)}`,
+    );
+  await field.fill("create page");
+  await field.press("Enter");
+  const createApproval = page.locator('[data-part="approval"]');
+  await createApproval.waitFor({ timeout: 20000 }).catch(async () => {
+    throw new Error(
+      `backend did not receive achilles__create_page catalog: ${await Bun.file(control).text()}`,
+    );
+  });
+  await createApproval.getByRole("button", { name: /approve/i }).click();
+  await page.getByText("annotation complete", { exact: true }).waitFor({ timeout: 20000 });
   const catalog = await homeMcp(2, "tools/list", {});
   const names =
     catalog.result?.tools?.map(
@@ -266,9 +284,9 @@ try {
   await field.fill("annotate from the live zeta session");
   await field.press("Enter");
   const annotationApproval = page.locator('[data-part="approval"]');
-  await annotationApproval.waitFor({ timeout: 20000 }).catch(async (error) => {
+  await annotationApproval.waitFor({ timeout: 20000 }).catch(async () => {
     throw new Error(
-      `${error}\nbackend=${await Bun.file(control).text()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+      `backend did not receive achilles__annotate_trace catalog: ${await Bun.file(control).text()}`,
     );
   });
   await annotationApproval.getByRole("button", { name: /approve/i }).click();
