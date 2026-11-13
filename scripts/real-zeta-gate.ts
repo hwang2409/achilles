@@ -101,7 +101,7 @@ try {
       "run",
       "python",
       "-c",
-      "from achilles.web import _database; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); db.commit(); db.close()",
+      "from achilles.web import _database; import json; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); row=db.execute(\"SELECT document FROM layout_version WHERE page_id='home' ORDER BY version DESC LIMIT 1\").fetchone(); layout=json.loads(row[0]) if row else {'blocks':[]}; layout['blocks'].append({'type':'list','title':'trace annotations','collection':'trace_annotations'}); db.execute(\"INSERT OR IGNORE INTO layout_version VALUES('home',1,'gate',?,datetime('now'))\", (json.dumps(layout),)); db.execute(\"UPDATE layout_version SET document=? WHERE page_id='home' AND version=1\", (json.dumps(layout),)); db.commit(); db.close()",
     ],
     env,
   );
@@ -239,12 +239,14 @@ try {
   };
   const homeMcp = (id: number, method: string, params: object) =>
     mcp(credential, id, method, params);
-  const mode = await fetch(`${origin}/api/pages/home/create-mode`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ enabled: true }),
-  });
-  if (!mode.ok) throw new Error(`create mode toggle failed: ${mode.status}`);
+  const modeToggle = page.getByRole("button", { name: "create mode off", exact: true });
+  const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
+  await modeToggle.click();
+  const toggleResult = await toggleResponse;
+  if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  if ((await page.locator("header button").getAttribute("aria-pressed")) !== "true")
+    throw new Error("create mode toggle did not show on");
   await homeMcp(1, "initialize", {
     protocolVersion: "2025-03-26",
     capabilities: {},
@@ -333,6 +335,8 @@ try {
   const nextTurnCatalog = JSON.parse(await Bun.file(control).text());
   if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
+  const emptyRecords = page.getByText("no records yet", { exact: true });
+  await emptyRecords.waitFor({ state: "visible" });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async () => {
     throw new Error(
       `annotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
@@ -363,6 +367,7 @@ try {
   );
   if (!annotationResult || annotationResult.is_error)
     throw new Error(`generated tool result was missing or failed: ${JSON.stringify(controlAfterTool.tool_results)}`);
+  await page.getByRole("cell", { name: "from zeta", exact: true }).waitFor({ state: "visible" });
   const homeRecords = await (
     await fetch(`${origin}/api/pages/home/records/trace_annotations`, {
       headers: { Authorization: `Bearer ${credential}` },

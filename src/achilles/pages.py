@@ -249,14 +249,20 @@ class PageStore:
             ).fetchone()
             return json.loads(row[0]) if row else {"blocks": []}
 
-    def records(self, page_id: str, collection: str) -> list[dict[str, Any]]:
+    def records(
+        self, page_id: str, collection: str, limit: int = 100
+    ) -> tuple[list[dict[str, Any]], int]:
         with self._connect() as db:
+            total = db.execute(
+                "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=?",
+                (page_id, collection),
+            ).fetchone()[0]
             rows = db.execute(
                 "SELECT record_id, document FROM page_record "
-                "WHERE page_id=? AND collection=? ORDER BY created_at",
-                (page_id, collection),
+                "WHERE page_id=? AND collection=? ORDER BY created_at DESC, record_id DESC LIMIT ?",
+                (page_id, collection, limit),
             ).fetchall()
-        return [{**json.loads(row[1]), "record_id": row[0]} for row in rows]
+        return ([{**json.loads(row[1]), "record_id": row[0]} for row in rows], total)
 
     def set_create_mode(self, page_id: str, enabled: bool) -> sqlite3.Row:
         with self.transaction() as db:

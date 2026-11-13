@@ -9,8 +9,8 @@ import type { SessionLease } from "@fulcrum/zeta";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
-type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; layout: { blocks: Array<Record<string, unknown>> } };
-type Attachment = { page: Page; sessionId: string; lease: SessionLease };
+type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; layout: { blocks: Array<Record<string, unknown>> } };
+type Attachment = { page: Page; sessionId: string; lease: SessionLease; credential: string };
 
 function connectionFailure(state: ConnectionState): string | null {
   switch (state.phase) {
@@ -41,22 +41,23 @@ async function attachPage(client: ZetaClient, key: string): Promise<Attachment> 
   let lease = await loadSession(client, id);
   const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: id }) });
   if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
-  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); await rebindPage(client, actual, binding); lease = await loadSession(client, actual); return { page, sessionId: actual, lease }; }
-  return { page, sessionId: id, lease };
+  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); await rebindPage(client, actual, binding); lease = await loadSession(client, actual); return { page, sessionId: actual, lease, credential }; }
+  return { page, sessionId: id, lease, credential };
 }
 
 export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [page, setPage] = useState<Page | null>(null); const [store, setStore] = useState<ReturnType<typeof createRunStore> | null>(null);
-  const [client, setClient] = useState<ZetaClient | null>(null); const [sessionId, setSessionId] = useState<string | null>(null); const [error, setError] = useState<string | null>(null);
+  const [client, setClient] = useState<ZetaClient | null>(null); const [credential, setCredential] = useState(""); const [sessionId, setSessionId] = useState<string | null>(null); const [error, setError] = useState<string | null>(null); const [toggling, setToggling] = useState(false);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
-  const turn = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => store.getState().turn : () => "idle" as const);
+  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => { const state = store.getState(); return `${state.turn}:${state.outline.length}:${state.turns.length}`; } : () => "idle:0:0");
+  const turn = snapshot.split(":", 1)[0] as "idle" | "running";
   useEffect(() => { let live = true; let attempt = 0; let attachment: Attachment | null = null; const key = location.pathname === "/" ? "home" : location.pathname.slice(1);
     const unsubscribe = connection.subscribe(() => { const next = connection.client; if (!next || connection.state.phase !== "connected") return; const current = ++attempt; setClient(next); setError(null);
       void (async () => { try {
         const attached = await attachPage(next, key); if (!live || current !== attempt) { attached.lease.release(); return; }
         attachment?.lease.release(); attachment = attached;
-        setSessionId(attached.sessionId); setPage(attached.page); setStore(attached.lease.store);
+        setSessionId(attached.sessionId); setPage(attached.page); setCredential(attached.credential); setStore(attached.lease.store);
       } catch (caught) { if (live && current === attempt) setError(attachmentError(caught)); } })(); });
     return () => { live = false; attachment?.lease.release(); unsubscribe(); connection.stop(); };
   }, [connection]);
@@ -66,14 +67,22 @@ export function App() {
   if (!store || !client || !sessionId || !page) return <main className="shell"><p role="status">connecting to zeta…</p></main>;
   const approval = createApprovalDecider(client, store); const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} onApprove={r => approval("approve", r)} onDeny={r => approval("deny", r)} /> };
   const send = async (text: string, intent: { steer: boolean }, track: (id: string) => void) => { const delivery_id = crypto.randomUUID(); track(delivery_id); await client.request(intent.steer ? "steer" : "send", { session_id: sessionId, text, delivery_id }); };
-  return <RunProvider store={store}><main className="shell"><header><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span></header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} />)}</section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
+  const toggle = async () => { setToggling(true); try { const response = await fetch(`/api/pages/${page.id}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !page.create_mode }) }); if (!response.ok) throw new Error(`could not update create mode (${response.status})`); const result = await response.json() as { create_mode: boolean }; setPage({ ...page, create_mode: result.create_mode }); } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); } finally { setToggling(false); } };
+  return <RunProvider store={store}><main className="shell"><header><div><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span></div><button type="button" aria-pressed={page.create_mode} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button></header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={page.id} credential={credential} refreshKey={snapshot} />)}</section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
 }
 
-function LayoutBlock({ block }: { block: Record<string, unknown> }) {
+function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
-  if (block.type === "list") return <p>{String(block.title)}: {String(block.collection)}</p>;
+  if (block.type === "list") return <RecordList title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
   if (block.type === "detail") return <p>{String(block.title)}: {Array.isArray(block.fields) ? block.fields.join(", ") : ""}</p>;
   if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
   return null;
 }
+function RecordList({ title, collection, pageId, credential, refreshKey }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string }) {
+  const [records, setRecords] = useState<Record<string, unknown>[]>([]); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null);
+  useEffect(() => { let live = true; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async response => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live) { setRecords(value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch(caught => { if (live) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, refreshKey]);
+  const columns = [...new Set(records.flatMap(record => Object.keys(record).filter(key => key !== "record_id")))]; if (records.some(record => "record_id" in record)) columns.push("record_id");
+  return <section className="record-list"><h2>{title}</h2>{error ? <p role="alert">{error}</p> : records.length === 0 ? <p>no records yet</p> : <><table><thead><tr>{columns.map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{records.map((record, index) => <tr key={String(record.record_id ?? index)}>{columns.map(column => <td key={column}>{formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 100 && <p>showing newest 100 of {total}</p>}</>}</section>;
+}
+function formatRecordValue(value: unknown): string { return value !== null && typeof value === "object" ? JSON.stringify(value) : String(value ?? ""); }

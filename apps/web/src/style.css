@@ -5,3 +5,5 @@ body { margin: 0; }
 header { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #363840; padding-bottom: .75rem; }
 h1 { font-size: 1.1rem; margin: 0; } header span { color: #9296a5; font-size: .8rem; }
 .transcript { flex: 1; min-height: 0; overflow: auto; padding: 1rem 0; }
+header button { color: var(--fulcrum-text); background: var(--fulcrum-surface-raised); border: 1px solid var(--fulcrum-border); border-radius: .35rem; padding: .4rem .65rem; } header button:disabled { opacity: .6; }
+.record-list { margin: 1rem 0; overflow-x: auto; } .record-list h2 { font-size: 1rem; margin: 0 0 .5rem; } table { width: 100%; border-collapse: collapse; } th, td { text-align: left; border: 1px solid var(--fulcrum-border); padding: .4rem .5rem; vertical-align: top; } th { color: var(--fulcrum-muted); font-weight: 600; } .record-list p { color: var(--fulcrum-muted); }
