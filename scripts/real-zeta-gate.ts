@@ -152,9 +152,9 @@ try {
       (frame) =>
         frame.method === "resume" &&
         frame.params?.session_id === "stale-session-id",
-    ).length !== 1
+    ).length !== 0
   )
-    throw new Error("stale session was not resumed exactly once");
+    throw new Error("stale session was unexpectedly resumed");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not create exactly one replacement");
   await field.fill("prove chat");
