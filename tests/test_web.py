@@ -22,6 +22,16 @@ def isolated_homes(monkeypatch, tmp_path):
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
 
 
+def test_approval_mode_validation(monkeypatch) -> None:
+    monkeypatch.delenv("ACHILLES_APPROVAL", raising=False)
+    assert web.approval_mode() == "allow"
+    monkeypatch.setenv("ACHILLES_APPROVAL", "ask")
+    assert web.approval_mode() == "ask"
+    monkeypatch.setenv("ACHILLES_APPROVAL", "invalid")
+    with pytest.raises(ValueError, match="ACHILLES_APPROVAL must be allow or ask"):
+        web.approval_mode()
+
+
 def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "achilles"
     home.mkdir(mode=0o755)
