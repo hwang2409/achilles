@@ -10,6 +10,7 @@ uv run pytest
 git clone https://github.com/hwang2409/fulcrum .cache/fulcrum
 git -C .cache/fulcrum checkout --detach "$(cat fulcrum.rev)"
 (cd .cache/fulcrum && bun install --frozen-lockfile)
+bun test scripts/
 FULCRUM_DIR=$PWD/.cache/fulcrum bun scripts/fulcrum.ts
 git clone https://github.com/hwang2409/zeta .cache/zeta
 git -C .cache/zeta checkout --detach "$(cat zeta.rev)"
