@@ -79,6 +79,7 @@ export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id"
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
+export const supportsFeature = (client: ZetaClient, feature: string) => client.features.includes(feature);
 
 async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) {
   const url = new URL(discovery.url);

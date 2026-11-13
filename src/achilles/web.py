@@ -164,6 +164,18 @@ def create_app() -> Starlette:
             ).fetchall()
         return JSONResponse([{"record_id": row[0], **json.loads(row[1])} for row in rows])
 
+    async def rollback_tool(request):
+        page_id = request.path_params["id"]
+        body = await request.json()
+        try:
+            await anyio.to_thread.run_sync(
+                store.rollback_tool, page_id, request.path_params["name"], body["version"]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        await notify_tools_changed(page_id)
+        return JSONResponse({"ok": True})
+
     async def create_mode(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
@@ -175,6 +187,7 @@ def create_app() -> Starlette:
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled must be boolean")
         row = await anyio.to_thread.run_sync(store.set_create_mode, row["id"], enabled)
+        await notify_tools_changed(row["id"])
         return JSONResponse(
             {
                 "id": row["id"],
@@ -183,7 +196,7 @@ def create_app() -> Starlette:
             }
         )
 
-    mcp, mcp_lifespan = build_mcp(store)
+    mcp, mcp_lifespan, notify_tools_changed = build_mcp(store)
     app = Starlette(
         lifespan=mcp_lifespan,
         routes=[
@@ -191,6 +204,7 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),

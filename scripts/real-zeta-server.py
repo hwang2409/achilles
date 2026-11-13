@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
-from zeta.core.session import SessionManager
 from zeta.protocol.types import TextContent, ToolCall
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
@@ -51,9 +50,6 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         )
     )
     advance(home, expected_epoch=0)
-    manager = SessionManager(home)
-    pending = manager.create(provider="codex", model="offline", cwd=cwd, name="pending proof")
-    pending.store.close()
     turns = [
         ScriptedTurn(
             content=[TextContent("assistant ready")],
@@ -107,7 +103,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             backend_factory=lambda provider, model, selected_home: (backend, model or "offline"),
         ),
         control,
-        pending.metadata.session_id,
+        "stale-session-id",
     )
 
 
