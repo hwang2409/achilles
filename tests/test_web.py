@@ -36,13 +36,13 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     home = tmp_path / "achilles"
     home.mkdir(mode=0o755)
     monkeypatch.setenv("ACHILLES_HOME", str(home))
-    client = TestClient(web.create_app())
+    client = chat_client()
     assert (
         client.put("/api/pages/home/session", json={"session_id": "session-a"}).status_code == 200
     )
 
     def save(value: str):
-        with TestClient(web.create_app()) as active:
+        with chat_client() as active:
             return active.put(
                 "/api/pages/home/session",
                 json={"expected_session_id": "session-a", "session_id": value},
@@ -59,6 +59,140 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
+
+
+def chat_client() -> TestClient:
+    return TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
+    )
+
+
+def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("notes", "/notes", "notes", "2025-01-01", "2025-01-01"),
+        )
+        for session_id, page_id, stamp in (
+            ("a", "home", "2025-01-01"),
+            ("b", "notes", "2025-01-02"),
+            ("c", "home", "2025-01-02"),
+            ("d", "notes", "2025-01-02"),
+        ):
+            db.execute(
+                "INSERT INTO chat(session_id,page_id,title,created_at,updated_at) "
+                "VALUES(?,?,?,?,?)",
+                (session_id, page_id, f"chat {session_id}", stamp, stamp),
+            )
+    client = chat_client()
+    first = client.get("/api/chats?limit=2").json()
+    first_rows = first["chats"] if isinstance(first, dict) else first
+    cursor = first["next"] if isinstance(first, dict) else first_rows[-1]["session_id"]
+    assert [row["session_id"] for row in first_rows] == ["d", "c"]
+    assert client.patch("/api/chats/c", json={"title": "renamed"}).status_code == 200
+    second = client.get(f"/api/chats?limit=2&before={cursor}").json()
+    second_rows = second["chats"] if isinstance(second, dict) else second
+    assert [row["session_id"] for row in second_rows] == ["b", "a"]
+    assert first_rows[0]["page_route"] == "/notes"
+    assert first_rows[0]["page_title"] == "notes"
+    assert client.get("/api/chats?limit=201").status_code == 400
+    assert client.get("/api/chats?limit=invalid").status_code == 400
+    assert client.get("/api/chats?before=missing").status_code == 400
+
+
+def test_chat_search_escapes_like_wildcards(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        for session_id, title in (
+            ("percent", "100% done"),
+            ("underscore", "under_score"),
+            ("plain", "plain"),
+        ):
+            db.execute(
+                "INSERT INTO chat(session_id,page_id,title,created_at,updated_at) "
+                "VALUES(?,?,?,?,?)",
+                (session_id, "home", title, "2025-01-01", "2025-01-01"),
+            )
+    client = chat_client()
+    assert [row["session_id"] for row in client.get("/api/chats?q=%25").json()["chats"]] == [
+        "percent"
+    ]
+    assert [row["session_id"] for row in client.get("/api/chats?q=_").json()["chats"]] == [
+        "underscore"
+    ]
+    assert [row["session_id"] for row in client.get("/api/chats?q=PLAIN").json()["chats"]] == [
+        "plain"
+    ]
+
+
+def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
+    client = chat_client()
+    path = "/api/pages/home/chats"
+    assert client.post(path, json=[]).status_code == 400
+    assert client.post(path, json={"session_id": "new-session"}).status_code == 200
+    with store.transaction() as db:
+        db.execute("UPDATE chat SET updated_at='old' WHERE session_id='new-session'")
+    response = client.post(path, json={"session_id": "new-session"})
+    assert response.status_code == 200
+    assert response.json()["updated_at"] != "old"
+    with store.transaction() as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM chat WHERE session_id='new-session'").fetchone()[0]
+            == 1
+        )
+    assert (
+        client.post("/api/pages/other/chats", json={"session_id": "new-session"}).status_code == 409
+    )
+
+
+def test_patch_chat_updates_fields_and_validates_input() -> None:
+    client = chat_client()
+    client.post("/api/pages/home/chats", json={"session_id": "editable"})
+    response = client.patch(
+        "/api/chats/editable", json={"title": "renamed", "last_state": "approval"}
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "renamed"
+    assert response.json()["last_state"] == "approval"
+    for body in (
+        {},
+        {"title": 1},
+        {"title": "x" * 201},
+        {"last_state": "unknown"},
+        {"unknown": True},
+    ):
+        assert client.patch("/api/chats/editable", json=body).status_code == 400
+    assert client.patch("/api/chats/missing", json={"title": "x"}).status_code == 404
+
+
+def test_chat_routes_require_same_origin() -> None:
+    client = TestClient(web.create_app(), client=("127.0.0.1", 1234))
+    headers = {"host": "127.0.0.1:5190", "origin": "http://evil.test"}
+    assert client.get("/api/chats", headers=headers).status_code == 403
+    assert (
+        client.put(
+            "/api/pages/home/session", headers=headers, json={"session_id": "session"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/pages/home/chats", headers=headers, json={"session_id": "session"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch("/api/chats/session", headers=headers, json={"title": "x"}).status_code == 403
+    )
 
 
 def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
