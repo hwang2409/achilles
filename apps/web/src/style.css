@@ -1,9 +1,12 @@
-:root { font-family: system-ui, sans-serif; color: #e8e8ec; background: #15161a; --fulcrum-bg: #15161a; --fulcrum-surface: #202229; --fulcrum-surface-raised: #292b34; --fulcrum-text: #e8e8ec; --fulcrum-muted: #9296a5; --fulcrum-border: #363840; }
+:root { color: var(--fulcrum-fg); background: var(--fulcrum-bg); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, monospace); }
 * { box-sizing: border-box; }
-body { margin: 0; }
+body { margin: 0; background: var(--fulcrum-bg); }
+button, input, textarea, select { font: inherit; }
+code, pre, kbd { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
+:root[data-density="compact"] { --achilles-gap: 6px; }
 .shell { height: 100vh; max-width: 58rem; margin: auto; display: flex; flex-direction: column; padding: 1rem; }
-header { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #363840; padding-bottom: .75rem; }
-h1 { font-size: 1.1rem; margin: 0; } header span { color: #9296a5; font-size: .8rem; }
+header { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--fulcrum-border); padding-bottom: .75rem; }
+h1 { font-size: 1.1rem; margin: 0; } header span { color: var(--fulcrum-muted); font-size: .8rem; }
 .transcript { flex: 1; min-height: 0; overflow: auto; padding: 1rem 0; }
-header button { color: var(--fulcrum-text); background: var(--fulcrum-surface-raised); border: 1px solid var(--fulcrum-border); border-radius: .35rem; padding: .4rem .65rem; } header button:disabled { opacity: .6; }
+header button { color: var(--fulcrum-fg); background: var(--fulcrum-surface); border: 1px solid var(--fulcrum-border); padding: .4rem .65rem; } header button:disabled { opacity: .6; }
 .record-list { margin: 1rem 0; overflow-x: auto; } .record-list h2 { font-size: 1rem; margin: 0 0 .5rem; } table { width: 100%; border-collapse: collapse; } th, td { text-align: left; border: 1px solid var(--fulcrum-border); padding: .4rem .5rem; vertical-align: top; } th { color: var(--fulcrum-muted); font-weight: 600; } .record-list p { color: var(--fulcrum-muted); }

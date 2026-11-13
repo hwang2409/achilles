@@ -6,10 +6,11 @@ import { createConnection, supportsFeature, type ConnectionState } from "./zeta"
 import type { ZetaClient } from "@fulcrum/zeta";
 import { applyApprovalMode, loadSession, openHomeSession } from "./zeta/session";
 import type { SessionLease } from "@fulcrum/zeta";
-import "./style.css";
+import { SettingsControl } from "./SettingsDialog";
+import { getSettings } from "./settings";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
-type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
+type Page = { id: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; server_forces_ask?: boolean; layout: { blocks: Array<Record<string, unknown>> } };
 type Attachment = { page: Page; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null };
 
 function connectionFailure(state: ConnectionState): string | null {
@@ -36,12 +37,13 @@ async function attachPage(client: ZetaClient, key: string): Promise<Attachment> 
   const page = await loaded.json() as Page;
   if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
   const credential = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }).then(r => r.json()).then(v => v.credential as string);
-  let session = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, page.approval_mode ?? "allow");
+  page.server_forces_ask = page.approval_mode === "ask";
+  const desiredApprovalMode = page.server_forces_ask || (page.zeta_session_id === null && !getSettings().autoApproveDefault) ? "ask" : "allow";
+  let session = await openHomeSession(client, page.zeta_session_id, credential, page.workspace, desiredApprovalMode);
   let lease = await loadSession(client, session.id);
   const saved = await fetch(`/api/pages/${page.id}/session`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: page.zeta_session_id, session_id: session.id }) });
   if (!saved.ok && saved.status !== 409) { lease.release(); throw new Error(`could not save session mapping (${saved.status})`); }
-  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); session = await openHomeSession(client, actual, credential, page.workspace, page.approval_mode ?? "allow"); lease = await loadSession(client, session.id); }
-  const desiredApprovalMode = page.approval_mode ?? "allow";
+  if (saved.status === 409) { const actual = (await saved.json()).session_id as string; lease.release(); session = await openHomeSession(client, actual, credential, page.workspace, desiredApprovalMode); lease = await loadSession(client, session.id); }
   page.approval_mode = session.approvalMode;
   return { page, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? desiredApprovalMode : null };
 }
@@ -83,7 +85,7 @@ export function App() {
   const approval = createApprovalDecider(client, store); const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} onApprove={r => approval("approve", r)} onDeny={r => approval("deny", r)} /> };
   const send = async (text: string, intent: { steer: boolean }, track: (id: string) => void) => { const delivery_id = crypto.randomUUID(); track(delivery_id); await client.request(intent.steer ? "steer" : "send", { session_id: sessionId, text, delivery_id }); };
   const toggle = async () => { setToggleError(null); setToggling(true); try { const response = await fetch(`/api/pages/${page.id}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !page.create_mode }) }); if (!response.ok) throw new Error(`could not update create mode (${response.status})`); const result = await response.json() as { create_mode: boolean }; setPage({ ...page, create_mode: result.create_mode }); } catch (caught) { setToggleError(caught instanceof Error ? caught.message : String(caught)); } finally { setToggling(false); } };
-  return <RunProvider store={store}><main className="shell"><header><div><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span>{page.approval_mode === "allow" && <span aria-label="auto-approve">auto-approve</span>}</div><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button>{toggleError && <p role="alert">{toggleError}</p>}</header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={page.id} credential={credential} refreshKey={refreshKey} />)}</section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
+  return <RunProvider store={store}><main className="shell"><SettingsControl serverForcesAsk={page.server_forces_ask} /><header><div><h1>{page.title}</h1><span data-session-id={sessionId}>zeta session</span>{page.approval_mode === "allow" && <span aria-label="auto-approve">auto-approve</span>}</div><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button>{toggleError && <p role="alert">{toggleError}</p>}</header><section className="transcript"><Timeline renderers={appRenderers} />{page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={page.id} credential={credential} refreshKey={refreshKey} />)}</section><Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: sessionId })} placeholder="message zeta" /></main></RunProvider>;
 }
 
 function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
