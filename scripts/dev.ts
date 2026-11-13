@@ -12,6 +12,12 @@ const cache = resolve(root, ".cache/dev");
 type Discovery = { pid: number; port: number; origins: string[] };
 export type ServeDecision = { kind: "reuse"; document: Discovery; origin: string } | { kind: "start" } | { kind: "origin-missing"; command: string };
 export type ProcessIdentity = { pid: number; started: string; command: string };
+type McpConfig = { transport?: string; url?: string };
+export type McpDecision = { kind: "add" } | { kind: "unchanged" } | { kind: "different"; command: string };
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
 
 export function serveDecision(document: unknown, requestedOrigin: string, command: string | null): ServeDecision {
   if (!document || typeof document !== "object") return { kind: "start" };
@@ -21,8 +27,13 @@ export function serveDecision(document: unknown, requestedOrigin: string, comman
   const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
   const allowed = origins.includes(requestedOrigin) ? requestedOrigin : origins.includes(alternate) ? alternate : null;
   if (allowed) return { kind: "reuse", document: value as Discovery, origin: allowed };
-  const all = [...origins, requestedOrigin].map((item) => `--ws-origin ${JSON.stringify(item)}`).join(" ");
-  return { kind: "origin-missing", command: `zeta serve --ws ${value.port} ${all}` };
+  return { kind: "origin-missing", command: `${command} --ws-origin ${shellQuote(requestedOrigin)}` };
+}
+
+export function mcpDecision(current: McpConfig | null, url: string): McpDecision {
+  if (current === null) return { kind: "add" };
+  if (current.transport === "streamable-http" && current.url === url) return { kind: "unchanged" };
+  return { kind: "different", command: `zeta mcp remove achilles --scope user && zeta mcp add --scope user --url ${shellQuote(url)} achilles` };
 }
 
 export function ownedProcessMatches(saved: ProcessIdentity, current: ProcessIdentity | null): boolean {
@@ -37,7 +48,7 @@ function run(args: string[], cwd = root, capture = false) {
 async function processIdentity(pid: number): Promise<ProcessIdentity | null> {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const started = Bun.spawnSync(["ps", "-p", String(pid), "-o", "lstart="]);
-  const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]);
+  const command = Bun.spawnSync(["ps", "-o", "args=", "-p", String(pid)]);
   if (started.exitCode || command.exitCode) return null;
   return { pid, started: started.stdout.toString().trim(), command: command.stdout.toString().trim() };
 }
@@ -85,12 +96,17 @@ async function backupOnce(file: string) {
 }
 async function ensureMcp(url: string) {
   const file = resolve(home, "mcp.json");
-  let current: any = null;
+  let current: McpConfig | null = null;
   const shown = Bun.spawnSync(["zeta", "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: process.env });
-  if (shown.exitCode === 0) { try { current = JSON.parse(shown.stdout.toString()); } catch {} }
-  if (current?.config?.transport === "streamable-http" && current?.config?.url === url) { console.log("mcp.json: unchanged"); return; }
+  if (shown.exitCode === 0) {
+    try { current = JSON.parse(shown.stdout.toString()).config; } catch { throw new Error("zeta mcp show returned invalid JSON"); }
+  } else if (!shown.stdout.toString().includes("unknown MCP server: achilles")) {
+    throw new Error(`zeta mcp show failed: ${shown.stdout.toString().trim() || shown.stderr.toString().trim()}`);
+  }
+  const decision = mcpDecision(current, url);
+  if (decision.kind === "unchanged") { console.log("mcp.json: unchanged"); return; }
+  if (decision.kind === "different") throw new Error(`mcp.json: achilles differs; fix it with: ${decision.command}`);
   await mkdir(dirname(file), { recursive: true }); await backupOnce(file);
-  if (current) run(["zeta", "mcp", "remove", "achilles", "--scope", "user"], home);
   run(["zeta", "mcp", "add", "--scope", "user", "--url", url, "achilles"], home);
   console.log("mcp.json: changed");
 }
@@ -115,7 +131,7 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   const ws = await freePort(); let control = await freePort(); while (control === ws) control = await freePort(); await mkdir(cache, { recursive: true });
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
   const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-origin", requestedOrigin];
-  const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
+  const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: process.env, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
   catch (error) { child.kill(); await child.exited; throw new Error(`${error instanceof Error ? error.message : error}. fix the error and retry:\n${await tail(logPath)}`); }
@@ -156,6 +172,18 @@ async function prerequisites() {
   const missing: string[] = [];
   for (const command of ["uv", "bun", "git", "zeta"]) { const result = Bun.spawnSync(["sh", "-c", `command -v ${command}`]); if (result.exitCode) missing.push(`${command}: install ${command} and put it on PATH`); }
   if (missing.length) { for (const item of missing) console.error(`missing prerequisite: ${item}`); process.exit(1); }
+  await mkdir(home, { recursive: true });
+  const checks: [string[], string[]][] = [
+    [["zeta", "mcp", "--help"], ["add", "show", "remove"]],
+    [["zeta", "mcp", "show", "--help"], ["--scope", "--json"]],
+    [["zeta", "mcp", "add", "--help"], ["--scope", "--url"]],
+    [["zeta", "mcp", "remove", "--help"], ["--scope"]],
+  ];
+  for (const [args, required] of checks) {
+    const result = Bun.spawnSync(args, { cwd: home, env: process.env });
+    const help = `${result.stdout.toString()}${result.stderr.toString()}`;
+    if (result.exitCode !== 0 || required.some((value) => !help.includes(value))) throw new Error("upgrade zeta: uv tool upgrade zeta");
+  }
 }
 async function dev() {
   await prerequisites(); run(["uv", "sync", "--group", "test"]); const fulcrumStamp = await ensureFulcrum();

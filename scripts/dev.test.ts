@@ -1,17 +1,27 @@
 import { expect, test } from "bun:test";
-import { ownedProcessMatches, serveDecision } from "./dev";
+import { mcpDecision, ownedProcessMatches, serveDecision } from "./dev";
 
-const zetaCommand = "/usr/local/bin/zeta serve --ws 43003";
+const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
 
 test("serve discovery requires a live zeta process and an exact origin", () => {
   expect(serveDecision(null, "http://127.0.0.1:43002", null).kind).toBe("start");
   expect(serveDecision({ pid: 123, port: 43003, origins: ["http://127.0.0.1:43002"] }, "http://127.0.0.1:43002", zetaCommand).kind).toBe("reuse");
   const localhost = serveDecision({ pid: 123, port: 43003, origins: ["http://localhost:43002"] }, "http://127.0.0.1:43002", zetaCommand);
   expect(localhost).toMatchObject({ kind: "reuse", origin: "http://localhost:43002" });
-  expect(serveDecision({ pid: 123, port: 43003, origins: [] }, "http://127.0.0.1:43002", zetaCommand).kind).toBe("origin-missing");
+  expect(serveDecision({ pid: 123, port: 43003, origins: [] }, "http://127.0.0.1:43002", zetaCommand)).toEqual({
+    kind: "origin-missing",
+    command: `${zetaCommand} --ws-origin 'http://127.0.0.1:43002'`,
+  });
   expect(serveDecision({ pid: 123, port: 43003, origins: ["https://example.test"] }, "http://127.0.0.1:43002", zetaCommand).kind).toBe("origin-missing");
   expect(serveDecision({ pid: 123, port: 43003, origins: ["http://127.0.0.1:43002"] }, "http://127.0.0.1:43002", null).kind).toBe("start");
   expect(serveDecision({ pid: 123, port: 43003, origins: ["http://127.0.0.1:43002"] }, "http://127.0.0.1:43002", "python unrelated.py").kind).toBe("start");
+});
+
+test("an existing different MCP entry is left unchanged with an exact fix command", () => {
+  expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/")).toEqual({
+    kind: "different",
+    command: "zeta mcp remove achilles --scope user && zeta mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles",
+  });
 });
 
 test("stop ownership requires pid, start time, and exact command", () => {
