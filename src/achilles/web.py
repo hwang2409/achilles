@@ -156,9 +156,70 @@ def create_app() -> Starlette:
             )
         except KeyError as exc:
             raise HTTPException(404, "page not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         if not saved:
             return JSONResponse({"session_id": actual}, status_code=409)
         return JSONResponse({"session_id": actual})
+
+    async def chats(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        try:
+            limit = int(request.query_params.get("limit", "50"))
+        except ValueError as exc:
+            raise HTTPException(400, "limit must be an integer") from exc
+        if not 1 <= limit <= 200:
+            raise HTTPException(400, "limit must be between 1 and 200")
+        try:
+            rows = await anyio.to_thread.run_sync(
+                store.chats,
+                limit,
+                request.query_params.get("before"),
+                request.query_params.get("q"),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(rows)
+
+    async def register_chat(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        body = await request.json()
+        session_id = body.get("session_id") if isinstance(body, dict) else None
+        if not isinstance(session_id, str) or not session_id:
+            raise HTTPException(400, "session_id must be a non-empty string")
+        try:
+            row = await anyio.to_thread.run_sync(
+                store.register_chat, request.path_params["id"], session_id
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "page not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return JSONResponse(row)
+
+    async def patch_chat(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        body = await request.json()
+        if not isinstance(body, dict) or not body or not set(body) <= {"title", "last_state"}:
+            raise HTTPException(400, "provide only title or last_state")
+        title = body.get("title")
+        if "title" in body and (title is not None and not isinstance(title, str)):
+            raise HTTPException(400, "title must be a string or null")
+        if isinstance(title, str) and len(title) > 200:
+            raise HTTPException(400, "title must be at most 200 characters")
+        state = body.get("last_state")
+        if "last_state" in body and state not in {None, "idle", "running", "approval", "failed"}:
+            raise HTTPException(400, "invalid last_state")
+        try:
+            row = await anyio.to_thread.run_sync(
+                store.update_chat, request.path_params["session_id"], body
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "chat not found") from exc
+        return JSONResponse(row)
 
     async def records(request):
         page_id = request.path_params["id"]
@@ -224,6 +285,9 @@ def create_app() -> Starlette:
         lifespan=mcp_lifespan,
         routes=[
             Route("/api/zeta/discovery", _discovery),
+            Route("/api/chats", chats),
+            Route("/api/chats/{session_id}", patch_chat, methods=["PATCH"]),
+            Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
