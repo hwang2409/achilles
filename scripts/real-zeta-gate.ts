@@ -100,12 +100,15 @@ try {
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== createdPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
+  mcpSession = "";
   await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
+  const refreshed = await mcp(7, "tools/list", {});
+  if (refreshed.result?.tools?.some((tool: { name: string }) => tool.name === "create_page")) throw new Error("reconnected catalog retained disabled create_page");
   const invalid = await mcp(5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
   const crossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!crossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
-  console.log("expected skip: refresh preserving tools waits for zeta fix: bound server stays failed after reconnect");
+  console.log("reconnect refresh asserted: disabled create_page was absent from the new catalog");
   console.log("expected skip: reload during pending approval waits for fulcrum hello params");
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
