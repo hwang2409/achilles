@@ -183,10 +183,12 @@ function InteractiveVimComposer({ state, onSubmit, onStop, label = "message", pl
       const modeBefore = vimMode(view);
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
-        if (event.shiftKey && modeBefore === "insert") return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (!event.shiftKey) submit();
+        if (event.shiftKey && modeBefore === "insert") {
+          const selection = view.state.selection.main;
+          view.dispatch({ changes: { from: selection.from, to: selection.to, insert: "\n" }, selection: { anchor: selection.from + 1 } });
+        } else if (!event.shiftKey) submit();
         return;
       }
       if (event.key === "Escape" && modeBefore === "normal") {
@@ -200,7 +202,7 @@ function InteractiveVimComposer({ state, onSubmit, onStop, label = "message", pl
         return;
       }
       const ctrlRedo = event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r";
-      const allowed = ctrlRedo || event.key === "Tab" || event.key === "Escape" || /^[0-9hjklwbeiaIoOAxdcypuvVG$]$/.test(event.key);
+      const allowed = ctrlRedo || event.key === "Tab" || event.key === "Escape" || /^[0-9ghjklwbeiaIoOAxdcypuvVG$]$/.test(event.key);
       if (!allowed) {
         event.preventDefault();
         event.stopImmediatePropagation();
