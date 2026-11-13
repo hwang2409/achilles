@@ -111,9 +111,9 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   const decision = serveDecision(document, requestedOrigin, identity?.command ?? null);
   if (decision.kind === "reuse") { console.log(`reusing zeta serve on port ${decision.document.port}`); return { origin: decision.origin }; }
   if (decision.kind === "origin-missing") throw new Error(`zeta serve is running without ${requestedOrigin}; leave it running and restart it with: ${decision.command}`);
-  const ws = await freePort(); await mkdir(cache, { recursive: true });
+  const ws = await freePort(); let control = await freePort(); while (control === ws) control = await freePort(); await mkdir(cache, { recursive: true });
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
-  const args = ["zeta", "serve", "--ws", String(ws), "--ws-origin", requestedOrigin];
+  const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-origin", requestedOrigin];
   const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
