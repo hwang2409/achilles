@@ -539,7 +539,7 @@ try {
     children.map(
       (child) =>
         new Promise<void>((resolve, reject) => {
-          if (child.exitCode !== null) return resolve();
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
           const timer = setTimeout(
             () => reject(new Error("child did not exit after SIGTERM")),
             5000,
