@@ -231,9 +231,7 @@ class PageStore:
                 (session_id, now(), page_id, expected),
             ).rowcount
             db.commit()
-            row = db.execute(
-                "SELECT zeta_session_id FROM page WHERE id=?", (page_id,)
-            ).fetchone()
+            row = db.execute("SELECT zeta_session_id FROM page WHERE id=?", (page_id,)).fetchone()
             if row is None:
                 raise KeyError(page_id)
             return updated == 1, row[0]
