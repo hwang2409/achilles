@@ -38,8 +38,11 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
         if (!unsupportedSettings(caught)) throw caught;
         settings = {};
       }
-      if (!settings.model) throw new Error("zeta did not provide a default model");
-      const created = await client.request("new_session", { ...binding, model: settings.model, approval_mode: approvalMode }) as { session?: { session_id?: string } };
+      let model = settings.model;
+      const catalog = await client.request("model_catalog", {}) as { models?: string[]; providers?: Record<string, string> };
+      if (!model || !catalog.providers?.[model]) model = catalog.models?.[0];
+      if (!model) throw new Error("zeta did not provide a default model");
+      const created = await client.request("new_session", { ...binding, model, approval_mode: approvalMode }) as { session?: { session_id?: string } };
       id = created.session?.session_id ?? null;
     }
     if (!id) throw new Error("zeta did not return a session id");
