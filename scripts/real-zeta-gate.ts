@@ -93,6 +93,7 @@ try {
   if (!createdPage.zeta_session_id || createdPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
   if (createdPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
   await page.goto(origin); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
@@ -100,15 +101,27 @@ try {
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== createdPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
+  const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
+  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
+  await field.fill("post-reconnect catalog"); await field.press("Enter");
+  await waitFor(async () => {
+    const schemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
+    return schemas.some((schema: string) => schema.startsWith("achilles__"));
+  }, "post-reconnect achilles catalog");
+  const postReconnect = JSON.parse(await Bun.file(control).text());
+  if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
+  if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
+  if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after reload");
   mcpSession = "";
   await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
-  const refreshed = await mcp(7, "tools/list", {});
-  if (refreshed.result?.tools?.some((tool: { name: string }) => tool.name === "create_page")) throw new Error("reconnected catalog retained disabled create_page");
   const invalid = await mcp(5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
   const crossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!crossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
-  console.log("reconnect refresh asserted: disabled create_page was absent from the new catalog");
+  console.log("reconnect refresh asserted: reload kept the session and refreshed the achilles catalog");
   console.log("expected skip: reload during pending approval waits for fulcrum hello params");
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
