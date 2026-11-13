@@ -12,6 +12,8 @@ const cache = resolve(root, ".cache/dev");
 type Discovery = { pid: number; port: number; origins: string[] };
 export type ServeDecision = { kind: "reuse"; document: Discovery; origin: string } | { kind: "start" } | { kind: "origin-missing"; command: string };
 export type ProcessIdentity = { pid: number; started: string; command: string };
+type AchillesState = ProcessIdentity & { stamp: string };
+export type AchillesDecision = { kind: "start" } | { kind: "restart"; saved: AchillesState } | { kind: "reuse" } | { kind: "foreign"; pid: number };
 type McpConfig = { transport?: string; url?: string };
 export type McpDecision = { kind: "add" } | { kind: "unchanged" } | { kind: "different"; command: string };
 
@@ -30,6 +32,10 @@ export function serveDecision(document: unknown, requestedOrigin: string, comman
   return { kind: "origin-missing", command: `${command} --ws-origin ${shellQuote(requestedOrigin)}` };
 }
 
+export function mcpUrl(port: number): string {
+  return `http://127.0.0.1:${port}/mcp/`;
+}
+
 export function mcpDecision(current: McpConfig | null, url: string): McpDecision {
   if (current === null) return { kind: "add" };
   if (current.transport === "streamable-http" && current.url === url) return { kind: "unchanged" };
@@ -38,6 +44,13 @@ export function mcpDecision(current: McpConfig | null, url: string): McpDecision
 
 export function ownedProcessMatches(saved: ProcessIdentity, current: ProcessIdentity | null): boolean {
   return current !== null && saved.pid === current.pid && saved.started === current.started && saved.command === current.command;
+}
+
+export function achillesDecision(saved: AchillesState | null, current: ProcessIdentity | null, stamp: string, portPid: number | null): AchillesDecision {
+  if (saved && ownedProcessMatches(saved, current)) return saved.stamp === stamp ? { kind: "reuse" } : { kind: "restart", saved };
+  if (current) return { kind: "foreign", pid: current.pid };
+  if (portPid) return { kind: "foreign", pid: portPid };
+  return { kind: "start" };
 }
 
 function run(args: string[], cwd = root, capture = false) {
@@ -140,19 +153,27 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
   console.log(`started zeta serve on port ${ws}`); return { origin: requestedOrigin };
 }
-async function portIsFree() {
-  const probe = createServer();
-  try { await new Promise<void>((ok, fail) => { probe.once("error", fail); probe.listen(port, "127.0.0.1", () => probe.close(() => ok())); }); return true; } catch { return false; }
+async function portPid(): Promise<number | null> {
+  const result = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
+  if (result.exitCode !== 0) return null;
+  const pid = Number(result.stdout.toString().trim().split("\n")[0]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
-async function startAchilles(appOrigin: string) {
-  if (!(await portIsFree())) {
-    try {
-      const response = await fetch(`${appOrigin}/api/zeta/discovery`, { headers: { Origin: appOrigin } });
-      const value = await response.json();
-      if (response.ok && typeof value?.url === "string") { console.log(`achilles already running on ${port}; open ${appOrigin}`); return; }
-    } catch {}
-    throw new Error(`port ${port} is busy; leave that process running and use PORT=<free-port>`);
-  }
+async function stopAchilles(saved: ProcessIdentity) {
+  process.kill(saved.pid, "SIGTERM");
+  for (let i = 0; i < 100 && await processIdentity(saved.pid); i++) await Bun.sleep(100);
+  if (await processIdentity(saved.pid)) throw new Error(`pid ${saved.pid} did not stop; stop it with: kill ${saved.pid}`);
+}
+async function startAchilles(appOrigin: string, stamp: string) {
+  const stateFile = resolve(cache, "achilles.json");
+  let saved: AchillesState | null = null;
+  try { saved = JSON.parse(await readFile(stateFile, "utf8")); } catch {}
+  const pid = await portPid();
+  const current = saved ? await processIdentity(saved.pid) : pid ? await processIdentity(pid) : null;
+  const decision = achillesDecision(saved, current, stamp, pid);
+  if (decision.kind === "reuse") { console.log(`achilles already running on ${port}; unchanged, open ${appOrigin}`); return; }
+  if (decision.kind === "foreign") { console.log(`achilles on ${port} was not started by make dev; to let make dev manage it: kill ${decision.pid} && make dev PORT=${port}`); return; }
+  if (decision.kind === "restart") await stopAchilles(decision.saved);
   await mkdir(cache, { recursive: true }); const logPath = resolve(cache, "achilles.log"); const log = Bun.file(logPath);
   const args = ["uv", "run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)];
   const child = Bun.spawn(args, { stdout: log, stderr: log, env: process.env, detached: true });
@@ -165,7 +186,7 @@ async function startAchilles(appOrigin: string) {
   }
   if (!ready) { child.kill(); await child.exited; throw new Error(`timed out waiting for achilles:\n${await tail(logPath)}`); }
   const identity = await processIdentity(child.pid); if (!identity) throw new Error("achilles disappeared during startup");
-  await writeFile(resolve(cache, "achilles.json"), JSON.stringify(identity)); child.unref();
+  await writeFile(resolve(cache, "achilles.json"), JSON.stringify({ ...identity, stamp })); child.unref();
   console.log(`achilles is ready at ${appOrigin}`);
 }
 async function zetaInstallCommand() {
@@ -213,7 +234,8 @@ async function dev() {
   let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
   if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");
   const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin);
-  await ensureMcp(`${selected.origin}/mcp/`); await startAchilles(selected.origin);
+  const achillesStamp = await digest([webStamp, ...(await filesUnder(resolve(root, "src/achilles"))), resolve(root, "pyproject.toml"), resolve(root, "uv.lock")]);
+  await ensureMcp(mcpUrl(port)); await startAchilles(selected.origin, achillesStamp);
   const opener = process.platform === "darwin" ? "open" : "xdg-open";
   if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, selected.origin]); else console.log(`open ${selected.origin} in your browser`);
 }
