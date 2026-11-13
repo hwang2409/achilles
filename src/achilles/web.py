@@ -20,6 +20,13 @@ def _home() -> Path:
     return Path(os.environ.get("ACHILLES_HOME", Path.home() / ".local/share/achilles"))
 
 
+def approval_mode() -> str:
+    value = os.environ.get("ACHILLES_APPROVAL", "allow")
+    if value not in {"allow", "ask"}:
+        raise ValueError("ACHILLES_APPROVAL must be allow or ask")
+    return value
+
+
 def _database():
     """compatibility entry point used by the real-zeta fixture seeder."""
     return PageStore(_home())._connect()
@@ -116,6 +123,9 @@ def create_app() -> Starlette:
                     "active_layout_version",
                     "create_mode",
                 )
+            }
+            | {
+                "approval_mode": approval_mode(),
             }
             | {
                 "workspace": str(store.root / "pages" / row["id"] / "workspace"),

@@ -81,6 +81,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(content=[TextContent("v2 turn")]),
         ScriptedTurn(content=[TextContent("rollback turn")]),
         ScriptedTurn(content=[TextContent("post-reconnect complete")]),
+        ScriptedTurn(
+            content=[TextContent("allow tool ready")],
+            tool_calls=[ToolCall("allow-read", "read", {"path": str(cwd / "fixture.txt")})],
+        ),
+        ScriptedTurn(content=[TextContent("allow complete")]),
     ]
 
     def record_request(messages, tool_schemas):
