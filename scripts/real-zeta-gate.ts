@@ -155,11 +155,11 @@ try {
       (frame) =>
         frame.method === "resume" &&
         frame.params?.session_id === "stale-session-id",
-    ).length !== 0
+    ).length !== 1
   )
-    throw new Error("stale session was unexpectedly resumed");
+    throw new Error("stale session was not resumed first");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
-    throw new Error("stale session did not create exactly one replacement");
+    throw new Error("stale session did not fall back to exactly one replacement");
   await field.fill("prove chat");
   await field.press("Enter");
   await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20000 }).catch(async () => { throw new Error(`assistant missing body=${await page.locator("body").innerText()} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
