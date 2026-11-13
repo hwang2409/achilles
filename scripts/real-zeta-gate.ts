@@ -169,7 +169,6 @@ try {
   await page
     .getByText("approval complete", { exact: true })
     .waitFor({ timeout: 20000 });
-  console.log("SKIP reload/resume checks: zeta ff5ae215 reconnect bug leaves the bound server failed");
   const credential = (
     await Bun.file(join(achillesHome, "credentials/home")).text()
   ).trim();
@@ -419,46 +418,60 @@ try {
     },
   });
   if (!late.result?.isError || (await fetch(`${origin}/api/pages/late`)).status !== 404) throw new Error("late create_page call mutated state");
+
+  const reconnectOn = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+  if (!reconnectOn.ok) throw new Error(`reconnect create mode on failed: ${reconnectOn.status}`);
+  const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
+  let createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (createdPage.zeta_session_id) throw new Error("created page got a session before navigation");
+  await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (!createdPage.zeta_session_id || createdPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
+  if (createdPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
+  await page.goto(origin); await page.getByText("approval complete", { exact: true }).waitFor({ timeout: 20000 });
+  const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
+  app.kill("SIGTERM");
+  await new Promise<void>((resolve) => app.once("exit", () => resolve()));
+  app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
+  await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "achilles restart");
+  const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
+  const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
+  if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== createdPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
+  const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
+  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
+  const beforeReconnect = JSON.parse(await Bun.file(control).text());
+  await field.fill("post-reconnect catalog"); await field.press("Enter");
+  await waitFor(async () => {
+    const state = JSON.parse(await Bun.file(control).text());
+    return state.request_count > (beforeReconnect.request_count ?? 0) && state.last_message.includes("post-reconnect catalog");
+  }, "post-reconnect backend request");
+  await page.getByText("post-reconnect complete", { exact: true }).waitFor({ timeout: 20000 });
+  const postReconnect = JSON.parse(await Bun.file(control).text());
+  if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
+  if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
+  if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after reload");
+  mcpSession = "";
+  await mcp(3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
+  const invalid = await mcp(5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
+  if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
+  const crossPage = await mcp(6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
+  if (!crossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
+  console.log("reconnect refresh asserted: reload kept the session and refreshed the achilles catalog");
+  console.log("expected skip: reload during pending approval waits for fulcrum hello params");
+
   const lateAnnotation = await homeMcp(14, "tools/call", { name: "annotate_trace", arguments: { text: "after create mode", id: "late-annotation" } });
   if (lateAnnotation.result?.isError) throw new Error(`generated tool failed after create mode: ${JSON.stringify(lateAnnotation)}`);
   const lateRecords = await (await fetch(`${origin}/api/pages/home/records/trace_annotations`, { headers: { Authorization: `Bearer ${credential}` } })).json();
   if (!Array.isArray(lateRecords) || lateRecords.length !== 2) throw new Error(`late generated tool result was not recorded: ${JSON.stringify(lateRecords)}`);
-  if (errors.length)
-    throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
-  app.kill("SIGTERM");
-  await new Promise<void>((resolve) => app.once("exit", () => resolve()));
-  app = start(
-    "uv",
-    ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)],
-    appEnv,
-  );
-  await waitFor(
-    async () =>
-      await fetch(origin).then(
-        (r) => r.ok,
-        () => false,
-      ),
-    "achilles restart",
-  );
-  const homeAfterRestart = (
-    await (await fetch(`${origin}/api/pages/home`)).json()
-  ).zeta_session_id;
-  const createdAfterRestart = await (
-    await fetch(`${origin}/api/pages/created`)
-  ).json();
-  if (
-    homeAfterRestart !== homeAfterCreate ||
-    createdAfterRestart.zeta_session_id !== createdPage.zeta_session_id
-  )
-    throw new Error("page sessions changed across achilles restart");
-  if (process.env.SCREENSHOT_PATH)
-    await page.screenshot({
-      path: process.env.SCREENSHOT_PATH,
-      fullPage: true,
-    });
-  console.log(
-    `real-zeta gate passed: session ${first}, created /created, late call rejected`,
-  );
+  if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
+  const captured = [...logs.values()].join("\n");
+  if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
+  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
+  console.log(`real-zeta gate passed: session ${first}, created /created, late call rejected`);
+
 } finally {
   await browser?.close().catch(() => {});
   for (const child of children) child.kill("SIGTERM");
