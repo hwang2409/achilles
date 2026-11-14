@@ -13,8 +13,8 @@ export async function waitForIdleTurn(
       (await composer.locator('[data-part="composer-stop"]').count()) === 0 &&
       (await runState.innerText()) === "idle",
     "idle transcript turn",
-  ).catch(async () => {
-    throw new Error(`timed out waiting for the transcript turn to become idle: ${JSON.stringify({
+  ).catch(async (error) => {
+    throw new Error(`${error}\ntranscript turn state: ${JSON.stringify({
       composer: await composer.getAttribute("data-state"),
       submit: await composer.locator('[data-part="composer-submit"]').innerText().catch(() => null),
       stop: await composer.locator('[data-part="composer-stop"]').count(),
@@ -72,6 +72,7 @@ export async function gateTranscript(
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");
 
+  await waitForIdleTurn(page, waitFor);
   await field.fill("stream enough lines to overflow");
   await field.press("Enter");
   const stream = messages.filter({ hasText: "stream line 000" });
