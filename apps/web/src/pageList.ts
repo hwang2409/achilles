@@ -23,7 +23,7 @@ export function createListOwner<K, T, M>(
   firstPageSize: number,
   maxPageSize: number,
 ) {
-  type MoreWaiter = { index: number; resolve: (item: T | null) => void };
+  type MoreWaiter = { index: number; after?: string; resolve: (item: T | null) => void };
   type Operation = {
     kind: "refresh" | "more";
     generation: number;
@@ -43,8 +43,13 @@ export function createListOwner<K, T, M>(
     publish(state);
   };
   const owns = (candidate: Operation) => operation === candidate && candidate.generation === generation;
+  const waiterItem = (waiter: MoreWaiter, items: T[] | null) => {
+    if (!items) return null;
+    const anchor = waiter.after === undefined ? -1 : items.findIndex((item) => itemKey(item) === waiter.after);
+    return items[anchor >= 0 ? anchor + 1 : waiter.index] ?? null;
+  };
   const settle = (candidate: Operation, items: T[] | null = null) => {
-    for (const waiter of candidate.waiters) waiter.resolve(items?.[waiter.index] ?? null);
+    for (const waiter of candidate.waiters) waiter.resolve(waiterItem(waiter, items));
     candidate.finish();
     if (operation === candidate) operation = null;
   };
@@ -120,7 +125,8 @@ export function createListOwner<K, T, M>(
       const candidate = operation;
       const index = candidate.targetDepth;
       candidate.targetDepth += firstPageSize;
-      return new Promise<T | null>((resolve) => candidate.waiters.push({ index, resolve }));
+      const after = state.items?.at(-1);
+      return new Promise<T | null>((resolve) => candidate.waiters.push({ index, after: after && itemKey(after), resolve }));
     }
     if (operation) return Promise.resolve(null);
     const key = activeKey;
@@ -129,7 +135,8 @@ export function createListOwner<K, T, M>(
     const { candidate } = makeOperation("more", index + firstPageSize);
     update({ ...state, loading: true });
     return new Promise<T | null>((resolve) => {
-      candidate.waiters.push({ index, resolve });
+      const after = state.items?.at(-1);
+      candidate.waiters.push({ index, after: after && itemKey(after), resolve });
       void runMore(candidate, key, before);
     });
   };

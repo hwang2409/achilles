@@ -77,7 +77,7 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
       expect(h.calls[2].before).toBe("A");
       h.succeed(2, page(["B", "D"], "D"));
       await refresh;
-      expect(await more).toEqual({ id: "B" });
+      expect(await more).toEqual({ id: "D" });
       expect(h.state().items).toEqual(items("X", "A", "B", "D"));
     },
   },
@@ -120,8 +120,8 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
       await Promise.resolve();
       h.succeed(3, page(["D", "E"], "E"));
       await refresh;
-      expect(await first).toEqual({ id: "B" });
-      expect(await second).toEqual({ id: "D" });
+      expect(await first).toEqual({ id: "C" });
+      expect(await second).toEqual({ id: "C" });
       expect(h.state().items).toEqual(items("X", "A", "B", "C", "D", "E"));
     },
   },

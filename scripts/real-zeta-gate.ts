@@ -279,6 +279,8 @@ try {
         await page.keyboard.press("Tab");
         const loadOlder = page.getByRole("button", { name: "load 50 older" });
         await assertActive("chat load-older button", loadOlder);
+        const boundaryChat = await rows.last().getAttribute("data-chat-id");
+        if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
         let firstPageHeld = false;
         let releaseFirstPage!: () => void;
         const firstPageReleased = new Promise<void>((resolve) => { releaseFirstPage = resolve; });
@@ -298,8 +300,10 @@ try {
           await loadOlder.click();
           releaseFirstPage();
           await waitFor(async () => (await rows.count()) > 50, "older chats");
-          await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
-          await assertActive("chat load-older success", rows.nth(50));
+          const boundary = page.locator(`[data-chat-id="${boundaryChat}"]`);
+          const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
+          await waitFor(async () => await boundary.evaluate((row) => row.nextElementSibling === document.activeElement), "first newly loaded chat row focus");
+          await assertActive("chat load-older success", firstNewlyLoaded);
           await page.locator(`[data-chat-id="${createdChat}"]`).waitFor({ state: "attached" });
           if (await rows.count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
         } finally {
