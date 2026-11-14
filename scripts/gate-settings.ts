@@ -60,6 +60,12 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("desktop settings escape did not restore opener focus"); });
 
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  if (!await page.evaluate(() => document.activeElement === document.body)) throw new Error("could not blur focus to body");
+  await openSettings(page);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("body-opened settings escape did not focus the composer"); });
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
   const menuButton = page.getByRole("button", { name: "open menu" });
