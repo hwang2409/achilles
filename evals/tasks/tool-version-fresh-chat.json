@@ -1,0 +1,93 @@
+{
+  "id": "tool-version-fresh-chat",
+  "page_plan": [
+    {
+      "alias": "reading",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 10,
+  "steps": [
+    {
+      "id": "publish-v2",
+      "kind": "prompt",
+      "page": "reading",
+      "chat": "author-chat",
+      "prompt": "add an optional numeric rating to the existing add_book tool, but keep old books working"
+    },
+    {
+      "id": "use-v2",
+      "kind": "prompt",
+      "page": "reading",
+      "chat": "fresh-chat",
+      "prompt": "add Dune with a rating of 5, then list all books so I can see the old one too"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_book",
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "list_books",
+        "operation": "list",
+        "collection": "books"
+      }
+    ],
+    "records": [
+      {
+        "id": "legacy-book",
+        "collection": "books",
+        "data": {
+          "title": "Legacy Book"
+        }
+      }
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "list",
+          "title": "Books",
+          "collection": "books"
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "v2-used",
+      "type": "tool_evolution",
+      "page": "reading",
+      "chat": "fresh-chat",
+      "value": {
+        "tool": "add_book",
+        "from": 1,
+        "to": 2,
+        "new_value": 5,
+        "legacy_record": "legacy-book",
+        "read_tool": "list_books"
+      }
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "reading"
+    }
+  ]
+}
