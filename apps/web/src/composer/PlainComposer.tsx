@@ -138,7 +138,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       <div data-part="composer-bar">
         <p
           data-part="composer-status"
-          data-tone={model.error?.kind === "uncertain" ? "warning" : model.error ? "danger" : message ? "busy" : undefined}
+          data-tone={model.error?.kind === "uncertain" || model.error?.kind === "dropped" ? "warning" : model.error ? "danger" : message ? "busy" : undefined}
           title={model.error?.text}
         >
           <span

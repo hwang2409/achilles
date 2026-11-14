@@ -669,6 +669,12 @@ try {
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-light-1440.png"), fullPage: true });
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-1440.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
+    await page.screenshot({ path: join(screenshotDir, "steer-notice-after-light-390.png"), fullPage: true });
+    await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
+    await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-390.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
   }
   if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("dropped steer did not keep its draft");
   const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
