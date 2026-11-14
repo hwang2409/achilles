@@ -62,7 +62,11 @@ function useFocusAfterCommit() {
     pending.current = null;
     target?.()?.focus();
   });
-  return (target: () => HTMLElement | null) => { pending.current = target; };
+  const [, commit] = useState(0);
+  return (target: () => HTMLElement | null) => {
+    pending.current = target;
+    commit((value) => value + 1);
+  };
 }
 
 function groupLabel(value: string) {

@@ -29,7 +29,7 @@ function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
-  useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  useLayoutEffect(() => { if (focus && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
   const adapterProps = {
     ...props,
     defaultValue: draft,
