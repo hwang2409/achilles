@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor, wait
 import pytest
 from jsonschema import Draft202012Validator
 
-from achilles.mcp_server import _validate_create
 from achilles.pages import PageStore
 from achilles.records import call_record
 from achilles.tools import CREATE_TOOL_SCHEMA, ValidationError
@@ -34,9 +33,18 @@ BUNDLE = {
 }
 
 
-@pytest.mark.parametrize("bundle", [BUNDLE])
-def test_tool_schema_accepts_validator_valid_bundle(bundle):
+@pytest.mark.parametrize("operation", ["list", "get", "insert", "update"])
+def test_every_operation_matches_catalog_and_store(tmp_path, operation):
+    bundle = {
+        **BUNDLE,
+        "name": f"{operation}_annotation",
+        "implementation": {**BUNDLE["implementation"], "operation": operation},
+    }
     assert Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    created, _ = store.create_tool("home", bundle)
+    assert created["name"] == bundle["name"]
 
 
 @pytest.mark.parametrize(
@@ -44,35 +52,76 @@ def test_tool_schema_accepts_validator_valid_bundle(bundle):
     [
         {**BUNDLE, "implementation": {**BUNDLE["implementation"], "operation": "delete"}},
         {**BUNDLE, "implementation": {**BUNDLE["implementation"], "collection": "Not valid"}},
-        {
-            **BUNDLE,
-            "implementation": {**BUNDLE["implementation"], "data_schema": "not a schema"},
-        },
+        {**BUNDLE, "name": "create_page"},
+        {**BUNDLE, "extra": True},
     ],
 )
-def test_tool_schema_rejects_invalid_bundle(bundle):
+def test_schema_expressible_bundle_errors_fail_catalog_and_store(tmp_path, bundle):
     assert not Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
-    with pytest.raises(ValueError):
-        from achilles.tools import validate_bundle
-
-        validate_bundle(bundle)
-
-
-def test_invalid_nested_create_input_has_safe_structured_error():
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
     with pytest.raises(ValidationError) as caught:
-        _validate_create(
-            "create_tool",
-            {
-                "bundle": {
-                    **BUNDLE,
-                    "implementation": {**BUNDLE["implementation"], "operation": "delete"},
-                }
-            },
-        )
+        store.create_tool("home", bundle)
     assert caught.value.code == "invalid_input"
-    assert caught.value.path == "bundle.implementation.operation"
-    assert "delete" in caught.value.expected
-    assert "/" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [
+        ({"type": "not-a-real-type"}, "valid JSON Schema"),
+        ({"description": "x" * 16_385}, "serialized size <= 16384 bytes"),
+    ],
+)
+def test_nested_schema_semantics_fail_store_with_structured_error(tmp_path, schema, expected):
+    bundle = {**BUNDLE, "implementation": {**BUNDLE["implementation"], "data_schema": schema}}
+    assert Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    with pytest.raises(ValidationError) as caught:
+        store.create_tool("home", bundle)
+    assert caught.value.path == "/implementation/data_schema"
+    assert caught.value.expected == expected
+
+
+@pytest.mark.parametrize(
+    "implementation",
+    [
+        {**BUNDLE["implementation"], "operation": "sk-secret-do-not-echo"},
+        {**BUNDLE["implementation"], "collection": "/Users/henry/private/path"},
+    ],
+)
+def test_structured_errors_never_echo_rejected_values(tmp_path, implementation):
+    bundle = {**BUNDLE, "implementation": implementation}
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    with pytest.raises(ValidationError) as caught:
+        store.create_tool("home", bundle)
+    error = {
+        "code": caught.value.code,
+        "path": caught.value.path,
+        "expected": caught.value.expected,
+    }
+    encoded = json.dumps(error)
+    assert "sk-secret-do-not-echo" not in encoded
+    assert "/Users/henry/private/path" not in encoded
+    assert caught.value.path.startswith("/implementation/")
+
+
+@pytest.mark.parametrize(
+    ("extra_key", "expected"),
+    [
+        ("safe_extra", "additional properties not allowed: safe_extra"),
+        ("sk-secret/do-not-echo", "additional properties not allowed"),
+    ],
+)
+def test_additional_property_errors_only_name_safe_identifiers(tmp_path, extra_key, expected):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    with pytest.raises(ValidationError) as caught:
+        store.create_tool("home", {**BUNDLE, extra_key: True})
+    assert caught.value.expected == expected
+    if extra_key != "safe_extra":
+        assert extra_key not in str(caught.value)
 
 
 def test_sqlite_is_owned_by_pages_module():
@@ -154,7 +203,7 @@ def test_reserved_bundle_names_are_rejected(tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
     for name in ("create_page", "create_tool"):
-        with pytest.raises(ValueError, match="reserved"):
+        with pytest.raises(ValidationError, match="not one of"):
             store.create_tool("home", {**BUNDLE, "name": name})
 
 

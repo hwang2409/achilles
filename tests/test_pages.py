@@ -4,19 +4,22 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from achilles.pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, PageStore, validate_layout
+from achilles.tools import ValidationError
 
 
 @pytest.mark.parametrize(
-    "layout",
+    ("layout", "assigned_tools"),
     [
-        {"blocks": []},
-        {"blocks": [{"type": "text", "text": "ok"}]},
-        {"blocks": [{"type": "detail", "title": "x", "fields": ["id"]}]},
-        {"blocks": [{"type": "metric", "label": "runs", "value": "3"}]},
+        ({"blocks": []}, set()),
+        ({"blocks": [{"type": "text", "text": "ok"}]}, set()),
+        ({"blocks": [{"type": "detail", "title": "x", "fields": ["id"]}]}, set()),
+        ({"blocks": [{"type": "metric", "label": "runs", "value": "3"}]}, set()),
+        ({"blocks": [{"type": "list", "title": "runs", "collection": "runs"}]}, set()),
+        ({"blocks": [{"type": "form", "title": "add", "tool": "add_run"}]}, {"add_run"}),
     ],
 )
-def test_layout_schema_accepts_validator_valid_samples(layout):
-    validate_layout(layout)
+def test_every_layout_variant_matches_catalog_schema(layout, assigned_tools):
+    validate_layout(layout, assigned_tools)
     assert Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
 
 
@@ -28,25 +31,29 @@ def test_layout_schema_accepts_validator_valid_samples(layout):
         {"blocks": [{"type": "unknown"}]},
     ],
 )
-def test_layout_schema_rejects_validator_invalid_samples(layout):
+def test_invalid_layouts_fail_catalog_and_production(layout):
     assert not Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError) as caught:
         validate_layout(layout)
+    assert caught.value.code == "invalid_input"
 
 
-def test_create_page_schema_rejects_reserved_route():
+def test_create_page_schema_rejects_reserved_route_through_store(tmp_path):
     value = {"route": "/api/report", "title": "report", "layout": {"blocks": []}}
     assert not Draft202012Validator(CREATE_PAGE_SCHEMA).is_valid(value)
-
-
-def test_layout_rejects_unknown_key() -> None:
-    with pytest.raises(ValueError, match="invalid keys"):
-        validate_layout({"blocks": [{"type": "text", "text": "ok", "extra": True}]})
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    with pytest.raises(ValidationError) as caught:
+        store.create_page(**value)
+    assert caught.value.path == "/route"
+    assert caught.value.expected.startswith("pattern ")
 
 
 def test_layout_rejects_unknown_tool_reference() -> None:
-    with pytest.raises(ValueError, match="unknown tool reference"):
-        validate_layout({"blocks": [{"type": "form", "title": "x", "tool": "other-page"}]})
+    with pytest.raises(ValidationError) as caught:
+        validate_layout({"blocks": [{"type": "form", "title": "x", "tool": "other"}]})
+    assert caught.value.path == "/blocks/0/tool"
+    assert caught.value.expected == "assigned tool name"
 
 
 def test_create_page_commits_layout_and_audit(tmp_path) -> None:

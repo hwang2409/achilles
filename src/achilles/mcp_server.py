@@ -5,14 +5,14 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import anyio
-from jsonschema import Draft202012Validator
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from .pages import CREATE_PAGE_SCHEMA, PageStore
 from .records import call_record
-from .tools import CREATE_TOOL_SCHEMA, ValidationError
+from .tools import CREATE_TOOL_SCHEMA
+from .validation import ValidationError, validate_schema
 
 
 def _token(context):
@@ -51,12 +51,9 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
     )
 
 
-def _validate_create(name: str, args: dict[str, Any]) -> None:
+def _validate_create(name: str, args: Any) -> None:
     schema = CREATE_PAGE_SCHEMA if name == "create_page" else CREATE_TOOL_SCHEMA
-    error = next(iter(Draft202012Validator(schema).iter_errors(args)), None)
-    if error:
-        path = ".".join(str(part) for part in error.absolute_path) or "$"
-        raise ValidationError("invalid_input", path, error.message)
+    validate_schema(args, schema)
 
 
 def build_mcp(store: PageStore):
@@ -90,7 +87,7 @@ def build_mcp(store: PageStore):
                 [
                     Tool(
                         name="create_page",
-                        description="create a page-owned page; available only in create mode",
+                        description="create a page; available only in create mode",
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
                     Tool(
@@ -98,7 +95,8 @@ def build_mcp(store: PageStore):
                         description=(
                             "create a page-owned immutable declarative tool version; "
                             "available only in create mode; operations are list, get, "
-                            "insert, or update"
+                            "insert, or update; nested schemas must be valid JSON Schema; "
+                            "bundle <= 64 KB"
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
