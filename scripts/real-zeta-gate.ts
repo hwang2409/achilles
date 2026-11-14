@@ -289,6 +289,7 @@ try {
   await field.fill("catalog refresh");
   await field.press("Enter");
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
+  await page.locator('[data-part="composer"][data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
   if (!backendSchemas.includes("achilles__create_tool"))
     throw new Error(
