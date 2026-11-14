@@ -9,8 +9,10 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from .pages import PageStore
+from .pages import CREATE_PAGE_SCHEMA, PageStore
 from .records import call_record
+from .tools import CREATE_TOOL_SCHEMA
+from .validation import ValidationError, validate_schema
 
 
 def _token(context):
@@ -33,6 +35,25 @@ def _text(value: Any) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(value, sort_keys=True))]
     )
+
+
+def _safe_error(exc: ValidationError) -> CallToolResult:
+    return CallToolResult(
+        isError=True,
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"code": exc.code, "path": exc.path, "expected": exc.expected}, sort_keys=True
+                ),
+            )
+        ],
+    )
+
+
+def _validate_create(name: str, args: Any) -> None:
+    schema = CREATE_PAGE_SCHEMA if name == "create_page" else CREATE_TOOL_SCHEMA
+    validate_schema(args, schema)
 
 
 def build_mcp(store: PageStore):
@@ -66,27 +87,18 @@ def build_mcp(store: PageStore):
                 [
                     Tool(
                         name="create_page",
-                        description="create a new Achilles page",
-                        inputSchema={
-                            "type": "object",
-                            "properties": {
-                                "route": {"type": "string"},
-                                "title": {"type": "string"},
-                                "layout": {"type": "object"},
-                            },
-                            "required": ["route", "title", "layout"],
-                            "additionalProperties": False,
-                        },
+                        description="create a page; available only in create mode",
+                        inputSchema=CREATE_PAGE_SCHEMA,
                     ),
                     Tool(
                         name="create_tool",
-                        description="create a page-local data tool",
-                        inputSchema={
-                            "type": "object",
-                            "properties": {"bundle": {"type": "object"}},
-                            "required": ["bundle"],
-                            "additionalProperties": False,
-                        },
+                        description=(
+                            "create a page-owned immutable declarative tool version; "
+                            "available only in create mode; operations are list, get, "
+                            "insert, or update; nested schemas must be valid JSON Schema; "
+                            "bundle <= 64 KB"
+                        ),
+                        inputSchema=CREATE_TOOL_SCHEMA,
                     ),
                 ]
             )
@@ -114,6 +126,7 @@ def build_mcp(store: PageStore):
                     content=[TextContent(type="text", text="forbidden: create mode is off")],
                 )
             try:
+                _validate_create(params.name, args)
                 if params.name == "create_page":
                     created, digest = await anyio.to_thread.run_sync(
                         store.create_page, args["route"], args["title"], args["layout"], page["id"]
@@ -121,9 +134,11 @@ def build_mcp(store: PageStore):
                     result = {"page_id": created["id"], "route": created["route"], "digest": digest}
                 else:
                     created, digest = await anyio.to_thread.run_sync(
-                        store.create_tool, page["id"], args["bundle"]
+                        store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
                     result = {**created, "digest": digest}
+            except ValidationError as exc:
+                return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
                 return CallToolResult(
                     isError=True, content=[TextContent(type="text", text=str(exc))]

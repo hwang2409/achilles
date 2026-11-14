@@ -319,6 +319,18 @@ try {
     throw new Error(
       `missing achilles__create_tool catalog assertion: ${JSON.stringify(names)}`,
     );
+  const createToolSchema = catalog.result?.tools?.find(
+    (tool: { name: string }) => tool.name === "create_tool",
+  )?.inputSchema;
+  const bundleSchema = createToolSchema?.properties?.bundle;
+  const implementationSchema = bundleSchema?.properties?.implementation;
+  if (
+    bundleSchema?.additionalProperties !== false ||
+    !Array.isArray(bundleSchema?.required) ||
+    JSON.stringify(implementationSchema?.properties?.operation?.enum) !==
+      JSON.stringify(["list", "get", "insert", "update"])
+  )
+    throw new Error("create_tool catalog does not expose the declarative bundle shape");
   const toolBundle = {
     format_version: 1,
     kind: "data_operation",
