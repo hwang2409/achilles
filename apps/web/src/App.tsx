@@ -50,6 +50,8 @@ export function App() {
   const waiting = Number(approvalCount);
   const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const transcriptRef = useRef<HTMLElement>(null);
   const send: typeof active.send = (...args) => {
     setFollowRequest((value) => value + 1);
     return active.send(...args);
@@ -62,6 +64,25 @@ export function App() {
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
+    if (!scroll) return;
+    let contentHeight = scroll.scrollHeight;
+    const update = () => {
+      const grew = scroll.scrollHeight > contentHeight;
+      if (scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 4) setShowJumpToLatest(false);
+      else if (grew) setShowJumpToLatest(true);
+      contentHeight = scroll.scrollHeight;
+    };
+    scroll.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(scroll);
+    if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
+    const mutations = new MutationObserver(update);
+    mutations.observe(scroll, { subtree: true, childList: true, characterData: true });
+    return () => { scroll.removeEventListener("scroll", update); observer.disconnect(); mutations.disconnect(); };
+  }, [ready?.sessionId, outlineLength]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
     if (previous === "running" && turn === "idle") void active.settleApprovalMode();
@@ -84,7 +105,7 @@ export function App() {
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
-        <section className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} /></section>
+        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
         <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!connected || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>
       </RunProvider>}
   </>;

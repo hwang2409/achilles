@@ -49,10 +49,27 @@ export async function gateTranscript(
 
   await field.fill("stream enough lines to overflow");
   await field.press("Enter");
-  const scroll = page.locator('[data-part="timeline-scroll"]');
   const stream = messages.filter({ hasText: "stream line 000" });
+  await waitFor(async () => await stream.count() === 1, "streaming reply for this turn");
+  await stream.last().evaluate((message) => {
+    let element: HTMLElement | null = message as HTMLElement;
+    while (element) {
+      const style = getComputedStyle(element);
+      if ((style.overflowY === "auto" || style.overflowY === "scroll") && element.scrollHeight > element.clientHeight) {
+        element.dataset.gateScrollContainer = "follow";
+        return;
+      }
+      element = element.parentElement;
+    }
+    throw new Error("could not find the transcript scroll container");
+  });
+  const scroll = page.locator('[data-gate-scroll-container="follow"]');
   const distanceFromBottom = () => scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
-  await waitFor(async () => await stream.count() === 1 && (await stream.innerText()).includes("stream line 030") && await distanceFromBottom() <= 4, "stream line 030 at the bottom for this turn");
+  await waitFor(
+    async () => await stream.count() === 1 && (await stream.innerText()).includes("stream line 030") &&
+      (await scroll.evaluate((element) => element.scrollTop)) > 0 && await distanceFromBottom() <= 4,
+    "stream line 030 at the bottom for this turn",
+  );
   await capture("streaming-at-bottom-1440x900.png");
 
   await scroll.hover();
@@ -71,4 +88,22 @@ export async function gateTranscript(
   const approval = page.locator('[data-part="approval"][data-state="pending"]').filter({ hasText: "read" });
   await approval.getByRole("button", { name: "deny", exact: true }).click();
   await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
+
+  await field.fill("stream text only lines to overflow");
+  await field.press("Enter");
+  const textStream = messages.filter({ hasText: "text-only line 000" });
+  await waitFor(async () => await textStream.count() === 1, "text-only streaming reply for this turn");
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 030") && await distanceFromBottom() <= 4, "text-only line 030 at the bottom for this turn");
+  await scroll.hover();
+  await page.mouse.wheel(0, -480);
+  await waitFor(async () => await distanceFromBottom() > 100, "user scroll up during text-only stream");
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
+  const textOnlyJump = page.locator('[data-part="jump-to-latest"]');
+  await textOnlyJump.waitFor({ state: "visible", timeout: 20_000 });
+  await textOnlyJump.focus();
+  if (!(await textOnlyJump.evaluate((element) => document.activeElement === element)))
+    throw new Error("text-only jump to latest control is not keyboard focusable");
+  await textOnlyJump.click();
+  await waitFor(async () => await distanceFromBottom() <= 4, "jump to latest after text-only stream");
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 119"), "text-only stream complete");
 }

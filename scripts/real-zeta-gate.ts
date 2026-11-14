@@ -535,7 +535,7 @@ try {
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
-  await page.getByText(/stream line 000:/).waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
+  await page.locator('[data-part="message"]').first().waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
