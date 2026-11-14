@@ -158,31 +158,23 @@ const NO_CREATION = { pending: null, error: null };
 
 type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" | "unknown"; outcome?: "queued" | "delivered" | "dropped" };
 
-async function waitForIdle(client: Pick<ZetaClient, "request">, sessionId: string, deadline: number) {
-  for (;;) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("turn did not become idle before resend");
-    const result = await client.request("status", { session_id: sessionId }, { timeoutMs: Math.min(1_000, remaining) });
-    if (result && typeof result === "object" && (result as { state?: string }).state === "idle") return;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
-  }
-}
+// Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
+const STUCK_STEER_WAIT_MS = 15_000;
 
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
-  sessionId: string,
-  text: string,
+  _sessionId: string,
+  _text: string,
   deliveryId: string,
   track: (id: string) => void,
-  deadlineMs = 15_000,
+  deadlineMs = STUCK_STEER_WAIT_MS,
 ): Promise<string> {
   const deadline = Date.now() + deadlineMs;
-  let id = deliveryId;
+  const id = deliveryId;
   track(id);
-  let resent = false;
   for (;;) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("steer delivery confirmation timed out");
+    if (remaining <= 0) throw new Error("this message may not have been sent yet. it may still arrive with your next message.");
     let result: unknown;
     try {
       result = await client.request("delivery_status", { delivery_id: id }, { timeoutMs: Math.min(1_000, remaining) });
@@ -193,15 +185,7 @@ export async function confirmSteerDelivery(
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
     if (outcome === "delivered") return id;
-    if (outcome === "dropped") {
-      if (resent) throw new Error("steer delivery was dropped after resend");
-      resent = true;
-      await waitForIdle(client, sessionId, deadline);
-      id = crypto.randomUUID();
-      track(id);
-      await client.request("send", { session_id: sessionId, text, delivery_id: id }, { timeoutMs: Math.min(1_000, Math.max(1, deadline - Date.now())) });
-      continue;
-    }
+    if (outcome === "dropped") throw new Error("message was not sent");
     if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
       throw new Error(`steer delivery status: ${status.status}`);
     await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
@@ -325,17 +309,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const current = state; const token = owner.current.token();
     let delivery_id: string = crypto.randomUUID();
     if (!intent.steer) track(delivery_id);
-    try {
-      await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
-      if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
-    } catch (error) {
-      // A stale turn view can race its server-side turn end. send queues the same draft instead of losing it.
-      if (!intent.steer || !(error instanceof Error) || !error.message.includes("no turn is running")) throw error;
-      await waitForIdle(client, current.sessionId, Date.now() + 15_000);
-      delivery_id = crypto.randomUUID(); track(delivery_id);
-      await client.request("send", { session_id: current.sessionId, text, delivery_id });
-      delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
-    }
+    await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+    if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {

@@ -708,8 +708,39 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
 
   const staleLayoutApprovalBefore = await updateLayoutApproval.count();
+  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
   await field.fill("repeat that layout update with the old version");
   await field.press("Enter");
+  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_steer_commit ?? null) === "held", "committed late steer before queue publication");
+  const lateSteerIndex = requests().findIndex((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
+  const lateSteer = requests()[lateSteerIndex];
+  if (lateSteerIndex < 0 || !lateSteer?.params?.delivery_id) throw new Error("late steer did not include a delivery id");
+  let lateControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_turn_barrier: true }));
+  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end before late steer publication");
+  lateControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_steer_commit: true }));
+  await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
+  await page.getByText("could not steer: this message may not have been sent yet. it may still arrive with your next message.", { exact: true }).waitFor({ timeout: 20_000 });
+  if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("stuck steer did not keep its draft");
+  const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
+  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
+  if (!lateStatuses.length || lateStatuses.some((status) => status !== "queued"))
+    throw new Error(`late steer status was not stuck queued: ${JSON.stringify(lateStatuses)}`);
+  const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
+  const lateSendRequests = requests().filter((frame) => frame.method === "send" && frame.params?.text === "repeat that layout update with the old version");
+  if (lateSteerRequests.length !== 1 || lateSendRequests.length !== 0)
+    throw new Error(`achilles sent the stuck prompt ${lateSteerRequests.length + lateSendRequests.length} times`);
+
+  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await field.fill("continue after queued steer");
+  await field.press("Enter");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "next request after stuck steer");
+  const afterQueuedSteer = JSON.parse(await Bun.file(control).text());
+  if (afterQueuedSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length !== 1)
+    throw new Error(`next request did not consume the stale steer exactly once: ${JSON.stringify(afterQueuedSteer.user_messages)}`);
+  if (afterQueuedSteer.user_messages?.filter((text: string) => text === "continue after queued steer").length !== 1)
+    throw new Error(`next request did not contain its new prompt exactly once: ${JSON.stringify(afterQueuedSteer.user_messages)}`);
   await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
   await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }).waitFor({ timeout: 20000 });
