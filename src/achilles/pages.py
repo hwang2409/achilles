@@ -364,6 +364,42 @@ class PageStore:
             raise KeyError(page_id)
         return row
 
+    def pages(
+        self, limit: int = 200, before: tuple[str, str] | None = None
+    ) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:
+        with self._connect() as db:
+            where = ""
+            parameters: list[Any] = []
+            if before is not None:
+                updated_at, page_id = before
+                where = "WHERE (p.updated_at < ? OR (p.updated_at = ? AND p.id < ?))"
+                parameters.extend((updated_at, updated_at, page_id))
+            rows = db.execute(
+                "SELECT p.id,p.route,p.title,p.created_at,p.updated_at,p.create_mode,"
+                "creator.route AS created_by_route,COUNT(c.session_id) AS chat_count "
+                "FROM page p LEFT JOIN page creator ON creator.id=p.created_by_page_id "
+                "LEFT JOIN chat c ON c.page_id=p.id "
+                f"{where} GROUP BY p.id ORDER BY p.updated_at DESC,p.id DESC LIMIT ?",
+                (*parameters, limit + 1),
+            ).fetchall()
+        page_rows = rows[:limit]
+        next_cursor = None
+        if len(rows) > limit:
+            next_cursor = (page_rows[-1]["updated_at"], page_rows[-1]["id"])
+        return [
+            {
+                "id": row["id"],
+                "route": row["route"],
+                "title": row["title"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "create_mode": bool(row["create_mode"]),
+                "chat_count": row["chat_count"],
+                "created_by_route": row["created_by_route"],
+            }
+            for row in page_rows
+        ], next_cursor
+
     def chats(
         self,
         limit: int,

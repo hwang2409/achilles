@@ -57,6 +57,28 @@ def _chat_cursor(updated_at: str, session_id: str) -> str:
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
+def _page_cursor(updated_at: str, page_id: str) -> str:
+    payload = json.dumps([updated_at, page_id], separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _parse_page_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    try:
+        payload = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
+        value = json.loads(payload)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid cursor") from exc
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise ValueError("invalid cursor")
+    return value[0], value[1]
+
+
 def _parse_chat_cursor(cursor: str | None) -> tuple[str, str] | None:
     if cursor is None:
         return None
@@ -189,6 +211,25 @@ def create_app() -> Starlette:
         if not saved:
             return JSONResponse({"session_id": actual}, status_code=409)
         return JSONResponse({"session_id": actual})
+
+    async def pages(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        try:
+            limit = int(request.query_params.get("limit", "200"))
+        except ValueError as exc:
+            raise HTTPException(400, "limit must be an integer") from exc
+        if not 1 <= limit <= 200:
+            raise HTTPException(400, "limit must be between 1 and 200")
+        try:
+            rows, cursor = await anyio.to_thread.run_sync(
+                store.pages, limit, _parse_page_cursor(request.query_params.get("before"))
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(
+            {"pages": rows, "next": _page_cursor(*cursor) if cursor is not None else None}
+        )
 
     async def chats(request):
         if not _same_origin(request):
@@ -389,6 +430,7 @@ def create_app() -> Starlette:
         lifespan=mcp_lifespan,
         routes=[
             Route("/api/zeta/discovery", _discovery),
+            Route("/api/pages", pages),
             Route("/api/chats", chats),
             Route("/api/chats/{session_id}", patch_chat, methods=["PATCH"]),
             Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),
