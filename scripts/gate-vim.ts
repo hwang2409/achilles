@@ -30,7 +30,47 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
       if (timer) clearTimeout(timer);
     }
   };
-  const stockField = page.getByRole("textbox", { name: "message", exact: true });
+  const sessionId = () => page.locator("[data-session-id]").getAttribute("data-session-id");
+  const switchTo = async (id: string) => {
+    await page.locator(`.chat-row[href*="chat=${id}"]`).click();
+    await waitFor(async () => await sessionId() === id, `chat ${id}`);
+    await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ state: "visible", timeout: 20_000 });
+  };
+  const originalSession = await sessionId();
+  if (!originalSession) throw new Error("stock composer session id missing");
+  let stockField = page.getByRole("textbox", { name: "message", exact: true });
+  await stockField.focus();
+  await page.keyboard.press("Meta+b");
+  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
+  await page.keyboard.press("Meta+b");
+  await page.keyboard.press("Meta+Shift+o");
+  await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== originalSession, "command+shift+O from stock composer");
+  const stockSession = await sessionId();
+  if (!stockSession) throw new Error("modifier row: command+shift+O did not create a chat with stock composer focus");
+
+  const multilineStockDraft = "stock first\n\n  stock third";
+  stockField = page.getByRole("textbox", { name: "message", exact: true });
+  await stockField.fill(multilineStockDraft);
+  await switchTo(originalSession);
+  await switchTo(stockSession);
+  stockField = page.getByRole("textbox", { name: "message", exact: true });
+  if (await stockField.inputValue() !== multilineStockDraft) throw new Error(`stock remount row: expected ${JSON.stringify(multilineStockDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
+
+  const beforeStockSend = JSON.parse(await Bun.file(control).text());
+  await stockField.fill("stock confirmed once");
+  await stockField.press("Enter");
+  await waitFor(async () => {
+    const current = JSON.parse(await Bun.file(control).text());
+    return current.request_count === (beforeStockSend.request_count ?? 0) + 1 && current.last_message.includes("stock confirmed once");
+  }, "stock message on this backend turn");
+  await waitFor(async () => await stockField.inputValue() === "", "confirmed stock send to clear its draft");
+  await switchTo(originalSession);
+  await switchTo(stockSession);
+  stockField = page.getByRole("textbox", { name: "message", exact: true });
+  const afterStockSend = JSON.parse(await Bun.file(control).text());
+  if (await stockField.inputValue() !== "" || afterStockSend.request_count !== (beforeStockSend.request_count ?? 0) + 1) throw new Error(`duplicate-send row: expected empty draft and exactly one send, got ${JSON.stringify(await stockField.inputValue())} and ${afterStockSend.request_count - (beforeStockSend.request_count ?? 0)} sends`);
+  await screenshot("plain-after");
+
   await stockField.fill("first\n\n  third");
   let releaseChunk = () => {};
   const chunkReleased = new Promise<void>((resolve) => { releaseChunk = resolve; });
@@ -59,6 +99,16 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await composer.waitFor({ state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "first\n\n  third") throw new Error(`vim did not preserve the multiline stock draft: ${JSON.stringify(await vimDraft())}`);
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
+  await field.focus();
+  await page.keyboard.press("Control+b");
+  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: control+B did not collapse the sidebar with vim composer focus");
+  await page.keyboard.press("Control+b");
+  const vimSession = await sessionId();
+  await page.keyboard.press("Control+Shift+o");
+  await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== vimSession, "control+shift+O from vim composer");
+  if (!vimSession) throw new Error("vim composer session id missing before modifier shortcut");
+  await switchTo(vimSession);
+  if (await vimDraft() !== "first\n\n  third") throw new Error("modifier chat creation changed the vim draft");
   await field.fill("path");
   await field.press("/");
   if (await vimDraft() !== "path/") throw new Error(`vim insert slash was stolen by a global shortcut: ${JSON.stringify(await vimDraft())}`);

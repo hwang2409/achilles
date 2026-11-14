@@ -92,9 +92,9 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
   }, [refreshKey, search]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); return; }
+      if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); return; }
       if (isEditableTarget(event)) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
-      if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (event.key === "Escape" && drawer) { event.preventDefault(); setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); }
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };

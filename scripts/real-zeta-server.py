@@ -86,6 +86,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("allow-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("allow complete")]),
+        ScriptedTurn(content=[TextContent("stock complete")]),
         ScriptedTurn(content=[TextContent("vim complete")]),
     ]
 

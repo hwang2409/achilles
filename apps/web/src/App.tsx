@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
+import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell } from "./AppShell";
+import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
@@ -18,17 +19,12 @@ function vimEnabled() {
 
 function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
   const slot = useRef<HTMLDivElement>(null);
-  const previousVim = useRef(vim);
-  const storedDraft = draftStore.get(sessionId);
-  const draft = vim && !previousVim.current ? slot.current?.querySelector<HTMLTextAreaElement>("textarea")?.value ?? storedDraft : storedDraft;
-  useLayoutEffect(() => {
-    if (vim && !previousVim.current) draftStore.set(sessionId, draft);
-    previousVim.current = vim;
-  }, [draft, sessionId, vim]);
+  const draft = draftStore.get(sessionId);
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  const adapterProps = { ...props, defaultValue: draft, onDraftChange: (text: string) => draftStore.set(sessionId, text) };
   const composer = vim
-    ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...props} defaultValue={draft} onDraftChange={(text) => draftStore.set(sessionId, text)} /></Suspense>
-    : <Composer {...props} defaultValue={draft} />;
+    ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
+    : <PlainComposer {...adapterProps} />;
   return <div ref={slot} style={{ display: "contents" }}>{composer}</div>;
 }
 

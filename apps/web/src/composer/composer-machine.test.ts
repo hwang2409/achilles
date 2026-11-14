@@ -10,9 +10,17 @@ describe("composer delivery machine", () => {
       expect(submitted.effect).toEqual({ type: "submit", attempt: 1, text: "hello", steer: false });
       expect(apply(submitted.model, { type: "confirm", attempt: 1 }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "", sending: false });
     }],
-    ["double enter", () => {
+    ["duplicate input", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit" });
       expect(transition(submitted.model, { type: "submit" }).effect).toBeUndefined();
+    }],
+    ["remount or restart seeds the exact published draft", () => {
+      const published = apply(createComposerModel("", "idle"), { type: "edit", draft: "first\n\n  third" });
+      expect(createComposerModel(published.draft, "idle").draft).toBe("first\n\n  third");
+    }],
+    ["submit await has no frontend cancellation operation", () => {
+      const submitted = transition(createComposerModel("hello", "idle"), { type: "submit" });
+      expect(submitted.model).toMatchObject({ draft: "hello", sending: true });
     }],
     ["enter during IME composition", () => {
       expect(enterAction({ key: "Enter", shiftKey: false, isComposing: true, keyCode: 13, mode: "insert" })).toBe("ignore");
@@ -21,10 +29,14 @@ describe("composer delivery machine", () => {
     ["steer while running", () => {
       expect(transition(createComposerModel("redirect", "steerable"), { type: "submit" }).effect).toEqual({ type: "submit", attempt: 1, text: "redirect", steer: true });
     }],
-    ["stop", () => {
+    ["stop await has no frontend cancellation operation", () => {
       const stopping = transition(createComposerModel("kept", "steerable"), { type: "stop" });
       expect(stopping.effect).toEqual({ type: "stop" });
-      expect(apply(stopping.model, { type: "stop-settle" })).toMatchObject({ draft: "kept", stopping: false });
+      expect(stopping.model).toMatchObject({ draft: "kept", stopping: true });
+    }],
+    ["stop publish rejects", () => {
+      const stopping = transition(createComposerModel("kept", "steerable"), { type: "stop" }).model;
+      expect(apply(stopping, { type: "stop-reject", message: "denied" }, { type: "stop-settle" })).toMatchObject({ draft: "kept", stopping: false, error: { kind: "stop", text: "could not stop: denied" } });
     }],
     ["late delivery confirmation", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit" }).model;
@@ -32,7 +44,7 @@ describe("composer delivery machine", () => {
       expect(rejected).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "could not send: offline" } });
       expect(apply(rejected, { type: "confirm", attempt: 1 })).toMatchObject({ draft: "", error: undefined, send: undefined });
     }],
-    ["error", () => {
+    ["submit publish rejects", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit" }).model;
       const failed = apply(submitted, { type: "reject", attempt: 1, message: "denied", delivered: false }, { type: "settle", attempt: 1 });
       expect(failed).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "could not send: denied" } });
