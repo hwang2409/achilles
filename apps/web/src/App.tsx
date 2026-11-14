@@ -5,6 +5,7 @@ import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type Comp
 import { AppShell } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
+import { DetailRecord, type DetailFilter } from "./DetailRecord";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
@@ -199,7 +200,12 @@ function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p className="layout-metric"><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
   if (block.type === "list") return <RecordList title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
-  if (block.type === "detail") return <p>{String(block.title)}: {Array.isArray(block.fields) ? block.fields.join(", ") : ""}</p>;
+  if (block.type === "detail") {
+    const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
+    const filter = block.filter as DetailFilter | undefined;
+    if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
+    return <p>{String(block.title)}: {fields.join(", ")}</p>;
+  }
   if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
   return null;
 }

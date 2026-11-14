@@ -725,9 +725,25 @@ try {
       `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
     );
   });
+  const filteredDetailResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === `/api/pages/${createdPage.id}/records/books`
+      && url.searchParams.get("field") === "status"
+      && url.searchParams.get("equals") === '"reading"';
+  }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
   await page.getByText("reading: 1", { exact: true }).waitFor({ timeout: 20000 });
+  const detailResponse = await filteredDetailResponse;
+  await page.waitForFunction(() => {
+    const text = document.querySelector(".record-detail")?.textContent ?? "";
+    return text.includes("Synthetic Book") || text.includes("could not load record");
+  }, undefined, { timeout: 20000 });
+  const filteredDetailText = await page.locator(".record-detail").innerText();
+  if (!filteredDetailText.includes("Synthetic Book"))
+    throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
+  if (filteredDetailText.includes("could not load record"))
+    throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
   const readingModeResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
@@ -854,6 +870,14 @@ try {
     throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
   console.log("stale chat update_layout showed a readable version conflict");
 
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".record-detail")?.textContent ?? "").includes(
+        "Synthetic Book",
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
   const layoutBeforeInvalidMetric = await page
     .locator(".layout-blocks")
     .locator(":scope > *")
@@ -865,6 +889,12 @@ try {
     async () => (await updateLayoutApproval.count()) > invalidLayoutApprovalBefore,
     "invalid metric layout approval",
   );
+  const invalidMetricDetailResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === `/api/pages/${createdPage.id}/records/books`
+      && url.searchParams.get("field") === "status"
+      && url.searchParams.get("equals") === '"reading"';
+  }, { timeout: 20000 });
   await updateLayoutApproval
     .nth(invalidLayoutApprovalBefore)
     .getByRole("button", { name: "approve", exact: true })
@@ -883,12 +913,21 @@ try {
     throw new Error(
       `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
     );
+  await invalidMetricDetailResponse;
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".record-detail")?.textContent ?? "").includes(
+        "Synthetic Book",
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
   const layoutAfterInvalidMetric = await page
     .locator(".layout-blocks")
     .locator(":scope > *")
     .allTextContents();
   if (JSON.stringify(layoutAfterInvalidMetric) !== JSON.stringify(layoutBeforeInvalidMetric))
-    throw new Error("invalid metric update changed the page layout");
+    throw new Error(`invalid metric update changed the page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
   console.log("invalid metric chat update showed a readable error and kept the layout");
 
   const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));

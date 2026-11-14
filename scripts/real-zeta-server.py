@@ -218,6 +218,13 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                     "where": {"field": "status", "equals": "reading"},
                                 },
                                 {"type": "list", "title": "books", "collection": "books"},
+                                {
+                                    "type": "detail",
+                                    "title": "selected reading book",
+                                    "collection": "books",
+                                    "fields": ["title"],
+                                    "filter": {"field": "status", "equals": "reading"},
+                                },
                             ]
                         },
                         "tools": [
@@ -283,6 +290,13 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                     "where": {"field": "status", "equals": "reading"},
                                 },
                                 {"type": "list", "title": "books", "collection": "books"},
+                                {
+                                    "type": "detail",
+                                    "title": "selected reading book",
+                                    "collection": "books",
+                                    "fields": ["title"],
+                                    "filter": {"field": "status", "equals": "reading"},
+                                },
                             ]
                         },
                         "expected_version": 1,
