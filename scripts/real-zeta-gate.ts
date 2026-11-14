@@ -196,7 +196,9 @@ try {
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
   const homeSessionId = async () =>
-    page.locator("[data-session-id]").getAttribute("data-session-id");
+    page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 }).catch(async (error) => {
+      throw new Error(`${error}\nhome session id missing at ${page.url()}: ${redact(await page.locator("body").innerText({ timeout: 10_000 }))}`);
+    });
   const first = await homeSessionId();
   if (!first) throw new Error("home session id missing");
   const requests = () =>
@@ -209,6 +211,8 @@ try {
         }
       })
       .filter(Boolean);
+  const zetaSessionCount = () => requests().filter((frame) => frame.method === "new_session").length;
+  const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: unknown[] }).chats.length;
   const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
     const messages = requests();
     let requestIndex = messages.length - 1;
@@ -636,8 +640,21 @@ try {
   await page.goto(origin);
   const readingLink = page.locator('.page-list a[href^="/reading"]');
   await readingLink.waitFor({ timeout: 20000 });
-  await readingLink.click();
-  await page.waitForURL((url) => new URL(url).pathname === "/reading");
+  const chatsBeforeReading = await chatCount();
+  const sessionsBeforeReading = zetaSessionCount();
+  await readingLink.click({ timeout: 20_000 });
+  await page.waitForURL((url) => new URL(url).pathname === "/reading", { timeout: 20_000 });
+  await page.getByText("reading list layout", { exact: true }).waitFor({ state: "visible", timeout: 20_000 }).catch(async (error) => {
+    throw new Error(`${error}\ncreated page layout did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
+  });
+  if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
+    throw new Error("created page layout did not appear before chat creation");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true, timeout: 20_000 });
+  await field.fill("open created page", { timeout: 20_000 });
+  await field.press("Enter", { timeout: 20_000 });
+  await page.getByText("new page ready", { exact: true }).waitFor({ timeout: 20_000 });
+  if (await chatCount() !== chatsBeforeReading + 1) throw new Error("first created-page send did not create exactly one chat");
+  if (zetaSessionCount() !== sessionsBeforeReading + 1) throw new Error("first created-page send did not create exactly one zeta session");
   await page.goto(origin);
   await field.waitFor({ timeout: 20000 });
   const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
@@ -1266,6 +1283,10 @@ try {
   await page.goto(`${origin}/allow`);
   const allowField = page.getByRole("textbox", { name: "message" });
   await allowField.waitFor({ timeout: 20000 });
+  await allowField.fill("start allow-mode chat", { timeout: 20_000 });
+  await allowField.press("Enter", { timeout: 20_000 });
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).allow_open_request === true, "allow-mode opening request");
+  await page.getByText("allow page ready", { exact: true }).waitFor({ timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
   await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });

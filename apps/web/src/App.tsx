@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
@@ -65,6 +66,9 @@ export function App() {
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const active = useActiveChat(client, connectionState.phase === "connected");
   const ready = active.state.phase === "ready" ? active.state : null;
+  const empty = active.state.phase === "empty" ? active.state : null;
+  const activePage = ready?.page ?? empty?.page ?? null;
+  const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
     const state = store.getState();
@@ -163,6 +167,11 @@ export function App() {
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
+      : empty && emptyStore ? <RunProvider store={emptyStore}>
+        {empty.page.layout.blocks.length > 0 && <div className="layout-blocks">{empty.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={empty.page.id} credential={empty.credential} refreshKey={refreshKey} />)}</div>}
+        <section className="transcript"><EmptyChat page={empty.page} send={send} continueWaiting={active.continueWaitingChat} /></section>
+        <ComposerSlot sessionId={`new:${empty.page.id}`} focus vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+      </RunProvider>
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
@@ -170,7 +179,7 @@ export function App() {
         <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
