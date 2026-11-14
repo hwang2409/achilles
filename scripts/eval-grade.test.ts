@@ -71,7 +71,7 @@ const toolEvolutionTask = (initial: Record<string, unknown>) => validateTask({
   checks: [toolEvolutionCheck],
   ...initial,
 });
-const toolEvolutionSnapshot = (field = "score", fieldSchema: Record<string, unknown> = { type: "number" }) => {
+const toolEvolutionSnapshot = (field = "score", fieldSchema: Record<string, unknown> = { type: "number" }, stringValid = false) => {
   const v1 = { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false };
   const v2 = { type: "object", properties: { title: { type: "string" }, [field]: fieldSchema }, required: ["title"], additionalProperties: false };
   const initial = {
@@ -90,7 +90,8 @@ const toolEvolutionSnapshot = (field = "score", fieldSchema: Record<string, unkn
     tools: initial.tools,
     assignments: [{ page_id: "home", tool_id: "add-id", active_version: 2 }, initial.assignments[1]],
     tool_versions: [...initial.tool_versions, { page_id: "home", tool_id: "add-id", name: "add_book", version: 2, operation: "insert", collection: "books", description: "insert a rated book", input_schema: v2 }],
-    records: [structuredClone(initial.records[0]), { page_id: "home", collection: "books", id: "new-book", version: 1, data: { title: "Dune", [field]: 5 } }],
+    records: [structuredClone(initial.records[0]), { page_id: "home", collection: "books", id: "new-book", version: 2, data: { title: "Dune", [field]: 5 } }],
+    tool_schema_validations: [{ tool: "add_book", version: 2, field, number_valid: true, string_valid: stringValid }],
     calls: [
       { id: "add-call", page_id: "home", chat_id: "fresh-chat", tool: "achilles__add_book", arguments: { title: "Dune", [field]: 5 } },
       { id: "list-call", page_id: "home", chat_id: "fresh-chat", tool: "achilles__list_books", arguments: {} },
@@ -104,6 +105,8 @@ const toolEvolutionSnapshot = (field = "score", fieldSchema: Record<string, unkn
 
 for (const testCase of [
   { name: "number field named score with a description change", snapshot: toolEvolutionSnapshot("score"), status: "pass" },
+  { name: "empty field schema", snapshot: toolEvolutionSnapshot("score", {}, true), status: "agent_fail" },
+  { name: "number or string field", snapshot: toolEvolutionSnapshot("score", { anyOf: [{ type: "number" }, { type: "string" }] }, true), status: "agent_fail" },
   { name: "integer field named stars", snapshot: toolEvolutionSnapshot("stars", { type: "integer" }), status: "pass" },
   { name: "anyOf accepts number or null", snapshot: toolEvolutionSnapshot("score", { anyOf: [{ type: "number" }, { type: "null" }] }), status: "pass" },
   { name: "type array accepts number or null", snapshot: toolEvolutionSnapshot("score", { type: ["number", "null"] }), status: "pass" },
@@ -116,6 +119,11 @@ for (const testCase of [
   { name: "v2 makes the new field required", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.tool_versions.at(-1)!.input_schema as any).required.push("score"); return snapshot; })(), status: "agent_fail" },
   { name: "agent deletes the v1 row", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); snapshot.records = snapshot.records.slice(1); return snapshot; })(), status: "agent_fail" },
   { name: "agent rewrites the v1 row as v2", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); snapshot.records[0].version = 2; return snapshot; })(), status: "agent_fail" },
+  { name: "v2 row stored at version 1", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); snapshot.records[1].version = 1; return snapshot; })(), status: "agent_fail" },
+  { name: "stored value changed before final list", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.records[1].data as any).score = 4; return snapshot; })(), status: "agent_fail" },
+  { name: "stored value deleted before final list", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); delete (snapshot.records[1].data as any).score; return snapshot; })(), status: "agent_fail" },
+  { name: "final list omits the value", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); delete ((snapshot.results[1].data as any[])[1] as any).score; return snapshot; })(), status: "agent_fail" },
+  { name: "product validator unavailable", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); delete (snapshot as any).tool_schema_validations; (snapshot as any).tool_schema_validation_error = "uv unavailable"; return snapshot; })(), status: "harness_error" },
 ] as const) test(`tool_evolution: ${testCase.name}`, () => {
   expect(gradeReference(toolEvolutionTask({}), testCase.snapshot as never).status).toBe(testCase.status);
 });

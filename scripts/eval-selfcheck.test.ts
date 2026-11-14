@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { gradeReference, validateTask, type EvalSnapshot } from "./eval-grade";
-import { relatedPages } from "./eval";
+import { relatedPages, validateToolVersionSchemas } from "./eval";
 
 const tasksDir = new URL("../evals/tasks/", import.meta.url).pathname;
 const referencesDir = new URL("../evals/references/", import.meta.url).pathname;
@@ -24,6 +24,36 @@ test("every task passes the expectation lint and its known-good and known-bad re
     if (references.good_old) expect(gradeReference(task, references.good_old).status, `${task.id} known-good old shape`).toBe("pass");
     expect(gradeReference(task, references.bad!).status, `${task.id} known-bad`).toBe("agent_fail");
   }
+});
+
+test("tool-version schema evidence uses the product validator", async () => {
+  const schemas = [
+    ["empty", {}],
+    ["mixed", { anyOf: [{ type: "number" }, { type: "string" }] }],
+    ["number", { type: "number" }],
+    ["nullable", { anyOf: [{ type: "number" }, { type: "null" }] }],
+    ["integer", { type: "integer" }],
+  ] as const;
+  const cwd = new URL("..", import.meta.url).pathname;
+  const stack = {
+    achillesDir: cwd,
+    run: async (command: string, args: string[], runCwd?: string) => {
+      const process = Bun.spawn([command, ...args], { cwd: runCwd, stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, exitCode] = await Promise.all([new Response(process.stdout).text(), new Response(process.stderr).text(), process.exited]);
+      return { stdout, stderr, exitCode };
+    },
+  };
+  const snapshot = { tool_versions: schemas.map(([name, schema], index) => ({ name, version: 2, input_schema: { type: "object", properties: { title: { type: "string" }, rating: schema }, required: ["title"], additionalProperties: false }, tool_id: `tool-${index}` })) };
+  const calls = schemas.map(([name]) => ({ tool: `achilles__${name}`, arguments: { title: "Dune", rating: 5 } }));
+  const result = await validateToolVersionSchemas(stack as never, snapshot, calls);
+  expect(result.tool_schema_validation_error).toBeUndefined();
+  expect(result.tool_schema_validations?.map(row => [row.tool, row.number_valid, row.string_valid])).toEqual([
+    ["empty", true, true],
+    ["mixed", true, true],
+    ["number", true, false],
+    ["nullable", true, false],
+    ["integer", true, false],
+  ]);
 });
 
 test("tool-version references use product-valid bundles and version evidence", async () => {

@@ -427,7 +427,16 @@
           }
         }
       ]
-    }
+    },
+    "tool_schema_validations": [
+      {
+        "tool": "add_book",
+        "version": 2,
+        "field": "rating",
+        "number_valid": true,
+        "string_valid": false
+      }
+    ]
   },
   "bad": {
     "pages": [
@@ -754,6 +763,7 @@
           }
         }
       ]
-    }
+    },
+    "tool_schema_validations": []
   }
 }

@@ -23,6 +23,7 @@ export type EvalSnapshot = {
   calls?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; approvals?: Array<Record<string, unknown>>;
   errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
   reconnects?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
+  tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
   initial?: EvalSnapshot;
 };
@@ -317,10 +318,14 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const results = rows(snapshot, "results");
     const use = calls.find(call => addedFields.some(field => structurallyContains(call.arguments, { [field]: spec.new_value })) && results.some(result => result.call_id === call.id && successful(result) && addedFields.some(field => structurallyContains(result.data ?? result.result, { [field]: spec.new_value }))));
     const useResult = results.find(result => result.call_id === use?.id && successful(result));
+    const usedField = addedFields.find(field => structurallyContains(use?.arguments, { [field]: spec.new_value }) && structurallyContains(useResult?.data ?? useResult?.result, { [field]: spec.new_value }));
     const newRecord = matchingObjects(useResult?.data ?? useResult?.result, {}).find(row => typeof row.record_id === "string")?.record_id;
-    const read = results.find(result => result.page_id === page && result.chat_id === check.chat && result.tool === `achilles__${spec.read_tool}` && successful(result) && structurallyContains(result.data ?? result.result, { record_id: spec.legacy_record }) && typeof newRecord === "string" && structurallyContains(result.data ?? result.result, { record_id: newRecord }));
+    const stored = owned("records").find(row => (row.id ?? row.record_id) === newRecord && row.collection === after?.collection && row.version === spec.to && usedField && structurallyContains(row.data ?? row, { [usedField]: spec.new_value }));
+    const read = results.find(result => result.page_id === page && result.chat_id === check.chat && result.tool === `achilles__${spec.read_tool}` && successful(result) && structurallyContains(result.data ?? result.result, { record_id: spec.legacy_record }) && typeof newRecord === "string" && usedField && structurallyContains(result.data ?? result.result, { record_id: newRecord, [usedField]: spec.new_value }));
     const legacy = owned("records").find(row => (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
-    return Boolean(before && after && assignment?.active_version === spec.to && addedFields.length && use && read && legacy);
+    const initialLegacy = rows(snapshot.initial ?? {}, "records").find(row => (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
+    const validation = rows(snapshot, "tool_schema_validations").find(row => row.tool === spec.tool && row.version === spec.to && row.field === usedField);
+    return Boolean(before && after && assignment?.active_version === spec.to && usedField && validation?.number_valid === true && validation.string_valid === false && stored && read && legacy && initialLegacy && sameSeedValue(legacy.data ?? legacy, initialLegacy.data ?? initialLegacy));
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
@@ -454,7 +459,9 @@ export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot
 }
 function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
   if (!task.setup) return [];
-  return snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"];
+  const failures = snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"];
+  if (task.checks.some(check => check.type === "tool_evolution") && !Array.isArray(snapshot.tool_schema_validations)) failures.push(snapshot.tool_schema_validation_error ?? "product schema validation unavailable");
+  return failures;
 }
 export function assertSetupPreconditions(task: EvalTask, snapshot: EvalSnapshot) {
   const failures = setupPreconditionFailures(task, snapshot);
