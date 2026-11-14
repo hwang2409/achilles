@@ -1009,9 +1009,10 @@ try {
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await restartedToggleResponse).ok()) throw new Error("post-restart create mode toggle request failed");
   await waitFor(async () => requests().filter((frame) => frame.method === "mcp_refresh_tools").length > refreshCountBeforeRestartToggle, "post-restart tool refresh request");
-  const restartedRefresh = requests().filter((frame) => frame.method === "mcp_refresh_tools").at(-1);
-  await waitFor(async () => requests().some((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error)), "post-restart tool refresh result");
-  const restartedRefreshResult = requests().find((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error));
+  const restartedRefreshIndex = requests().findLastIndex((frame) => frame.method === "mcp_refresh_tools");
+  const restartedRefresh = requests()[restartedRefreshIndex];
+  await waitFor(async () => requests().slice(restartedRefreshIndex + 1).some((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error)), "post-restart tool refresh result");
+  const restartedRefreshResult = requests().slice(restartedRefreshIndex + 1).find((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error));
   if (restartedRefreshResult?.error) throw new Error(`post-restart tool refresh did not enable create mode without a zeta restart: ${JSON.stringify(restartedRefreshResult.error)}`);
   await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
   if (await page.getByText("restart zeta serve, then reload", { exact: false }).count()) throw new Error("automatic post-restart tool refresh showed the manual restart message");
