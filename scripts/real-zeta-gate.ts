@@ -136,6 +136,12 @@ try {
   let expectedNotFoundResponse = false;
   let expectedNotFoundConsoleError = false;
   let expectingRegistrationFailures = false;
+  let registrationFailureUrl: string | null = null;
+  let registrationFailureResponse = false;
+  let registrationFailureConsoleError = false;
+  let expectingDiscoveryFailure = false;
+  let discoveryFailureResponse = false;
+  let discoveryFailureConsoleError = false;
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
@@ -150,11 +156,34 @@ try {
       response.status() === 404 &&
       response.url() === expectedNotFoundUrl
     ) expectedNotFoundResponse = true;
+    if (
+      expectingRegistrationFailures &&
+      request.method() === "POST" &&
+      response.status() === 503 &&
+      response.url() === registrationFailureUrl
+    ) registrationFailureResponse = true;
+    if (
+      expectingDiscoveryFailure &&
+      request.method() === "GET" &&
+      response.status() === 503 &&
+      response.url() === `${origin}/api/zeta/discovery`
+    ) discoveryFailureResponse = true;
   });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() !== "error") return;
-    if (expectingRegistrationFailures && m.text().includes("the server responded with a status of 503")) return;
+    const expectedRegistration = expectingRegistrationFailures && registrationFailureResponse &&
+      !registrationFailureConsoleError && m.text().includes("503");
+    if (expectedRegistration) {
+      registrationFailureConsoleError = true;
+      return;
+    }
+    const expectedDiscovery = expectingDiscoveryFailure && discoveryFailureResponse &&
+      !discoveryFailureConsoleError && m.text().includes("503");
+    if (expectedDiscovery) {
+      discoveryFailureConsoleError = true;
+      return;
+    }
     const expected = expectedNotFoundNavigation && expectedNotFoundResponse &&
       !expectedNotFoundConsoleError && m.location().url === expectedNotFoundUrl &&
       m.text().includes("404");
@@ -687,8 +716,11 @@ try {
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
   let registerFailures = 0;
   expectingRegistrationFailures = true;
+  registrationFailureUrl = null;
+  registrationFailureResponse = false;
+  registrationFailureConsoleError = false;
   await page.route("**/api/pages/*/chats", async (route) => {
-    if (registerFailures < 2) { registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
+    if (registerFailures < 2) { registerFailures += 1; registrationFailureUrl ??= route.request().url(); await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
     else await route.continue();
   });
   const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
@@ -713,6 +745,9 @@ try {
   await droppedField.fill(draft);
   await page.keyboard.press("Meta+b");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
+  expectingDiscoveryFailure = true;
+  discoveryFailureResponse = false;
+  discoveryFailureConsoleError = false;
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
   await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
@@ -733,6 +768,7 @@ try {
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await recoveredField.waitFor({ timeout: 20_000 });
+  expectingDiscoveryFailure = false;
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
