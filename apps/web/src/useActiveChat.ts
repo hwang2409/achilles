@@ -42,8 +42,26 @@ export function reduceAttachment(model: AttachmentModel, event: AttachmentEvent)
 
 export function selectAttachmentState(model: AttachmentModel, canWrite: boolean): AttachmentState {
   const authority = canWrite ? "controller" : "observer";
+  if (model.state.phase === "ready" && model.state.kind === "controller" && !canWrite) {
+    return {
+      phase: "ready",
+      kind: "observer",
+      page: model.state.page,
+      serverApprovalMode: model.state.serverApprovalMode,
+      sessionId: model.state.sessionId,
+      lease: model.state.lease,
+      pendingApprovalMode: model.state.pendingApprovalMode,
+      title: model.state.title,
+    };
+  }
   if (model.authority !== authority || (model.state.phase === "ready" && model.state.kind !== authority)) return { phase: "switching" };
   return model.state;
+}
+
+export function composerMode(state: AttachmentState, lost: boolean): "controller" | "read-only" | null {
+  if (state.phase !== "ready") return null;
+  if (state.kind === "controller") return "controller";
+  return lost ? "read-only" : null;
 }
 
 export function createAttachmentOwner(release: (lease: SessionLease) => void = (lease) => lease.release()) {

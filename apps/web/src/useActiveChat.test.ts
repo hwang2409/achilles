@@ -11,6 +11,7 @@ const reduceAttachment = activeChat.reduceAttachment ?? ((model: AttachmentModel
   return model;
 });
 const selectAttachmentState = activeChat.selectAttachmentState ?? ((model: AttachmentModel, _canWrite: boolean): AttachmentState => model.state);
+const composerMode = activeChat.composerMode ?? ((state: AttachmentState, lost: boolean) => state.phase === "ready" ? ("credential" in state ? "controller" : lost ? "read-only" : null) : null);
 import { reduceConnection } from "./zeta/connection";
 
 class MemoryStorage {
@@ -168,7 +169,7 @@ describe("active chat attachment", () => {
   const failed = (token: number, step: string): AttachmentEvent => ({ type: "failed", token, error: `failed at ${step}` });
   const controllerAwaits = ["page fetch", "page body", "credential fetch", "credential body", "resume creation", "find chat", "open or create session", "load session", "finish title"];
   const failureSteps = ["page", "credential", "resume", "find chat", "open session", "create session", "load session", "finish"];
-  const transitionRows: Array<{ name: string; initial?: "controller" | "observer"; steps: Array<{ events?: AttachmentEvent[]; canWrite: boolean; phase: string; kind?: "controller" | "observer"; credential?: boolean; transcript?: boolean; pageTitle?: string }> }> = [
+  const transitionRows: Array<{ name: string; initial?: "controller" | "observer"; steps: Array<{ events?: AttachmentEvent[]; canWrite: boolean; phase: string; kind?: "controller" | "observer"; credential?: boolean; transcript?: boolean; pageTitle?: string; lost?: boolean; composer?: "controller" | "read-only" | null; draft?: boolean }> }> = [
     { name: "controller success", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true }] },
     { name: "observer success", steps: [{ events: [started(1, "observer"), attached(1, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true }] },
     ...controllerAwaits.map((step) => ({ name: `stale result after ${step}`, initial: "controller" as const, steps: [
@@ -178,7 +179,7 @@ describe("active chat attachment", () => {
     ...failureSteps.map((step) => ({ name: `failure at ${step}`, initial: "controller" as const, steps: [{ events: [started(1, "controller"), failed(1, step)], canWrite: true, phase: "error", credential: false, transcript: false }] })),
     { name: "controller lost then observer reconnect", initial: "controller", steps: [
       { events: [started(1, "controller"), attached(1, "controller")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true },
-      { canWrite: false, phase: "switching", credential: false, transcript: false },
+      { canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true, lost: true, composer: "read-only", draft: true },
       { events: [started(2, "observer"), attached(2, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true },
     ] },
     { name: "taking over keeps observer transcript", steps: [
@@ -211,6 +212,9 @@ describe("active chat attachment", () => {
       expect(view.phase).toBe(step.phase);
       expect(view.phase === "ready" ? view.kind : undefined).toBe(step.kind);
       expect(view.phase === "ready", `${name}: transcript availability`).toBe(step.transcript ?? false);
+      const mode = composerMode(view, step.lost ?? false);
+      if ("composer" in step) expect(mode, `${name}: composer mode`).toBe(step.composer);
+      if ("draft" in step) expect(Boolean(mode), `${name}: draft availability`).toBe(step.draft);
       if (step.pageTitle) expect(view.phase === "ready" ? view.page.title : null, `${name}: refreshed page`).toBe(step.pageTitle);
     }
   });
