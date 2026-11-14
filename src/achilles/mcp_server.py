@@ -206,7 +206,11 @@ def build_mcp(store: PageStore):
                     ),
                     Tool(
                         name="create_page",
-                        description="create a page; available only in create mode",
+                        description=(
+                            "create a page; available only in create mode; a detail block shows "
+                            "field labels only and cannot pin one record; use a list block to "
+                            "show records"
+                        ),
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
                     Tool(
@@ -229,7 +233,8 @@ def build_mcp(store: PageStore):
                             "only what the user asked (insert, reorder, edit, or remove blocks), "
                             "and pass the full layout with `layout_version` as expected_version. "
                             "On a version conflict, inspect again and retry. To change another "
-                            "page, open that page's chat."
+                            "page, open that page's chat. A detail block shows field labels only "
+                            "and cannot pin one record; use a list block to show records."
                         ),
                         inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),

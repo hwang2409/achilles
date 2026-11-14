@@ -33,6 +33,10 @@ _LAYOUT_BLOCK_SCHEMA = {
         },
         {
             "type": "object",
+            "description": (
+                "shows field labels only and cannot pin one record; "
+                "use a list block to show records"
+            ),
             "properties": {
                 "type": {"const": "detail"},
                 "title": {"type": "string"},
@@ -185,13 +189,32 @@ def validate_layout(
     tools = assigned_tools or set()
     for index, block in enumerate(layout["blocks"]):
         if block["type"] == "form" and block["tool"] not in tools:
-            raise ValidationError(f"{prefix}/blocks/{index}/tool", "assigned tool name")
+            raise ValidationError(
+                f"{prefix}/blocks/{index}/tool",
+                "assigned tool name",
+                hint=(
+                    "Add a tool with this name to create_page.tools (or call create_tool first), "
+                    "then retry."
+                ),
+            )
         if (
             block["type"] == "list"
             and assigned_collections is not None
             and block["collection"] not in assigned_collections
         ):
-            raise ValidationError(f"{prefix}/blocks/{index}/collection", "assigned collection")
+            raise ValidationError(
+                f"{prefix}/blocks/{index}/collection",
+                "assigned collection",
+                hint=(
+                    "Add a tool for this collection in create_page.tools (or call create_tool "
+                    'first), for example: {"format_version":1,"kind":"data_operation",'
+                    '"name":"list_collection_name","description":"list records",'
+                    '"input_schema":{"type":"object","properties":{}},'
+                    '"implementation":{"operation":"list",'
+                    '"collection":"collection_name","data_schema":{"type":'
+                    '"object","properties":{}}}}. A simple inferred input_schema is fine.'
+                ),
+            )
     return layout
 
 
@@ -799,7 +822,10 @@ class PageStore:
             )
             if expected_version != active_version:
                 raise ValidationError(
-                    "/expected_version", "current active layout version", "conflict"
+                    "/expected_version",
+                    "current active layout version",
+                    "conflict",
+                    "Call inspect_page, set expected_version to layout.version, and retry.",
                 )
             version = active_version + 1
             stamp = now()
