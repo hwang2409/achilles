@@ -97,7 +97,7 @@ jobs:
               raise SystemExit(result.returncode)
 
           env['REPORT_DIR'] = '.cache/eval-ci-browser'
-          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'harness-smoke'], env=env, timeout=30)
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'browser-controller-slot'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-browser') / 'report.json').read_text())
           assert result.returncode == 0, report['tasks'][0]
           assert report['tasks'][0]['status'] == 'pass'

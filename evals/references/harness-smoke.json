@@ -34,12 +34,6 @@
           "route": "/eval-smoke"
         }
       }
-    ],
-    "browser": [
-      {
-        "page_id": "smoke",
-        "text": "smoke"
-      }
     ]
   },
   "bad": {
@@ -76,12 +70,6 @@
           "page_id": "smoke",
           "route": "/eval-smoke"
         }
-      }
-    ],
-    "browser": [
-      {
-        "page_id": "smoke",
-        "text": "smoke"
       }
     ]
   }
