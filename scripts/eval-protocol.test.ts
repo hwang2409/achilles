@@ -9,6 +9,9 @@ class FakeWebSocket {
   static controllerClaimed = true;
   static helloErrorCode = -32001;
   static helloAttempts = 0;
+  static socketConstructions = 0;
+  static closeCalls = 0;
+  static holdOpen = false;
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSING = 2;
@@ -21,7 +24,8 @@ class FakeWebSocket {
   private listeners = new Map<string, Listener[]>();
 
   constructor(_url: string | URL, _protocols?: string | string[]) {
-    queueMicrotask(() => {
+    FakeWebSocket.socketConstructions += 1;
+    if (!FakeWebSocket.holdOpen) queueMicrotask(() => {
       this.readyState = FakeWebSocket.OPEN;
       this.emit("open", new Event("open"));
     });
@@ -42,6 +46,7 @@ class FakeWebSocket {
   }
 
   close() {
+    FakeWebSocket.closeCalls += 1;
     if (this.readyState === FakeWebSocket.CLOSED) return;
     this.readyState = FakeWebSocket.CLOSED;
     this.emit("close", new Event("close"));
@@ -58,6 +63,9 @@ function installFakeWebSocket(errorCode = -32001) {
   FakeWebSocket.controllerClaimed = true;
   FakeWebSocket.helloErrorCode = errorCode;
   FakeWebSocket.helloAttempts = 0;
+  FakeWebSocket.socketConstructions = 0;
+  FakeWebSocket.closeCalls = 0;
+  FakeWebSocket.holdOpen = false;
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
 }
 
@@ -104,21 +112,43 @@ test("reconnect does not retry another hello error", async () => {
   expect(delays).toEqual([]);
 });
 
-test("reconnect aborts during capacity backoff without another connection", async () => {
+test("reconnect aborts during a pending capacity backoff without another connection", async () => {
   installFakeWebSocket();
   const controller = new AbortController();
   const reason = new Error("task stopped");
-  let waits = 0;
+  let waitResolved = false;
+  let releaseWait!: () => void;
+  let waitStartedResolve!: () => void;
+  const waitStarted = new Promise<void>(resolve => { waitStartedResolve = resolve; });
   const connecting = connectEvalProtocol(discovery, undefined, {
     retryCapacity: true,
     signal: controller.signal,
     wait: async () => {
-      waits += 1;
-      controller.abort(reason);
+      waitStartedResolve();
+      await new Promise<void>(resolve => { releaseWait = resolve; });
+      waitResolved = true;
     },
   });
 
+  await Promise.race([waitStarted, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("backoff did not start")), 1_000))]);
+  expect(FakeWebSocket.socketConstructions).toBe(1);
+  controller.abort(reason);
   await expect(connecting).rejects.toBe(reason);
-  expect(waits).toBe(1);
-  expect(FakeWebSocket.helloAttempts).toBe(1);
+  expect(waitResolved).toBe(false);
+  expect(FakeWebSocket.socketConstructions).toBe(1);
+  releaseWait();
+});
+
+test("reconnect aborts while the socket is opening and closes it", async () => {
+  installFakeWebSocket();
+  FakeWebSocket.holdOpen = true;
+  const controller = new AbortController();
+  const reason = new Error("task stopped");
+  const connecting = connectEvalProtocol(discovery, undefined, { signal: controller.signal });
+
+  expect(FakeWebSocket.socketConstructions).toBe(1);
+  controller.abort(reason);
+  await expect(connecting).rejects.toBe(reason);
+  expect(FakeWebSocket.closeCalls).toBeGreaterThan(0);
+  expect(FakeWebSocket.socketConstructions).toBe(1);
 });
