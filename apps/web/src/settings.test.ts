@@ -1,6 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { defaultSettings, parseSettings } from "./settings";
 
+async function moduleMockCalls() {
+  const calls: string[] = [];
+  for (const pattern of ["**/*.test.ts", "**/*.test.tsx"]) {
+    for await (const path of new Bun.Glob(pattern).scan({ cwd: import.meta.dir, absolute: true })) {
+      if (/mock\s*\.\s*module\s*\(/.test(await Bun.file(path).text())) calls.push(path.replace(`${import.meta.dir}/`, "apps/web/src/"));
+    }
+  }
+  return calls;
+}
+
+describe("web test isolation", () => {
+  test("injects dependencies instead of replacing shared modules", async () => {
+    expect(await moduleMockCalls(), "mock.module leaks across test files; inject the dependency instead").toEqual([]);
+  });
+});
+
 describe("parseSettings", () => {
   test("falls back per field for malformed browser storage", () => {
     expect(parseSettings("not json")).toEqual(defaultSettings);
