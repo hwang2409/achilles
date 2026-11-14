@@ -65,10 +65,10 @@ async function preflightBrowser(tasks: EvalTask[]) {
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
 
-const bundle = (name: string, operation: string, collection: string) => {
+const bundle = (name: string, operation: string, collection: string, input_schema?: Record<string, unknown>) => {
   const record = { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] };
   const output_schema = operation === "list" ? { type: "array", items: record } : operation === "get" ? { anyOf: [record, { type: "null" }] } : record;
-  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, output_schema, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } };
+  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: input_schema ?? (operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }), output_schema, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } };
 };
 const CAPABILITIES_SCRIPT = `
 import inspect, json
@@ -103,7 +103,7 @@ with store.transaction() as db:
 async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const plan = task.page_plan.find(page => page.source !== "created")!;
   if (task.setup) {
-    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
+    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
   }
@@ -189,8 +189,13 @@ async function databaseSnapshot(stack: EvalStack) {
   if (process.exitCode !== 0) throw new Error(`snapshot failed: ${process.stderr}`); return JSON.parse(process.stdout) as EvalSnapshot;
 }
 const rowKey = (type: string, row: Record<string, unknown>) => type === "pages" || type === "tools" ? String(row.id) : type === "records" ? `${row.page_id}:${row.collection}:${row.id}` : `${row.page_id}:${row.tool_id ?? row.version}`;
-function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: Record<string, unknown>[]) {
-  const ids: string[] = calls.filter(call => !String(call.tool).endsWith("create_page")).map(call => String(call.page_id));
+export function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: Record<string, unknown>[]) {
+  const toolOwners = new Map((after.tools ?? []).map(tool => [`achilles__${tool.name}`, String(tool.page_id)]));
+  const ids: string[] = [];
+  for (const call of calls) {
+    const owner = toolOwners.get(String(call.tool));
+    if (call.success === true && owner) ids.push(String(call.page_id), owner);
+  }
   for (const type of ["pages", "tools", "assignments", "records", "layouts"] as const) {
     const old = new Set((before[type] ?? []).map(row => rowKey(type, row)));
     for (const row of after[type] ?? []) if (!old.has(rowKey(type, row)) && row.page_id) ids.push(String(row.page_id));
@@ -369,7 +374,7 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && repeats.every(repeat => (repeat.result.pass || repeat.result.status === "unsupported") && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => (task.pass || task.status === "unsupported") && task.status !== "needs_review") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {

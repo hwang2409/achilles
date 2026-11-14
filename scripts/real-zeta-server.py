@@ -203,6 +203,20 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "form", "title": "add book", "tool": "add_book"},
+                                {
+                                    "type": "metric",
+                                    "label": (
+                                        "legacy total with an unusually long descriptive label"
+                                    ),
+                                    "value": "9,999,999,999,999,999",
+                                },
+                                {
+                                    "type": "metric",
+                                    "label": "reading",
+                                    "collection": "books",
+                                    "count": True,
+                                    "where": {"field": "status", "equals": "reading"},
+                                },
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
@@ -254,6 +268,20 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "text", "text": "layout updated without reload"},
+                                {
+                                    "type": "metric",
+                                    "label": (
+                                        "legacy total with an unusually long descriptive label"
+                                    ),
+                                    "value": "9,999,999,999,999,999",
+                                },
+                                {
+                                    "type": "metric",
+                                    "label": "reading",
+                                    "collection": "books",
+                                    "count": True,
+                                    "where": {"field": "status", "equals": "reading"},
+                                },
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
@@ -276,6 +304,34 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             content=[
                 TextContent(
                     "layout version conflict: inspect the page and retry with its current version."
+                )
+            ]
+        ),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "invalid-metric-layout",
+                    "achilles__update_layout",
+                    {
+                        "layout": {
+                            "blocks": [
+                                {
+                                    "type": "metric",
+                                    "label": "invalid",
+                                    "collection": "books",
+                                    "count": "yes",
+                                }
+                            ]
+                        },
+                        "expected_version": 2,
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(
+            content=[
+                TextContent(
+                    "metric update rejected: /layout/blocks/0 must match one valid schema variant."
                 )
             ]
         ),
@@ -378,6 +434,47 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
 
 async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
+    original_event = server.control._event
+
+    async def held_event(event, *args, **kwargs):
+        document = json.loads(control.read_text())
+        if (
+            event.type.name == "TURN_START"
+            and document.get("hold_turn_start")
+            and not document.get("turn_start_released")
+        ):
+            server.control._turn_end_published = False
+            document["turn_start_barrier"] = "held"
+            write_control(control, document)
+            for _ in range(300):
+                document = json.loads(control.read_text())
+                if document.get("release_turn_start_barrier"):
+                    document["turn_start_released"] = True
+                    write_control(control, document)
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise RuntimeError("turn start barrier release timed out after 15 seconds")
+        await original_event(event, *args, **kwargs)
+
+    server.control._event = held_event
+    original_send = DeliveryRequests.send
+
+    async def held_send(instance, params, features):
+        outcome = await original_send(instance, params, features)
+        if params.get("text") == "steer while running":
+            document = json.loads(control.read_text())
+            document["fallback_send_barrier"] = "held"
+            write_control(control, document)
+            for _ in range(300):
+                document = json.loads(control.read_text())
+                if document.get("release_fallback_send_barrier"):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise RuntimeError("fallback send barrier release timed out after 15 seconds")
+        return outcome
+
     original_finalize_turn = DeliveryRequests.finalize_turn
 
     async def held_finalize_turn(instance, *args, **kwargs):
@@ -396,6 +493,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 raise RuntimeError("late turn barrier release timed out after 15 seconds")
         await original_finalize_turn(instance, *args, **kwargs)
 
+    DeliveryRequests.send = held_send
     DeliveryRequests.finalize_turn = held_finalize_turn
     await server.start()
     websocket = server._websocket
