@@ -72,12 +72,22 @@ type AttachmentOwner = ReturnType<typeof createAttachmentOwner>;
 class StaleAttachment extends Error {}
 const requireCurrent = (owner: AttachmentOwner, token: number) => { if (!owner.current(token)) throw new StaleAttachment(); };
 
-export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number): Promise<Attachment> {
+export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, readOnly = false): Promise<Attachment> {
   let ownsLease = false;
   try {
     const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); requireCurrent(owner, token);
     if (!loaded.ok) throw new Error("page not found");
     const page = await loaded.json() as Page; requireCurrent(owner, token);
+    if (readOnly) {
+      const current = await client.request("status", {}) as { session?: { session_id: string } | null };
+      const sessionId = current.session?.session_id ?? selectedId ?? page.zeta_session_id;
+      if (!sessionId) throw new Error("no active chat to observe");
+      const selectedChat = await findChat(sessionId); requireCurrent(owner, token);
+      const lease = await loadSession(client, sessionId);
+      if (!owner.accept(token, lease)) throw new StaleAttachment();
+      ownsLease = true;
+      return { page, serverApprovalMode: page.approval_mode ?? null, sessionId, lease, credential: "", pendingApprovalMode: null, title: selectedChat?.title?.trim() || "untitled chat" };
+    }
     if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
     const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
     if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
@@ -142,7 +152,7 @@ class PendingCreationError extends Error {
 
 const NO_CREATION = { pending: null, error: null };
 
-export function useActiveChat(client: ZetaClient | null, connected: boolean) {
+export function useActiveChat(client: ZetaClient | null, connected: boolean, readOnly = false) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
   const [state, setState] = useState<State>({ phase: "loading" });
   const [creationPageId, setCreationPageId] = useState<string | null>(null);
@@ -161,7 +171,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     setCreationPageId(null);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
-    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token).then((next) => {
+    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, readOnly).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
       setState({ phase: "ready", ...next });
@@ -210,7 +220,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, []);
 
   const newChat = useCallback(async () => {
-    if (!client) return;
+    if (!client || readOnly) return;
     const context = state.phase === "ready"
       ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } }
       : state.phase === "missing" ? missingCreation.current : null;
@@ -238,7 +248,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, []);
 
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
-    if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
+    if (readOnly || !client || state.phase !== "ready") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
     const delivery_id = crypto.randomUUID(); track(delivery_id);
     await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
@@ -250,7 +260,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, [client, state, updateReady]);
 
   const toggle = useCallback(async () => {
-    if (state.phase !== "ready") return;
+    if (readOnly || state.phase !== "ready") return;
     const current = state; const token = owner.current.token();
     setToggleError(null); setToggling(true);
     try {
@@ -263,7 +273,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, [state, updateReady]);
 
   const settleApprovalMode = useCallback(async () => {
-    if (!client || state.phase !== "ready" || !state.pendingApprovalMode) return;
+    if (readOnly || !client || state.phase !== "ready" || !state.pendingApprovalMode) return;
     const current = state; const mode = state.pendingApprovalMode; const token = owner.current.token();
     try {
       const result = await applyApprovalMode(client, current.sessionId, mode);
@@ -272,7 +282,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, [client, state, updateReady]);
 
   const recordLastState = useCallback((lastState: string) => {
-    if (state.phase !== "ready") return;
+    if (readOnly || state.phase !== "ready") return;
     const token = owner.current.token();
     void fetch(`/api/chats/${encodeURIComponent(state.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) })
       .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); });

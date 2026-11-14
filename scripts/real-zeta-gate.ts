@@ -130,7 +130,7 @@ try {
     "achilles",
   );
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  let page = await browser.newPage();
   const errors: string[] = [];
   let ignoreBrowserErrors = false;
   let expectingRegistrationFailures = false;
@@ -691,6 +691,22 @@ try {
   await recoveredField.waitFor({ timeout: 20_000 });
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
+
+  const observerSession = await page.locator("[data-session-id]").getAttribute("data-session-id");
+  if (!observerSession) throw new Error("controller session id missing before observer gate");
+  const observerPage = await browser.newPage();
+  await observerPage.goto(`${origin}/?chat=${encodeURIComponent(observerSession)}`);
+  await observerPage.locator(".transcript").waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer attach failed: ${await observerPage.locator("body").innerText()}`); });
+  await observerPage.getByRole("status").filter({ hasText: "read-only" }).waitFor({ timeout: 20_000 });
+  if (await observerPage.getByRole("textbox", { name: "message" }).count()) throw new Error("observer page exposed a composer");
+  if (!(await observerPage.getByRole("status").innerText()).includes("another tab or app")) throw new Error("observer page did not show the controller capacity banner");
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "08-observer-read-only-review-1440x900.png"), fullPage: true });
+  await page.close({ runBeforeUnload: true });
+  page = observerPage;
+  await page.waitForTimeout(3_000);
+  await page.getByRole("button", { name: "take control" }).click();
+  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "09-observer-take-control-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
     zetaProcess.kill("SIGTERM");

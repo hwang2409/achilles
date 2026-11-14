@@ -11,14 +11,14 @@ export type ConnectionState =
   | { phase: "not_running"; attempt: number; retryAt: number; lost: boolean }
   | { phase: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; attempt: number; retryAt: number; lost: boolean }
   | { phase: "dropped"; attempt: number; retryAt: number; lost: true }
-  | { phase: "unresponsive" | "incompatible"; attempt: number; retryAt: number; lost: boolean };
+  | { phase: "unresponsive" | "incompatible" | "capacity"; attempt: number; retryAt: number; lost: boolean };
 
 export type ConnectionEvent =
   | { type: "attempt" }
   | { type: "connected"; authority: ZetaRole }
   | { type: "not_running"; now: number }
   | { type: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; now: number }
-  | { type: "unresponsive" | "incompatible"; now: number }
+  | { type: "unresponsive" | "incompatible" | "capacity"; now: number }
   | { type: "closed"; now: number };
 
 /** The command that starts a server this page may connect to. The origin is exact: localhost and 127.0.0.1 differ. */
@@ -72,10 +72,11 @@ export type Connection = {
   subscribe(listener: () => void): () => void;
   /** Skips the wait before the next automatic try. */
   retryNow(): void;
+  takeControl(): void;
   stop(): void;
 };
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "serve_observers"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
@@ -172,7 +173,26 @@ export function createConnection({
     const authority = "controller" as const;
     const opened = await openRole(authority);
     if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    if (opened.kind === "busy") return send({ type: "incompatible", now: now() });
+    if (opened.kind === "busy") {
+      if (discovery.observer_token) {
+        const observer = await openRole("observer");
+        if (!current()) return observer.kind === "connected" ? observer.client.close() : undefined;
+        if (observer.kind === "connected") {
+          const next = observer.client;
+          client = next;
+          next.onClose(() => {
+            if (client !== next) return;
+            client = null;
+            send({ type: "closed", now: now() });
+          });
+          send({ type: "connected", authority: "observer" });
+          return;
+        }
+        if (observer.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
+        if (observer.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
+      }
+      return send({ type: "capacity", now: now() });
+    }
     if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
     // The process runs and the origin is allowed, so a refused upgrade means the token was refused.
@@ -198,6 +218,15 @@ export function createConnection({
       if (timer !== null) { clearTimer(timer); timer = null; }
       // A slot may have freed since both roles were refused: start again as a fresh open does, controller first.
       void attempt();
+    },
+    takeControl() {
+      if (state.phase !== "connected" || state.authority !== "observer" || stopped) return;
+      const open = client;
+      client = null;
+      open?.close();
+      state = { phase: "capacity", attempt: attemptOf(state), retryAt: now(), lost: false };
+      listeners.forEach((listener) => listener());
+      schedule(1_000);
     },
     stop() {
       stopped = true;
