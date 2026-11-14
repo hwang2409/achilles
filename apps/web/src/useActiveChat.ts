@@ -161,6 +161,7 @@ type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" |
 // Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
 const STUCK_STEER_WAIT_MS = 15_000;
 export class UncertainSteerDeliveryError extends Error {}
+export class DroppedSteerDeliveryError extends Error {}
 
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
@@ -186,7 +187,7 @@ export async function confirmSteerDelivery(
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
     if (outcome === "delivered") return id;
-    if (outcome === "dropped") throw new Error("this message was not sent. your text is still here.");
+    if (outcome === "dropped") throw new DroppedSteerDeliveryError("this message was not sent. your text is still here.");
     if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
       throw new Error(`steer delivery status: ${status.status}`);
     await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
