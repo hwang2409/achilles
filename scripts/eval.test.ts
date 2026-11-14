@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
 import { failureResult, productCapabilities, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unsupportedResult, validateCatalog, validateReservedBundles } from "./eval";
 
-const localRun = async (command: string, args: string[], cwd?: string) => {
-  const process = Bun.spawn([command, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
+  const python = command === "uv" && args[0] === "run" ? args.slice(args.indexOf("python")) : [command, ...args];
+  const process = Bun.spawn(python, { cwd, env: { ...Bun.env, PYTHONPATH: [join(target, "src"), target].join(delimiter) }, stdout: "pipe", stderr: "pipe" });
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
 
@@ -42,7 +43,7 @@ test("capability probe keeps an unrelated internal ImportError as a harness_erro
     await Bun.write(join(root, "achilles", "tools.py"), "from achilles import unrelated\n");
     await Bun.write(join(root, "achilles", "unrelated.py"), 'raise ImportError("unrelated dependency broke")\n');
     try {
-      await productCapabilities({ run: localRun, achillesDir: root } as never);
+      await productCapabilities({ run: targetRun(root), achillesDir: root } as never);
       throw new Error("broken target unexpectedly passed");
     } catch (error) {
       const result = failureResult(task, error, []);
@@ -63,7 +64,7 @@ test("reserved bundle validation uses the target revision's validator after chan
   const bundles = [valid, ...invalid]; const calls = bundles.map((bundle, index) => ({ id: `call-${index}`, tool: "achilles__create_tool", arguments: { bundle } }));
   const results = calls.map(call => ({ call_id: call.id, success: false }));
   const target = Bun.env.ACHILLES_DIR ?? resolve(new URL("..", import.meta.url).pathname);
-  const validations = await validateReservedBundles({ run: localRun, achillesDir: target } as never, calls, results);
+  const validations = await validateReservedBundles({ run: targetRun(target), achillesDir: target } as never, calls, results);
   expect(validations.map(row => row.valid)).toEqual([true, false, false, false, false]);
 });
 
