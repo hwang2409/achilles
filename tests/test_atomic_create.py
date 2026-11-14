@@ -814,6 +814,61 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
     }
 
 
+@pytest.mark.parametrize(
+    ("field_filter", "expect_error"),
+    [
+        ({"field": "title", "equals": "the book"}, False),
+        ({"field": "missing", "equals": "the book"}, True),
+        (None, False),
+    ],
+)
+def test_detail_filter_validation_through_public_tools(
+    creation_client, field_filter, expect_error
+):
+    _, _, client, home_headers = creation_client
+    detail = {
+        "type": "detail",
+        "title": "book",
+        "collection": "books",
+        "fields": ["title"],
+    }
+    if field_filter is not None:
+        detail["filter"] = field_filter
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(layout={"blocks": [detail]}),
+        },
+    )
+
+    assert bool(created.get("isError")) is expect_error
+    if expect_error:
+        assert json.loads(created["content"][0]["text"]) == {
+            "code": "invalid_input",
+            "path": "/layout/blocks/0/filter/field",
+            "expected": "field in collection schema",
+            "hint": (
+                "Use one of the collection's fields; inspect its assigned tool schema in "
+                "tools/list to see them."
+            ),
+        }
+    else:
+        page_id = json.loads(created["content"][0]["text"])["page_id"]
+        inspected = mcp(
+            client,
+            home_headers,
+            3,
+            "tools/call",
+            {"name": "inspect_page", "arguments": {"page_id": page_id}},
+        )
+        value = json.loads(inspected["content"][0]["text"])
+        assert value["layout"] == {"blocks": [detail]}
+
+
 def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
     _, store, client, home_headers = creation_client
     created = mcp(
