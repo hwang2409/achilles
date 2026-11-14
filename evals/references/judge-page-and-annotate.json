@@ -73,7 +73,12 @@
               "type": "list"
             },
             {
-              "type": "detail"
+              "type": "detail",
+              "collection": "annotations",
+              "filter": {
+                "field": "run_id",
+                "equals": "run-002"
+              }
             }
           ]
         }
@@ -85,7 +90,9 @@
         "data": {
           "run_id": "run-002",
           "verdict": "bad"
-        }
+        },
+        "id": "annotation-1",
+        "collection": "annotations"
       }
     ],
     "calls": [
@@ -199,7 +206,12 @@
               "type": "list"
             },
             {
-              "type": "detail"
+              "type": "detail",
+              "collection": "annotations",
+              "filter": {
+                "field": "run_id",
+                "equals": "run-002"
+              }
             }
           ]
         }
@@ -215,7 +227,9 @@
         "data": {
           "run_id": "run-002",
           "verdict": "bad"
-        }
+        },
+        "id": "annotation-1",
+        "collection": "annotations"
       }
     ],
     "calls": [

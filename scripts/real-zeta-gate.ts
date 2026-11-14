@@ -878,10 +878,34 @@ try {
     undefined,
     { timeout: 20000 },
   );
-  const layoutBeforeInvalidMetric = await page
-    .locator(".layout-blocks")
-    .locator(":scope > *")
-    .allTextContents();
+  const storedReadingLayout = async () => {
+    const response = await fetch(`${origin}/api/pages/${createdPage.id}`, {
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) throw new Error(`reading page fetch failed: ${response.status}`);
+    const stored = await response.json();
+    if (!Array.isArray(stored.layout?.blocks)) throw new Error("reading page layout was missing blocks");
+    return {
+      version: stored.active_layout_version,
+      blocks: stored.layout.blocks,
+    };
+  };
+  const layoutBeforeInvalidMetric = await storedReadingLayout();
+  let heldInvalidMetricDetail: Route | undefined;
+  let holdInvalidMetricDetail = true;
+  const filteredDetailPattern = `**/api/pages/${createdPage.id}/records/books?*`;
+  await page.route(filteredDetailPattern, async (route) => {
+    const url = new URL(route.request().url());
+    if (
+      holdInvalidMetricDetail
+      && url.searchParams.get("field") === "status"
+      && url.searchParams.get("equals") === '"reading"'
+    ) {
+      heldInvalidMetricDetail = route;
+      return;
+    }
+    await route.continue();
+  });
   const invalidLayoutApprovalBefore = await updateLayoutApproval.count();
   await field.fill("replace the page with an invalid metric");
   await field.press("Enter");
@@ -889,12 +913,6 @@ try {
     async () => (await updateLayoutApproval.count()) > invalidLayoutApprovalBefore,
     "invalid metric layout approval",
   );
-  const invalidMetricDetailResponse = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return url.pathname === `/api/pages/${createdPage.id}/records/books`
-      && url.searchParams.get("field") === "status"
-      && url.searchParams.get("equals") === '"reading"';
-  }, { timeout: 20000 });
   await updateLayoutApproval
     .nth(invalidLayoutApprovalBefore)
     .getByRole("button", { name: "approve", exact: true })
@@ -913,7 +931,16 @@ try {
     throw new Error(
       `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
     );
-  await invalidMetricDetailResponse;
+  await waitFor(async () => heldInvalidMetricDetail !== undefined, "held invalid metric detail refresh");
+  await page.getByText("loading record…", { exact: true }).waitFor({ timeout: 20000 });
+  const layoutAfterInvalidMetric = await storedReadingLayout();
+  if (
+    layoutAfterInvalidMetric.version !== layoutBeforeInvalidMetric.version
+    || JSON.stringify(layoutAfterInvalidMetric.blocks) !== JSON.stringify(layoutBeforeInvalidMetric.blocks)
+  )
+    throw new Error(`invalid metric update changed the stored page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
+  holdInvalidMetricDetail = false;
+  await heldInvalidMetricDetail!.continue();
   await page.waitForFunction(
     () =>
       (document.querySelector(".record-detail")?.textContent ?? "").includes(
@@ -922,13 +949,8 @@ try {
     undefined,
     { timeout: 20000 },
   );
-  const layoutAfterInvalidMetric = await page
-    .locator(".layout-blocks")
-    .locator(":scope > *")
-    .allTextContents();
-  if (JSON.stringify(layoutAfterInvalidMetric) !== JSON.stringify(layoutBeforeInvalidMetric))
-    throw new Error(`invalid metric update changed the page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
-  console.log("invalid metric chat update showed a readable error and kept the layout");
+  await page.unroute(filteredDetailPattern);
+  console.log("invalid metric chat update showed a readable error and kept the stored layout");
 
   const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode on", exact: true }).click();
