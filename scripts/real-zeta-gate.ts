@@ -600,7 +600,7 @@ try {
   if (
     homeInspect.result?.isError ||
     homeInspectValue.route !== "/reading" ||
-    homeInspectValue.layout?.version !== 1 ||
+    (homeInspectValue.layout_version ?? homeInspectValue.layout?.version) !== 1 ||
     homeInspectValue.tools?.[0]?.name !== "add_book" ||
     JSON.stringify(homeInspectValue).includes("credentials") ||
     JSON.stringify(homeInspectValue).includes(achillesHome)
