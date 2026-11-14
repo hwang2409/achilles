@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
@@ -47,6 +48,22 @@ function VimLoading() {
   return <div className="vim-loading" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><textarea rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
 }
 
+function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
+  return waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+}
+
+function activeComposerProps(
+  connected: boolean,
+  toggleBlocked: boolean,
+  turn: "idle" | "running",
+  onSubmit: ComposerProps["onSubmit"],
+  onStop: () => void,
+): ComposerProps {
+  if (!connected) return { state: "read-only", reason: "send is off until zeta is back", onSubmit, placeholder: "message zeta" };
+  if (toggleBlocked) return { state: "read-only", reason: "send is off until page tools refresh", onSubmit, placeholder: "message zeta" };
+  return { state: turn === "running" ? "steerable" : "idle", onSubmit, onStop, placeholder: "message zeta" };
+}
+
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
   switch (state.phase) {
@@ -65,7 +82,11 @@ export function App() {
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const active = useActiveChat(client, connectionState.phase === "connected");
   const ready = active.state.phase === "ready" ? active.state : null;
+  const empty = active.state.phase === "empty" ? active.state : null;
+  const activePage = ready?.page ?? empty?.page ?? null;
+  const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
+  const activeStore = store ?? emptyStore;
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
     const state = store.getState();
     const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
@@ -141,7 +162,7 @@ export function App() {
     const previous = previousTurn.current; previousTurn.current = turn;
     if (previous === "running" && turn === "idle") void active.settleApprovalMode();
   }, [active.settleApprovalMode, turn]);
-  const lastState = waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+  const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
@@ -149,28 +170,24 @@ export function App() {
   const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
-  const composerProps: ComposerProps = !connected || !client
-    ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: send, placeholder: "message zeta" }
-    : active.toggleBlocked
-      ? { state: "read-only", reason: "send is off until page tools refresh", onSubmit: send, placeholder: "message zeta" }
-      : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => { if (ready) void client.request("abort", { session_id: ready.sessionId }); }, placeholder: "message zeta" };
+  const composerProps = activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
   const content = <>
-    {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} />}
-    {ready && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>retry</button>}</div>}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} />}
+    {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>retry</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry creating chat</button></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
-      : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
-      : <RunProvider store={store}>
-        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+      : !activePage || !activeStore ? <div className="full-state"><p role="status">loading chat…</p></div>
+      : <RunProvider store={activeStore}>
+        {activePage.layout.blocks.length > 0 && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
+        <section ref={ready ? transcriptRef : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat page={activePage} send={send} continueWaiting={active.continueWaitingChat} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
@@ -179,7 +196,7 @@ function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
 
 function EmptyChat({ page, send, continueWaiting }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void> }) {
   const starters = ["make a page that tracks my reading list", "what changed in my repos since yesterday", "continue: grade last night's eval runs"];
-  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
+  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>choose create mode above before you send if this chat should make pages or use page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
 }
 
 function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; disabled: boolean; toggle: () => void }) {
