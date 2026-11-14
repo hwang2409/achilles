@@ -13,11 +13,14 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await page.screenshot({ path: join(screenshotDir, `${name}.png`) });
   };
   if (screenshotDir) await page.setViewportSize({ width: 1440, height: 900 });
+  const settingsDialog = page.getByRole("dialog", { name: "settings" });
   const setVim = async (enabled: boolean) => {
-    await page.evaluate((value) => localStorage.setItem("achilles-settings", JSON.stringify({ vim: value })), enabled);
-    const toggle = page.getByRole("button", { name: /create mode/ }).first();
-    await toggle.click();
-    await waitFor(async () => !(await toggle.isDisabled()), "create mode toggle");
+    await page.keyboard.press("Meta+,");
+    await settingsDialog.waitFor({ state: "visible", timeout: 10_000 });
+    const toggle = settingsDialog.getByRole("switch", { name: "vim mode" });
+    if ((await toggle.getAttribute("aria-checked")) !== String(enabled)) await toggle.click();
+    await settingsDialog.getByRole("button", { name: "esc" }).click();
+    await settingsDialog.waitFor({ state: "hidden", timeout: 10_000 });
   };
   const withDeadline = async <T>(promise: Promise<T>, label: string) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -86,6 +89,12 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await vimDraft() !== "first\n\n  third") throw new Error(`vim did not preserve the multiline stock draft: ${JSON.stringify(await vimDraft())}`);
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   await field.focus();
+  if (await composer.getAttribute("data-mode") !== "insert") throw new Error("vim did not start in INSERT");
+  await page.keyboard.press("Meta+,");
+  await settingsDialog.waitFor({ state: "visible", timeout: 10_000 });
+  await page.keyboard.press("Escape");
+  await settingsDialog.waitFor({ state: "hidden", timeout: 10_000 });
+  if (await composer.getAttribute("data-mode") !== "insert") throw new Error("closing settings with escape changed vim mode");
   await page.keyboard.press("Control+b");
   if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: control+B did not collapse the sidebar with vim composer focus");
   await page.keyboard.press("Control+b");
@@ -102,6 +111,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await field.fill("helo");
   await screenshot("insert");
   await field.press("Escape");
+  if (await composer.getAttribute("data-mode") !== "normal") throw new Error("escape in vim INSERT did not enter NORMAL");
   await field.press("0");
   await field.press("l");
   await field.press("a");
@@ -168,23 +178,27 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const afterStockSend = JSON.parse(await Bun.file(control).text());
   if (await confirmedStock.inputValue() !== "" || afterStockSend.request_count !== (beforeStockSend.request_count ?? 0) + 1) throw new Error(`duplicate-send row: expected empty draft and exactly one send, got ${JSON.stringify(await confirmedStock.inputValue())} and ${afterStockSend.request_count - (beforeStockSend.request_count ?? 0)} sends`);
 
-  await setVim(true);
-  await composer.waitFor({ state: "visible", timeout: 20_000 });
-  await field.fill("kept draft");
+  await confirmedStock.fill("kept draft");
+  await confirmedStock.press("Enter");
+  const stopButton = page.getByRole("button", { name: "stop the running turn" });
+  await stopButton.waitFor({ state: "visible", timeout: 20_000 });
+  await stopButton.focus();
   await whileDisconnected(async () => {
     await page.getByRole("alert").filter({ hasText: "connection to zeta was lost" }).waitFor({ state: "visible", timeout: 20_000 });
-    const keptDraft = await vimDraft().catch(() => null);
-    if (keptDraft !== "kept draft") throw new Error(`vim read-only draft-kept assertion failed: expected "kept draft", got ${JSON.stringify(keptDraft)}`);
-    await page.locator('.vim-composer[data-state="read-only"]').waitFor({ state: "visible", timeout: 20_000 });
+    const readOnlyComposer = page.locator('[data-part="composer"][data-state="read-only"]').last();
+    await readOnlyComposer.waitFor({ state: "visible", timeout: 20_000 });
+    if (!await readOnlyComposer.evaluate((element) => element.contains(document.activeElement))) throw new Error("read-only composer did not retain focus after its focused stop button disappeared");
+    const keptDraft = await readOnlyComposer.locator("textarea").inputValue().catch(() => null);
+    if (keptDraft !== "kept draft") throw new Error(`plain read-only draft-kept assertion failed: expected "kept draft", got ${JSON.stringify(keptDraft)}`);
     await screenshot("connection-lost");
   });
   const retry = page.getByRole("button", { name: "retry now" });
   if (await retry.isVisible().catch(() => false)) await retry.click();
-  await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
-  const reconnectedDraft = await vimDraft();
-  if (reconnectedDraft !== "kept draft") throw new Error(`vim reconnect changed the kept draft: ${JSON.stringify(reconnectedDraft)}`);
-  await setVim(false);
   const restoredStock = page.locator('textarea[aria-label="message"]');
   await restoredStock.waitFor({ state: "visible", timeout: 20_000 });
-  if (await restoredStock.inputValue() !== "kept draft") throw new Error("switching vim off changed the reconnected draft");
+  if (await restoredStock.inputValue() !== "kept draft") throw new Error("plain reconnect changed the kept draft");
+  await setVim(true);
+  await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
+  if (await vimDraft() !== "kept draft") throw new Error("switching to vim changed the reconnected draft");
+  await setVim(false);
 }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { chromium, type Route } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
+import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gateVim } from "./gate-vim";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -218,12 +219,7 @@ try {
     throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
-  if (approvalModeResponse("session_settings", first) !== "ask")
-    throw new Error("replacement session did not report ask settings");
-  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === first))
-    throw new Error("ask-mode replacement session sent a no-op set_settings frame");
-  if (await page.getByLabel("auto-approve").count())
-    throw new Error("ask-mode session showed the auto-approve marker");
+  await assertServerAskWins(page, first, requests(), approvalModeResponse);
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
@@ -240,10 +236,7 @@ try {
   const second = await gateShell(page, first, waitFor);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
-  if (approvalModeResponse("session_settings", second) !== "ask")
-    throw new Error("new ask-server chat did not report ask settings");
-  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === second))
-    throw new Error("new ask-server chat sent a no-op set_settings frame");
+  await assertServerAskWins(page, second, requests(), approvalModeResponse);
   const firstSetSettingsAfterReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterReopen !== firstSetSettingsBeforeReopen)
     throw new Error("reopening an ask chat under an ask server sent set_settings");
@@ -556,7 +549,7 @@ try {
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
   if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
-  if (await page.getByLabel("auto-approve").count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
@@ -591,7 +584,7 @@ try {
   await allowField.waitFor({ timeout: 20000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await page.getByLabel("auto-approve").waitFor({ state: "visible" });
+  await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
   if (approvalModeResponse("set_settings", allowSession) !== "allow")
     throw new Error("allow-mode session settings were not applied");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
@@ -613,6 +606,8 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
+  await gateSettings(page, origin);
+  await gateCreationApprovalDefaults(page, requests, approvalModeResponse);
 
   await gateVim(page, control, waitFor, async (check) => {
     const previousPid = JSON.parse(await Bun.file(control).text()).pid;
@@ -631,7 +626,7 @@ try {
   const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   await page.goto(`${origin}/?chat=${first}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
-  if (await page.getByLabel("auto-approve").count()) throw new Error("user ask chat reopened under allow showed auto-approve");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("user ask chat reopened under allow showed auto-approve");
   const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
     throw new Error("reopening a user ask chat under an allow server sent set_settings");

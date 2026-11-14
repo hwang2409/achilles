@@ -1,10 +1,12 @@
 import {
   useCallback,
   useId,
+  useLayoutEffect,
   useRef,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { restoreFocus } from "../AppShell";
 import { enterAction } from "./composer-machine";
 import {
   useComposerDelivery,
@@ -23,6 +25,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
   } = props;
   const id = useId();
   const input = useRef<HTMLTextAreaElement>(null);
+  const group = useRef<HTMLDivElement>(null);
+  const focusLost = useRef(false);
   const { model, edit, submit, stop } = useComposerDelivery(props);
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
@@ -68,14 +72,21 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
     return () => {
-      if (document.activeElement === button)
-        input.current?.focus({ preventScroll: true });
+      if (document.activeElement !== button) return;
+      focusLost.current = true;
+      restoreFocus(input.current);
     };
   }, []);
+  useLayoutEffect(() => {
+    if (!focusLost.current) return;
+    focusLost.current = false;
+    restoreFocus(input.current, group.current);
+  });
 
   if (state === "read-only")
     return (
       <div
+        ref={group}
         tabIndex={-1}
         className={className}
         data-part="composer"

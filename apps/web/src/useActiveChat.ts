@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
+import { getSettings } from "./settings";
 import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./zeta/session";
 
@@ -81,7 +82,7 @@ export async function attachPage(client: ZetaClient, key: string, selectedId: st
     const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
     if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
     const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
-    const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode) };
+    const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
     let resumedCreation: PendingChat | null;
     try { resumedCreation = await creation.resume(creationInput); }
     catch (caught) { throw new PendingCreationError(caught, creationInput); }
@@ -211,7 +212,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const newChat = useCallback(async () => {
     if (!client) return;
     const context = state.phase === "ready"
-      ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode) } }
+      ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } }
       : state.phase === "missing" ? missingCreation.current : null;
     if (!context) return;
     const token = owner.current.begin(`new:${context.input.pageId}`, true);

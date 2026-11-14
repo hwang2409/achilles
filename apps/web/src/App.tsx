@@ -3,6 +3,7 @@ import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type Comp
 import { AppShell } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
+import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
@@ -10,12 +11,6 @@ import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
-
-function vimEnabled() {
-  if (matchMedia("(pointer: coarse)").matches) return false;
-  try { return JSON.parse(localStorage.getItem("achilles-settings") ?? "null")?.vim === true; }
-  catch { return false; }
-}
 
 function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
   const slot = useRef<HTMLDivElement>(null);
@@ -44,6 +39,7 @@ function connectionFailure(state: ConnectionState): string | null {
 }
 
 export function App() {
+  const settings = useSettings();
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -88,10 +84,10 @@ export function App() {
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         <section className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={active.send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} />{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</section>
-        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={vimEnabled()} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: active.send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: active.send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
+        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: active.send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: active.send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;
+  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;
 }
 
 function EmptyChat({ page, send, continueWaiting }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void> }) {

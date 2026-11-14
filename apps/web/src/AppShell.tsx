@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { isEditableTarget } from "./keyboard";
 
 export type Chat = {
@@ -17,6 +18,7 @@ type Props = {
   page: PageLink | null;
   sessionId: string | null;
   waiting: number;
+  serverForcesAsk?: boolean;
   children: ReactNode;
   onNewChat: () => Promise<void>;
   onSelectChat: (chat: Chat) => void;
@@ -35,6 +37,18 @@ const chatHref = (chat: Chat) => {
   return `${url.pathname}${url.search}`;
 };
 const titleOf = (chat: Chat) => chat.title?.trim() || "untitled chat";
+const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
+const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
+const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
+export const restoreFocus = (...candidates: Array<Element | null>) => {
+  const target = candidates.find((element): element is HTMLElement => {
+    if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement || !element.isConnected || element.matches("[disabled], :disabled") || element.closest("[inert], [aria-hidden='true']")) return false;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return (element.tabIndex >= 0 || element.matches(nativelyFocusable)) && style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+  });
+  target?.focus();
+};
 
 function groupLabel(value: string) {
   const date = new Date(value);
@@ -60,7 +74,7 @@ function Highlight({ value, query }: { value: string; query: string }) {
   return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
 }
 
-export function AppShell({ page, sessionId, waiting, children, onNewChat, onSelectChat, refreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onSelectChat, refreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -70,15 +84,37 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
   const [next, setNext] = useState<string | null>(null);
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 759px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const settingsOpener = useRef<Element>(null);
   const loading = chats === null;
+  const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => restoreFocus(menuButton.current)); };
+  const openSettings = (opener: Element | null) => {
+    setSettingsOpen((open) => {
+      if (!open) settingsOpener.current = opener;
+      return true;
+    });
+  };
+  const closeSettings = () => {
+    if (!settingsOpen) return;
+    setSettingsOpen(false);
+    requestAnimationFrame(() => {
+      restoreFocus(
+        settingsOpener.current,
+        drawer ? firstFocusable(sidebar.current) : null,
+        document.querySelector(".main-pane textarea[aria-label='message'], .main-pane [role='textbox']"),
+        document.querySelector(".settings-button"),
+      );
+      settingsOpener.current = null;
+    });
+  };
 
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
   useEffect(() => { const media = matchMedia("(max-width: 759px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
-  useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => sidebar.current?.querySelector<HTMLElement>("button:not(:disabled), a[href], input")?.focus()); }, [drawer, narrow]);
+  useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => firstFocusable(sidebar.current)?.focus()); }, [drawer, narrow]);
   useEffect(() => {
     let live = true;
     const params = new URLSearchParams({ limit: "50" });
@@ -91,15 +127,31 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
     return () => { live = false; };
   }, [refreshKey, search]);
   useEffect(() => {
+    const layers: Array<() => void> = [];
+    if (query) layers.push(() => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); });
+    if (drawer) layers.push(closeDrawer);
+    if (settingsOpen) layers.push(closeSettings);
+    const top = layers.at(-1);
+    if (!top) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      top();
+    };
+    document.addEventListener("keydown", escape, true);
+    return () => document.removeEventListener("keydown", escape, true);
+  }, [drawer, query, settingsOpen]);
+  useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); return; }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); return; }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); return; }
       if (isEditableTarget(event)) return;
-      if (event.key === "Escape" && drawer) { event.preventDefault(); setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); }
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [drawer, loading, onNewChat]);
+  }, [loading, onNewChat, settingsOpen]);
 
   const pages = useMemo(() => {
     const values = new Map<string, PageLink>();
@@ -113,10 +165,8 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
     for (const chat of chats ?? []) { const group = groupLabel(chat.updated_at); values.set(group, [...(values.get(group) ?? []), chat]); }
     return [...values];
   }, [chats]);
-  const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); };
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
   const searchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") { event.preventDefault(); setQuery(""); setSearch(""); setActiveResult(0); event.currentTarget.focus(); return; }
     if (!search || !chats?.length) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveResult((value) => (value + (event.key === "ArrowDown" ? 1 : -1) + chats.length) % chats.length); }
     if (event.key === "Enter") { event.preventDefault(); select(chats[activeResult] ?? chats[0]); }
@@ -149,12 +199,13 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
         {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
         {next && <button className="load-older" onClick={loadOlder}>load 50 older</button>}
       </section>
-      <footer><button type="button">⚙ <span>settings</span></button><kbd>⌘K</kbd></footer>
+      <footer><SettingsControl onOpen={openSettings} className="settings-button" /><kbd>⌘K</kbd></footer>
     </aside>
     <main className="main-pane" aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
       {children}
     </main>
+    <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} />
   </div>;
 }
 

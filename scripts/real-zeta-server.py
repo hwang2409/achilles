@@ -88,6 +88,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(content=[TextContent("allow complete")]),
         ScriptedTurn(content=[TextContent("stock complete")]),
         ScriptedTurn(content=[TextContent("vim complete")]),
+        ScriptedTurn(content=[TextContent("focus complete")], delay=5),
     ]
 
     def record_request(messages, tool_schemas):

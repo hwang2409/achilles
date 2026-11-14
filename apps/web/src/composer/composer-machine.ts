@@ -40,7 +40,7 @@ const unsentDraft = (current: string, sent: string) => current.startsWith(sent) 
 export function transition(model: ComposerModel, event: ComposerEvent): ComposerTransition {
   switch (event.type) {
     case "state":
-      return { model: { ...model, state: event.state, error: event.state === "idle" && model.error?.kind === "stop" ? undefined : model.error } };
+      return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
       return { model: { ...model, draft: event.draft, send: model.sending ? model.send : undefined, error: model.error?.kind === "submit" && !model.sending ? undefined : model.error } };
     case "submit": {

@@ -6,13 +6,15 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; overflow: hidden; }
 body { margin: 0; }
-button, input { color: inherit; font: inherit; }
+button, input, textarea, select { color: inherit; font: inherit; }
+.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 button, input, a { border-radius: 0; }
 button { background: transparent; border: 1px solid var(--fulcrum-border); cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 kbd { color: var(--fulcrum-muted); font: inherit; }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
 .app-shell { height: 100%; display: grid; grid-template-columns: 288px minmax(0, 1fr); background: var(--fulcrum-bg); }
+.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border); }
 .brand-row strong { font-size: 16px; letter-spacing: .02em; }
@@ -48,9 +50,10 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 8%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
 .load-older { width: calc(100% - 32px); height: 40px; margin: 12px 16px; }
-.sidebar footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
-.sidebar footer button { flex: 1; height: 40px; text-align: left; padding: 0 10px; }
-.sidebar footer > kbd { border: 1px solid var(--fulcrum-border); padding: 8px; }
+.sidebar > footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
+.sidebar > footer > button { flex: 1; height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
+.sidebar > footer > button kbd { margin-left: auto; }
+.sidebar > footer > kbd { border: 1px solid var(--fulcrum-border); padding: 8px; }
 .sidebar-skeleton { padding: 8px 16px; }
 .search-skeleton { flex: 0 0 40px; margin: 12px 16px 0; border: 1px solid var(--fulcrum-border); background: linear-gradient(90deg, transparent, var(--fulcrum-surface), transparent); }
 .shell-loading .new-chat { color: var(--fulcrum-muted); border-color: var(--fulcrum-border); background: transparent; }
@@ -103,11 +106,11 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
 .sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
 .sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
-.sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed footer span, .sidebar-collapsed footer > kbd { display: none; }
+.sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed .sidebar > footer .settings-label, .sidebar-collapsed .sidebar > footer > kbd { display: none; }
 .sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 40px; justify-content: center; margin: 12px 6px 0; padding: 0; }
 .sidebar-collapsed .waiting-count { display: grid; place-items: center; width: 32px; height: 32px; margin: 12px 9px; border: 1px solid var(--fulcrum-warn); }
-.sidebar-collapsed footer { margin-top: auto; padding: 6px; }
-.sidebar-collapsed footer button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
+.sidebar-collapsed .sidebar > footer { margin-top: auto; padding: 6px; }
+.sidebar-collapsed .sidebar > footer > button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
 
 @media (max-width: 759px) {
   .app-shell { display: block; }

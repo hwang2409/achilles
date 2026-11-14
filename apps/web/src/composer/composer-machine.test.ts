@@ -38,6 +38,11 @@ describe("composer delivery machine", () => {
       const stopping = transition(createComposerModel("kept", "steerable"), { type: "stop" }).model;
       expect(apply(stopping, { type: "stop-reject", message: "denied" }, { type: "stop-settle" })).toMatchObject({ draft: "kept", stopping: false, error: { kind: "stop", text: "could not stop: denied" } });
     }],
+    ["read-only clears a stale stop error", () => {
+      const stopping = transition(createComposerModel("kept", "steerable"), { type: "stop" }).model;
+      const failed = apply(stopping, { type: "stop-reject", message: "denied" }, { type: "stop-settle" });
+      expect(apply(failed, { type: "state", state: "read-only" }).error).toBeUndefined();
+    }],
     ["late delivery confirmation", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit" }).model;
       const rejected = apply(submitted, { type: "track", attempt: 1, deliveryId: "delivery-1" }, { type: "reject", attempt: 1, message: "offline", delivered: false }, { type: "settle", attempt: 1 });
