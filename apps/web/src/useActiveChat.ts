@@ -411,7 +411,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (waiting) selectChat(waiting);
   }, [selectChat]);
 
-  const publishReady = useCallback(async (ready: ReadyState, token: number, replace = false, focus = false) => {
+  const publishReady = useCallback(async (ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
     requireCurrent(owner.current, token);
     missingCreation.current = null;
     setCreationPageId(ready.page.id);
@@ -419,7 +419,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const route = routeWithChat(ready.page.route === "/" ? "/" : ready.page.route, ready.sessionId);
     if (replace) history.replaceState({}, "", route); else history.pushState({}, "", route);
     if (focus) setFocusSessionId(ready.sessionId);
-    setSelectedId(ready.sessionId);
+    if (select) setSelectedId(ready.sessionId);
     setState(ready);
   }, []);
 
@@ -482,7 +482,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
           token,
           true,
           applyPendingCreateMode,
-          (ready) => publishReady(ready, token, true, focusClaim.owns()),
+          (ready) => publishReady(ready, token, true, focusClaim.owns(), false),
         );
         if (attached.phase !== "ready") throw new Error("created chat did not attach");
         current = attached;
@@ -492,6 +492,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     }
     const delivery_id = crypto.randomUUID();
     await deliverChatMessage(client, current.sessionId, text, delivery_id, intent.steer, track);
+    setSelectedId(current.sessionId);
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {
