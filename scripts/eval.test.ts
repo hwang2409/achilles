@@ -63,7 +63,7 @@ test("reserved bundle validation uses the target revision's validator after chan
   expect(validations.map(row => row.valid)).toEqual([true, false, false, false, false]);
 });
 
-test("related pages ignore built-ins and include page-owned tools and durable changes", () => {
+test("related pages include both ends of successful page-tool calls only", () => {
   const before = { pages: [{ id: "home" }], tools: [], records: [], layouts: [], assignments: [] };
   const after = { pages: [{ id: "home" }, { id: "review" }], tools: [{ id: "tool-1", page_id: "review", name: "add_annotation" }], records: [], layouts: [], assignments: [] };
   const calls = [
@@ -71,9 +71,10 @@ test("related pages ignore built-ins and include page-owned tools and durable ch
     { page_id: "home", tool: "achilles__create_page", success: true },
     { page_id: "review", tool: "achilles__create_tool", success: true },
     { page_id: "review", tool: "mcp_discover", success: true },
-    { page_id: "review", tool: "achilles__add_annotation", success: true },
+    { page_id: "home", tool: "achilles__add_annotation", success: false },
+    { page_id: "home", tool: "achilles__add_annotation", success: true },
   ];
-  expect(relatedPages(before, after, calls)).toEqual(["review", "review", "review"]);
+  expect(relatedPages(before, after, calls)).toEqual(["home", "review", "review", "review"]);
 });
 
 test("provider catalog is allow-only", () => {

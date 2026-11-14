@@ -99,7 +99,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
 }
 
 const EXPECTATION_TOKEN_KEYS = new Set(["value", "name", "tool", "text", "route"]);
-const HARNESS_STRUCTURAL_TOKENS = new Set([
+const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "original", // layout_update wrapper for the setup layout
   "added", // layout_update wrapper for the requested block
   "version", // harness-owned layout revision field
@@ -135,8 +135,9 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
   }
   for (const token of nestedTokens(setup?.initial_layout)) declared.add(token);
   for (const check of checks) for (const token of expectationTokens(check)) {
-    // count names select a closed snapshot collection; they are not agent-authored content.
-    if (check.type !== "count" && !HARNESS_STRUCTURAL_TOKENS.has(token) && !promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
+    // Count names select a closed snapshot collection; layout checks use a fixed document envelope.
+    const structural = ["layout_contains", "layout_update"].includes(check.type) && LAYOUT_STRUCTURAL_TOKENS.has(token);
+    if (check.type !== "count" && !structural && !promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
   }
 }
 
@@ -191,21 +192,10 @@ function schemaStringFields(version: Record<string, unknown>) {
   }
   return fields;
 }
-function categoricalField(versions: Record<string, unknown>[]) {
-  const fields = new Set<string>(); const enumFields = new Set<string>();
-  for (const version of versions) for (const schema of [version.data_schema, version.input_schema]) {
-    if (!schema || typeof schema !== "object" || Array.isArray(schema)) continue;
-    const properties = (schema as Record<string, unknown>).properties;
-    if (!properties || typeof properties !== "object" || Array.isArray(properties)) continue;
-    for (const [name, value] of Object.entries(properties)) if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).type === "string") {
-      fields.add(name); if (Array.isArray((value as Record<string, unknown>).enum)) enumFields.add(name);
-    }
-  }
-  const statusLike = (field: string) => /^(?:status|state|stage|verdict)$/.test(field);
-  return [...enumFields].find(statusLike) ?? (enumFields.size === 1 ? [...enumFields][0] : undefined) ?? [...fields].find(statusLike);
-}
-function stableIdentity(inserted: Record<string, unknown>, later: Record<string, unknown>, categorical: string, fields: string[], requirePresent = false) {
-  return fields.filter(field => field !== categorical && inserted[field] !== undefined).every(field => (!requirePresent && later[field] === undefined) || later[field] === inserted[field]);
+function scalarValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(scalarValues);
+  if (value && typeof value === "object") return Object.values(value).flatMap(scalarValues);
+  return typeof value === "string" ? [value] : [];
 }
 function matchingSchemaObjects(actual: unknown, version: Record<string, unknown>, values: string[], inheritedRecordId?: string): Array<Record<string, unknown>> {
   if (!actual || typeof actual !== "object") return [];
@@ -244,21 +234,22 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   updated_record: ({ check, snapshot, page, owned }) => {
     const versions = owned("tool_versions"); const results = rows(snapshot, "results").filter(row => row.page_id === page && row.chat_id === check.chat && successful(row));
     const transition = check.value as { before: unknown; after: unknown };
+    const afterValues = scalarValues(transition.after);
+    const identity = scalarValues(transition.before).find(value => afterValues.includes(value));
+    if (!identity) return false;
     return [...new Set(versions.map(row => row.collection))].some(collection => {
       const collectionVersions = versions.filter(version => version.collection === collection);
-      const matches = (operations: string[], value: unknown) => collectionVersions.filter(version => operations.includes(String(version.operation))).flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => Array.isArray(value) ? matchingSchemaObjects(row.data ?? row.result, version, value as string[]) : matchingObjects(row.data ?? row.result, value)));
-      const beforeMatches = matches(["insert"], transition.before);
-      const beforeValues = Array.isArray(transition.before) ? transition.before : Object.values(transition.before as object);
-      const schemaBefore = beforeValues.length ? collectionVersions.filter(version => version.operation === "insert").flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => matchingSchemaObjects(row.data ?? row.result, version, [String(beforeValues[0])]))) : [];
-      return [...beforeMatches, ...schemaBefore].some(inserted => {
-        if (typeof inserted.record_id !== "string" || !inserted.record_id.length) return false;
-        const updateRows = results.filter(row => collectionVersions.some(version => version.operation === "update" && row.tool === `achilles__${version.name}`)).map(row => row.data ?? row.result).filter(value => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).record_id === inserted.record_id) as Array<Record<string, unknown>>;
-        const readRows = results.filter(row => collectionVersions.some(version => ["list", "get"].includes(String(version.operation)) && row.tool === `achilles__${version.name}`)).flatMap(row => matchingObjects(row.data ?? row.result, { record_id: inserted.record_id }));
-        const reads = matches(["list", "get"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id });
-        const categorical = categoricalField(collectionVersions); if (!categorical || typeof inserted[categorical] !== "string") return false;
-        const fields = collectionVersions.flatMap(version => [...schemaStringFields(version)]);
-        return updateRows.some(update => typeof update[categorical] === "string" && update[categorical] !== inserted[categorical] && stableIdentity(inserted, update, categorical, fields)
-          && [...reads, ...readRows].some(read => read[categorical] === update[categorical] && stableIdentity(inserted, read, categorical, fields, true)));
+      const fields = [...new Set(collectionVersions.flatMap(version => [...schemaStringFields(version)]))];
+      const toolResults = (operation: string) => collectionVersions.filter(version => version.operation === operation).flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => matchingObjects(row.data ?? row.result, {})));
+      return toolResults("insert").some(inserted => {
+        const identityField = fields.find(field => inserted[field] === identity);
+        if (!identityField || typeof inserted.record_id !== "string" || !inserted.record_id.length) return false;
+        const updates = toolResults("update").filter(row => row.record_id === inserted.record_id && (!(identityField in row) || row[identityField] === identity));
+        const reads = toolResults("list").filter(row => row.record_id === inserted.record_id && row[identityField] === identity);
+        return reads.some(read => {
+          const changed = fields.filter(field => field !== identityField && field in inserted && field in read && !Object.is(inserted[field], read[field]));
+          return changed.length > 0 && updates.length > 0;
+        });
       });
     });
   },

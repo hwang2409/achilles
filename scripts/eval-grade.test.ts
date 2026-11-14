@@ -11,9 +11,10 @@ test("task schema is closed and count checks name real collections", () => {
   expect(() => validateTask({ ...task, prompt: "duplicate" })).toThrow("prompt source");
 });
 
-test("task expectation lint rejects undeclared check literals", () => {
-  const task = { id: "lint-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "do", kind: "prompt", page: "p", chat: "c", prompt: "do work" }], setup: { tools: [{ name: "add_note", operation: "insert", collection: "notes" }], records: [] }, checks: [{ id: "record", type: "records_exact", page: "p", value: [{ text: "undocumented literal" }] }] };
+test("task expectation lint rejects undeclared record keys and literals", () => {
+  const task = { id: "lint-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "do", kind: "prompt", page: "p", chat: "c", prompt: "do work with wanted" }], setup: { tools: [{ name: "add_note", operation: "insert", collection: "notes" }], records: [] }, checks: [{ id: "record", type: "records_exact", page: "p", value: [{ text: "undocumented literal" }] }] };
   expect(() => validateTask(task)).toThrow("without a prompt quote or declared schema");
+  expect(() => validateTask({ ...task, checks: [{ id: "record", type: "record", page: "p", value: { type: "wanted" } }] })).toThrow('expects "type"');
 });
 
 test("expectation tokens cover each literal-bearing check shape", () => {
@@ -54,15 +55,16 @@ test("schema roundtrip accepts an agent-designed title field", () => {
   expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
 });
 
-test("schema-relative updates change the declared categorical field and keep identity stable", () => {
-  const check = { id: "update", type: "updated_record" as const, page: "p", chat: "c", value: { before: ["Synthetic Book", "unread"], after: ["Synthetic Book", "read"] } };
+test("schema-relative updates infer the changed field and keep identity stable", () => {
+  const check = { id: "update", type: "updated_record" as const, page: "p", chat: "c", value: { before: ["Synthetic Book", "queued"], after: ["Synthetic Book", "done"] } };
   const pages = [{ id: "p1", alias: "p" }];
-  const schema = { type: "object", properties: { title: { type: "string" }, status: { type: "string", enum: ["want_to_read", "finished"] } } };
+  const schema = { type: "object", properties: { title: { type: "string" }, progress: { type: "string", enum: ["queued", "done"] }, format: { type: "string", enum: ["paperback", "ebook"] } } };
   const tool_versions = ["insert", "update", "list"].map(operation => ({ page_id: "p1", name: `${operation}_book`, collection: "books", operation, data_schema: schema }));
-  const result = (tool: string, title: string, status: string, list = false) => ({ page_id: "p1", chat_id: "c", tool: `achilles__${tool}_book`, success: true, data: list ? { records: [{ record_id: "book-1", title, status }] } : { record_id: "book-1", title, status } });
-  const inserted = result("insert", "Synthetic Book", "want_to_read");
-  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Synthetic Book", "finished"), result("list", "Synthetic Book", "finished", true)] }).pass).toBe(true);
-  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Other", "want_to_read"), result("list", "Other", "want_to_read", true)] }).pass).toBe(false);
+  const result = (tool: string, title: string, progress: string, list = false) => ({ page_id: "p1", chat_id: "c", tool: `achilles__${tool}_book`, success: true, data: list ? { records: [{ record_id: "book-1", title, progress, format: "paperback" }] } : { record_id: "book-1", title, progress, format: "paperback" } });
+  const inserted = result("insert", "Synthetic Book", "queued");
+  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Synthetic Book", "done"), result("list", "Synthetic Book", "done", true)] }).pass).toBe(true);
+  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Other", "done"), result("list", "Other", "done", true)] }).pass).toBe(false);
+  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Synthetic Book", "queued"), result("list", "Synthetic Book", "queued", true)] }).pass).toBe(false);
 });
 
 test("page-aware approvals and strict route checks do not accept other pages", () => {
