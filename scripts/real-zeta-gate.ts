@@ -411,6 +411,36 @@ try {
       },
     },
     {
+      name: "focus moved before commit",
+      run: async () => {
+        await reloadShell();
+        let release!: () => void;
+        let seen = false;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const holdContinuation = async (route: Route) => {
+          if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          seen = true;
+          await held;
+          await route.continue();
+        };
+        await page.route("**/api/pages?**", holdContinuation);
+        const links = page.locator(".page-list a");
+        const before = await links.count();
+        const search = page.locator(".chat-search input");
+        try {
+          await page.getByRole("button", { name: "show more pages" }).click();
+          await waitFor(async () => seen, "held continuation before moving focus");
+          await search.focus();
+          release();
+          await waitFor(async () => (await links.count()) > before, "held continuation rows published");
+          await assertActive("focus moved before commit", search);
+        } finally {
+          release();
+          await page.unroute("**/api/pages?**", holdContinuation);
+        }
+      },
+    },
+    {
       name: "target removed before commit",
       run: async () => {
         await reloadShell();
