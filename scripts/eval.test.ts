@@ -33,6 +33,29 @@ test("setup seeds an initial layout on a fresh page at version 1", async () => {
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("turn cap report preserves the seeded initial snapshot", async () => {
+  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-turn-cap-"));
+  const taskId = "turn-cap-seeded-snapshot"; const taskPath = join(target, "evals/tasks", `${taskId}.json`); let child: ReturnType<typeof Bun.spawn> | undefined;
+  const layout = { blocks: [{ type: "text", text: "Seeded dashboard" }] }; const record = { id: "seed-1", collection: "notes", data: { text: "Seeded note" } };
+  try {
+    await Bun.write(taskPath, JSON.stringify({ id: taskId, page_plan: [{ alias: "seeded", source: "setup", bind_chat: true, create_mode: true }], agent_turns: 1, steps: [{ id: "use-turn", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "keep using tools" }, { id: "exhaust", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "continue" }], setup: { tools: [], records: [record], initial_layout: layout }, checks: [{ id: "seeded-record", type: "record", page: "seeded", value: record.data }] }));
+    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
+    const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
+    const exitCode = await Promise.race([child.exited, Bun.sleep(25_000).then(() => { throw new Error("scripted eval exceeded 25 seconds"); })]);
+    expect(exitCode, `${await stdout}\n${await stderr}`).toBe(1);
+    const report = JSON.parse(await readFile(join(root, "report.json"), "utf8")); const result = report.tasks[0];
+    const snapshot = JSON.parse(await readFile(join(root, result.transcript), "utf8"));
+    expect(snapshot.initial, "turn-cap snapshot must retain initial setup").toBeDefined();
+    expect(snapshot.initial.layouts).toContainEqual(expect.objectContaining({ page_id: "home", version: 1, document: layout }));
+    expect(snapshot.initial?.records).toContainEqual(expect.objectContaining({ page_id: "home", ...record }));
+    expect(result).toEqual(expect.objectContaining({ status: "agent_fail", cap_hit: true }));
+    expect(JSON.stringify(result.checks)).not.toContain("setup precondition unverifiable");
+  } finally {
+    if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(2_000)]); }
+    await rm(taskPath, { force: true }); await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
   expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
