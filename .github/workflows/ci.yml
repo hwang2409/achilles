@@ -60,7 +60,7 @@ jobs:
           version: "0.8.17"
           python-version: "3.12"
       - run: uv sync --project .cache/zeta --frozen
-      - run: bunx playwright install --with-deps chromium
+      - run: bun node_modules/playwright/cli.js install --with-deps chromium
         working-directory: apps/web
       - run: bun test ./scripts/eval*.test.ts
       - run: |

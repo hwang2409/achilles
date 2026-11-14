@@ -63,7 +63,7 @@ const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url)
 async function preflightBrowser(tasks: EvalTask[]) {
   if (!tasks.some(task => task.checks.some(check => check.type === "browser_text"))) return;
   try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
-  catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bunx playwright install chromium"); }
+  catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
 
 const bundle = (name: string, operation: string, collection: string) => {

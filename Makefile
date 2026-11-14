@@ -13,7 +13,7 @@ stop:
 	@uv run --no-project python scripts/locked.py bun scripts/stop.ts
 
 eval:
-	@if [ "$${EVAL_SKIP_BROWSER_INSTALL}" != 1 ]; then cd apps/web && bun install --frozen-lockfile && bunx playwright install chromium; fi
+	@if [ "$${EVAL_SKIP_BROWSER_INSTALL}" != 1 ]; then cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium; fi
 	@env $${TASK:+TASK="$${TASK}"} $${N:+N="$${N}"} $${MODEL:+MODEL="$${MODEL}"} $${ACHILLES_DIR:+ACHILLES_DIR="$${ACHILLES_DIR}"} $${ZETA_REV:+ZETA_REV="$${ZETA_REV}"} $${KEEP_EVAL:+KEEP_EVAL="$${KEEP_EVAL}"} bun scripts/eval.ts --suite "$${TASK}"
 
 eval-selfcheck-real:
