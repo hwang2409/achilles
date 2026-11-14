@@ -186,6 +186,21 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     return () => document.removeEventListener("keydown", escape, true);
   }, [drawer, query, settingsOpen]);
   useEffect(() => {
+    if (!narrow || !drawer) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !sidebar.current?.contains(document.activeElement)) return;
+      const controls = Array.from(sidebar.current.querySelectorAll<HTMLElement>(focusable)).filter((element) => restorableFocus(element));
+      if (!controls.length) return;
+      const next = event.shiftKey ? controls.at(-1) : controls[0];
+      const current = event.shiftKey ? controls[0] : controls.at(-1);
+      if (document.activeElement !== current) return;
+      event.preventDefault();
+      next?.focus();
+    };
+    document.addEventListener("keydown", key, true);
+    return () => document.removeEventListener("keydown", key, true);
+  }, [drawer, narrow]);
+  useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
@@ -239,8 +254,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   };
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
-    <a className="skip-link" href="#message-composer" onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
-    <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
+    <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
+    <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} inert={narrow && drawer ? true : undefined} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span><button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button></div>
       <button className="new-chat" onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
