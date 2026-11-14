@@ -1,44 +1,56 @@
-export type PageLink = { id: string; route: string; title: string };
-export type PageListState = {
-  pages: PageLink[] | null;
+export type ListPage<T, M> = { items: T[]; next: string | null; meta: M };
+export type ListState<T, M> = {
+  items: T[] | null;
   next: string | null;
   loading: boolean;
   error: boolean;
+  meta: M;
 };
 
-type PageResult = { pages: PageLink[]; next: string | null };
-type PageResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
-type FetchPage = (before: string | null, signal: AbortSignal) => Promise<PageResponse>;
-
-export const initialPageListState: PageListState = { pages: null, next: null, loading: false, error: false };
+type FetchPage<K, T, M> = (key: K, before: string | null, signal: AbortSignal) => Promise<ListPage<T, M>>;
 
 const aborted = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
 
-export function createPageListOwner(fetchPage: FetchPage, publish: (state: PageListState) => void) {
-  let state = initialPageListState;
+export function initialListState<T, M>(meta: M): ListState<T, M> {
+  return { items: null, next: null, loading: false, error: false, meta };
+}
+
+export function createListOwner<K, T, M>(
+  initial: ListState<T, M>,
+  fetchPage: FetchPage<K, T, M>,
+  itemKey: (item: T) => string,
+  publish: (state: ListState<T, M>) => void,
+) {
+  let state = initial;
   let generation = 0;
+  let activeKey: K | undefined;
+  let older: T[] = [];
   let continuation = false;
   let controller: AbortController | null = null;
 
-  const update = (next: PageListState) => {
+  const update = (next: ListState<T, M>) => {
     state = next;
     publish(state);
   };
-  const request = async (before: string | null, signal: AbortSignal) => {
-    const response = await fetchPage(before, signal);
-    if (!response.ok) throw new Error(`could not load pages (${response.status})`);
-    return await response.json() as PageResult;
-  };
-  const reload = async () => {
+  const reload = async (key: K) => {
+    const keyChanged = activeKey === undefined || !Object.is(activeKey, key);
     const owned = ++generation;
+    activeKey = key;
     controller?.abort();
     continuation = false;
     controller = new AbortController();
-    update({ ...state, loading: true });
+    if (keyChanged) {
+      older = [];
+      update({ ...initial, loading: true });
+    } else {
+      update({ ...state, loading: true });
+    }
     try {
-      const result = await request(null, controller.signal);
+      const result = await fetchPage(key, null, controller.signal);
       if (owned !== generation) return;
-      update({ pages: result.pages, next: result.next, loading: false, error: false });
+      const firstKeys = new Set(result.items.map(itemKey));
+      older = older.filter((item) => !firstKeys.has(itemKey(item)));
+      update({ items: [...result.items, ...older], next: older.length ? state.next : result.next, loading: false, error: false, meta: result.meta });
     } catch (error) {
       if (owned !== generation) return;
       update({ ...state, loading: false, error: aborted(error) ? state.error : true });
@@ -47,17 +59,21 @@ export function createPageListOwner(fetchPage: FetchPage, publish: (state: PageL
     }
   };
   const more = async () => {
-    if (state.loading || state.error || !state.next || continuation) return null;
+    if (activeKey === undefined || state.loading || !state.next || continuation) return null;
     const owned = generation;
+    const key = activeKey;
     const before = state.next;
     continuation = true;
     controller = new AbortController();
     update({ ...state, loading: true });
     try {
-      const result = await request(before, controller.signal);
+      const result = await fetchPage(key, before, controller.signal);
       if (owned !== generation) return null;
-      update({ pages: [...(state.pages ?? []), ...result.pages], next: result.next, loading: false, error: false });
-      return result.pages[0] ?? null;
+      const existing = new Set((state.items ?? []).map(itemKey));
+      const accepted = result.items.filter((item) => !existing.has(itemKey(item)));
+      older = [...older, ...accepted];
+      update({ items: [...(state.items ?? []), ...accepted], next: result.items.length ? result.next : null, loading: false, error: false, meta: result.meta });
+      return accepted[0] ?? null;
     } catch (error) {
       if (owned !== generation) return null;
       update({ ...state, loading: false, error: aborted(error) ? state.error : true });
@@ -79,4 +95,4 @@ export function createPageListOwner(fetchPage: FetchPage, publish: (state: PageL
   return { reload, more, cancel };
 }
 
-export type PageListOwner = ReturnType<typeof createPageListOwner>;
+export type ListOwner<K, T, M> = ReturnType<typeof createListOwner<K, T, M>>;
