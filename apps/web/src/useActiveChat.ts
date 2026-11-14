@@ -30,9 +30,9 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
   };
 }
 
-function attachmentError(caught: unknown): string {
+function attachmentError(caught: unknown, context: "loading" | "creation" = "loading"): string {
   const message = caught instanceof Error ? caught.message : String(caught);
-  if (message === "Failed to fetch" || message === "Load failed") return "achilles is unavailable while creating the chat.";
+  if (message === "Failed to fetch" || message === "Load failed") return `achilles is unavailable while ${context === "creation" ? "creating the chat" : "loading the chat"}.`;
   return message.includes("MCP server is not a trusted global server: achilles")
     ? "achilles is not trusted by zeta. add it to $ZETA_HOME/mcp.json, then restart zeta serve."
     : message;
@@ -138,7 +138,7 @@ class MissingChatError extends Error {
 }
 
 class PendingCreationError extends Error {
-  constructor(caught: unknown, readonly input: ChatCreationInput) { super(attachmentError(caught)); }
+  constructor(caught: unknown, readonly input: ChatCreationInput) { super(attachmentError(caught, "creation")); }
 }
 
 const NO_CREATION = { pending: null, error: null };
@@ -155,7 +155,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const owner = useRef(createAttachmentOwner());
   const creation = useRef(createChatCreationOwner());
   const status = useSyncExternalStore(creation.current.subscribe, () => creationPageId ? creation.current.status(creationPageId) : NO_CREATION);
-  const creationError = status.error ? attachmentError(status.error) : null;
+  const creationError = status.error ? attachmentError(status.error, "creation") : null;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
   const createAfterLoad = useRef(false);
 
@@ -233,7 +233,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     try {
       publishCreated(context.route, await creation.current.create(context.input), token);
     } catch (caught) {
-      if (!creation.current.status(context.input.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
+      if (!creation.current.status(context.input.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     }
   }, [client, publishCreated, state]);
 

@@ -132,20 +132,37 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
-  let ignoreBrowserErrors = false;
+  let expectedNotFoundNavigation = false;
+  let expectedNotFoundResponse = false;
+  let expectedNotFoundConsoleError = false;
   let expectingRegistrationFailures = false;
+  const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
     socket.on("framereceived", (event) => frames.push(String(event.payload)));
   });
-  page.on("pageerror", (e) => {
-    if (!ignoreBrowserErrors) errors.push(e.message);
+  page.on("response", (response) => {
+    const request = response.request();
+    if (
+      expectedNotFoundNavigation &&
+      request.method() === "GET" &&
+      response.status() === 404 &&
+      response.url() === expectedNotFoundUrl
+    ) expectedNotFoundResponse = true;
   });
+  page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() !== "error") return;
     if (expectingRegistrationFailures && m.text().includes("the server responded with a status of 503")) return;
-    if (!ignoreBrowserErrors) errors.push(m.text());
+    const expected = expectedNotFoundNavigation && expectedNotFoundResponse &&
+      !expectedNotFoundConsoleError && m.location().url === expectedNotFoundUrl &&
+      m.text().includes("404");
+    if (expected) {
+      expectedNotFoundConsoleError = true;
+      return;
+    }
+    errors.push(m.text());
   });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
@@ -154,7 +171,6 @@ try {
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const firstZetaPid = zetaProcess.pid;
-  ignoreBrowserErrors = true;
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) {
     zetaProcess.kill("SIGKILL");
@@ -181,7 +197,6 @@ try {
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
-  ignoreBrowserErrors = false;
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
@@ -220,7 +235,9 @@ try {
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
   await assertServerAskWins(page, first, requests(), approvalModeResponse);
-  ignoreBrowserErrors = true;
+  expectedNotFoundNavigation = true;
+  expectedNotFoundResponse = false;
+  expectedNotFoundConsoleError = false;
   await page.goto(`${origin}/not-a-real-page`);
   await page.getByRole("alert").filter({ hasText: "page not found" }).waitFor({ timeout: 20_000 });
   await page.getByRole("button", { name: "new chat", exact: true }).click();
@@ -228,9 +245,9 @@ try {
   const unknownRouteSession = await homeSessionId();
   if (!unknownRouteSession || unknownRouteSession === first) throw new Error("unknown-route new chat did not create a new session");
   if (!(await page.locator(".empty-chat").count())) throw new Error("unknown-route new chat did not show an empty chat");
+  expectedNotFoundNavigation = false;
   await page.goto(`${origin}/?chat=${first}`);
   await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
-  ignoreBrowserErrors = false;
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
@@ -724,7 +741,6 @@ try {
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
     const heldRequests: Route[] = [];
     const hold = (route: Route) => { heldRequests.push(route); };
-    ignoreBrowserErrors = true;
     await page.route("**/api/pages**", hold);
     await page.route("**/api/chats**", hold);
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -734,7 +750,6 @@ try {
     await Promise.all(heldRequests.map((route) => route.abort().catch(() => {})));
     await page.unroute("**/api/pages**", hold);
     await page.unroute("**/api/chats**", hold);
-    ignoreBrowserErrors = false;
   }
 
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
