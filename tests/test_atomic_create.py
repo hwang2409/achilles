@@ -6,7 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import achilles.web as web
-from achilles.pages import PageStore
+from achilles.pages import UPDATE_LAYOUT_SCHEMA, PageStore
 from achilles.tools import derived_output_schema
 
 
@@ -109,7 +109,13 @@ def state(root):
     return counts, files
 
 
-def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
+@pytest.mark.parametrize(
+    ("block_title_length", "layout_complete"),
+    [(100, True), (256, False)],
+)
+def test_inspect_page_bounds_large_summary_over_public_mcp(
+    creation_client, block_title_length, layout_complete
+):
     _, store, client, home_headers = creation_client
     tools = []
     blocks = []
@@ -131,7 +137,13 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
                 },
             }
         )
-        blocks.append({"type": "list", "title": "b" * 256, "collection": collection})
+        blocks.append(
+            {
+                "type": "list",
+                "title": "b" * block_title_length,
+                "collection": collection,
+            }
+        )
     created = mcp(
         client,
         home_headers,
@@ -170,7 +182,15 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
     value = json.loads(text)
     assert len(text.encode()) <= 8 * 1024
     assert value["truncated"] is True
-    assert set(value["omitted"]) == {"blocks", "tools", "collections"}
+    if layout_complete:
+        assert len(value["layout"]["blocks"]) == 32
+    assert value["layout_complete"] is layout_complete
+    if not layout_complete:
+        assert value["layout"] is None
+        assert value["message"] == (
+            "this layout is too large to inspect here; do not call update_layout"
+        )
+    assert "blocks" not in value["omitted"]
     assert sum(value["omitted"].values()) > 0
 
 
@@ -189,7 +209,7 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     )
     value = json.loads(summary["content"][0]["text"])
     assert value["route"] == "/reading"
-    assert value["layout"]["version"] == 1
+    assert value["layout_version"] == 1
     assert value["tools"][0]["name"] == "add_book"
     assert value["collections"] == {}
     serialized = json.dumps(value)
@@ -763,7 +783,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     before = json.loads(inspected["content"][0]["text"])
-    assert before["layout"]["version"] == 1
+    assert before["layout_version"] == 1
 
     layout = {"blocks": [{"type": "detail", "title": "changed", "fields": ["id"]}]}
     updated = mcp(
@@ -775,7 +795,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": layout,
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -789,8 +809,8 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     after = json.loads(inspected["content"][0]["text"])
-    assert after["layout"]["version"] == 2
-    assert after["layout"]["blocks"] == [{"type": "detail", "title": "changed"}]
+    assert after["layout_version"] == 2
+    assert after["layout"] == layout
 
     stale = mcp(
         client,
@@ -801,7 +821,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": {"blocks": []},
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -886,16 +906,42 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     store.set_create_mode(page_id, True)
     catalog = mcp(client, page_headers, 5, "tools/list", {})
     update_tool = next(tool for tool in catalog["tools"] if tool["name"] == "update_layout")
-    assert update_tool["inputSchema"] == {
-        "type": "object",
-        "properties": {
-            "layout": update_tool["inputSchema"]["properties"]["layout"],
-            "expected_version": {"type": "integer", "minimum": 1},
-        },
-        "required": ["layout", "expected_version"],
-        "additionalProperties": False,
-    }
-    assert "open another page's chat" in update_tool["description"]
+    assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
+    assert update_tool["description"] == (
+        "REPLACES the whole layout; any block you leave out is deleted. First call "
+        "achilles__inspect_page. If layout_complete is false, do not call update_layout. "
+        "Otherwise, copy its `layout` exactly, change only what the user asked (insert, "
+        "reorder, edit, or remove blocks), and pass the full layout with "
+        "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
+        "To change another page, open that page's chat."
+    )
+    assert (
+        update_tool["inputSchema"]["properties"]["layout"]["description"]
+        == "When achilles__inspect_page reports layout_complete true, copy its complete stored "
+        "layout; any block you leave out is deleted. Do not call update_layout when "
+        "layout_complete is false."
+    )
+    assert (
+        update_tool["inputSchema"]["properties"]["expected_version"]["description"]
+        == "The layout_version from achilles__inspect_page; pass it as expected_version. "
+        "On a conflict, inspect again and retry."
+    )
+    assert (
+        "full ordered block list"
+        in update_tool["inputSchema"]["properties"]["layout"]["properties"]["blocks"]["description"]
+    )
+    inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "when layout_complete is true" in inspect_tool["description"]
+    assert "when layout_complete is false, do not call update_layout" in inspect_tool["description"]
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout"]["description"]
+        == "The complete stored layout to edit with update_layout, or null when "
+        "layout_complete is false."
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]
+        == "The value to pass as update_layout expected_version."
+    )
 
     layout = {"blocks": [{"type": "text", "text": "changed"}]}
     updated = mcp(

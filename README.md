@@ -18,6 +18,10 @@ set `ACHILLES_APPROVAL=ask` to require approval for tool calls.
 
 create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
 
+## metric blocks
+
+use `{"type":"metric","label":"books","collection":"books","count":true}` to count every record in a collection. add `"where":{"field":"status","equals":"reading"}` to count exact JSON scalar matches. equality keeps JSON types separate, except integer and decimal forms of the same number are equal. `"equals":null` counts records where the field is missing or is explicitly JSON null.
+
 ## eval harness
 
 run the scripted harness with `make eval TASK=harness-smoke`. the current suite covers `agent-data-access`, `create-and-use-tool-same-chat`, `harness-smoke`, `judge-page-and-annotate`, and `second-chat-tools`. the other six evaluation tasks return in a follow-up PR. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
