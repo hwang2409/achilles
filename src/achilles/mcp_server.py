@@ -164,7 +164,9 @@ def build_mcp(store: PageStore):
                     target = await anyio.to_thread.run_sync(
                         store.page, args.get("route", args.get("page_id"))
                     )
-                if target is None or target["id"] != page["id"]:
+                if target is None or (
+                    target["id"] != page["id"] and target["created_by_page_id"] != page["id"]
+                ):
                     return _inspect_error()
                 summary = await anyio.to_thread.run_sync(store.inspect_page, target["id"])
                 return _inspect_result(summary)

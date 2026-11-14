@@ -109,41 +109,75 @@ def state(root):
     return counts, files
 
 
-def test_inspect_page_returns_bounded_safe_summary_with_scoped_auth(creation_client):
-    root, store, client, headers = creation_client
-    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
-    page_id = json.loads(result["content"][0]["text"])["page_id"]
-    summary = mcp(client, headers, 3, "tools/call", {"name": "inspect_page", "arguments": {}})
+def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_client):
+    root, store, client, home_headers = creation_client
+    created = mcp(
+        client, home_headers, 2, "tools/call", {"name": "create_page", "arguments": request()}
+    )
+    reading_id = json.loads(created["content"][0]["text"])["page_id"]
+    summary = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
     value = json.loads(summary["content"][0]["text"])
-    assert value["route"] == "/"
-    assert value["layout"]["version"] is None
-    assert value["layout"]["blocks"] == []
-    assert value["tools"] == []
+    assert value["route"] == "/reading"
+    assert value["layout"]["version"] == 1
+    assert value["tools"][0]["name"] == "add_book"
     assert value["collections"] == {}
     serialized = json.dumps(value)
     assert len(serialized.encode()) <= 8 * 1024
     assert "credentials" not in serialized and str(root) not in serialized
-    secret = (root / "credentials" / page_id).read_text()
+    secret = (root / "credentials" / reading_id).read_text()
     with store.transaction() as db:
         credential_hash = db.execute(
-            "SELECT credential_hash FROM page WHERE id=?", (page_id,)
+            "SELECT credential_hash FROM page WHERE id=?", (reading_id,)
         ).fetchone()[0]
     assert secret not in serialized and credential_hash not in serialized
-    forbidden = mcp(
+
+    third = mcp(
         client,
-        headers,
+        home_headers,
         4,
         "tools/call",
-        {"name": "inspect_page", "arguments": {"page_id": page_id}},
+        {"name": "create_page", "arguments": {**request(), "route": "/third", "title": "third"}},
+    )
+    third_id = json.loads(third["content"][0]["text"])["page_id"]
+    store.set_create_mode(third_id, True)
+    third_headers = initialize(client, store.ensure_credential(third_id), 5)
+    forbidden = mcp(
+        client,
+        third_headers,
+        6,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
     )
     assert forbidden["isError"]
-    assert json.loads(forbidden["content"][0]["text"]) == {
-        "code": "forbidden",
-        "expected": "authorized page",
-        "path": "",
-    }
+    expected = {"code": "forbidden", "expected": "authorized page", "path": ""}
+    assert json.loads(forbidden["content"][0]["text"]) == expected
+
+    store.set_create_mode(reading_id, True)
+    reading_headers = initialize(client, store.ensure_credential(reading_id), 7)
+    cross_forbidden = mcp(
+        client,
+        reading_headers,
+        8,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/"}},
+    )
+    missing = mcp(
+        client,
+        reading_headers,
+        9,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/missing"}},
+    )
+    assert json.loads(cross_forbidden["content"][0]["text"]) == expected
+    assert json.loads(missing["content"][0]["text"]) == expected
     store.set_create_mode("home", False)
-    off = mcp(client, headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}})
+    off = mcp(client, home_headers, 10, "tools/call", {"name": "inspect_page", "arguments": {}})
     assert off["isError"]
 
 
