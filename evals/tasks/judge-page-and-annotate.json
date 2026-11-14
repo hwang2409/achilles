@@ -80,11 +80,9 @@
     },
     {
       "id": "detail-layout",
-      "type": "layout_contains",
+      "type": "detail_selects",
       "page": "review",
-      "value": {
-        "type": "detail"
-      }
+      "value": "run-002"
     },
     {
       "id": "same-page",
