@@ -93,6 +93,9 @@ def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None
     assert not {"credential_hash", "workspace", "zeta_session_id"} & reading.keys()
     assert client.get("/api/pages?limit=201").status_code == 400
     assert client.get("/api/pages?limit=invalid").status_code == 400
+    limited = client.get("/api/pages?limit=1")
+    assert limited.status_code == 200
+    assert len(limited.json()["pages"]) == 1
     assert client.get("/api/pages", headers={"origin": "http://evil.test"}).status_code == 403
 
     with store.transaction() as db:

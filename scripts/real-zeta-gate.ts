@@ -107,7 +107,7 @@ try {
       "run",
       "python",
       "-c",
-      "from achilles.web import _database; import json; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); row=db.execute(\"SELECT document FROM layout_version WHERE page_id='home' ORDER BY version DESC LIMIT 1\").fetchone(); layout=json.loads(row[0]) if row else {'blocks':[]}; layout['blocks'].append({'type':'list','title':'trace annotations','collection':'trace_annotations'}); db.execute(\"INSERT OR IGNORE INTO layout_version VALUES('home',1,'gate',?,datetime('now'))\", (json.dumps(layout),)); db.execute(\"UPDATE layout_version SET document=? WHERE page_id='home' AND version=1\", (json.dumps(layout),)); db.commit(); db.close()",
+      "from achilles.web import _database; import json; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); row=db.execute(\"SELECT document FROM layout_version WHERE page_id='home' ORDER BY version DESC LIMIT 1\").fetchone(); layout=json.loads(row[0]) if row else {'blocks':[]}; layout['blocks'].append({'type':'list','title':'trace annotations','collection':'trace_annotations'}); db.execute(\"INSERT OR IGNORE INTO layout_version VALUES('home',1,'gate',?,datetime('now'))\", (json.dumps(layout),)); db.execute(\"UPDATE layout_version SET document=? WHERE page_id='home' AND version=1\", (json.dumps(layout),)); db.executemany(\"INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)\", [(f'gate-page-{i}', f'/gate-page-{i}', f'gate page {i}', '2025-01-01', f'2025-01-{i:02d}') for i in range(1,46)]); db.commit(); db.close()",
     ],
     env,
   );
@@ -330,6 +330,16 @@ try {
   }
   console.log("page links at create completion", await page.locator(".page-list a").evaluateAll((links) => links.map((link) => ({ href: (link as HTMLAnchorElement).href, text: link.textContent }))));
   console.log("tool call names", await page.locator('[data-part="timeline-frame"]').evaluateAll((frames) => [...new Set(frames.flatMap((frame) => frame.textContent?.match(/(?:achilles__)?create_page/g) ?? []))]));
+  const pageSection = page.locator(".page-list");
+  const showMorePages = page.getByRole("button", { name: "show more pages" });
+  await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await showMorePages.waitFor({ state: "visible", timeout: 20000 }).catch(() => { throw new Error("show more pages is not visible in the page section"); });
+  await showMorePages.click();
+  const secondBatchPage = page.locator('.page-list a[href^="/gate-page-27"]');
+  await secondBatchPage.waitFor({ state: "visible", timeout: 20000 });
+  await secondBatchPage.click();
+  await page.waitForURL((url) => new URL(url).pathname === "/gate-page-27");
+  await page.goto(origin);
   const readingLink = page.locator('.page-list a[href^="/reading"]');
   await readingLink.waitFor({ timeout: 20000 });
   await readingLink.click();

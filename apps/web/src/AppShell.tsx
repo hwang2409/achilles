@@ -125,7 +125,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     let live = true;
     const load = () => {
       setPagesLoading(true);
-      void fetch("/api/pages?limit=200", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+      void fetch("/api/pages?limit=20", { cache: "no-store", signal: controller.signal }).then(async (response) => {
         if (!response.ok) throw new Error(`could not load pages (${response.status})`);
         const result = await response.json() as { pages: PageLink[]; next: string | null };
         if (live) { setPages(result.pages); setPageNext(result.next); setPagesError(false); }
@@ -188,7 +188,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const loadOlder = async () => {
     if (!pageNext || pagesLoading) return;
     setPagesLoading(true);
-    const response = await fetch(`/api/pages?limit=200&before=${encodeURIComponent(pageNext)}`, { cache: "no-store" });
+    const response = await fetch(`/api/pages?limit=20&before=${encodeURIComponent(pageNext)}`, { cache: "no-store" });
     if (!response.ok) { setPagesLoading(false); return; }
     const result = await response.json() as { pages: PageLink[]; next: string | null };
     setPages((current) => [...(current ?? []), ...result.pages]);
