@@ -1,5 +1,6 @@
 {
   "id": "reconnect-recovery",
+"suite": "core",
   "page_plan": [
     {
       "alias": "reconnect",
