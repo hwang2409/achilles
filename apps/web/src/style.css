@@ -1,5 +1,5 @@
 :root {
-  font: 14px / 1.5 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--fulcrum-fg);
   background: var(--fulcrum-bg);
 }
