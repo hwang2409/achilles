@@ -291,10 +291,39 @@ try {
         await page.keyboard.press("Tab");
         const loadOlder = page.getByRole("button", { name: "load 50 older" });
         await assertActive("chat load-older button", loadOlder);
-        await page.keyboard.press("Enter");
-        await waitFor(async () => (await rows.count()) > 50, "older chats");
-        await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
-        await assertActive("chat load-older success", rows.nth(50));
+        const boundaryChat = await rows.last().getAttribute("data-chat-id");
+        if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
+        let firstPageHeld = false;
+        let releaseFirstPage!: () => void;
+        const firstPageReleased = new Promise<void>((resolve) => { releaseFirstPage = resolve; });
+        const holdRefresh = async (route: Route) => {
+          if (new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          firstPageHeld = true;
+          await firstPageReleased;
+          await route.continue();
+        };
+        await page.route("**/api/chats?**", holdRefresh);
+        const previousUrl = page.url();
+        try {
+          await page.locator(".new-chat").click();
+          await waitFor(async () => firstPageHeld, "held chat refresh first page");
+          const createdChat = new URL(page.url()).searchParams.get("chat");
+          if (!createdChat) throw new Error("forced chat refresh did not create a chat");
+          await loadOlder.click();
+          releaseFirstPage();
+          await waitFor(async () => (await rows.count()) > 50, "older chats");
+          const boundary = page.locator(`[data-chat-id="${boundaryChat}"]`);
+          const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
+          await waitFor(async () => await boundary.evaluate((row) => row.nextElementSibling === document.activeElement), "first newly loaded chat row focus");
+          await assertActive("chat load-older success", firstNewlyLoaded);
+          await page.locator(`[data-chat-id="${createdChat}"]`).waitFor({ state: "attached" });
+          if (await rows.count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
+        } finally {
+          releaseFirstPage();
+          await page.unroute("**/api/chats?**", holdRefresh);
+        }
+        await page.goto(previousUrl);
+        await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
       },
     },
     {
@@ -379,6 +408,36 @@ try {
         await waitFor(async () => (await links.count()) > before, "page continuation after retry");
         await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "page continuation retry focus");
         await assertActive("page continuation retry", links.nth(before));
+      },
+    },
+    {
+      name: "focus moved before commit",
+      run: async () => {
+        await reloadShell();
+        let release!: () => void;
+        let seen = false;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const holdContinuation = async (route: Route) => {
+          if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          seen = true;
+          await held;
+          await route.continue();
+        };
+        await page.route("**/api/pages?**", holdContinuation);
+        const links = page.locator(".page-list a");
+        const before = await links.count();
+        const search = page.locator(".chat-search input");
+        try {
+          await page.getByRole("button", { name: "show more pages" }).click();
+          await waitFor(async () => seen, "held continuation before moving focus");
+          await search.focus();
+          release();
+          await waitFor(async () => (await links.count()) > before, "held continuation rows published");
+          await assertActive("focus moved before commit", search);
+        } finally {
+          release();
+          await page.unroute("**/api/pages?**", holdContinuation);
+        }
       },
     },
     {
@@ -618,14 +677,42 @@ try {
   if (
     homeInspect.result?.isError ||
     homeInspectValue.route !== "/reading" ||
-    homeInspectValue.layout?.version !== 1 ||
+    homeInspectValue.layout_version !== 1 ||
     homeInspectValue.tools?.[0]?.name !== "add_book" ||
     JSON.stringify(homeInspectValue).includes("credentials") ||
     JSON.stringify(homeInspectValue).includes(achillesHome)
   )
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
+  const legacyMetricText =
+    "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
   await page.goto(`${origin}/reading`);
   await field.waitFor({ timeout: 20000 });
+  await page.getByText(legacyMetricText, { exact: true }).waitFor();
+  await page.getByText("reading: 0", { exact: true }).waitFor();
+  const desktopViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const metricBoxes = await page.locator(".layout-metric").evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        top: box.top,
+        width: box.width,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      };
+    }),
+  );
+  if (
+    metricBoxes.length !== 2 ||
+    metricBoxes[0].top !== metricBoxes[1].top ||
+    metricBoxes.some(
+      (box) => box.width > 172 || box.scrollWidth > box.clientWidth,
+    )
+  )
+    throw new Error(
+      `390px metrics did not render two wrapped columns: ${JSON.stringify(metricBoxes)}`,
+    );
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   const readingSessionId = await homeSessionId();
   if (!readingSessionId || readingSessionId === first)
     throw new Error("reading page did not get its own zeta session");
@@ -638,12 +725,66 @@ try {
       `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
     );
   });
+  const filteredDetailResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === `/api/pages/${createdPage.id}/records/books`
+      && url.searchParams.get("field") === "status"
+      && url.searchParams.get("equals") === '"reading"';
+  }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
+  await page.getByText("reading: 1", { exact: true }).waitFor({ timeout: 20000 });
+  const detailResponse = await filteredDetailResponse;
+  await page.waitForFunction(() => {
+    const text = document.querySelector(".record-detail")?.textContent ?? "";
+    return text.includes("Synthetic Book") || text.includes("could not load record");
+  }, undefined, { timeout: 20000 });
+  const filteredDetailText = await page.locator(".record-detail").innerText();
+  if (!filteredDetailText.includes("Synthetic Book"))
+    throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
+  if (filteredDetailText.includes("could not load record"))
+    throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
   const readingModeResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
   await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+
+  const readingCredential = (
+    await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()
+  ).trim();
+  secrets.push(readingCredential);
+  await mcp(readingCredential, 1, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "metric-validation-gate", version: "1" },
+  });
+  await mcp(readingCredential, 2, "tools/list", {});
+  const invalidMetricCall = await mcp(readingCredential, 3, "tools/call", {
+    name: "update_layout",
+    arguments: {
+      layout: {
+        blocks: [
+          { type: "metric", label: "invalid", collection: "books", count: "yes" },
+        ],
+      },
+      expected_version: 1,
+    },
+  });
+  const invalidMetricError = JSON.parse(
+    invalidMetricCall.result?.content?.[0]?.text ?? "{}",
+  );
+  if (
+    !invalidMetricCall.result?.isError ||
+    JSON.stringify(invalidMetricError) !==
+      JSON.stringify({
+        code: "invalid_input",
+        expected: "one valid schema variant",
+        path: "/layout/blocks/0",
+      })
+  )
+    throw new Error(
+      `invalid metric did not return the safe error document: ${JSON.stringify(invalidMetricCall.result)}`,
+    );
 
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
@@ -654,7 +795,7 @@ try {
   await page.getByText("layout updated", { exact: true }).waitFor({ timeout: 20000 });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
-    return blocks[0] === "layout updated without reload" && blocks[1]?.includes("books");
+    return blocks[0] === "layout updated without reload" && blocks[1] === legacyMetricText && blocks[2] === "reading: 1" && blocks[3]?.includes("books");
   }, "open page layout re-render after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
@@ -667,43 +808,59 @@ try {
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
   await field.fill("repeat that layout update with the old version");
   await field.press("Enter");
-  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_steer_commit ?? null) === "held", "committed late steer before queue publication");
+  await waitFor(async () => requests().some((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version"), "late steer request");
   const lateSteerIndex = requests().findIndex((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
   const lateSteer = requests()[lateSteerIndex];
   if (lateSteerIndex < 0 || !lateSteer?.params?.delivery_id) throw new Error("late steer did not include a delivery id");
-  let lateControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_turn_barrier: true }));
-  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end before late steer publication");
-  lateControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_steer_commit: true }));
   await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
-  await page.getByText("this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.", { exact: true }).waitFor({ timeout: 20_000 });
+  const lateControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_turn_barrier: true }));
+  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end after accepted late steer");
+  await waitFor(async () => requests().some((request) => request.method === "delivery_status" && request.params?.delivery_id === lateSteer.params.delivery_id && requests().some((frame) => frame.id === request.id && frame.result?.status === "dropped")), "dropped late steer delivery status");
+  const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
+  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
+  if (lateStatuses.at(-1) !== "dropped")
+    throw new Error(`late steer terminal status was not dropped: ${JSON.stringify(lateStatuses)}`);
+  const droppedNotice = page.getByText("this message was not sent. your text is still here; press send to try again.", { exact: true });
+  await droppedNotice.waitFor({ timeout: 20_000 });
+  const droppedPanel = droppedNotice.locator("..");
+  const droppedPanelText = await droppedPanel.innerText();
+  if (droppedPanelText !== droppedPanelText.toLowerCase()) throw new Error(`dropped notice labels were not lowercase: ${droppedPanelText}`);
+  await droppedPanel.getByRole("button", { name: "dismiss delivery warning", exact: true }).waitFor();
   if (screenshotDir) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-light-1440.png"), fullPage: true });
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-1440.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "open menu", exact: true }).waitFor();
+    const closeMenu = page.getByRole("button", { name: "close menu", exact: true });
+    if (await closeMenu.isVisible()) await closeMenu.evaluate((button) => button.click());
+    await waitFor(async () => await page.locator('[aria-label="sidebar"]').getAttribute("aria-hidden") === "true", "narrow sidebar close");
+    await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
+    await page.screenshot({ path: join(screenshotDir, "steer-notice-after-light-390.png"), fullPage: true });
+    await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
+    await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-390.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
   }
-  if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("stuck steer did not keep its draft");
-  const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
-  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
-  if (!lateStatuses.length || lateStatuses.some((status) => status !== "queued"))
-    throw new Error(`late steer status was not stuck queued: ${JSON.stringify(lateStatuses)}`);
+  if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("dropped steer did not keep its draft");
+
   const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
-  const lateSendRequests = requests().filter((frame) => frame.method === "send" && frame.params?.text === "repeat that layout update with the old version");
-  if (lateSteerRequests.length !== 1 || lateSendRequests.length !== 0)
-    throw new Error(`achilles sent the stuck prompt ${lateSteerRequests.length + lateSendRequests.length} times`);
+  if (lateSteerRequests.length !== 1)
+    throw new Error(`achilles sent the dropped steer ${lateSteerRequests.length} times`);
 
   await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
-  await field.fill("continue after queued steer");
-  await field.press("Enter");
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "next request after stuck steer");
-  const afterQueuedSteer = JSON.parse(await Bun.file(control).text());
-  if (afterQueuedSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length !== 1)
-    throw new Error(`next request did not consume the stale steer exactly once: ${JSON.stringify(afterQueuedSteer.user_messages)}`);
-  if (afterQueuedSteer.user_messages?.filter((text: string) => text === "continue after queued steer").length !== 1)
-    throw new Error(`next request did not contain its new prompt exactly once: ${JSON.stringify(afterQueuedSteer.user_messages)}`);
+  await page.getByRole("button", { name: "send message", exact: true }).click();
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "new request after dropped steer");
+  const afterDroppedSteer = JSON.parse(await Bun.file(control).text());
+  const repeatedMessages = afterDroppedSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length;
+  if (repeatedMessages !== 1)
+    throw new Error(`send did not deliver the dropped prompt exactly once: ${JSON.stringify(afterDroppedSteer.user_messages)}`);
+  const resendRequests = requests().filter((frame) => frame.method === "send" && frame.params?.text === "repeat that layout update with the old version");
+  if (resendRequests.length !== 1 || resendRequests[0]?.params?.delivery_id === lateSteer.params.delivery_id)
+    throw new Error(`send did not use one new delivery id: ${JSON.stringify(resendRequests)}`);
+  await waitFor(async () => await field.inputValue() === "", "draft clear after confirmed retry delivery");
   await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
   await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }).waitFor({ timeout: 20000 });
@@ -712,6 +869,67 @@ try {
   if (!staleLayoutResult?.is_error)
     throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
   console.log("stale chat update_layout showed a readable version conflict");
+
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".record-detail")?.textContent ?? "").includes(
+        "Synthetic Book",
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
+  const layoutBeforeInvalidMetric = await page
+    .locator(".layout-blocks")
+    .locator(":scope > *")
+    .allTextContents();
+  const invalidLayoutApprovalBefore = await updateLayoutApproval.count();
+  await field.fill("replace the page with an invalid metric");
+  await field.press("Enter");
+  await waitFor(
+    async () => (await updateLayoutApproval.count()) > invalidLayoutApprovalBefore,
+    "invalid metric layout approval",
+  );
+  const invalidMetricDetailResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === `/api/pages/${createdPage.id}/records/books`
+      && url.searchParams.get("field") === "status"
+      && url.searchParams.get("equals") === '"reading"';
+  }, { timeout: 20000 });
+  await updateLayoutApproval
+    .nth(invalidLayoutApprovalBefore)
+    .getByRole("button", { name: "approve", exact: true })
+    .click();
+  await page
+    .getByText(
+      "metric update rejected: /layout/blocks/0 must match one valid schema variant.",
+      { exact: true },
+    )
+    .waitFor({ timeout: 20000 });
+  const afterInvalidMetric = JSON.parse(await Bun.file(control).text());
+  const invalidMetricResult = afterInvalidMetric.tool_results?.find(
+    (result: { call_id: string }) => result.call_id === "invalid-metric-layout",
+  );
+  if (!invalidMetricResult?.is_error)
+    throw new Error(
+      `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
+    );
+  await invalidMetricDetailResponse;
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".record-detail")?.textContent ?? "").includes(
+        "Synthetic Book",
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
+  const layoutAfterInvalidMetric = await page
+    .locator(".layout-blocks")
+    .locator(":scope > *")
+    .allTextContents();
+  if (JSON.stringify(layoutAfterInvalidMetric) !== JSON.stringify(layoutBeforeInvalidMetric))
+    throw new Error(`invalid metric update changed the page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
+  console.log("invalid metric chat update showed a readable error and kept the layout");
+
   const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode on", exact: true }).click();
   if (!(await readingModeOffResponse).ok()) throw new Error("reading page create mode reset failed");
@@ -949,7 +1167,7 @@ try {
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
   const readingBody = await page.locator("body").innerText();
-  if (reconnectPage.layout?.blocks?.[1]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
+  if (!reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list") || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
   const homeIdleWrite = page.waitForResponse((response) => {
     if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
@@ -978,8 +1196,6 @@ try {
   if (!(await retryToggle.isVisible())) throw new Error("create mode error retry was not visible above the transcript");
   await retryToggle.click();
   await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
-  await page.getByRole("button", { name: "create mode off", exact: true }).click();
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
@@ -987,13 +1203,22 @@ try {
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
-  const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
-  await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
-  if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
-  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
-  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
+  if (await homeSessionId() !== homeAfterRestart) throw new Error("achilles restart changed home session id");
+  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
+  const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
+  const restartedToggleResponse = page.waitForResponse((response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  if (!(await restartedToggleResponse).ok()) throw new Error("post-restart create mode toggle request failed");
+  await waitFor(async () => requests().filter((frame) => frame.method === "mcp_refresh_tools").length > refreshCountBeforeRestartToggle, "post-restart tool refresh request");
+  const restartedRefreshIndex = requests().findLastIndex((frame) => frame.method === "mcp_refresh_tools");
+  const restartedRefresh = requests()[restartedRefreshIndex];
+  await waitFor(async () => requests().slice(restartedRefreshIndex + 1).some((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error)), "post-restart tool refresh result");
+  const restartedRefreshResult = requests().slice(restartedRefreshIndex + 1).find((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error));
+  if (restartedRefreshResult?.error) throw new Error(`post-restart tool refresh did not enable create mode without a zeta restart: ${JSON.stringify(restartedRefreshResult.error)}`);
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  if (await page.getByText("restart zeta serve, then reload", { exact: false }).count()) throw new Error("automatic post-restart tool refresh showed the manual restart message");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
@@ -1012,20 +1237,20 @@ try {
   if (!(await reconnectIdleWrite).ok()) throw new Error("reconnect idle state write failed before achilles restart");
   const postReconnect = JSON.parse(await Bun.file(control).text());
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
-  if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
+  if (!postReconnect.schemas.includes("achilles__create_page") || !postReconnect.schemas.includes("achilles__create_tool")) throw new Error(`post-restart turn did not receive create tools: ${JSON.stringify(postReconnect.schemas)}`);
   const restartAnnotationResult = postReconnect.tool_results?.find((result: { call_id: string }) => result.call_id === "annotate-after-restart");
   if (!restartAnnotationResult || restartAnnotationResult.is_error) throw new Error(`generated tool did not recover after achilles restart: ${JSON.stringify(postReconnect.tool_results)}`);
   const restartRecords = await (await fetch(`${origin}/api/pages/home/records/trace_annotations`, { headers: { Authorization: `Bearer ${credential}` } })).json();
   const restartRecordTexts = Array.isArray(restartRecords) ? restartRecords.map((record: { text?: string }) => record.text).sort() : [];
   if (JSON.stringify(restartRecordTexts) !== JSON.stringify(["after achilles restart", "from zeta"])) throw new Error(`post-restart generated tool result was not recorded: ${JSON.stringify(restartRecords)}`);
-  if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after reload");
+  if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after the achilles restart");
   mcpSessions.delete(credential);
   await mcp(credential, 3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
   const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
-  console.log("reconnect refresh asserted: reload kept the session and refreshed the achilles catalog");
+  console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
   console.log("expected skip: reload during pending approval waits for fulcrum hello params");
 
   await homeMcp(14, "tools/list", {});

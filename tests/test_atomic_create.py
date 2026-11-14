@@ -6,7 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import achilles.web as web
-from achilles.pages import PageStore
+from achilles.pages import UPDATE_LAYOUT_SCHEMA, PageStore
 from achilles.tools import derived_output_schema
 
 
@@ -109,7 +109,30 @@ def state(root):
     return counts, files
 
 
-def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
+def install_layout(store, page_id, version, layout):
+    encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO layout_version VALUES(?,?,?,?,?)",
+            (page_id, version, f"synthetic-{version}", encoded, "synthetic"),
+        )
+        db.execute(
+            "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
+            (version, "synthetic", page_id),
+        )
+        db.execute(
+            "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+            (page_id, "update_layout", f"synthetic-{version}", "synthetic"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("block_title_length", "layout_complete"),
+    [(100, True), (256, False)],
+)
+def test_inspect_page_bounds_large_summary_over_public_mcp(
+    creation_client, block_title_length, layout_complete
+):
     _, store, client, home_headers = creation_client
     tools = []
     blocks = []
@@ -131,7 +154,13 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
                 },
             }
         )
-        blocks.append({"type": "list", "title": "b" * 256, "collection": collection})
+        blocks.append(
+            {
+                "type": "list",
+                "title": "b" * block_title_length,
+                "collection": collection,
+            }
+        )
     created = mcp(
         client,
         home_headers,
@@ -139,10 +168,19 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
         "tools/call",
         {
             "name": "create_page",
-            "arguments": request(tools=tools, layout={"blocks": blocks}),
+            "arguments": request(
+                tools=tools,
+                layout={
+                    "blocks": [
+                        {**block, "title": "b" * min(block_title_length, 100)} for block in blocks
+                    ]
+                },
+            ),
         },
     )
     page_id = json.loads(created["content"][0]["text"])["page_id"]
+    if not layout_complete:
+        install_layout(store, page_id, 2, {"blocks": blocks})
     with store.transaction() as db:
         for index in range(32):
             db.execute(
@@ -170,7 +208,15 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
     value = json.loads(text)
     assert len(text.encode()) <= 8 * 1024
     assert value["truncated"] is True
-    assert set(value["omitted"]) == {"blocks", "tools", "collections"}
+    if layout_complete:
+        assert len(value["layout"]["blocks"]) == 32
+    assert value["layout_complete"] is layout_complete
+    if not layout_complete:
+        assert value["layout"] is None
+        assert value["message"] == (
+            "do not change this page; tell the user it is too large to edit from chat"
+        )
+    assert "blocks" not in value["omitted"]
     assert sum(value["omitted"].values()) > 0
 
 
@@ -189,7 +235,7 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     )
     value = json.loads(summary["content"][0]["text"])
     assert value["route"] == "/reading"
-    assert value["layout"]["version"] == 1
+    assert value["layout_version"] == 1
     assert value["tools"][0]["name"] == "add_book"
     assert value["collections"] == {}
     serialized = json.dumps(value)
@@ -763,7 +809,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     before = json.loads(inspected["content"][0]["text"])
-    assert before["layout"]["version"] == 1
+    assert before["layout_version"] == 1
 
     layout = {"blocks": [{"type": "detail", "title": "changed", "fields": ["id"]}]}
     updated = mcp(
@@ -775,7 +821,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": layout,
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -789,8 +835,8 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     after = json.loads(inspected["content"][0]["text"])
-    assert after["layout"]["version"] == 2
-    assert after["layout"]["blocks"] == [{"type": "detail", "title": "changed"}]
+    assert after["layout_version"] == 2
+    assert after["layout"] == layout
 
     stale = mcp(
         client,
@@ -801,7 +847,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": {"blocks": []},
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -812,6 +858,215 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         "expected": "current active layout version",
         "hint": "Call inspect_page, set expected_version to layout.version, and retry.",
     }
+
+
+@pytest.mark.parametrize("writer", ["create_page", "update_layout"])
+@pytest.mark.parametrize(
+    ("field_filter", "expect_error"),
+    [
+        ({"field": "title", "equals": "the book"}, False),
+        ({"field": "missing", "equals": "the book"}, True),
+        ({"field": "run_id", "equals": "run-002"}, True),
+        (None, False),
+    ],
+)
+def test_detail_filter_validation_through_public_tools(
+    creation_client, writer, field_filter, expect_error
+):
+    _, store, client, home_headers = creation_client
+    detail = {
+        "type": "detail",
+        "title": "book",
+        "collection": "books",
+        "fields": ["title"],
+    }
+    if field_filter is not None:
+        detail["filter"] = field_filter
+    layout = {"blocks": [detail]}
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(
+                layout=layout
+                if writer == "create_page"
+                else {"blocks": [{"type": "text", "text": "start"}]}
+            ),
+        },
+    )
+    result = created
+    page_id = None
+    if writer == "update_layout":
+        page_id = json.loads(created["content"][0]["text"])["page_id"]
+        store.set_create_mode(page_id, True)
+        page_headers = initialize(client, store.ensure_credential(page_id), 3)
+        result = mcp(
+            client,
+            page_headers,
+            4,
+            "tools/call",
+            {
+                "name": "update_layout",
+                "arguments": {"layout": layout, "expected_version": 1},
+            },
+        )
+
+    assert bool(result.get("isError")) is expect_error
+    if expect_error:
+        assert json.loads(result["content"][0]["text"]) == {
+            "code": "invalid_input",
+            "path": "/layout/blocks/0/filter/field",
+            "expected": "field in collection schema",
+            "hint": (
+                "Use a field listed in the assigned tool's "
+                "implementation.data_schema.properties, or add it there."
+            ),
+        }
+    else:
+        page_id = page_id or json.loads(created["content"][0]["text"])["page_id"]
+        inspected = mcp(
+            client,
+            home_headers,
+            5,
+            "tools/call",
+            {"name": "inspect_page", "arguments": {"page_id": page_id}},
+        )
+        value = json.loads(inspected["content"][0]["text"])
+        assert value["layout"] == layout
+
+
+def test_update_layout_refuses_page_too_large_to_inspect(creation_client):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    install_layout(store, "home", 2, large_layout)
+
+    inspected = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {}},
+    )
+    value = json.loads(inspected["content"][0]["text"])
+    assert value["layout"] is None
+    assert value["layout_complete"] is False
+
+    before = state(store.root)
+    refused = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
+        },
+    )
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "inspect_page result no larger than 8192 bytes",
+        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
+    }
+    assert store.layout("home") == large_layout
+    assert state(store.root) == before
+
+
+def test_update_layout_guard_is_atomic_with_write(creation_client, monkeypatch):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    original = PageStore.update_layout
+    installed = False
+
+    def interleaved_update(self, page_id, layout, expected_version):
+        nonlocal installed
+        if not installed:
+            installed = True
+            install_layout(PageStore(self.root), page_id, 2, large_layout)
+        return original(self, page_id, layout, expected_version)
+
+    monkeypatch.setattr(PageStore, "update_layout", interleaved_update)
+    refused = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
+        },
+    )
+
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"])["code"] == "layout_too_large"
+    assert store.layout("home") == large_layout
+    with store._connect() as db:
+        assert (
+            db.execute("SELECT active_layout_version FROM page WHERE id='home'").fetchone()[0] == 2
+        )
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM layout_version WHERE page_id='home' AND version=3"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_update_layout_refuses_new_layout_too_large_to_inspect(creation_client):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    before = state(store.root)
+
+    refused = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": large_layout, "expected_version": 1},
+        },
+    )
+
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "inspect_page result no larger than 8192 bytes",
+        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
+    }
+    assert store.inspect_page("home")["layout_version"] == 1
+    assert state(store.root) == before
+
+
+def test_create_page_refuses_layout_too_large_to_inspect(creation_client):
+    root, _, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    before = state(root)
+
+    refused = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(layout=large_layout),
+        },
+    )
+
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "inspect_page result no larger than 8192 bytes",
+        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
+    }
+    assert state(root) == before
 
 
 def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
@@ -831,16 +1086,54 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     store.set_create_mode(page_id, True)
     catalog = mcp(client, page_headers, 5, "tools/list", {})
     update_tool = next(tool for tool in catalog["tools"] if tool["name"] == "update_layout")
-    assert update_tool["inputSchema"] == {
-        "type": "object",
-        "properties": {
-            "layout": update_tool["inputSchema"]["properties"]["layout"],
-            "expected_version": {"type": "integer", "minimum": 1},
-        },
-        "required": ["layout", "expected_version"],
-        "additionalProperties": False,
-    }
-    assert "open another page's chat" in update_tool["description"]
+    assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
+    assert update_tool["description"] == (
+        "REPLACES the whole layout; any block you leave out is deleted. First call "
+        "achilles__inspect_page. If layout_complete is false, do not change the page; tell "
+        "the user it is too large to edit from chat. Otherwise, copy its `layout` exactly, "
+        "change only what the user asked (insert, "
+        "reorder, edit, or remove blocks), and pass the full layout with "
+        "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
+        "To change another page, open that page's chat. A detail block can select records with "
+        'collection and filter, for example {"field":"run_id","equals":"run-002"}; use a '
+        "field from the collection's assigned tool schema. It shows the highest creation time, "
+        "with ties resolved by highest record id; without a filter it shows field labels only."
+    )
+    assert (
+        update_tool["inputSchema"]["properties"]["layout"]["description"]
+        == "When achilles__inspect_page reports layout_complete true, copy its complete stored "
+        "layout; any block you leave out is deleted. When layout_complete is false, do not "
+        "change the page; tell the user it is too large to edit from chat."
+    )
+    assert (
+        update_tool["inputSchema"]["properties"]["expected_version"]["description"]
+        == "The layout_version from achilles__inspect_page; pass it as expected_version. "
+        "On a conflict, inspect again and retry."
+    )
+    assert (
+        "full ordered block list"
+        in update_tool["inputSchema"]["properties"]["layout"]["properties"]["blocks"]["description"]
+    )
+    inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "when layout_complete is true" in inspect_tool["description"]
+    assert (
+        "when layout_complete is false, do not change the page and tell the user it is too large "
+        "to edit from chat" in inspect_tool["description"]
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout"]["description"]
+        == "The complete stored layout to edit with update_layout, or null when "
+        "layout_complete is false."
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout_complete"]["description"]
+        == "When false, do not change the page; tell the user the page is too large to edit "
+        "from chat."
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]
+        == "The value to pass as update_layout expected_version."
+    )
 
     layout = {"blocks": [{"type": "text", "text": "changed"}]}
     updated = mcp(

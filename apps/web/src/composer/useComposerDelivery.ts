@@ -5,7 +5,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useRunStore, type ComposerProps } from "@fulcrum/react";
-import { UncertainSteerDeliveryError } from "../useActiveChat";
+import { DroppedSteerDeliveryError, UncertainSteerDeliveryError } from "../useActiveChat";
 import {
   createComposerModel,
   transition,
@@ -93,7 +93,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
           type: "reject",
           attempt: sendAttempt,
           message: errorText(failure),
-          uncertain: failure instanceof UncertainSteerDeliveryError,
+          rejection: failure instanceof UncertainSteerDeliveryError ? "uncertain" : failure instanceof DroppedSteerDeliveryError ? "dropped" : undefined,
         });
       } finally {
         apply({ type: "settle", attempt: sendAttempt });

@@ -38,7 +38,27 @@
           "text": "seeded note"
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_notes",
+          "operation": "list",
+          "collection": "notes"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "seeded-note",
+          "collection": "notes",
+          "data": {
+            "text": "seeded note"
+          }
+        }
+      ]
+    }
   },
   "bad": {
     "pages": [
@@ -77,6 +97,26 @@
           "text": "seeded note"
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_notes",
+          "operation": "list",
+          "collection": "notes"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "seeded-note",
+          "collection": "notes",
+          "data": {
+            "text": "seeded note"
+          }
+        }
+      ]
+    }
   }
 }

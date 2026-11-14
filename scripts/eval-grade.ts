@@ -23,6 +23,7 @@ export type EvalSnapshot = {
   errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
   reconnects?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
+  initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
@@ -313,6 +314,46 @@ export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResul
   return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...(failure ? { transition: { field: failure.field, before: failure.before, after: failure.after } } : {}) }, ...(failure ? { reason: failure.reason } : {}) };
 }
 
+const canonicalSeedValue = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalSeedValue) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalSeedValue(item)])) : value;
+const sameSeedValue = (left: unknown, right: unknown) => JSON.stringify(canonicalSeedValue(left)) === JSON.stringify(canonicalSeedValue(right));
+
+export function declaredSeedMismatches(setup: TaskSetup, storedState: EvalSnapshot & Record<string, any>): string[] {
+  const failures: string[] = [];
+  const inspected = storedState.inspect as Record<string, any> | undefined;
+  const tools = storedState.tool_versions ?? inspected?.tools ?? [];
+  for (const expected of setup.tools) {
+    const tool = tools.find((row: Record<string, any>) => (row.page_id === undefined || row.page_id === "home") && row.name === expected.name);
+    const stored = tool && { ...tool, operation: tool.operation ?? tool.operations?.[0] };
+    if (!stored || Object.entries(expected).some(([key, value]) => !sameSeedValue(stored[key], value))) failures.push(`seed mismatch: tool ${expected.name}`);
+  }
+
+  const records = Array.isArray(storedState.records) ? storedState.records : Object.entries(storedState.records ?? {}).flatMap(([collection, items]) => (items as Array<Record<string, unknown>>).map(item => ({ ...item, id: item.record_id, collection, data: Object.fromEntries(Object.entries(item).filter(([key]) => !["record_id", "revision"].includes(key))) })));
+  for (const expected of setup.records) {
+    const record = records.find((row: Record<string, any>) => (row.page_id === undefined || row.page_id === "home") && (row.id ?? row.record_id) === expected.id && row.collection === expected.collection);
+    const stored = record && { ...record, id: record.id ?? record.record_id, data: record.data ?? Object.fromEntries(Object.keys(expected.data).map(key => [key, record[key]])) };
+    if (!stored || Object.entries(expected).some(([key, value]) => !sameSeedValue(stored[key], value))) failures.push(`seed mismatch: record ${expected.collection}/${expected.id}`);
+  }
+
+  if (setup.initial_layout) {
+    const layout = storedState.layouts?.find((row: Record<string, any>) => row.page_id === "home" && row.version === 1)?.document ?? storedState.layout;
+    const version = storedState.layouts ? (layout === undefined ? undefined : 1) : inspected?.layout_version ?? inspected?.layout?.version;
+    if (version !== 1 || !sameSeedValue(layout, setup.initial_layout)) failures.push("seed mismatch: initial_layout at version 1");
+  }
+  return failures;
+}
+
+export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  return task.setup ? declaredSeedMismatches(task.setup, snapshot) : [];
+}
+function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  if (!task.setup) return [];
+  return snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"];
+}
+export function assertSetupPreconditions(task: EvalTask, snapshot: EvalSnapshot) {
+  const failures = setupPreconditionFailures(task, snapshot);
+  if (failures.length) throw new Error(`task grader preconditions failed: ${failures.join(", ")}`);
+}
+
 export function hostToolsGap(snapshot: EvalSnapshot): boolean {
   const forbidden = /^(bash|sqlite|write|edit|read|fetch|process|shell)(__|$)/i;
   return rows(snapshot, "calls").some(call => forbidden.test(String(call.tool ?? call.name ?? ""))) || rows(snapshot, "errors").some(error => /unknown[- ]?tool|tool not available|disallowed tool/i.test(String(error.code ?? error.message ?? "")));
@@ -325,13 +366,15 @@ export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
   return { first_call_validity, structured_tool_errors: structured.map(row => ({ code: row.code, path: row.path, expected: row.expected })), unstructured_tool_errors: errors.length - structured.length };
 }
 export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
+  const preconditions = setupFailures(task, snapshot);
+  if (preconditions.length) return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "grader preconditions", actual: preconditions, evidence: { initial: snapshot.initial } }], turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
   const checks = task.checks.map(check => gradeCheck(check, snapshot)); const required = checks.filter((_, i) => task.checks[i].required !== false);
   const score = Math.round((checks.filter(result => result.pass).length / checks.length) * 100);
   return { task_id: task.id, pass: required.every(result => result.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
 }
 
 export function gradeReference(task: EvalTask, snapshot: EvalSnapshot) {
-  const result = gradeTask(task, snapshot);
+  const result = gradeTask(task, snapshot); const preconditions = setupFailures(task, snapshot);
   const staticFailure = rows(snapshot, "browser").some(row => /static file not found/i.test(String(row.text ?? "")));
-  return { ...result, status: staticFailure ? "harness_error" as const : result.pass ? "pass" as const : "agent_fail" as const };
+  return { ...result, status: preconditions.length || staticFailure ? "harness_error" as const : result.pass ? "pass" as const : "agent_fail" as const };
 }

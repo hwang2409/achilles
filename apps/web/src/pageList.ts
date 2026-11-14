@@ -1,82 +1,151 @@
-export type PageLink = { id: string; route: string; title: string };
-export type PageListState = {
-  pages: PageLink[] | null;
+export type ListPage<T, M> = { items: T[]; next: string | null; meta: M };
+export type ListState<T, M> = {
+  items: T[] | null;
   next: string | null;
   loading: boolean;
   error: boolean;
+  meta: M;
 };
 
-type PageResult = { pages: PageLink[]; next: string | null };
-type PageResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
-type FetchPage = (before: string | null, signal: AbortSignal) => Promise<PageResponse>;
-
-export const initialPageListState: PageListState = { pages: null, next: null, loading: false, error: false };
+type FetchPage<K, T, M> = (key: K, before: string | null, signal: AbortSignal, limit?: number) => Promise<ListPage<T, M>>;
 
 const aborted = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
 
-export function createPageListOwner(fetchPage: FetchPage, publish: (state: PageListState) => void) {
-  let state = initialPageListState;
-  let generation = 0;
-  let continuation = false;
-  let controller: AbortController | null = null;
+export function initialListState<T, M>(meta: M): ListState<T, M> {
+  return { items: null, next: null, loading: false, error: false, meta };
+}
 
-  const update = (next: PageListState) => {
+export function createListOwner<K, T, M>(
+  initial: ListState<T, M>,
+  fetchPage: FetchPage<K, T, M>,
+  itemKey: (item: T) => string,
+  publish: (state: ListState<T, M>) => void,
+  firstPageSize: number,
+  maxPageSize: number,
+) {
+  type MoreWaiter = { index: number; after?: string; resolve: (item: T | null) => void };
+  type Operation = {
+    kind: "refresh" | "more";
+    generation: number;
+    controller: AbortController;
+    targetDepth: number;
+    waiters: MoreWaiter[];
+    finish: () => void;
+  };
+
+  let state = initial;
+  let generation = 0;
+  let activeKey: K | undefined;
+  let operation: Operation | null = null;
+
+  const update = (next: ListState<T, M>) => {
     state = next;
     publish(state);
   };
-  const request = async (before: string | null, signal: AbortSignal) => {
-    const response = await fetchPage(before, signal);
-    if (!response.ok) throw new Error(`could not load pages (${response.status})`);
-    return await response.json() as PageResult;
+  const owns = (candidate: Operation) => operation === candidate && candidate.generation === generation;
+  const waiterItem = (waiter: MoreWaiter, items: T[] | null) => {
+    if (!items) return null;
+    const anchor = waiter.after === undefined ? -1 : items.findIndex((item) => itemKey(item) === waiter.after);
+    return items[anchor >= 0 ? anchor + 1 : waiter.index] ?? null;
   };
-  const reload = async () => {
-    const owned = ++generation;
-    controller?.abort();
-    continuation = false;
-    controller = new AbortController();
-    update({ ...state, loading: true });
+  const settle = (candidate: Operation, items: T[] | null = null) => {
+    for (const waiter of candidate.waiters) waiter.resolve(waiterItem(waiter, items));
+    candidate.finish();
+    if (operation === candidate) operation = null;
+  };
+  const stop = () => {
+    if (!operation) return;
+    operation.controller.abort();
+    settle(operation);
+  };
+  const unique = (existing: T[], incoming: T[]) => {
+    const keys = new Set(existing.map(itemKey));
+    return incoming.filter((item) => !keys.has(itemKey(item)));
+  };
+  const runRefresh = async (candidate: Operation, key: K, keyChanged: boolean) => {
+    const items: T[] = [];
+    let before: string | null = null;
+    let result: ListPage<T, M> | null = null;
     try {
-      const result = await request(null, controller.signal);
-      if (owned !== generation) return;
-      update({ pages: result.pages, next: result.next, loading: false, error: false });
+      do {
+        const limit = candidate.targetDepth ? Math.min(maxPageSize, candidate.targetDepth - items.length) : undefined;
+        result = await fetchPage(key, before, candidate.controller.signal, limit);
+        if (!owns(candidate)) return;
+        items.push(...result.items);
+        before = result.next;
+      } while (before && items.length < candidate.targetDepth);
+      update({ items, next: result.next, loading: false, error: false, meta: result.meta });
+      settle(candidate, items);
     } catch (error) {
-      if (owned !== generation) return;
-      update({ ...state, loading: false, error: aborted(error) ? state.error : true });
-    } finally {
-      if (owned === generation) controller = null;
+      if (!owns(candidate)) return;
+      const failed = !aborted(error);
+      update({ ...state, items: failed && keyChanged ? null : state.items, next: failed && keyChanged ? null : state.next, loading: false, error: failed ? true : state.error });
+      settle(candidate);
     }
   };
-  const more = async () => {
-    if (state.loading || state.error || !state.next || continuation) return null;
-    const owned = generation;
+  const runMore = async (candidate: Operation, key: K, before: string) => {
+    try {
+      const result = await fetchPage(key, before, candidate.controller.signal);
+      if (!owns(candidate)) return;
+      const accepted = unique(state.items ?? [], result.items);
+      const items = [...(state.items ?? []), ...accepted];
+      update({ items, next: result.items.length ? result.next : null, loading: false, error: false, meta: result.meta });
+      settle(candidate, items);
+    } catch (error) {
+      if (!owns(candidate)) return;
+      update({ ...state, loading: false, error: aborted(error) ? state.error : true });
+      settle(candidate);
+    }
+  };
+  const makeOperation = (kind: Operation["kind"], targetDepth: number) => {
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => { finish = resolve; });
+    const candidate: Operation = { kind, generation, controller: new AbortController(), targetDepth, waiters: [], finish };
+    operation = candidate;
+    return { candidate, done };
+  };
+  const replacementDepth = (currentDepth: number, active: Operation | null) =>
+    active?.kind === "refresh" ? active.targetDepth : currentDepth + (active?.kind === "more" ? firstPageSize : 0);
+  const reload = (key: K) => {
+    const keyChanged = activeKey === undefined || !Object.is(activeKey, key);
+    const currentDepth = state.items?.length ?? 0;
+    const requestedDepth = replacementDepth(currentDepth, operation);
+    stop();
+    generation += 1;
+    activeKey = key;
+    const loadedDepth = keyChanged ? 0 : Math.max(firstPageSize, currentDepth, requestedDepth);
+    const { candidate, done } = makeOperation("refresh", loadedDepth);
+    update(keyChanged ? { ...state, next: null, loading: true, error: false } : { ...state, loading: true, error: false });
+    void runRefresh(candidate, key, keyChanged);
+    return done;
+  };
+  const more = () => {
+    if (activeKey === undefined || !state.next) return Promise.resolve(null);
+    if (operation?.kind === "refresh") {
+      const candidate = operation;
+      const index = candidate.targetDepth;
+      candidate.targetDepth += firstPageSize;
+      const after = state.items?.at(-1);
+      return new Promise<T | null>((resolve) => candidate.waiters.push({ index, after: after && itemKey(after), resolve }));
+    }
+    if (operation) return Promise.resolve(null);
+    const key = activeKey;
     const before = state.next;
-    continuation = true;
-    controller = new AbortController();
+    const index = state.items?.length ?? 0;
+    const { candidate } = makeOperation("more", index + firstPageSize);
     update({ ...state, loading: true });
-    try {
-      const result = await request(before, controller.signal);
-      if (owned !== generation) return null;
-      update({ pages: [...(state.pages ?? []), ...result.pages], next: result.next, loading: false, error: false });
-      return result.pages[0] ?? null;
-    } catch (error) {
-      if (owned !== generation) return null;
-      update({ ...state, loading: false, error: aborted(error) ? state.error : true });
-      return null;
-    } finally {
-      if (owned === generation) {
-        continuation = false;
-        controller = null;
-      }
-    }
+    return new Promise<T | null>((resolve) => {
+      const after = state.items?.at(-1);
+      candidate.waiters.push({ index, after: after && itemKey(after), resolve });
+      void runMore(candidate, key, before);
+    });
   };
   const cancel = () => {
+    stop();
     generation += 1;
-    continuation = false;
-    controller?.abort();
-    controller = null;
   };
 
   return { reload, more, cancel };
 }
 
-export type PageListOwner = ReturnType<typeof createPageListOwner>;
+export type ListOwner<K, T, M> = ReturnType<typeof createListOwner<K, T, M>>;

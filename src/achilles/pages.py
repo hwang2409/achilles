@@ -15,6 +15,23 @@ from typing import Any
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
+_COLLECTION_KEY_PATTERN = TOOL_BUNDLE_SCHEMA["properties"]["implementation"]["properties"][
+    "collection"
+]["pattern"]
+
+_EQUALITY_FILTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "field": {"type": "string", "pattern": _COLLECTION_KEY_PATTERN},
+        "equals": {
+            "type": ["string", "number", "boolean", "null"],
+            "description": "Exact JSON scalar match. Null also matches a missing field.",
+        },
+    },
+    "required": ["field", "equals"],
+    "additionalProperties": False,
+}
+
 _LAYOUT_BLOCK_SCHEMA = {
     "oneOf": [
         {
@@ -30,15 +47,20 @@ _LAYOUT_BLOCK_SCHEMA = {
         {
             "type": "object",
             "description": (
-                "shows field labels only and cannot pin one record; "
-                "use a list block to show records"
+                "Shows field labels only unless filter selects records from collection, for "
+                'example {"field":"run_id","equals":"run-002"}. One match shows its '
+                "values; multiple matches show the highest creation time, with ties resolved "
+                "by highest record id. Get field names from an assigned tool's schema."
             ),
             "properties": {
                 "type": {"const": "detail"},
                 "title": {"type": "string"},
+                "collection": {"type": "string"},
                 "fields": {"type": "array", "items": {"type": "string"}},
+                "filter": _EQUALITY_FILTER_SCHEMA,
             },
             "required": ["type", "title", "fields"],
+            "dependentRequired": {"filter": ["collection"]},
             "additionalProperties": False,
         },
         {
@@ -67,6 +89,18 @@ _LAYOUT_BLOCK_SCHEMA = {
             "required": ["type", "label", "value"],
             "additionalProperties": False,
         },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "metric"},
+                "label": {"type": "string"},
+                "collection": {"type": "string"},
+                "count": {"const": True},
+                "where": _EQUALITY_FILTER_SCHEMA,
+            },
+            "required": ["type", "label", "collection", "count"],
+            "additionalProperties": False,
+        },
     ]
 }
 LAYOUT_SCHEMA = {
@@ -78,12 +112,37 @@ LAYOUT_SCHEMA = {
 UPDATE_LAYOUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "layout": LAYOUT_SCHEMA,
-        "expected_version": {"type": "integer", "minimum": 1},
+        "layout": {
+            **LAYOUT_SCHEMA,
+            "description": (
+                "When achilles__inspect_page reports layout_complete true, copy its complete "
+                "stored layout; any block you leave out is deleted. When layout_complete is "
+                "false, do not change the page; tell the user it is too large to edit from chat."
+            ),
+            "properties": {
+                "blocks": {
+                    **LAYOUT_SCHEMA["properties"]["blocks"],
+                    "description": (
+                        "The full ordered block list; insert, reorder, or remove blocks "
+                        "from the inspected list."
+                    ),
+                }
+            },
+        },
+        "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": (
+                "The layout_version from achilles__inspect_page; pass it as "
+                "expected_version. On a conflict, inspect again and retry."
+            ),
+        },
     },
     "required": ["layout", "expected_version"],
     "additionalProperties": False,
 }
+INSPECT_MAX_BYTES = 8 * 1024
+
 CREATE_PAGE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -102,6 +161,49 @@ CREATE_PAGE_SCHEMA = {
     "required": ["route", "title", "layout"],
     "additionalProperties": False,
 }
+
+
+def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    result = {
+        **value,
+        "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
+        "layout_complete": True,
+        "metric_values": list(value["metric_values"]),
+        "tools": list(value["tools"]),
+        "collections": dict(value["collections"]),
+    }
+
+    def serialize() -> str:
+        return json.dumps(result, sort_keys=True, separators=(",", ":"))
+
+    encoded = serialize()
+    if len(encoded.encode()) <= INSPECT_MAX_BYTES:
+        return result, encoded
+
+    result["truncated"] = True
+    result["omitted"] = {}
+    for key in ("metric_values", "tools", "collections", "title"):
+        omitted = result.pop(key)
+        result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
+        encoded = serialize()
+        if len(encoded.encode()) <= INSPECT_MAX_BYTES:
+            return result, encoded
+
+    result["layout"] = None
+    result["layout_complete"] = False
+    result["message"] = "do not change this page; tell the user it is too large to edit from chat"
+    return result, serialize()
+
+
+def require_inspectable(value: dict[str, Any]) -> None:
+    bounded, _ = bounded_inspect(value)
+    if not bounded["layout_complete"]:
+        raise ValidationError(
+            "/layout",
+            f"inspect_page result no larger than {INSPECT_MAX_BYTES} bytes",
+            "layout_too_large",
+            "Keep the page smaller, e.g. use fewer or shorter blocks.",
+        )
 
 
 def validate_page_route(route: str) -> None:
@@ -129,6 +231,7 @@ def validate_layout(
     assigned_tools: set[str] | None = None,
     assigned_collections: set[str] | None = None,
     prefix: str = "",
+    collection_fields: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
@@ -143,7 +246,8 @@ def validate_layout(
                 ),
             )
         if (
-            block["type"] == "list"
+            block["type"] in {"list", "detail"}
+            and "collection" in block
             and assigned_collections is not None
             and block["collection"] not in assigned_collections
         ):
@@ -160,7 +264,58 @@ def validate_layout(
                     '"object","properties":{}}}}. A simple inferred input_schema is fine.'
                 ),
             )
+        if (
+            block["type"] == "detail"
+            and "filter" in block
+            and collection_fields is not None
+            and block["filter"]["field"] not in collection_fields.get(block["collection"], set())
+        ):
+            raise ValidationError(
+                f"{prefix}/blocks/{index}/filter/field",
+                "field in collection schema",
+                hint=(
+                    "Use a field listed in the assigned tool's "
+                    "implementation.data_schema.properties, or add it there."
+                ),
+            )
     return layout
+
+
+def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
+    fields: dict[str, set[str]] = {}
+    for bundle in bundles:
+        implementation = bundle["implementation"]
+        fields.setdefault(implementation["collection"], set()).update(
+            implementation["data_schema"].get("properties", {})
+        )
+    return fields
+
+
+def _json_scalar_match(
+    field: str, value: str | int | float | bool | None
+) -> tuple[str, tuple[Any, ...]]:
+    path = f'$."{field}"'
+    if value is None:
+        value_type = "null"
+    elif isinstance(value, bool):
+        value_type = "boolean"
+    elif isinstance(value, (int, float)):
+        value_type = "number"
+    else:
+        value_type = "text"
+    return (
+        "json_extract(document, ?) IS json_extract(?, '$') "
+        "AND CASE COALESCE(json_type(document, ?), 'null') "
+        "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' "
+        "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' "
+        "ELSE COALESCE(json_type(document, ?), 'null') END = ?",
+        (path, json.dumps(value), path, path, value_type),
+    )
+
+
+def validate_record_filter(value: Any) -> dict[str, Any]:
+    validate_schema(value, _EQUALITY_FILTER_SCHEMA)
+    return value
 
 
 class PageStore:
@@ -330,40 +485,65 @@ class PageStore:
         document = json.loads(row[2]) if row[2] else {"blocks": []}
         return row[0], row[1], document
 
+    @staticmethod
+    def _computed_layout(
+        db: sqlite3.Connection, page_id: str, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        for block in document.get("blocks", []):
+            if block.get("type") != "metric" or block.get("count") is not True:
+                continue
+            where = block.get("where")
+            if where is None:
+                count = db.execute(
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=?",
+                    (page_id, block["collection"]),
+                ).fetchone()[0]
+            else:
+                predicate, parameters = _json_scalar_match(where["field"], where["equals"])
+                count = db.execute(
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? AND "
+                    + predicate,
+                    (page_id, block["collection"], *parameters),
+                ).fetchone()[0]
+            block["value"] = count
+        return document
+
     def layout(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             active = self._active_layout(db, page_id)
-        return active[2] if active else {"blocks": []}
+            return self._computed_layout(db, page_id, active[2]) if active else {"blocks": []}
 
-    def inspect_page(self, page_id: str) -> dict[str, Any]:
-        with self._connect() as db:
-            row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
-            if row is None:
-                raise KeyError(page_id)
-            active = self._active_layout(db, page_id)
-            assert active is not None
-            counts = db.execute(
-                "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
-                (page_id,),
-            ).fetchall()
+    @staticmethod
+    def _page_tools(db: sqlite3.Connection, page_id: str) -> list[dict[str, Any]]:
+        rows = db.execute(
+            """SELECT t.name, v.bundle, v.version FROM page_tool pt
+            JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id
+            AND v.version=pt.active_version
+            WHERE pt.page_id=? ORDER BY t.name""",
+            (page_id,),
+        ).fetchall()
+        return [
+            {"name": row[0], **validate_bundle(json.loads(row[1])), "version": row[2]}
+            for row in rows
+        ]
+
+    @staticmethod
+    def _inspect_projection(
+        page: Any,
+        active: tuple[int, str | None, dict[str, Any]],
+        metric_values: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        collections: dict[str, int],
+    ) -> dict[str, Any]:
         version, digest, document = active
-        tools = self.page_tools(page_id)
         return {
-            "route": row["route"],
-            "title": row["title"],
-            "create_mode": bool(row["create_mode"]),
-            "layout": {
-                "version": version,
-                "digest": digest,
-                "blocks": [
-                    {
-                        key: block[key]
-                        for key in ("type", "title", "tool", "collection")
-                        if key in block
-                    }
-                    for block in document.get("blocks", [])
-                ],
-            },
+            "route": page["route"],
+            "title": page["title"],
+            "create_mode": bool(page["create_mode"]),
+            "layout": document,
+            "layout_version": version,
+            "layout_digest": digest,
+            "metric_values": metric_values,
             "tools": [
                 {
                     "name": tool["name"],
@@ -373,8 +553,48 @@ class PageStore:
                 }
                 for tool in tools
             ],
-            "collections": {collection: count for collection, count in counts},
+            "collections": collections,
         }
+
+    def _inspect_page(
+        self,
+        db: sqlite3.Connection,
+        page_id: str,
+        active: tuple[int, str | None, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
+        if row is None:
+            raise KeyError(page_id)
+        if active is None:
+            active = self._active_layout(db, page_id)
+        assert active is not None
+        version, digest, document = active
+        computed = self._computed_layout(
+            db,
+            page_id,
+            {"blocks": [dict(block) for block in document.get("blocks", [])]},
+        )
+        metric_values = [
+            {"block": index, "value": block["value"]}
+            for index, block in enumerate(computed["blocks"])
+            if block.get("type") == "metric" and block.get("count") is True
+        ]
+        counts = db.execute(
+            "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
+            (page_id,),
+        ).fetchall()
+        tools = self._page_tools(db, page_id)
+        return self._inspect_projection(
+            row,
+            (version, digest, document),
+            metric_values,
+            tools,
+            {collection: count for collection, count in counts},
+        )
+
+    def inspect_page(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            return self._inspect_page(db, page_id)
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -388,6 +608,29 @@ class PageStore:
                 "SELECT record_id, document, revision FROM page_record "
                 "WHERE page_id=? AND collection=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (page_id, collection, limit),
+            ).fetchall()
+        return (
+            [{**json.loads(row[1]), "record_id": row[0], "revision": row[2]} for row in rows],
+            total,
+        )
+
+    def matching_records(
+        self,
+        page_id: str,
+        collection: str,
+        field_filter: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], int]:
+        field_filter = validate_record_filter(field_filter)
+        predicate, parameters = _json_scalar_match(field_filter["field"], field_filter["equals"])
+        with self._connect() as db:
+            base = "FROM page_record WHERE page_id=? AND collection=? AND " + predicate
+            query_parameters = (page_id, collection, *parameters)
+            total = db.execute("SELECT COUNT(*) " + base, query_parameters).fetchone()[0]
+            rows = db.execute(
+                "SELECT record_id, document, revision "
+                + base
+                + " ORDER BY created_at DESC, record_id DESC LIMIT 1",
+                query_parameters,
             ).fetchall()
         return (
             [{**json.loads(row[1]), "record_id": row[0], "revision": row[2]} for row in rows],
@@ -559,6 +802,7 @@ class PageStore:
             {bundle["name"] for bundle in bundles},
             {bundle["implementation"]["collection"] for bundle in bundles},
             "/layout",
+            _collection_fields(bundles),
         )
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
@@ -598,6 +842,22 @@ class PageStore:
                     raise ValidationError(
                         "/route", "unused route or equivalent request", "conflict"
                     )
+                require_inspectable(
+                    self._inspect_projection(
+                        {"route": route, "title": title, "create_mode": False},
+                        (1, digest, layout),
+                        [
+                            {"block": index, "value": 0}
+                            for index, block in enumerate(layout["blocks"])
+                            if block.get("type") == "metric" and block.get("count") is True
+                        ],
+                        [
+                            {**bundle, "version": 1}
+                            for bundle in sorted(bundles, key=lambda item: item["name"])
+                        ],
+                        {},
+                    )
+                )
                 hook = getattr(self, "before_create_commit", None)
                 if hook is not None:
                     hook()
@@ -705,6 +965,7 @@ class PageStore:
                 raise PermissionError("forbidden: create mode is off")
             active = self._active_layout(db, page_id)
             assert active is not None
+            require_inspectable(self._inspect_page(db, page_id, active))
             active_version = active[0]
             tools = db.execute(
                 "SELECT t.name, v.bundle FROM page_tool pt "
@@ -718,6 +979,7 @@ class PageStore:
                 {tool["name"] for tool in tools},
                 {bundle["implementation"]["collection"] for bundle in bundles},
                 "/layout",
+                _collection_fields(bundles),
             )
             if expected_version != active_version:
                 raise ValidationError(
@@ -727,6 +989,7 @@ class PageStore:
                     "Call inspect_page, set expected_version to layout.version, and retry.",
                 )
             version = active_version + 1
+            require_inspectable(self._inspect_page(db, page_id, (version, digest, layout)))
             stamp = now()
             db.execute(
                 "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
@@ -796,14 +1059,7 @@ class PageStore:
 
     def page_tools(self, page_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:
-            rows = db.execute(
-                """SELECT t.name, v.bundle, v.version FROM page_tool pt
-                JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id
-                AND v.version=pt.active_version
-                WHERE pt.page_id=? ORDER BY t.name""",
-                (page_id,),
-            ).fetchall()
-        return [{"name": r[0], **validate_bundle(json.loads(r[1])), "version": r[2]} for r in rows]
+            return self._page_tools(db, page_id)
 
     def rollback_tool(self, page_id: str, name: str, version: int) -> None:
         with self.transaction() as db:

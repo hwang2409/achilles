@@ -9,6 +9,21 @@ test("static file failures are harness errors, not agent failures", () => {
   expect(result.pass).toBe(false);
 });
 
+test("a setup task without an initial snapshot is a harness error", () => {
+  const setupTask = validateTask({ ...task, setup: { tools: [{ name: "list_records", operation: "list", collection: "records" }], records: [] } });
+  const result = gradeReference(setupTask, { pages: [{ id: "home", alias: "p" }], pages_seen: [], results: [], turns: 0 });
+  expect(result.status).toBe("harness_error");
+  expect(result.checks[0]?.actual).toEqual(["setup precondition unverifiable"]);
+});
+
+test("a missing seeded layout is a harness error before grading", () => {
+  const original = { blocks: [{ type: "text", text: "seeded" }] }; const added = { type: "text", text: "added" };
+  const layoutTask = validateTask({ ...task, setup: { tools: [], records: [], initial_layout: original }, checks: [{ id: "layout", type: "layout_update", page: "p", value: { original, added, version: 2 } }] });
+  const result = gradeReference(layoutTask, { initial: { layouts: [] }, pages: [{ id: "home", alias: "p" }], layouts: [{ page_id: "home", version: 1, document: original }, { page_id: "home", version: 2, document: { blocks: [...original.blocks, added] } }], turns: 0 });
+  expect(result.status).toBe("harness_error");
+  expect(result.turns).toBe(0);
+});
+
 test("task schema is closed and count checks name real collections", () => {
   expect(validateTask(task).id).toBe("x-task");
   expect(() => validateTask({ ...task, extra: true })).toThrow("unknown key");

@@ -5,6 +5,7 @@ import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type Comp
 import { AppShell } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
+import { DetailRecord, type DetailFilter } from "./DetailRecord";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
@@ -29,7 +30,7 @@ function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; foc
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
-  useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  useLayoutEffect(() => { if (focus && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
   const adapterProps = {
     ...props,
     defaultValue: draft,
@@ -78,6 +79,7 @@ export function App() {
   } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
+  const previousRefreshKey = useRef(refreshKey);
   const waiting = Number(approvalCount);
   const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
@@ -107,6 +109,11 @@ export function App() {
       }
     }
   }), [active.refreshPage, store]);
+  useEffect(() => {
+    if (previousRefreshKey.current === refreshKey) return;
+    previousRefreshKey.current = refreshKey;
+    void active.refreshPage();
+  }, [refreshKey]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
@@ -191,9 +198,14 @@ function ConnectionBanner({ state, connection, compact = false }: { state: Conne
 
 function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
   if (block.type === "text") return <p>{String(block.text)}</p>;
-  if (block.type === "metric") return <p><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
+  if (block.type === "metric") return <p className="layout-metric"><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
   if (block.type === "list") return <RecordList title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
-  if (block.type === "detail") return <p>{String(block.title)}: {Array.isArray(block.fields) ? block.fields.join(", ") : ""}</p>;
+  if (block.type === "detail") {
+    const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
+    const filter = block.filter as DetailFilter | undefined;
+    if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
+    return <p>{String(block.title)}: {fields.join(", ")}</p>;
+  }
   if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
   return null;
 }
