@@ -255,7 +255,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
-    <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} inert={narrow && drawer ? true : undefined} onClick={closeDrawer} />
+    <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span><button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button></div>
       <button className="new-chat" onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>

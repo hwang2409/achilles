@@ -107,7 +107,11 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${origin}/allow`);
-  await page.getByRole("button", { name: "open menu" }).click();
+  const menu = page.getByRole("button", { name: "open menu" });
+  await menu.click();
+  await page.getByRole("button", { name: "close menu" }).click();
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "open menu");
+  await menu.click();
   const sidebar = page.locator(".sidebar");
   const controls = sidebar.locator("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
   await controls.first().waitFor();
