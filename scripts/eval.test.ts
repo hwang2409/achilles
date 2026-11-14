@@ -34,6 +34,7 @@ test("setup seeds an initial layout on a fresh page at version 1", async () => {
 });
 
 test("turn cap report preserves the seeded initial snapshot", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
   const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-turn-cap-"));
   const taskId = "turn-cap-seeded-snapshot"; const taskPath = join(target, "evals/tasks", `${taskId}.json`); let child: ReturnType<typeof Bun.spawn> | undefined;
   const layout = { blocks: [{ type: "text", text: "Seeded dashboard" }] }; const record = { id: "seed-1", collection: "notes", data: { text: "Seeded note" } };
