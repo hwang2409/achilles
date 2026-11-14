@@ -40,10 +40,10 @@ function processesContaining(text: string): number[] {
   });
 }
 
-async function stop(saved: ProcessIdentity) {
+async function stop(saved: ProcessIdentity, signal: NodeJS.Signals = "SIGTERM") {
   const current = await processIdentity(saved.pid);
   if (!ownedProcessMatches(saved, current)) return;
-  process.kill(saved.pid, "SIGTERM");
+  process.kill(saved.pid, signal);
   await waitFor(() => !alive(saved.pid), `pid ${saved.pid} to stop`);
 }
 
@@ -80,13 +80,14 @@ test("stop ownership requires pid, start time, and exact command", () => {
 
 test("cleanup does not signal a reused pid", async () => {
   const child = Bun.spawn(["sleep", "30"], { stdout: "ignore", stderr: "ignore" });
+  const saved = await processIdentity(child.pid);
   try {
-    const saved = await processIdentity(child.pid);
     expect(saved).not.toBeNull();
     await stop({ ...saved!, started: "different start time" });
     expect(alive(child.pid)).toBe(true);
+    await stop(saved!);
   } finally {
-    process.kill(child.pid, "SIGTERM");
+    if (saved && alive(child.pid)) await stop(saved);
     await child.exited;
   }
 });
@@ -105,6 +106,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   let zetaPid = 0;
   let foreignPid = 0;
   let crashedChildPid = 0;
+  let crashedLockIdentity: ProcessIdentity | null = null;
 
   await mkdir(resolve(home, "run"), { recursive: true });
   await mkdir(bin, { recursive: true });
@@ -139,7 +141,9 @@ if (args[0] === "serve") {
   const ws = Number(args[args.indexOf("--ws") + 1]);
   const origins = args.reduce<string[]>((values, arg, index) => arg === "--ws-origin" ? [...values, args[index + 1]] : values, []);
   const run = resolve(process.env.ZETA_HOME!, "run"); mkdirSync(run, { recursive: true });
-  writeFileSync(resolve(run, "serve.ws.json"), JSON.stringify({ pid: process.pid, port: ws, origins }));
+  const started = Bun.spawnSync(["ps", "-p", String(process.pid), "-o", "lstart="]).stdout.toString().trim();
+  const command = Bun.spawnSync(["ps", "-o", "args=", "-p", String(process.pid)]).stdout.toString().trim();
+  writeFileSync(resolve(run, "serve.ws.json"), JSON.stringify({ pid: process.pid, started, command, port: ws, origins }));
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
   const parent = Number(process.env.FAKE_PARENT_PID);
   const watchdog = setInterval(() => {
@@ -227,12 +231,15 @@ process.exit(0);
     if (crashedIdentity) spawned.push(crashedIdentity);
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
     crashedChildPid = Number(await readFile(waiterReady, "utf8"));
+    const crashedChildIdentity = await processIdentity(crashedChildPid);
+    if (crashedChildIdentity) spawned.push(crashedChildIdentity);
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
+    crashedLockIdentity = crashedIdentity?.pid === crashedLockPid ? crashedIdentity : await processIdentity(crashedLockPid);
     const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(await rejected.exited).toBe(1);
     expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
-    process.kill(crashedLockPid, "SIGKILL");
-    await waitFor(() => !alive(crashedLockPid), "killed lock holder to exit");
+    expect(crashedLockIdentity).not.toBeNull();
+    await stop(crashedLockIdentity!, "SIGKILL");
     const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(await recovered.exited, await new Response(recovered.stderr).text()).toBe(0);
     const crashedChild = await processIdentity(crashedChildPid);
@@ -257,20 +264,15 @@ process.exit(0);
     await waitFor(() => !alive(zetaPid), "fake zeta to stop after its home is removed");
   } finally {
     const owned: ProcessIdentity[] = [...managed, ...spawned];
-    const record = async (pid: number) => {
-      const identity = await processIdentity(pid);
-      if (identity) owned.push(identity);
+    const addStoredIdentity = async (path: string) => {
+      try {
+        const value = JSON.parse(await readFile(path, "utf8"));
+        if (typeof value.pid === "number" && typeof value.started === "string" && typeof value.command === "string") owned.push(value);
+      } catch {}
     };
-    await record(crashedChildPid);
-    await record(foreignPid);
-    await record(zetaPid);
-    try {
-      const pids = (await readFile(serverPids, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line).pid);
-      for (const pid of pids) await record(pid);
-    } catch {}
-    for (const path of [resolve(home, "run/serve.ws.json"), resolve(devCache, "zeta-serve.json"), resolve(devCache, "achilles.json")]) {
-      try { await record(JSON.parse(await readFile(path, "utf8")).pid); } catch {}
-    }
+    await addStoredIdentity(resolve(home, "run/serve.ws.json"));
+    await addStoredIdentity(resolve(devCache, "zeta-serve.json"));
+    await addStoredIdentity(resolve(devCache, "achilles.json"));
     for (const saved of owned) { try { await stop(saved); } catch {} }
     expect(processesContaining(temp), "fake dev processes survived cleanup").toEqual([]);
     await rm(devCache, { recursive: true, force: true });
