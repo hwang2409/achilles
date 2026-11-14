@@ -39,7 +39,7 @@ export function reportMarkdown(report: EvalReport): string {
     `zeta: ${report.agent.zeta_sha ?? "unavailable"}`,
     `repeats: ${report.repeats}`,
     `totals: ${report.totals?.turns ?? report.tasks.reduce((total, task) => total + task.turns, 0)} turns, ${report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0)} ms wall time`,
-    `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`, 
+    `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
     "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: |",
   ];
