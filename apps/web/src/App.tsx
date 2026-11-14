@@ -48,6 +48,19 @@ function VimLoading() {
   return <div className="vim-loading" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><textarea rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
 }
 
+function storeSnapshot(store: ReturnType<typeof createRunStore> | null): string {
+  if (!store) return "idle:0:0:0::0:";
+  const state = store.getState();
+  const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
+  const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
+  const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
+  const toolStates = state.outline.map((item) => {
+    const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
+    return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
+  }).join(",");
+  return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
+}
+
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
   switch (state.phase) {
@@ -71,17 +84,7 @@ export function App() {
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
-  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
-    const state = store.getState();
-    const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
-    const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
-    const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
-    const toolStates = state.outline.map((item) => {
-      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
-      return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
-    }).join(",");
-    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
-  } : () => "idle:0:0:0::0:");
+  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), () => storeSnapshot(store));
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
   const previousRefreshKey = useRef(refreshKey);

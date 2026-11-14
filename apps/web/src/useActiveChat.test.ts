@@ -445,7 +445,10 @@ describe("chat creation lifecycle", () => {
     };
     const publish = async () => { await step("publish"); publishes += 1; };
     const run = () => reopen
-      ? withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish))
+      ? withFetch(fetcher, async () => {
+        try { return await attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish); }
+        finally { attachmentOwner.clear(); }
+      })
       : owner.ensure(
         input(client, true),
         async (sessionId) => { await step("attach"); attaches += 1; return { sessionId }; },
@@ -454,6 +457,7 @@ describe("chat creation lifecycle", () => {
       )!;
     if (reopen) {
       const reopened = await withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true)));
+      attachmentOwner.clear();
       expect(reopened.page.create_mode).toBe(true);
       if (turnOff) owner.setCreateMode("home", false);
     }
@@ -499,6 +503,5 @@ describe("chat creation lifecycle", () => {
     expect(appliedModes.at(-1)).toBe(pendingMode ? !turnOff : undefined);
     expect(deliveries).toBe(doubleEnter ? 1 : 0);
     expect(owner.status("home")).toMatchObject({ pending: null, error: null, createMode: undefined });
-    attachmentOwner.clear();
   }, CONTROLLED_TIMEOUT_MS + 5_000);
 });
