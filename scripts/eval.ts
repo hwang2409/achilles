@@ -54,7 +54,7 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
   return Promise.all(ids.map(id => loadTask(id, dir)));
 }
 
-const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : { type: "object", additionalProperties: true }, output_schema: {}, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
+const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, output_schema: {}, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
 const SETUP_SCRIPT = `
 import json, sys
 from pathlib import Path
