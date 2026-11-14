@@ -22,6 +22,18 @@ def holder_alive(value: str) -> bool:
     return status.returncode == 0 and not status.stdout.strip().startswith("Z")
 
 
+# dead holder: macOS CI can delay kernel flock release; this grace is bounded.
+def wait_for_dead_holder_release(lock: object, holder: str) -> bool:
+    for _attempt in range(50):
+        time.sleep(0.01)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            continue
+    return False
+
+
 def main() -> int:
     lock_path = Path(__file__).resolve().parents[1] / ".cache" / "dev" / "lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -36,18 +48,12 @@ def main() -> int:
                 suffix = f" (pid {holder})" if holder else ""
                 print(f"make dev is already running{suffix}", file=sys.stderr)
                 return 1
-            for attempt in range(50):
-                time.sleep(0.01)
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if attempt == 49:
-                        print(
-                            f"make dev is already running (pid {holder})",
-                            file=sys.stderr,
-                        )
-                        return 1
+            if not wait_for_dead_holder_release(lock, holder):
+                print(
+                    f"make dev is already running (pid {holder})",
+                    file=sys.stderr,
+                )
+                return 1
 
         lock.seek(0)
         lock.truncate()
