@@ -104,7 +104,7 @@
       "page": "reading"
     }
   ],
-  "requires": [
-    "update_layout"
+  "goal_capabilities": [
+    "create_page_with_tools"
   ]
 }

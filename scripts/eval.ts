@@ -71,10 +71,13 @@ const bundle = (name: string, operation: string, collection: string) => {
   return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, output_schema, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } };
 };
 const CAPABILITIES_SCRIPT = `
-import json
+import inspect, json
 from achilles import tools
-names = getattr(tools, "BUILTIN_TOOL_NAMES", ("create_page", "create_tool"))
-print(json.dumps(list(names)))`;
+from achilles.pages import PageStore
+names = list(getattr(tools, "BUILTIN_TOOL_NAMES", ("create_page", "create_tool")))
+if "tools" in inspect.signature(PageStore.create_page).parameters:
+    names.append("create_page_with_tools")
+print(json.dumps(names))`;
 export async function productCapabilities(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);
   if (process.exitCode !== 0) throw new Error(`capability preflight failed: ${process.stderr}`);
@@ -300,7 +303,9 @@ export function unsupportedResult(task: EvalTask, missing: string[]) {
 export async function classifyTaskSupport(stack: EvalStack, task: EvalTask, hidden: string[]) {
   try {
     const capabilities = await productCapabilities(stack); const missing = (task.requires ?? []).filter(capability => !capabilities.has(capability));
-    return missing.length ? unsupportedResult(task, missing) : undefined;
+    const result = missing.length ? unsupportedResult(task, missing) : undefined;
+    if (result) Object.defineProperty(result, "capabilities", { value: capabilities });
+    return result;
   } catch (error) { return failureResult(task, error, hidden); }
 }
 
@@ -315,7 +320,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     else {
       const classification = await classifyTaskSupport(stack, task, options.hidden);
       if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }
-      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); }
+      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); const capabilities = (await productCapabilities(stack)); const missingGoal = (task.goal_capabilities ?? []).find(capability => !capabilities.has(capability)); if (missingGoal && result.status === "agent_fail" && !task.requires?.length) result = { ...result, gap: `capability_missing:${missingGoal}` } as ReturnType<typeof gradeTask>; }
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
   } catch (error) { const original = error instanceof TaskRunFailure ? error.original : error; if (error instanceof TaskRunFailure) snapshot = error.snapshot; else if (stack) snapshot = await databaseSnapshot(stack).catch(() => ({})); stopSuite = stopsSuite(original);

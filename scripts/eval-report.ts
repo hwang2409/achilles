@@ -1,6 +1,6 @@
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
-export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported"; cap_hit?: boolean };
+export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported"; cap_hit?: boolean; gap?: string };
 export type EvalReport = {
   run_id: string;
   agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
@@ -72,7 +72,7 @@ export function reportMarkdown(report: EvalReport): string {
   ];
   for (const task of report.tasks) {
     const first = task.diagnostics?.first_call_validity ?? {};
-    lines.push(`| ${task.task_id} | ${task.status ?? (task.pass ? "pass" : "agent_fail")} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} | ${task.cap_hit ? "yes" : "no"} |`);
+    lines.push(`| ${task.task_id} | ${task.status ?? (task.pass ? "pass" : "agent_fail")}${task.gap ? ` (${task.gap.startsWith("capability_missing:") ? "goal not reachable on this revision" : task.gap})` : ""} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} | ${task.cap_hit ? "yes" : "no"} |`);
   }
   lines.push("", "## grouped repeat metrics", "", "unsupported and harness-error runs are excluded from comparable task metrics.", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time | cap hits | action |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.score_min}–${value.score_max} | ${value.median_turns} | ${value.median_tool_calls} | ${value.median_wall_ms} ms | ${value.cap_hits} | ${value.cap_action} |`);
