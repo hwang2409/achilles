@@ -751,7 +751,7 @@ try {
   const observerOutputs = observerPage.locator('[data-part="message"][data-role="assistant"]');
   const controllerOutputBefore = await controllerOutputs.count();
   const observerOutputBefore = await observerOutputs.count();
-  await recoveredField.fill("observer live message");
+  await recoveredField.fill("observer live message", { timeout: 20_000 }).catch(async () => { throw new Error(`controller lost its composer after observer attach: ${await page.locator("body").innerText()}`); });
   await recoveredField.press("Enter");
   await page.getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 });
   await waitFor(async () => await controllerOutputs.count() > controllerOutputBefore, "controller live output");
@@ -769,9 +769,10 @@ try {
   await observerPage.getByRole("button", { name: "retry", exact: true }).click();
   const takeoverField = observerPage.getByRole("textbox", { name: "message", exact: true });
   await takeoverField.waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover retry did not gain control: ${await observerPage.locator("body").innerText()}`); });
+  const sendsBeforeTakeover = requests().filter((frame) => frame.method === "send").length;
   await takeoverField.fill("takeover retry message");
   await takeoverField.press("Enter");
-  await observerPage.getByText("takeover retry message", { exact: true }).waitFor({ timeout: 20_000 });
+  await waitFor(() => requests().filter((frame) => frame.method === "send").length > sendsBeforeTakeover, "takeover retry send");
   page = observerPage;
 
   if (screenshotDir) {
