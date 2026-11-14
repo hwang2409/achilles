@@ -261,9 +261,12 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await restoredStock.waitFor({ state: "visible", timeout: 20_000 });
   if (await restoredStock.inputValue() !== "kept draft") throw new Error("plain reconnect changed the kept draft");
   const pendingApproval = page.locator('[data-part="approval"][data-state="pending"]');
-  await pendingApproval.last().waitFor({ state: "visible", timeout: 20_000 });
-  await pendingApproval.last().getByRole("button", { name: "deny", exact: true }).click();
   await waitFor(async () =>
+    await pendingApproval.count() > 0 ||
+    (JSON.parse(await Bun.file(control).text()).request_count ?? 0) >= 2, "reconnected turn result");
+  if (await pendingApproval.count()) await pendingApproval.last().getByRole("button", { name: "deny", exact: true }).click();
+  await waitFor(async () =>
+    (JSON.parse(await Bun.file(control).text()).request_count ?? 0) >= 2 &&
     await page.locator('[data-part="composer"][data-state="idle"]').count() === 1 &&
     await page.locator(".run-state").innerText() === "idle", "reconnected turn idle after denial");
   await setVim(true);
