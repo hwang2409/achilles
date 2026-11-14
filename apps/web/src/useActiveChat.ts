@@ -429,11 +429,18 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
     const focusOwner = document.activeElement;
+    let focusMoved = false;
+    const markFocusMoved = () => { focusMoved = true; };
+    addEventListener("pointerdown", markFocusMoved, true);
+    addEventListener("focusin", markFocusMoved, true);
     setState({ phase: "loading" });
     try {
-      await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, document.activeElement === focusOwner), true);
+      await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, !focusMoved && document.activeElement === focusOwner), true);
     } catch (caught) {
       if (!creation.current.status(context.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
+    } finally {
+      removeEventListener("pointerdown", markFocusMoved, true);
+      removeEventListener("focusin", markFocusMoved, true);
     }
   }, [applyPendingCreateMode, client, publishReady, state]);
 
@@ -457,20 +464,29 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     let current = state.phase === "ready" ? state : null;
     if (!current) {
       const focusOwner = document.activeElement;
+      let focusMoved = false;
+      const markFocusMoved = () => { focusMoved = true; };
+      addEventListener("pointerdown", markFocusMoved, true);
+      addEventListener("focusin", markFocusMoved, true);
       setCreationPageId(state.page.id);
-      const attached = await attachPage(
-        client,
-        keyFromPath(),
-        null,
-        owner.current,
-        creation.current,
-        token,
-        true,
-        applyPendingCreateMode,
-        (ready) => publishReady(ready, token, true, document.activeElement === focusOwner || (focusOwner !== null && !focusOwner.isConnected && document.activeElement === document.body)),
-      );
-      if (attached.phase !== "ready") throw new Error("created chat did not attach");
-      current = attached;
+      try {
+        const attached = await attachPage(
+          client,
+          keyFromPath(),
+          null,
+          owner.current,
+          creation.current,
+          token,
+          true,
+          applyPendingCreateMode,
+          (ready) => publishReady(ready, token, true, !focusMoved && (document.activeElement === focusOwner || (focusOwner !== null && !focusOwner.isConnected && document.activeElement === document.body))),
+        );
+        if (attached.phase !== "ready") throw new Error("created chat did not attach");
+        current = attached;
+      } finally {
+        removeEventListener("pointerdown", markFocusMoved, true);
+        removeEventListener("focusin", markFocusMoved, true);
+      }
     }
     const delivery_id = crypto.randomUUID();
     await deliverChatMessage(client, current.sessionId, text, delivery_id, intent.steer, track);
