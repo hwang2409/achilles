@@ -220,6 +220,7 @@ try {
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
   await assertServerAskWins(page, first, requests(), approvalModeResponse);
+  ignoreBrowserErrors = true;
   await page.goto(`${origin}/not-a-real-page`);
   await page.getByRole("alert").filter({ hasText: "page not found" }).waitFor({ timeout: 20_000 });
   await page.getByRole("button", { name: "new chat", exact: true }).click();
@@ -229,6 +230,7 @@ try {
   if (!(await page.locator(".empty-chat").count())) throw new Error("unknown-route new chat did not show an empty chat");
   await page.goto(`${origin}/?chat=${first}`);
   await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  ignoreBrowserErrors = false;
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
