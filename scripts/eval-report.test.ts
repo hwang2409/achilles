@@ -15,6 +15,13 @@ test("report aggregates pass rate per task and states tools", () => {
   expect(reportJson(report)).toContain("tool_policy");
 });
 
+test("goal capability gaps label agent failures without changing status", () => {
+  const report = makeReport({ run_id: "run", repeats: 1, agent: { provider: "scripted", model: "offline", tool_policy: "achilles__*", observed_catalog: [] }, tasks: [{ task_id: "reading", pass: false, status: "agent_fail", gap: "capability_missing:update_layout", score: 0, turns: 1, tool_calls: 0, wall_ms: 1, approvals: 0, checks: [], host_tools_gap: false, usage: "unavailable", diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } }] as never });
+  expect(report.tasks[0].status).toBe("agent_fail");
+  expect(reportJson(report)).toContain('"gap": "capability_missing:update_layout"');
+  expect(reportMarkdown(report)).toContain("goal not reachable on this revision");
+});
+
 test("unsupported runs are excluded and repeated cap hits request a higher cap", () => {
   const rows = [
     { task_id: "capped", pass: false, score: 0, turns: 4, tool_calls: 1, wall_ms: 1, status: "agent_fail", cap_hit: true },

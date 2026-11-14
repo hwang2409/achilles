@@ -12,10 +12,11 @@ test("every task's known-good passes and plausible known-bad agent fails", async
   expect(referenceFiles).toEqual(taskFiles);
   for (const file of taskFiles) {
     const task = validateTask(JSON.parse(await readFile(join(tasksDir, file), "utf8")));
-    const references = JSON.parse(await readFile(join(referencesDir, file), "utf8")) as { good?: EvalSnapshot; bad?: EvalSnapshot };
+    const references = JSON.parse(await readFile(join(referencesDir, file), "utf8")) as { good?: EvalSnapshot; good_old?: EvalSnapshot; bad?: EvalSnapshot };
     expect(references.good, `${basename(file)} needs a known-good snapshot`).toBeDefined();
     expect(references.bad, `${basename(file)} needs a known-bad snapshot`).toBeDefined();
     expect(gradeReference(task, references.good!).status, `${task.id} known-good`).toBe("pass");
+    if (references.good_old) expect(gradeReference(task, references.good_old).status, `${task.id} known-good old shape`).toBe("pass");
     expect(gradeReference(task, references.bad!).status, `${task.id} known-bad`).toBe("agent_fail");
   }
 });

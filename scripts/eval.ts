@@ -300,7 +300,9 @@ export function unsupportedResult(task: EvalTask, missing: string[]) {
 export async function classifyTaskSupport(stack: EvalStack, task: EvalTask, hidden: string[]) {
   try {
     const capabilities = await productCapabilities(stack); const missing = (task.requires ?? []).filter(capability => !capabilities.has(capability));
-    return missing.length ? unsupportedResult(task, missing) : undefined;
+    const result = missing.length ? unsupportedResult(task, missing) : undefined;
+    if (result) Object.defineProperty(result, "capabilities", { value: capabilities });
+    return result;
   } catch (error) { return failureResult(task, error, hidden); }
 }
 
@@ -315,7 +317,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     else {
       const classification = await classifyTaskSupport(stack, task, options.hidden);
       if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }
-      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); }
+      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); const capabilities = (await productCapabilities(stack)); const missingGoal = (task.goal_capabilities ?? []).find(capability => !capabilities.has(capability)); if (missingGoal && result.status === "agent_fail" && !task.requires?.length) result = { ...result, gap: `capability_missing:${missingGoal}` } as ReturnType<typeof gradeTask>; }
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
   } catch (error) { const original = error instanceof TaskRunFailure ? error.original : error; if (error instanceof TaskRunFailure) snapshot = error.snapshot; else if (stack) snapshot = await databaseSnapshot(stack).catch(() => ({})); stopSuite = stopsSuite(original);

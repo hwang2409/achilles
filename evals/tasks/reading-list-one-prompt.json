@@ -104,7 +104,7 @@
       "page": "reading"
     }
   ],
-  "requires": [
+  "goal_capabilities": [
     "update_layout"
   ]
 }
