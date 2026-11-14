@@ -19,6 +19,12 @@ class TaskRunFailure extends Error {
   constructor(readonly original: unknown, readonly snapshot: EvalSnapshot) { super(original instanceof Error ? original.message : String(original)); }
 }
 class TurnCapFailure extends Error {}
+export function unresolvedDeliveryError(events: Record<string, any>[], aborted: boolean) {
+  if (!aborted) return undefined;
+  const event = events.find(item => String(item.event ?? item.method ?? "") === "delivery_status" && String(item.data?.status ?? item.params?.status ?? "") === "queued");
+  const deliveryId = event?.data?.delivery_id ?? event?.params?.delivery_id;
+  return deliveryId ? Object.assign(new Error(`zeta: delivery ${deliveryId} never resolved`), { delivery_id: deliveryId, delivery_status: "queued" }) : undefined;
+}
 export function stopsSuite(error: unknown) { return error instanceof SecretScanFailure || fatalAccountFailure.test(error instanceof Error ? error.message : String(error)); }
 const redact = (value: string, hidden: string[]) => hidden.reduce((text, secret) => secret ? text.replaceAll(secret, "[REDACTED]") : text, value);
 export function hiddenValues(accountHome?: string) {
@@ -261,7 +267,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
-    throw new TaskRunFailure(error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
+    throw new TaskRunFailure(unresolvedDeliveryError(events, signal.aborted) ?? error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 
@@ -294,8 +300,8 @@ function catalogProof(requests: Record<string, unknown>[], task: EvalTask) {
   catalogs.forEach(catalog => validateCatalog(catalog)); if (required) validateCatalog(catalogs[0] ?? [], required); return [...new Set(catalogs.flat())];
 }
 export function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
-  const detail = error as Error & { code?: number; method?: string; sessionId?: string; pageId?: string };
-  return { task_id: task.id, status: "harness_error", pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
+  const detail = error as Error & { code?: number; method?: string; sessionId?: string; pageId?: string; delivery_id?: string; delivery_status?: string };
+  return { task_id: task.id, status: "harness_error", pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId, delivery_id: detail.delivery_id, delivery_status: detail.delivery_status } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
 }
 export function unsupportedResult(task: EvalTask, missing: string[]) {
   return { task_id: task.id, status: "unsupported", pass: false, score: 0, checks: [{ id: "capability", pass: false, expected: task.requires, actual: [...(task.requires ?? []).filter(item => !missing.includes(item))], evidence: { missing } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>;
