@@ -11,31 +11,33 @@
         "page_id": "p",
         "tool": "achilles__list_records",
         "success": true,
-        "data": {
-          "records": [
-            {
-              "id": "record-2"
-            },
-            {
-              "id": "record-1",
-              "status": "done"
-            }
-          ]
-        }
+        "data": [
+          {
+            "name": "record-1",
+            "status": "done",
+            "record_id": "synthetic-1",
+            "revision": 2
+          },
+          {
+            "name": "record-2",
+            "record_id": "synthetic-2",
+            "revision": 1
+          }
+        ]
       }
     ],
     "records": [
       {
         "page_id": "p",
         "data": {
-          "id": "record-1",
+          "name": "record-1",
           "status": "done"
         }
       },
       {
         "page_id": "p",
         "data": {
-          "id": "record-2"
+          "name": "record-2"
         }
       }
     ]
@@ -52,37 +54,29 @@
         "page_id": "p",
         "tool": "achilles__list_records",
         "success": true,
-        "data": {
-          "records": [
-            {
-              "id": "record-2"
-            },
-            {
-              "id": "record-1",
-              "status": "done"
-            }
-          ]
-        }
+        "data": [
+          {
+            "name": "record-1",
+            "status": "pending"
+          },
+          {
+            "name": "record-2"
+          }
+        ]
       }
     ],
     "records": [
       {
         "page_id": "p",
         "data": {
-          "id": "record-1",
-          "status": "done"
+          "name": "record-1",
+          "status": "pending"
         }
       },
       {
         "page_id": "p",
         "data": {
-          "id": "record-2"
-        }
-      },
-      {
-        "page_id": "p",
-        "data": {
-          "id": "record-3"
+          "name": "record-2"
         }
       }
     ]

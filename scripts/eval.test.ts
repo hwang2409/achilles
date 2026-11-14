@@ -1,9 +1,15 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog } from "./eval";
+import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
+
+const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
+  const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
+  const process = Bun.spawn(python, { cwd, env: { ...Bun.env, PYTHONPATH: [join(target, "src"), target].join(delimiter) }, stdout: "pipe", stderr: "pipe" });
+  return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
+};
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
@@ -25,6 +31,36 @@ test("live turn budget allows the cap and aborts only excess work", async () => 
   expect(aborts).toBe(0);
   await expect(enforce({ event: "turn_start" })).rejects.toThrow("limit exceeded");
   expect(aborts).toBe(1);
+});
+
+test("capability probe keeps an unrelated internal ImportError as a harness_error", async () => {
+  const task = { id: "capability", requires: ["update_layout"] } as never;
+  const root = await mkdtemp(join(tmpdir(), "achilles-broken-target-"));
+  try {
+    await mkdir(join(root, "achilles"));
+    await Bun.write(join(root, "pyproject.toml"), '[project]\nname="broken-target"\nversion="0.0.0"\nrequires-python=">=3.11"\n');
+    await Bun.write(join(root, "achilles", "__init__.py"), "");
+    await Bun.write(join(root, "achilles", "tools.py"), "from achilles import unrelated\n");
+    await Bun.write(join(root, "achilles", "unrelated.py"), 'raise ImportError("unrelated dependency broke")\n');
+    const result = await classifyTaskSupport({ run: targetRun(root), achillesDir: root } as never, task, []);
+    expect(result?.status).toBe("harness_error");
+    expect(result?.checks[0].evidence).toEqual(expect.objectContaining({ message: expect.stringContaining("unrelated dependency broke") }));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("reserved bundle validation uses the target revision's validator after changing only the name", async () => {
+  const valid = { format_version: 1, kind: "data_operation", name: "create_tool", description: "synthetic tool", input_schema: { type: "object", additionalProperties: true }, output_schema: { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] }, implementation: { operation: "insert", collection: "records", data_schema: { type: "object", additionalProperties: true } } };
+  const invalid = [
+    { ...valid, implementation: { ...valid.implementation, collection: "" } },
+    { ...valid, input_schema: { type: "not-a-json-schema-type" } },
+    { ...valid, extra: true },
+    { ...valid, description: "x".repeat(10_000) },
+  ];
+  const bundles = [valid, ...invalid]; const calls = bundles.map((bundle, index) => ({ id: `call-${index}`, tool: "achilles__create_tool", arguments: { bundle } }));
+  const results = calls.map(call => ({ call_id: call.id, success: false }));
+  const target = Bun.env.ACHILLES_DIR ?? resolve(new URL("..", import.meta.url).pathname);
+  const validations = await validateReservedBundles({ run: targetRun(target), achillesDir: target } as never, calls, results);
+  expect(validations.map(row => row.valid)).toEqual([true, false, false, false, false]);
 });
 
 test("provider catalog is allow-only", () => {

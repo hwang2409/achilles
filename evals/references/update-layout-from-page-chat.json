@@ -122,7 +122,6 @@
           "title": "Records",
           "create_mode": true,
           "layout": {
-            "version": 1,
             "blocks": [
               {
                 "type": "text",
@@ -136,7 +135,10 @@
                 ]
               }
             ]
-          }
+          },
+          "layout_version": 1,
+          "layout_digest": "456bc10578fd62703d7225bf39b1307e1e611cd64b3c9d83da9f87f9f714bb10",
+          "metric_values": []
         }
       },
       {
@@ -217,6 +219,12 @@
     ],
     "calls": [
       {
+        "id": "inspect-old",
+        "page_id": "p",
+        "tool": "achilles__inspect_page",
+        "arguments": {}
+      },
+      {
         "id": "bad-update",
         "page_id": "p",
         "tool": "achilles__update_layout",
@@ -228,8 +236,187 @@
     "results": [
       {
         "page_id": "p",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-old",
+        "success": true,
+        "data": {
+          "route": "/records",
+          "title": "Records",
+          "create_mode": true,
+          "layout": {
+            "version": 1,
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "page_id": "p",
         "tool": "achilles__update_layout",
         "call_id": "bad-update",
+        "success": true,
+        "data": {
+          "version": 2
+        }
+      }
+    ],
+    "errors": []
+  },
+  "good_old": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "records"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "p",
+        "name": "list_records",
+        "collection": "records",
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "collection": "records",
+        "data": {
+          "title": "Synthetic record"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "p",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "p",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            },
+            {
+              "type": "list",
+              "title": "Page records",
+              "collection": "records"
+            }
+          ]
+        }
+      }
+    ],
+    "related_page_ids": [
+      "p"
+    ],
+    "calls": [
+      {
+        "id": "inspect-1",
+        "page_id": "p",
+        "tool": "achilles__inspect_page",
+        "arguments": {}
+      },
+      {
+        "id": "update-1",
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              },
+              {
+                "type": "list",
+                "title": "Page records",
+                "collection": "records"
+              }
+            ]
+          },
+          "expected_version": 1
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-1",
+        "success": true,
+        "data": {
+          "route": "/records",
+          "title": "Records",
+          "create_mode": true,
+          "layout": {
+            "version": 1,
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "call_id": "update-1",
         "success": true,
         "data": {
           "version": 2

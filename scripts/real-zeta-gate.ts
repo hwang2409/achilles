@@ -2,8 +2,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, type Locator, type Route } from "playwright";
-import { controlSnapshot, diagnostic } from "./gate-diagnostics";
+import { pathToFileURL } from "node:url";
+import type { Locator, Route } from "../apps/web/node_modules/playwright";
+import { controlSnapshot, createFrameRing, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -12,6 +13,7 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
+const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
 if (!/^[0-9a-f]{40}$/.test(zetaRef))
@@ -32,6 +34,7 @@ const logs = new Map<ChildProcess, string>();
 const secrets: string[] = [];
 const redact = (text: string) => diagnostic(text, secrets);
 const safeControl = (text: string) => controlSnapshot(text, secrets);
+const frameRing = createFrameRing();
 const start = (
   command: string,
   args: string[],
@@ -54,7 +57,7 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => {
     if (await check()) return;
     await Bun.sleep(100);
   }
-  throw new Error(`timed out waiting for ${label}; backend catalog=${safeControl(await Bun.file(control).text())}`);
+  throw new Error(`timed out waiting for ${label}; websocket frames=${JSON.stringify(frameRing.snapshot())}; backend catalog=${safeControl(await Bun.file(control).text())}`);
 };
 const waitForExit = (child: ChildProcess, timeoutMs: number) =>
   new Promise<boolean>((resolve) => {
@@ -142,14 +145,23 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
+  const requestFailures: string[] = [];
+  const consoleErrors: string[] = [];
+  const requestPath = (url: string) => { try { return new URL(url).pathname; } catch { return "<invalid-url>"; } };
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
+  let nextSocket = 0;
   page.on("websocket", (socket) => {
-    socket.on("framesent", (event) => frames.push(String(event.payload)));
-    socket.on("framereceived", (event) => frames.push(String(event.payload)));
+    const socketId = nextSocket++;
+    socket.on("framesent", (event) => { const payload = String(event.payload); frames.push(payload); frameRing.record(socketId, "sent", payload); });
+    socket.on("framereceived", (event) => { const payload = String(event.payload); frames.push(payload); frameRing.record(socketId, "received", payload); });
   });
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(`${e.message}${requestFailures.length ? `; latest request failure: ${requestFailures.at(-1)}` : ""}${consoleErrors.length ? `; latest console error: ${consoleErrors.at(-1)}` : ""}`));
+  page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${requestPath(request.url())}: ${request.failure()?.errorText ?? "unknown failure"}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
+  });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
   await setupAlert.waitFor({ timeout: 20000 });
@@ -238,7 +250,7 @@ try {
   const approvalBefore = await approval.count();
   await field.fill("prove chat");
   await field.press("Enter");
-  await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async () => { throw new Error(`assistant missing body=${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
+  await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async (error) => { throw new Error(`${error}\nassistant missing body=${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
   await waitFor(async () => (await approval.count()) > approvalBefore, "initial approval");
   const approvalComplete = page.getByText("approval complete", { exact: true });
   const approvalCompleteBefore = await approvalComplete.count();
@@ -532,9 +544,9 @@ try {
   const annotationCompleteBefore = await annotationComplete.count();
   await field.fill("create page");
   await field.press("Enter");
-  await waitFor(async () => (await createApproval.count()) > createApprovalBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > createRequestBefore), "create page approval").catch(async () => {
+  await waitFor(async () => (await createApproval.count()) > createApprovalBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > createRequestBefore), "create page approval").catch(async (error) => {
     throw new Error(
-      `backend did not receive achilles__create_page catalog: ${safeControl(await Bun.file(control).text())}`,
+      `${error}\nbackend did not receive achilles__create_page catalog: ${safeControl(await Bun.file(control).text())}`,
     );
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
@@ -756,9 +768,9 @@ try {
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
   const emptyRecords = page.getByText("no records yet", { exact: true });
   await emptyRecords.waitFor({ state: "visible" });
-  await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async () => {
+  await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(
-      `annotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
+      `${error}\nannotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
     );
   });
   await annotationApproval.nth(annotationApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
@@ -914,10 +926,15 @@ try {
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
   const readingBody = await page.locator("body").innerText();
   if (reconnectPage.layout?.blocks?.[1]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
+  const homeIdleWrite = page.waitForResponse((response) => {
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
+    try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
+  }).catch(() => { throw new Error("missing home idle state write before achilles restart"); });
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
   await page.locator('[data-part="message"]').first().waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
+  if (!(await homeIdleWrite).ok()) throw new Error("home idle state write failed before achilles restart");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
@@ -936,6 +953,10 @@ try {
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
+  const reconnectIdleWrite = page.waitForResponse((response) => {
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterRestart)}`) return false;
+    try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
+  }).catch(() => { throw new Error("missing reconnect idle state write before achilles restart"); });
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
     const state = JSON.parse(await Bun.file(control).text());
@@ -944,6 +965,7 @@ try {
   await waitFor(async () => (await restartAnnotationApproval.count()) > restartApprovalBefore, "post-restart generated tool approval");
   await restartAnnotationApproval.nth(restartApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await page.getByText("post-reconnect complete", { exact: true }).waitFor({ timeout: 20000 });
+  if (!(await reconnectIdleWrite).ok()) throw new Error("reconnect idle state write failed before achilles restart");
   const postReconnect = JSON.parse(await Bun.file(control).text());
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
   if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
@@ -1109,7 +1131,10 @@ try {
     await page.locator(".sidebar-skeleton").first().waitFor({ timeout: 20_000 });
     await page.getByRole("alert").filter({ hasText: "zeta serve is not running" }).waitFor({ timeout: 20_000 });
     await page.screenshot({ path: join(screenshotDir, "07-first-paint-not-running-review-1440x900.png"), fullPage: true });
-    await Promise.all(heldRequests.map((route) => route.abort().catch(() => {})));
+    const failedRequests = heldRequests.map((route) => page.waitForEvent("requestfailed", (request) => request === route.request())
+      .catch(() => { throw new Error(`missing request failure for held route ${route.request().method()} ${requestPath(route.request().url())}`); }));
+    await Promise.all(heldRequests.map((route) => route.abort()));
+    await Promise.all(failedRequests);
     await page.unroute("**/api/pages**", hold);
     await page.unroute("**/api/chats**", hold);
   }

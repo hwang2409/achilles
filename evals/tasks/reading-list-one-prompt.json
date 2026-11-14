@@ -15,7 +15,7 @@
       "create_mode": false
     }
   ],
-  "agent_turns": 20,
+  "agent_turns": 7,
   "steps": [
     {
       "id": "creation-prompt",
@@ -103,5 +103,8 @@
       "type": "same_page",
       "page": "reading"
     }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
   ]
 }

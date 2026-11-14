@@ -36,6 +36,13 @@ export function persistUntitledChatTitle(sessionId: string, title: string, onSuc
     .catch((error) => console.error("could not update chat title", error));
 }
 
+export async function persistChatState(sessionId: string, lastState: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
+  try {
+    await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) });
+    return true;
+  } catch { return false; }
+}
+
 function attachmentError(caught: unknown, context: "loading" | "creation" = "loading"): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   if (message === "Failed to fetch" || message === "Load failed") return `achilles is unavailable while ${context === "creation" ? "creating the chat" : "loading the chat"}.`;
@@ -375,8 +382,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const recordLastState = useCallback((lastState: string) => {
     if (state.phase !== "ready") return;
     const token = owner.current.token();
-    void fetch(`/api/chats/${encodeURIComponent(state.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) })
-      .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); });
+    void persistChatState(state.sessionId, lastState)
+      .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
   return { state, selectedId, listRefresh, toggleError, toggling, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
