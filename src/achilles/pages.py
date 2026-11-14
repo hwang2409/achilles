@@ -169,7 +169,7 @@ RESTORE_VERSION_SCHEMA = {
     "required": ["kind", "version", "expected_version"],
     "additionalProperties": False,
 }
-_RESTORE_TOOL_SCHEMA = {
+_RESTORE_ARGS_SCHEMA = {
     "type": "object",
     "properties": {"version": _VERSION_NUMBER, "expected_version": _VERSION_NUMBER},
     "required": ["version", "expected_version"],
@@ -1183,7 +1183,7 @@ class PageStore:
     ) -> tuple[int, str, list[dict[str, Any]]]:
         """Append a copy of an old layout version; history is never rewritten."""
         validate_schema(
-            {"version": version, "expected_version": expected_version}, _RESTORE_TOOL_SCHEMA
+            {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
         )
         with self._connect() as db:
             row = db.execute(
@@ -1318,7 +1318,7 @@ class PageStore:
     ) -> dict[str, Any]:
         """Make an earlier tool version active if the active one is still expected_version."""
         validate_schema(
-            {"version": version, "expected_version": expected_version}, _RESTORE_TOOL_SCHEMA
+            {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
         )
         with self.transaction() as db:
             row = db.execute(
