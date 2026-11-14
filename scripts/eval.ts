@@ -45,7 +45,6 @@ export async function loadTask(id: string, dir = new URL("../evals/tasks/", impo
   const task = validateTask(JSON.parse(await readFile(join(dir, `${id}.json`), "utf8")));
   if (task.id !== id) throw new Error(`task id ${task.id} does not match ${id}`); return task;
 }
-
 export async function selectTasks(selection?: string, dir = new URL("../evals/tasks/", import.meta.url).pathname) {
   const ids = selection?.trim() ? selection.split(",").map(id => id.trim()).filter(Boolean) : (await readdir(dir)).filter(name => name.endsWith(".json")).map(name => name.slice(0, -5)).sort();
   if (!ids.length || new Set(ids).size !== ids.length) throw new Error("TASK must select at least one unique task");
@@ -123,9 +122,11 @@ async function waitForTerminal(protocol: EvalProtocol, sessionId: string, prior:
 const SNAPSHOT_SCRIPT = `import json,sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row
 def q(s): return [dict(r) for r in c.execute(s)]
-out={"pages":q("select id,route,title from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,document as data from page_record"),"layouts":q("select page_id,version,document from layout_version")}
+out={"pages":q("select id,route,title from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,document as data from page_record"),"layouts":q("select page_id,version,document from layout_version"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id and v.version=pt.active_version")}
 for k in ("records","layouts"):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
+for r in out["tool_versions"]:
+ b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]
 print(json.dumps(out))`;
 async function databaseSnapshot(stack: EvalStack) {
   const process = Bun.spawn(["uv", "run", "python", "-c", SNAPSHOT_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3")], { stdout: "pipe", stderr: "pipe" });
@@ -162,37 +163,41 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
+  const reconnects: Array<Record<string, any>> = [];
   for (const plan of task.page_plan.filter(page => page.source !== "created")) pages.set(plan.alias, "home");
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol;
   const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
   const onEvent = (event: Record<string, any>) => {
     events.push(event);
     if (event.event === "turn_start" && ++turns > task.agent_turns && !fatal) { fatal = new Error("task model turn limit exceeded"); void abortAll(); }
+    if (event.event !== "approval_request") return;
+    const session = [...sessions.entries()].find(([, value]) => value.id === event.session_id); const requestId = event.data?.request_id ?? event.request_id;
+    if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
+    const request = event.data ?? event; approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name }); void protocol.approve(session[1].id, String(requestId)).catch(error => { fatal = error; });
   };
   protocol = await connectEvalProtocol(discovery, onEvent); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
     if (sessions.has(chat)) return sessions.get(chat)!; const plan = task.page_plan.find(page => page.alias === alias)!;
     const pageId = plan.source === "created" ? createdPageId(events, plan) : pages.get(alias)!; pages.set(alias, pageId);
     if (plan.source === "created") { const mode = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal); if (!mode.ok) throw new Error(`could not set create mode for ${alias}`); }
-    const binding = await pageBinding(stack, pageId, hidden, signal); const created = await protocol.newSession({ cwd: binding.page.workspace, provider: stack.provider, model: stack.model, approval_mode: "allow", mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${binding.credential}` } }] });
+    const binding = await pageBinding(stack, pageId, hidden, signal); const created = await protocol.newSession({ cwd: binding.page.workspace, provider: stack.provider, model: stack.model, approval_mode: task.approval_mode ?? "allow", mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${binding.credential}` } }] });
     const id = String(created.session?.session_id ?? created.session_id ?? ""); if (!id) throw new Error("new_session returned no session id");
     const registration = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: id }) }, signal); if (!registration.ok) throw new Error(`chat registration failed (${registration.status})`);
     const session = { id, alias, page_id: pageId }; sessions.set(chat, session); return session;
   };
   try {
     for (const step of task.steps) {
-      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns) throw new Error("task model turn limit has no remaining turn");
-      const session = await getSession(step.chat, step.page);
-      try { await protocol.send(session.id, step.prompt ?? task.prompt!); }
-      catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; }
-      const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
+      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new Error("task model turn limit has no remaining turn");
+      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
+      const session = await getSession(step.chat, step.page); try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
     for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) pages.set(plan.alias, pageIdFromResults(tools.results, plan));
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
-    const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: { status: "unavailable" }, session_history: durable.flatMap(history => history.rows) };
+    const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
+    for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
+    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: { status: "unavailable" }, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); protocol.close(); }
 }
@@ -227,10 +232,8 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
   try {
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
     options.hidden.push(...hiddenValues(stack.accountHome));
-    if (Bun.env.EVAL_SETUP_ONLY === "1") {
-      const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>;
-    } else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal));
-    if (provider) catalog = catalogProof(provider.requests); result.diagnostics.observed_catalog = catalog;
+    if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>; }
+    else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider) catalog = catalogProof(provider.requests); result.diagnostics.observed_catalog = catalog;
   } catch (error) { failed = true; result = failureResult(task, error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
   if (!stack) return { result: result!, catalog, failed: true };
@@ -271,22 +274,16 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1");
-  const tasks = await selectTasks(selection); assertTurnBudget(reserveTurns(tasks, repeats));
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const tasks = await selectTasks(selection); assertTurnBudget(reserveTurns(tasks, repeats));
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {
-    if (Bun.env.EVAL_STACK_ONLY === "1") {
-      if (tasks.length !== 1) throw new Error("EVAL_STACK_ONLY requires one task");
-      await runStackOnly(tasks[0], controller, hidden);
-    } else {
+    if (Bun.env.EVAL_STACK_ONLY === "1") { if (tasks.length !== 1) throw new Error("EVAL_STACK_ONLY requires one task"); await runStackOnly(tasks[0], controller, hidden); }
+    else {
       const runId = `${Date.now()}-${process.pid}`; const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("../evals/reports/", import.meta.url).pathname, runId)); const results: RepeatResult[] = [];
       for (const task of tasks) for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break; results.push(await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId: `${runId}-${task.id}`, signal: controller.signal, hidden })); }
       if (!await publishReport(tasks, results, output, runId, hidden)) process.exitCode = 1;
     }
   } finally { process.off("SIGINT", onSigint); process.off("SIGTERM", onSigterm); if (signalCode) process.exitCode = signalCode; }
 }
-if (import.meta.main) {
-  await main();
-  process.exit(process.exitCode ?? 0);
-}
+if (import.meta.main) { await main(); process.exit(process.exitCode ?? 0); }

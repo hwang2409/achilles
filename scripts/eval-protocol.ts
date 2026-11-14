@@ -38,7 +38,7 @@ class Client implements EvalProtocol {
   async send(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { await this.request("send", { session_id: sessionId, text, delivery_id: deliveryId }); }
   async approve(sessionId: string, requestId: string) { await this.request("approve", { session_id: sessionId, request_id: requestId, scope: "once" }); }
   async abort(sessionId: string) { await this.request("abort", { session_id: sessionId }); }
-  async resume(sessionId: string) { await this.request("resume", { session_id: sessionId }); }
+  async resume(sessionId: string) { return this.request("resume", { session_id: sessionId }); }
   async sessionHistory(sessionId: string) {
     const rows: unknown[] = []; let offset = 0;
     for (;;) { const page = await this.request("session_history", { session_id: sessionId, offset }); rows.push(...(page?.messages ?? [])); if (page?.next_offset == null) return rows; offset = page.next_offset; }
@@ -51,7 +51,7 @@ export type EvalProtocol = {
   send(sessionId: string, text: string, deliveryId?: string): Promise<void>;
   approve(sessionId: string, requestId: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
-  resume(sessionId: string): Promise<void>;
+  resume(sessionId: string): Promise<{ session?: { session_id?: string }; session_id?: string }>;
   sessionHistory(sessionId: string): Promise<unknown[]>;
   close(): void;
 };
