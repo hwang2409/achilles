@@ -151,6 +151,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
+  const [routeRefresh, setRouteRefresh] = useState(0);
   const owner = useRef(createAttachmentOwner());
   const creation = useRef(createChatCreationOwner());
   const status = useSyncExternalStore(creation.current.subscribe, () => creationPageId ? creation.current.status(creationPageId) : NO_CREATION);
@@ -176,7 +177,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
     });
     return () => owner.current.clear(token);
-  }, [client, connected, selectedId]);
+  }, [client, connected, routeRefresh, selectedId]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
@@ -219,6 +220,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       history.pushState({}, "", "/");
       setState({ phase: "loading" });
       setSelectedId(null);
+      setRouteRefresh((value) => value + 1);
       return;
     }
     const context = state.phase === "ready"
