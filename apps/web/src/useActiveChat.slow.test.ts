@@ -1,9 +1,25 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { useActiveChat } from "./useActiveChat";
 
 const EXPECTED_ATTACH_SLOW_MS = 15_000;
+const originalGlobals = {
+  localStorage: globalThis.localStorage,
+  location: globalThis.location,
+  history: globalThis.history,
+  addEventListener: globalThis.addEventListener,
+  removeEventListener: globalThis.removeEventListener,
+  fetch: globalThis.fetch,
+  IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
+};
+let mounted: ReactTestRenderer | null = null;
+
+afterEach(async () => {
+  if (mounted) await act(async () => { mounted?.unmount(); });
+  mounted = null;
+  Object.assign(globalThis, originalGlobals);
+});
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -97,7 +113,7 @@ test("a slow attachment can retry without accepting its late answer", async () =
   const Harness = () => { active = useActiveChat(slowClient as never, true, clock as never); return null; };
   let renderer!: ReactTestRenderer;
 
-  await act(async () => { renderer = create(createElement(Harness)); });
+  await act(async () => { renderer = create(createElement(Harness)); mounted = renderer; });
   await flushUntil(() => slowClient.resumes === 1);
   expect(active.attachSlow ?? false).toBe(false);
   await act(async () => { clock.advance(EXPECTED_ATTACH_SLOW_MS); });
@@ -110,14 +126,14 @@ test("a slow attachment can retry without accepting its late answer", async () =
   firstResume.resolve({ session: { name: "late old attachment" } });
   await act(async () => {});
   expect(active.state).toMatchObject({ phase: "ready", title: "new attachment" });
-  await act(async () => { renderer.unmount(); });
+  await act(async () => { renderer.unmount(); mounted = null; });
 
   const normalClock = new ManualClock();
   const normalClient = client();
   const NormalHarness = () => { active = useActiveChat(normalClient as never, true, normalClock as never); return null; };
-  await act(async () => { renderer = create(createElement(NormalHarness)); });
+  await act(async () => { renderer = create(createElement(NormalHarness)); mounted = renderer; });
   await flushUntil(() => active.state.phase === "ready");
   await act(async () => { normalClock.advance(EXPECTED_ATTACH_SLOW_MS); });
   expect(active.attachSlow).toBe(false);
-  await act(async () => { renderer.unmount(); });
+  await act(async () => { renderer.unmount(); mounted = null; });
 });
