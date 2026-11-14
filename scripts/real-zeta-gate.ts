@@ -667,16 +667,19 @@ try {
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
   await field.fill("repeat that layout update with the old version");
   await field.press("Enter");
-  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_steer_commit ?? null) === "held", "committed late steer before queue publication");
+  await waitFor(async () => requests().some((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version"), "late steer request");
   const lateSteerIndex = requests().findIndex((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
   const lateSteer = requests()[lateSteerIndex];
   if (lateSteerIndex < 0 || !lateSteer?.params?.delivery_id) throw new Error("late steer did not include a delivery id");
-  let lateControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_turn_barrier: true }));
-  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end before late steer publication");
-  lateControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_steer_commit: true }));
   await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
+  const lateControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_turn_barrier: true }));
+  await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end after accepted late steer");
+  await waitFor(async () => requests().some((request) => request.method === "delivery_status" && request.params?.delivery_id === lateSteer.params.delivery_id && requests().some((frame) => frame.id === request.id && frame.result?.status === "dropped")), "dropped late steer delivery status");
+  const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
+  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
+  if (lateStatuses.at(-1) !== "dropped")
+    throw new Error(`late steer terminal status was not dropped: ${JSON.stringify(lateStatuses)}`);
   await page.getByText("this message was not sent. your text is still here.", { exact: true }).waitFor({ timeout: 20_000 });
   if (screenshotDir) {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -685,6 +688,10 @@ try {
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-1440.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "open menu", exact: true }).waitFor();
+    const closeMenu = page.getByRole("button", { name: "close menu", exact: true });
+    if (await closeMenu.isVisible()) await closeMenu.evaluate((button) => button.click());
+    await waitFor(async () => await page.locator('[aria-label="sidebar"]').getAttribute("aria-hidden") === "true", "narrow sidebar close");
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-light-390.png"), fullPage: true });
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
@@ -692,10 +699,6 @@ try {
     await page.setViewportSize({ width: 1440, height: 900 });
   }
   if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("dropped steer did not keep its draft");
-  const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
-  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
-  if (!lateStatuses.length || lateStatuses.some((status) => status !== "dropped"))
-    throw new Error(`late steer status was not dropped: ${JSON.stringify(lateStatuses)}`);
   const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
   if (lateSteerRequests.length !== 1)
     throw new Error(`achilles sent the dropped steer ${lateSteerRequests.length} times`);

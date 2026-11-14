@@ -97,6 +97,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
 .main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
+.main-pane [data-part="composer"][data-error="dropped"] { border-color: var(--fulcrum-warn); }
 .main-pane [data-part="composer-status"][data-tone="warning"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; height: auto; min-height: 20px; padding: 8px; overflow: visible; border: 1px solid var(--fulcrum-warn); color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 9%, transparent); font-size: var(--achilles-ui-size, 14px); font-weight: 600; line-height: 1.4; white-space: normal; text-overflow: clip; }
 .main-pane [data-part="composer-status"][data-tone="warning"] [data-part="composer-message"] { flex: 1 1 320px; text-wrap: pretty; }
 .main-pane [data-part="composer-resend"] { --action: var(--fulcrum-accent); }
