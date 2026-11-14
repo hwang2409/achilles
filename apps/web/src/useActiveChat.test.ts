@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
   value: string | null = null;
@@ -12,10 +12,98 @@ class MemoryStorage {
 const input = (client: object, map = false): ChatCreationInput => ({ client: client as never, pageId: "home", credential: "synthetic", cwd: "/tmp", mode: "allow", ...(map ? { mapExpectedSessionId: null } : {}) });
 const CONTROLLED_TIMEOUT_MS = 10_000;
 
-async function waitBounded(wait: Promise<void>, cancel: () => void, drain: () => Promise<unknown>) {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((accept, decline) => { resolve = accept; reject = decline; });
+  return { promise, resolve, reject };
+}
+
+describe("create mode tool refresh", () => {
+  test.each([
+    { name: "successful refresh", reset: false, refreshError: null, sendReady: true },
+    { name: "successful refresh after reset keeps the old draft", reset: true, refreshError: null, sendReady: false },
+    { name: "blocked refresh after reset", reset: true, refreshError: Object.assign(new Error("failed"), { code: -32005 }), sendReady: false },
+  ])("holds send through $name", async ({ reset, refreshError, sendReady: expectedSendReady }) => {
+    const refresh = deferred<unknown>();
+    const requestReached = deferred<void>();
+    let fetches = 0; let requests = 0;
+    const owner = createModeToggleOwner(async () => { fetches += 1; return Response.json({ create_mode: true }); });
+    const input = { pageId: "home", sessionId: "session", enabled: true, client: { features: ["mcp_refresh_tools"], request: () => { requests += 1; requestReached.resolve(); return refresh.promise; } } };
+    const first = owner.run(input); const duplicate = owner.run(input);
+    let sendReady = false;
+    const send = owner.beforeSend().then(() => { sendReady = true; });
+    const cancel = () => refresh.reject(new Error("cancelled controlled refresh"));
+    const drain = () => Promise.allSettled([first, send]);
+    await waitBounded(requestReached.promise, cancel, drain);
+    expect(sendReady).toBe(false);
+    expect(duplicate).toBe(first);
+    expect(fetches).toBe(1); expect(requests).toBe(1);
+    if (reset) owner.reset();
+    if (refreshError) refresh.reject(refreshError);
+    else refresh.resolve({ session_id: "session", servers: ["achilles"] });
+    expect((await waitBounded(first, cancel, drain)).blocked).toBe(Boolean(refreshError));
+    if (expectedSendReady) await waitBounded(send, cancel, drain);
+    else await expect(waitBounded(send, cancel, drain)).rejects.toThrow("send is off");
+    expect(sendReady).toBe(expectedSendReady);
+  });
+
+  test.each([
+    { code: -32005, text: "could not refresh page tools" },
+    { code: -32602, text: "could not find the achilles" },
+    { code: -32003, text: "different chat" },
+  ])("blocks send on refresh error $code and retries only the refresh", async ({ code, text }) => {
+    let fetches = 0; let requests = 0;
+    const client = { features: ["mcp_refresh_tools"], request: async () => { requests += 1; if (requests === 1) throw Object.assign(new Error("failed"), { code }); return { session_id: "session", servers: ["achilles"] }; } };
+    const owner = createModeToggleOwner(async () => { fetches += 1; return Response.json({ create_mode: true }); });
+    const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
+    expect(result.blocked).toBe(true); expect(result.error).toContain(text);
+    await expect(owner.beforeSend()).rejects.toThrow("send is off");
+    expect(await owner.run({ pageId: "home", sessionId: "session", enabled: false, client })).toEqual({ createMode: true, error: null, blocked: false, retryable: false });
+    await owner.beforeSend();
+    expect(fetches).toBe(1); expect(requests).toBe(2);
+  });
+
+  test("keeps send blocked and retries the mode update when the endpoint fails", async () => {
+    let requests = 0;
+    const owner = createModeToggleOwner(async () => {
+      requests += 1;
+      if (requests === 1) return new Response(null, { status: 503 });
+      return Response.json({ create_mode: true });
+    });
+    const input = { pageId: "home", sessionId: "session", enabled: true, client: { features: ["mcp_refresh_tools"], request: async () => ({}) } };
+    expect(await owner.run(input)).toEqual({ createMode: null, error: "could not update create mode (503)", blocked: true, retryable: true });
+    await expect(owner.beforeSend()).rejects.toThrow("send is off");
+    expect(await owner.run(input)).toEqual({ createMode: true, error: null, blocked: false, retryable: false });
+    expect(requests).toBe(2);
+  });
+
+  test("explains how to recover an expired MCP session without offering a dead retry", async () => {
+    const client = { features: ["mcp_refresh_tools"], request: async () => { throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "achilles: MCP HTTP 404: Session not found" } }); } };
+    const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
+    const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
+    expect(result).toEqual({ createMode: null, error: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false });
+    await expect(owner.beforeSend()).rejects.toThrow("send is off");
+  });
+
+  test.each([
+    { name: "feature was not negotiated", features: [] as string[], code: null, requests: 0 },
+    { name: "server returns method not found", features: ["mcp_refresh_tools"], code: -32601, requests: 1 },
+  ])("keeps the old toggle behavior when $name", async ({ features, code, requests }) => {
+    let requestCount = 0;
+    const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
+    const client = { features, request: async () => { requestCount += 1; throw Object.assign(new Error("unknown method"), { code }); } };
+    const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
+    expect(result).toEqual({ createMode: true, error: null, blocked: false, retryable: false });
+    await owner.beforeSend();
+    expect(requestCount).toBe(requests);
+  });
+});
+
+async function waitBounded<T>(wait: Promise<T>, cancel: () => void, drain: () => Promise<unknown>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([wait, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("controlled wait timed out after 10 seconds")), CONTROLLED_TIMEOUT_MS); })]);
+    return await Promise.race([wait, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("controlled wait timed out after 10 seconds")), CONTROLLED_TIMEOUT_MS); })]);
   } catch (caught) {
     cancel();
     await drain().catch(() => {});
