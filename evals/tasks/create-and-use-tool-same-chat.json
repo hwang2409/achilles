@@ -1,0 +1,55 @@
+{
+  "id": "create-and-use-tool-same-chat",
+  "page_plan": [
+    {
+      "alias": "notes",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 10,
+  "steps": [
+    {
+      "id": "create",
+      "kind": "prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "create a page-local add_note insert tool for a notes collection"
+    },
+    {
+      "id": "use",
+      "kind": "prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "use add_note to add exactly one note with text synthetic note"
+    }
+  ],
+  "checks": [
+    {
+      "id": "tool",
+      "type": "tool",
+      "page": "notes",
+      "name": "add_note"
+    },
+    {
+      "id": "use",
+      "type": "successful_result",
+      "page": "notes",
+      "tool": "achilles__add_note"
+    },
+    {
+      "id": "record",
+      "type": "record",
+      "page": "notes",
+      "value": {
+        "text": "synthetic note"
+      }
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "notes"
+    }
+  ]
+}
