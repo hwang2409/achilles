@@ -44,10 +44,10 @@ async function main() {
       const sessionId = (session.session?.session_id ?? session.session_id) as string;
       if (!sessionId) throw new Error("new_session returned no session id");
       await fetch(`${stack.achillesOrigin}/api/pages/home/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) });
-      await protocol.send(sessionId, "run the harness smoke task");
+      await protocol.send(sessionId, "list the notes on this page");
       const deadline = Date.now() + 90_000;
-      while (!events.some(event => event.method === "served_turn_end")) { if (Date.now() >= deadline) { const turns = events.filter(event => event.method === "turn_start").length; throw new Error(turns ? "provider turn did not finish within 90s" : "no provider turn started within 90s; inspect the scrubbed zeta serve log"); } await Bun.sleep(100); }
-      result.turns = events.filter(event => event.method === "turn_start").length;
+      while (!events.some(event => event.event === "served_turn_end")) { if (Date.now() >= deadline) { const turns = events.filter(event => event.event === "turn_start").length; throw new Error(turns ? "provider turn did not finish within 90s" : "no provider turn started within 90s; inspect the scrubbed zeta serve log"); } await Bun.sleep(100); }
+      result.turns = events.filter(event => event.event === "turn_start").length;
     } finally { protocol.close(); }
   }
   const runId = `${Date.now()}-${process.pid}`;

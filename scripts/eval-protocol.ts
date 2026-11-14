@@ -16,7 +16,7 @@ class Client implements EvalProtocol {
         const waiter = this.pending.get(value.id); if (!waiter) return;
         this.pending.delete(value.id);
         value.error ? waiter.reject(new Error(value.error.message ?? `zeta rpc error ${value.error.code ?? ""}`)) : waiter.resolve(value.result);
-      } else if (value.method) this.onEvent?.(value as Record<string, unknown>);
+      } else if (value.method === "event" && value.params) this.onEvent?.(value.params as Record<string, unknown>);
     };
     socket.onerror = () => this.rejectAll(new Error("zeta websocket failed"));
     socket.onclose = () => this.rejectAll(new Error("zeta websocket closed"));
