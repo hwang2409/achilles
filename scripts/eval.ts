@@ -228,8 +228,20 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
   try {
     const output = [];
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
-      const pageId = pages.get(plan.alias); const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
-      const page = await browser.newPage(); await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "networkidle", timeout: 15_000 }); output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
+      const pageId = pages.get(plan.alias); if (!pageId) continue;
+      const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
+      const page = await browser.newPage();
+      await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
+      signal.throwIfAborted();
+      let abortReady: (() => void) | undefined;
+      try {
+        await Promise.race([
+          page.locator('.connection-state, .connection-banner, [role="status"]:has-text("loading chat…")').waitFor({ state: "hidden", timeout: 5_000 }),
+          new Promise<never>((_, reject) => { abortReady = () => reject(signal.reason); signal.addEventListener("abort", abortReady, { once: true }); }),
+        ]);
+      } catch { signal.throwIfAborted(); const text = await page.locator("body").innerText({ timeout: 10_000 }); throw new Error(`browser page did not become ready: ${text}`); }
+      finally { if (abortReady) signal.removeEventListener("abort", abortReady); }
+      output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
     }
     return output;
   } finally { await browser.close(); }
@@ -279,13 +291,14 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
+    await protocol.close(signal);
     const snapshot: EvalSnapshot = { ...after, initial, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
-    throw new TaskRunFailure(error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
+    throw new TaskRunFailure(error, { ...after, initial, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 
@@ -348,7 +361,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
   } catch (error) { const original = error instanceof TaskRunFailure ? error.original : error; if (error instanceof TaskRunFailure) snapshot = error.snapshot; else if (stack) snapshot = await databaseSnapshot(stack).catch(() => ({})); stopSuite = stopsSuite(original);
-    if (original instanceof TurnCapFailure) result = { ...gradeReference(task, snapshot ?? {}), pass: false, status: "agent_fail", cap_hit: true } as ReturnType<typeof gradeTask>;
+    if (original instanceof TurnCapFailure) { const graded = gradeReference(task, snapshot ?? {}); result = { ...graded, pass: false, ...(graded.status === "harness_error" ? {} : { status: "agent_fail" }), cap_hit: true } as ReturnType<typeof gradeTask>; }
     else { failed = true; result = failureResult(task, stopSuite ? new Error("suite stopped after an account, login, quota, or secret-scan failure") : original, options.hidden); }
     if (provider?.requests.length) { try { catalog = catalogProof(provider.requests, task); } catch (catalogError) { failed = true; result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
