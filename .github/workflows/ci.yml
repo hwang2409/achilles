@@ -96,16 +96,39 @@ jobs:
           if result.returncode not in (0, 1):
               raise SystemExit(result.returncode)
 
-          env.update({'EVAL_SKIP_CREATE_PAGE': '1', 'REPORT_DIR': '.cache/eval-ci-missing-page'})
-          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'judge-page-and-annotate'], env=env, timeout=30)
+          env['REPORT_DIR'] = '.cache/eval-ci-browser'
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'browser-controller-slot'], env=env, timeout=30)
+          report = json.loads((Path('.cache/eval-ci-browser') / 'report.json').read_text())
+          assert result.returncode == 0, report['tasks'][0]
+          assert report['tasks'][0]['status'] == 'pass'
+
+          index = Path('apps/web/dist/index.html')
+          original = index.read_text()
+          index.write_text(original.replace('</body>', '<p role="status">loading chat…</p></body>'))
+          env['REPORT_DIR'] = '.cache/eval-ci-browser-loading'
+          try:
+              result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'browser-controller-slot'], env=env, timeout=30)
+          finally:
+              index.write_text(original)
+          report = json.loads((Path('.cache/eval-ci-browser-loading') / 'report.json').read_text())
+          task = report['tasks'][0]
+          assert result.returncode == 1
+          assert task['status'] == 'harness_error', task
+          assert 'browser page did not become ready' in task['checks'][0]['evidence']['message'], task
+
+          env['REPORT_DIR'] = '.cache/eval-ci-missing-page'
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'reading-list-one-prompt'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-missing-page') / 'report.json').read_text())
           task = report['tasks'][0]
           assert result.returncode == 1
           assert task['status'] == 'agent_fail', task
+          assert task['turns'] > 0, task
+          assert task['tool_calls'] > 0, task
+          assert task['wall_ms'] > 0, task
+          assert task['usage'] != 'unavailable', task
           snapshot = json.loads((Path('.cache/eval-ci-missing-page') / task['transcript']).read_text())
           assert snapshot['session_history'], snapshot
 
-          env.pop('EVAL_SKIP_CREATE_PAGE')
           env['REPORT_DIR'] = '.cache/eval-ci-reconnect'
           result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'reconnect-recovery'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-reconnect') / 'report.json').read_text())
