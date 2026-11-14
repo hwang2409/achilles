@@ -497,7 +497,8 @@ try {
   try {
     await toggleReached;
     const pendingMode = page.getByRole("button", { name: "turning on create mode…", exact: true });
-    if (!(await pendingMode.isVisible()) || !(await pendingMode.isDisabled())) throw new Error("create mode toggle did not show its pending state");
+    await pendingMode.waitFor({ state: "visible" });
+    if (!(await pendingMode.isDisabled())) throw new Error("create mode toggle pending state was not disabled");
     await field.press("Enter");
   } finally {
     releaseToggle();
