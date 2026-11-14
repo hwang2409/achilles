@@ -12,6 +12,7 @@ class FakeWebSocket {
   static socketConstructions = 0;
   static closeCalls = 0;
   static holdOpen = false;
+  static holdClose = false;
   static lastSocket: FakeWebSocket | undefined;
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -49,7 +50,7 @@ class FakeWebSocket {
 
   close() {
     FakeWebSocket.closeCalls += 1;
-    if (this.readyState === FakeWebSocket.CLOSED) return;
+    if (this.readyState === FakeWebSocket.CLOSED || FakeWebSocket.holdClose) return;
     this.readyState = FakeWebSocket.CLOSED;
     this.emit("close", new Event("close"));
   }
@@ -68,6 +69,7 @@ function installFakeWebSocket(errorCode = -32001) {
   FakeWebSocket.socketConstructions = 0;
   FakeWebSocket.closeCalls = 0;
   FakeWebSocket.holdOpen = false;
+  FakeWebSocket.holdClose = false;
   FakeWebSocket.lastSocket = undefined;
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
 }
@@ -93,6 +95,7 @@ async function rejectBeforeDeadline(
   connecting: Promise<unknown>,
   controller: AbortController,
   cleanup: () => void,
+  deadlineMs = 10_000,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -115,7 +118,7 @@ async function rejectBeforeDeadline(
       } catch (cleanupError) {
         reject(cleanupError);
       }
-    }, 10_000);
+    }, deadlineMs);
   });
   try {
     return await Promise.race([
@@ -200,6 +203,21 @@ test("reconnect aborts during a pending capacity backoff without another connect
   await resolveBeforeDeadline("capacity backoff finish", waitFinished);
   await new Promise<void>(resolve => queueMicrotask(resolve));
   expect(FakeWebSocket.socketConstructions).toBe(1);
+});
+
+test("close rejects when the websocket never closes", async () => {
+  installFakeWebSocket();
+  FakeWebSocket.controllerClaimed = false;
+  const protocol = await connectEvalProtocol(discovery);
+  FakeWebSocket.holdClose = true;
+  const controller = new AbortController();
+  const closing = protocol.close(undefined, 10);
+
+  const error = await rejectBeforeDeadline("websocket-close bound", closing, controller, () => {
+    FakeWebSocket.holdClose = false;
+    FakeWebSocket.lastSocket?.close();
+  }, 100);
+  expect(error).toMatchObject({ message: "zeta websocket close timed out" });
 });
 
 test("reconnect aborts while the socket is opening and closes it", async () => {
