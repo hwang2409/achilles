@@ -33,16 +33,20 @@ jobs:
         with:
           repository: hwang2409/fulcrum
           ref: ${{ steps.pin.outputs.sha }}
-          path: fulcrum
+          path: .cache/fulcrum
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile
-        working-directory: fulcrum
+        working-directory: .cache/fulcrum
       - run: bun test ./scripts/
       - run: bun scripts/fulcrum.ts
         env:
-          FULCRUM_DIR: ${{ github.workspace }}/fulcrum
+          FULCRUM_DIR: ${{ github.workspace }}/.cache/fulcrum
+      - name: eval make target prepares fresh web dependencies
+        run: |
+          rm -rf apps/web/node_modules/@fulcrum
+          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 REPORT_DIR=.cache/eval-ci-make-setup make eval TASK=harness-smoke
       - run: bun test ./apps/web/src/
       - run: bun run typecheck
         working-directory: apps/web
