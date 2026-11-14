@@ -5,7 +5,7 @@ const CONNECTION_CAPACITY = -32001;
 const RECONNECT_DELAYS_MS = [50, 100, 200, 400, 800, 1_600, 1_850] as const;
 type EventHandler = (event: Record<string, any>) => void;
 type Rpc = { id?: number; result?: any; error?: { message?: string; code?: number }; method?: string; params?: any };
-type ConnectOptions = { retryCapacity?: boolean; wait?: (delayMs: number) => Promise<void> };
+type ConnectOptions = { retryCapacity?: boolean; wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>; signal?: AbortSignal };
 
 class Client implements EvalProtocol {
   private nextId = 1;
@@ -69,14 +69,27 @@ function withDeadline<T>(work: Promise<T>, label: string, timeoutMs = RPC_TIMEOU
   return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs); work.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); }); });
 }
 
-async function connectOnce(discovery: { url: string; controller_token: string }, onEvent?: EventHandler): Promise<EvalProtocol> {
+async function connectOnce(discovery: { url: string; controller_token: string }, onEvent?: EventHandler, signal?: AbortSignal): Promise<EvalProtocol> {
+  signal?.throwIfAborted();
   const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
   const socket = new WebSocket(url, ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]);
-  await withDeadline(new Promise<void>((resolve, reject) => { socket.addEventListener("open", () => resolve(), { once: true }); socket.addEventListener("error", () => reject(new Error("zeta websocket failed")), { once: true }); }), "zeta websocket open");
+  try {
+    await withDeadline(new Promise<void>((resolve, reject) => {
+      const abort = () => { socket.close(); reject(signal!.reason); };
+      signal?.addEventListener("abort", abort, { once: true });
+      socket.addEventListener("open", () => { signal?.removeEventListener("abort", abort); resolve(); }, { once: true });
+      socket.addEventListener("error", () => { signal?.removeEventListener("abort", abort); reject(new Error("zeta websocket failed")); }, { once: true });
+    }), "zeta websocket open");
+    signal?.throwIfAborted();
+  } catch (error) { socket.close(); throw error; }
   const client = new Client(socket, onEvent);
   try {
-    const hello = await client.hello([...REQUIRED_FEATURES]) as { capabilities?: { features?: unknown } };
+    const hello = await Promise.race([
+      client.hello([...REQUIRED_FEATURES]),
+      ...(signal ? [new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))] : []),
+    ]) as { capabilities?: { features?: unknown } };
     const accepted = hello.capabilities?.features;
+    signal?.throwIfAborted();
     if (!Array.isArray(accepted)) throw new Error("zeta hello omitted negotiated features");
     const missing = REQUIRED_FEATURES.filter(feature => !accepted.includes(feature));
     if (missing.length) throw new Error(`zeta lacks required features: ${missing.join(", ")}`);
@@ -84,12 +97,23 @@ async function connectOnce(discovery: { url: string; controller_token: string },
   } catch (error) { await client.close(); throw error; }
 }
 
+async function waitForDelay(wait: (delayMs: number, signal?: AbortSignal) => Promise<void>, delayMs: number, signal?: AbortSignal) {
+  if (!signal) return wait(delayMs);
+  signal.throwIfAborted();
+  await Promise.race([
+    wait(delayMs, signal),
+    new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })),
+  ]);
+  signal.throwIfAborted();
+}
+
 export async function connectEvalProtocol(discovery: { url: string; controller_token: string }, onEvent?: EventHandler, options: ConnectOptions = {}): Promise<EvalProtocol> {
   const wait = options.wait ?? (delayMs => Bun.sleep(delayMs));
   let firstCapacityError: unknown;
   for (const delayMs of [0, ...(options.retryCapacity ? RECONNECT_DELAYS_MS : [])]) {
-    if (delayMs) await wait(delayMs);
-    try { return await connectOnce(discovery, onEvent); }
+    if (delayMs) await waitForDelay(wait, delayMs, options.signal);
+    else options.signal?.throwIfAborted();
+    try { return await connectOnce(discovery, onEvent, options.signal); }
     catch (error) {
       if ((error as { code?: unknown }).code !== CONNECTION_CAPACITY) throw error;
       firstCapacityError ??= error;

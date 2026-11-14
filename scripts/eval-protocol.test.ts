@@ -103,3 +103,22 @@ test("reconnect does not retry another hello error", async () => {
   await expect(connectEvalProtocol(discovery, undefined, { retryCapacity: true, wait: async delay => { delays.push(delay); } })).rejects.toMatchObject({ code: -32002 });
   expect(delays).toEqual([]);
 });
+
+test("reconnect aborts during capacity backoff without another connection", async () => {
+  installFakeWebSocket();
+  const controller = new AbortController();
+  const reason = new Error("task stopped");
+  let waits = 0;
+  const connecting = connectEvalProtocol(discovery, undefined, {
+    retryCapacity: true,
+    signal: controller.signal,
+    wait: async () => {
+      waits += 1;
+      controller.abort(reason);
+    },
+  });
+
+  await expect(connecting).rejects.toBe(reason);
+  expect(waits).toBe(1);
+  expect(FakeWebSocket.helloAttempts).toBe(1);
+});
