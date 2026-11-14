@@ -27,24 +27,25 @@ export async function applyApprovalMode(client: ZetaClient, sessionId: string, m
   }
 }
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, approvalMode = "allow") {
+export function creationApprovalMode(serverMode: string | null | undefined, autoApproveDefault = true): "ask" | "allow" {
+  return serverMode === "ask" || !autoApproveDefault ? "ask" : "allow";
+}
+
+export class SessionNotFoundError extends Error {}
+
+export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null) {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
-  let id = storedId;
-  if (id) {
-    try {
-      await rebindPage(client, id, binding);
-    } catch (caught) {
-      const code = (caught as { data?: { code?: string } }).data?.code;
-      if (code !== "session_not_found") throw caught;
-      id = null;
-    }
+  let name: string | null = null;
+  try {
+    const resumed = await rebindPage(client, id, binding) as { session?: { name?: string | null } };
+    name = resumed.session?.name ?? null;
+  } catch (caught) {
+    if ((caught as { data?: { code?: string } }).data?.code === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
+    throw caught;
   }
-  if (!id) {
-    const created = await client.request("new_session", binding) as { session?: { session_id?: string } };
-    id = created.session?.session_id ?? null;
-    if (!id) throw new Error("zeta did not return a session id");
-  }
-  return { id, ...await applyApprovalMode(client, id, approvalMode) };
+  if (serverMode === "ask") return { id, name, ...await applyApprovalMode(client, id, "ask") };
+  const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
+  return { id, name, approvalMode: settings.approval_mode, pending: false };
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
@@ -57,10 +58,15 @@ export async function loadSession(client: ZetaClient, id: string): Promise<Sessi
   const snapshot = (rows: unknown[], status: Status) => [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(status)];
   const loadAll = async () => { pages = []; for (let offset: number | null = 0; offset !== null;) { const next = await page(offset); pages.push(next); offset = next.nextOffset; } };
   const initial = await client.request("status", {}) as Status;
-  lease = await client.replay(id, async () => { await loadAll(); const status = initial.session?.session_id === id ? initial : await client.request("status", {}) as Status; return snapshot(allRows(), status); }, true);
-  const revision = client.replayRevision(id); const tail = pages.at(-1);
-  if (tail) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tail.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); }
-  let status = await client.request("status", {}) as Status;
-  while (!client.finishReplay(id, revision)) { const nextRevision = client.replayRevision(id); const tailPage = pages.at(-1); if (tailPage) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tailPage.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); } status = await client.request("status", {}) as Status; if (client.finishReplay(id, nextRevision)) break; }
-  lease.store.resync(snapshot(allRows(), status)); return lease;
+  try {
+    lease = await client.replay(id, async () => { await loadAll(); const status = initial.session?.session_id === id ? initial : await client.request("status", {}) as Status; return snapshot(allRows(), status); }, true);
+    const revision = client.replayRevision(id); const tail = pages.at(-1);
+    if (tail) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tail.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); }
+    let status = await client.request("status", {}) as Status;
+    while (!client.finishReplay(id, revision)) { const nextRevision = client.replayRevision(id); const tailPage = pages.at(-1); if (tailPage) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tailPage.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); } status = await client.request("status", {}) as Status; if (client.finishReplay(id, nextRevision)) break; }
+    lease.store.resync(snapshot(allRows(), status)); return lease;
+  } catch (caught) {
+    lease?.release();
+    throw caught;
+  }
 }

@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Route } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
+import { gateShell } from "./gate-shell";
 
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -17,6 +18,8 @@ const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
 const port = 5200 + Math.floor(Math.random() * 1000);
 const origin = `http://127.0.0.1:${port}`;
+const screenshotDir = process.env.SCREENSHOT_DIR;
+if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
 const secrets: string[] = [];
@@ -128,6 +131,7 @@ try {
   const page = await browser.newPage();
   const errors: string[] = [];
   let ignoreBrowserErrors = false;
+  let expectingRegistrationFailures = false;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
@@ -137,7 +141,9 @@ try {
     if (!ignoreBrowserErrors) errors.push(e.message);
   });
   page.on("console", (m) => {
-    if (m.type() === "error" && !ignoreBrowserErrors) errors.push(m.text());
+    if (m.type() !== "error") return;
+    if (expectingRegistrationFailures && m.text().includes("the server responded with a status of 503")) return;
+    if (!ignoreBrowserErrors) errors.push(m.text());
   });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
@@ -229,6 +235,17 @@ try {
   const approvalCompleteBefore = await approvalComplete.count();
   await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+  const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  const second = await gateShell(page, first, waitFor);
+  if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
+    throw new Error("hostile chat query reached zeta resume");
+  if (approvalModeResponse("session_settings", second) !== "ask")
+    throw new Error("new ask-server chat did not report ask settings");
+  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === second))
+    throw new Error("new ask-server chat sent a no-op set_settings frame");
+  const firstSetSettingsAfterReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  if (firstSetSettingsAfterReopen !== firstSetSettingsBeforeReopen)
+    throw new Error("reopening an ask chat under an ask server sent set_settings");
   const credential = (
     await Bun.file(join(achillesHome, "credentials/home")).text()
   ).trim();
@@ -265,7 +282,7 @@ try {
   const toggleResult = await toggleResponse;
   if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
   await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
-  if ((await page.locator("header button").getAttribute("aria-pressed")) !== "true")
+  if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
     throw new Error("create mode toggle did not show on");
   await homeMcp(1, "initialize", {
     protocolVersion: "2025-03-26",
@@ -595,6 +612,86 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
+
+  const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  await page.goto(`${origin}/?chat=${first}`);
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  if (await page.getByLabel("auto-approve").count()) throw new Error("user ask chat reopened under allow showed auto-approve");
+  const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
+    throw new Error("reopening a user ask chat under an allow server sent set_settings");
+
+  await page.goto(`${origin}/allow?chat=${allowSession}`);
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  let registerFailures = 0;
+  expectingRegistrationFailures = true;
+  await page.route("**/api/pages/*/chats", async (route) => {
+    if (registerFailures < 2) { registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
+    else await route.continue();
+  });
+  const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
+  await page.getByRole("button", { name: "new chat" }).click();
+  const retryRegistration = page.getByRole("button", { name: "retry saving this chat" });
+  await retryRegistration.waitFor({ timeout: 20_000 });
+  const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
+  if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)
+    throw new Error("failed chat registration did not retain exactly one new zeta session");
+  await page.unroute("**/api/pages/*/chats");
+  await retryRegistration.click();
+  await waitFor(async () => {
+    const current = await homeSessionId();
+    return Boolean(current && current !== allowSession);
+  }, "orphan chat retry");
+  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsAfterFailure)
+    throw new Error("retrying an orphaned chat created another zeta session");
+  await page.waitForTimeout(1_000);
+
+  const draft = "this draft must remain after zeta disconnects";
+  const droppedField = page.getByRole("textbox", { name: "message" });
+  await droppedField.fill(draft);
+  await page.keyboard.press("Meta+b");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
+  zetaProcess.kill("SIGTERM");
+  if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
+  await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+  if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
+  if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
+  if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
+  const droppedPid = zetaProcess.pid;
+  zetaProcess = start(
+    "uv",
+    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
+    env,
+  );
+  await waitFor(async () => {
+    try { return JSON.parse(await Bun.file(control).text()).pid !== droppedPid; }
+    catch { return false; }
+  }, "zeta reconnect after dropped connection");
+  await page.getByRole("button", { name: "retry now" }).click();
+  const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
+  await recoveredField.waitFor({ timeout: 20_000 });
+  if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
+
+  if (screenshotDir) {
+    zetaProcess.kill("SIGTERM");
+    if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
+    const heldRequests: Route[] = [];
+    const hold = (route: Route) => { heldRequests.push(route); };
+    ignoreBrowserErrors = true;
+    await page.route("**/api/pages**", hold);
+    await page.route("**/api/chats**", hold);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(".sidebar-skeleton").first().waitFor({ timeout: 20_000 });
+    await page.getByRole("alert").filter({ hasText: "zeta serve is not running" }).waitFor({ timeout: 20_000 });
+    await page.screenshot({ path: join(screenshotDir, "07-first-paint-not-running-review-1440x900.png"), fullPage: true });
+    await Promise.all(heldRequests.map((route) => route.abort().catch(() => {})));
+    await page.unroute("**/api/pages**", hold);
+    await page.unroute("**/api/chats**", hold);
+    ignoreBrowserErrors = false;
+  }
+
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
