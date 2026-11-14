@@ -4,10 +4,13 @@ import { aggregateTaskResults, makeReport, reportJson, reportMarkdown } from "./
 test("report aggregates pass rate per task and states tools", () => {
   const rows = [{ task_id: "a", pass: true, score: 100, turns: 2, tool_calls: 1, wall_ms: 10 }, { task_id: "a", pass: false, score: 50, turns: 3, tool_calls: 2, wall_ms: 20 }];
   expect(aggregateTaskResults(rows).a.pass_rate).toBe(0.5);
-  const report = makeReport({ run_id: "run", repeats: 2, agent: { provider: "claude", model: "claude-opus-5-5", tool_policy: "achilles__*,mcp_discover", observed_catalog: ["achilles__list_notes"] }, tasks: rows.map((row) => ({ ...row, approvals: 0, usage: "unavailable", checks: [], host_tools_gap: false })) as never });
+  const usage = { turns_with_usage: 1, input_tokens: 10, output_tokens: "unavailable at this zeta pin", reasoning_output_tokens: 4, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 } as const;
+  const report = makeReport({ run_id: "run", repeats: 2, agent: { provider: "claude", model: "claude-opus-5-5", tool_policy: "achilles__*,mcp_discover", observed_catalog: ["achilles__list_notes"] }, totals: { turns: 5, wall_ms: 30 }, tasks: rows.map((row) => ({ ...row, approvals: 0, usage, checks: [], host_tools_gap: false })) as never });
   const markdown = reportMarkdown(report);
   expect(markdown).toContain("observed catalog");
   expect(markdown).toContain("50–100");
   expect(markdown).toContain("provider credentials are read from the configured account home");
+  expect(markdown).toContain("suite tokens: input 20; output unavailable at this zeta pin; reasoning 8; cache read 6; cache write 4");
+  expect(reportJson(report)).toContain('"input_tokens": 20');
   expect(reportJson(report)).toContain("tool_policy");
 });

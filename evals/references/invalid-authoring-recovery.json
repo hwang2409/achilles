@@ -1,0 +1,102 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "authoring"
+      }
+    ],
+    "tools": [
+      {
+        "page_id": "p",
+        "name": "safe_tool"
+      }
+    ],
+    "calls": [
+      {
+        "id": "c1",
+        "page_id": "p",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "create_tool"
+          }
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "c1",
+        "page_id": "p",
+        "tool": "achilles__create_tool",
+        "success": false,
+        "data": {
+          "code": "invalid_input",
+          "path": "/bundle/name",
+          "expected": "not one of: create_page,create_tool"
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__safe_tool",
+        "success": true,
+        "data": {}
+      }
+    ],
+    "related_page_ids": [
+      "p"
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "authoring"
+      }
+    ],
+    "tools": [
+      {
+        "page_id": "p",
+        "name": "create_tool"
+      },
+      {
+        "page_id": "p",
+        "name": "safe_tool"
+      }
+    ],
+    "calls": [
+      {
+        "id": "c1",
+        "page_id": "p",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "create_tool"
+          }
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "c1",
+        "page_id": "p",
+        "tool": "achilles__create_tool",
+        "success": false,
+        "data": {
+          "code": "invalid_input",
+          "path": "/bundle/name",
+          "expected": "not one of: create_page,create_tool"
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__safe_tool",
+        "success": true,
+        "data": {}
+      }
+    ],
+    "related_page_ids": [
+      "p"
+    ]
+  }
+}

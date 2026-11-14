@@ -1,0 +1,55 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "data"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__list_records",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "id": "record-1"
+            },
+            {
+              "id": "record-2"
+            },
+            {
+              "id": "record-3"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "data"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__list_records",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "id": "record-1"
+            },
+            {
+              "id": "record-2"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

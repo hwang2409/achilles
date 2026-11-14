@@ -217,3 +217,8 @@ export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
   const score = Math.round((checks.filter(result => result.pass).length / checks.length) * 100);
   return { task_id: task.id, pass: required.every(result => result.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
 }
+
+export function gradeReference(task: EvalTask, snapshot: EvalSnapshot) {
+  const result = gradeTask(task, snapshot);
+  return { ...result, status: result.pass ? "pass" as const : "agent_fail" as const };
+}

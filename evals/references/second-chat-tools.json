@@ -1,0 +1,84 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "shared"
+      }
+    ],
+    "errors": [],
+    "chats": [
+      {
+        "chat_id": "chat-a",
+        "page_id": "p",
+        "history": "tools available"
+      },
+      {
+        "chat_id": "chat-b",
+        "page_id": "p",
+        "history": "tools available"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "chat_id": "chat-a",
+        "tool": "achilles__list_notes",
+        "success": true,
+        "data": {
+          "text": "seeded note"
+        }
+      },
+      {
+        "page_id": "p",
+        "chat_id": "chat-b",
+        "tool": "achilles__list_notes",
+        "success": true,
+        "data": {
+          "text": "seeded note"
+        }
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "shared"
+      }
+    ],
+    "errors": [],
+    "chats": [
+      {
+        "chat_id": "chat-a",
+        "page_id": "p",
+        "history": "tools available"
+      },
+      {
+        "chat_id": "chat-b",
+        "page_id": "p",
+        "history": "tools available"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "chat_id": "chat-a",
+        "tool": "achilles__list_notes",
+        "success": true,
+        "data": {
+          "text": "seeded note"
+        }
+      },
+      {
+        "page_id": "p",
+        "chat_id": "chat-b",
+        "tool": "achilles__list_notes",
+        "success": true,
+        "data": {
+          "text": "wrong note"
+        }
+      }
+    ]
+  }
+}

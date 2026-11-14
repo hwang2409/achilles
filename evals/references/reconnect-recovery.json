@@ -1,0 +1,86 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "reconnect"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__list_notes",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "text": "reconnect note"
+            }
+          ]
+        }
+      }
+    ],
+    "reconnects": [
+      {
+        "page_id": "p",
+        "original_session_id": "s1",
+        "resumed_session_id": "s1",
+        "history_continuity": true
+      }
+    ],
+    "errors": [],
+    "records": [
+      {
+        "page_id": "p",
+        "data": {
+          "text": "reconnect note"
+        }
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "reconnect"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__list_notes",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "text": "reconnect note"
+            }
+          ]
+        }
+      }
+    ],
+    "reconnects": [
+      {
+        "page_id": "p",
+        "original_session_id": "s1",
+        "resumed_session_id": "s1",
+        "history_continuity": true
+      }
+    ],
+    "errors": [],
+    "records": [
+      {
+        "page_id": "p",
+        "data": {
+          "text": "reconnect note"
+        }
+      },
+      {
+        "page_id": "p",
+        "data": {
+          "text": "extra note"
+        }
+      }
+    ]
+  }
+}

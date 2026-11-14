@@ -1,0 +1,296 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      },
+      {
+        "id": "reading",
+        "alias": "reading"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "reading",
+        "name": "add_book",
+        "collection": "books",
+        "operation": "insert",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
+      },
+      {
+        "page_id": "reading",
+        "name": "update_book",
+        "collection": "books",
+        "operation": "update",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
+      },
+      {
+        "page_id": "reading",
+        "name": "list_books",
+        "collection": "books",
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "reading",
+        "data": {
+          "title": "Synthetic Book",
+          "status": "read"
+        },
+        "collection": "books"
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "reading",
+        "document": {
+          "blocks": [
+            {
+              "type": "list"
+            }
+          ]
+        }
+      }
+    ],
+    "browser": [
+      {
+        "page_id": "reading",
+        "text": "Synthetic Book read"
+      }
+    ],
+    "related_page_ids": [
+      "reading"
+    ],
+    "results": [
+      {
+        "page_id": "reading",
+        "chat_id": "reading-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "data": {
+          "record_id": "book-1",
+          "title": "Synthetic Book",
+          "status": "unread"
+        }
+      },
+      {
+        "page_id": "reading",
+        "chat_id": "reading-chat",
+        "tool": "achilles__update_book",
+        "success": true,
+        "data": {
+          "record_id": "book-1",
+          "title": "Synthetic Book",
+          "status": "read"
+        }
+      },
+      {
+        "page_id": "reading",
+        "chat_id": "reading-chat",
+        "tool": "achilles__list_books",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "record_id": "book-1",
+              "title": "Synthetic Book",
+              "status": "read"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      },
+      {
+        "id": "reading",
+        "alias": "reading"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "reading",
+        "name": "add_book",
+        "collection": "books",
+        "operation": "insert",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
+      },
+      {
+        "page_id": "reading",
+        "name": "update_book",
+        "collection": "books",
+        "operation": "update",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
+      },
+      {
+        "page_id": "reading",
+        "name": "list_books",
+        "collection": "books",
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "reading",
+        "data": {
+          "title": "Synthetic Book",
+          "status": "read"
+        },
+        "collection": "books"
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "reading",
+        "document": {
+          "blocks": [
+            {
+              "type": "list"
+            }
+          ]
+        }
+      }
+    ],
+    "browser": [
+      {
+        "page_id": "reading",
+        "text": "Synthetic Book read"
+      }
+    ],
+    "related_page_ids": [
+      "reading"
+    ],
+    "results": [
+      {
+        "page_id": "reading",
+        "chat_id": "reading-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "data": {
+          "record_id": "book-1",
+          "title": "Synthetic Book",
+          "status": "unread"
+        }
+      },
+      {
+        "page_id": "reading",
+        "chat_id": "reading-chat",
+        "tool": "achilles__update_book",
+        "success": true,
+        "data": {
+          "record_id": "book-2",
+          "title": "Synthetic Book",
+          "status": "read"
+        }
+      },
+      {
+        "page_id": "reading",
+        "chat_id": "reading-chat",
+        "tool": "achilles__list_books",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "record_id": "book-1",
+              "title": "Synthetic Book",
+              "status": "read"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
