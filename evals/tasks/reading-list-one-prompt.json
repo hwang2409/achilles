@@ -86,6 +86,12 @@
       "value": [
         "Synthetic Book",
         "read"
+      ],
+      "synonyms": [
+        "finished",
+        "done",
+        "completed",
+        "have_read"
       ]
     },
     {
@@ -104,7 +110,13 @@
       "id": "visible-status",
       "type": "browser_text",
       "page": "reading",
-      "text": "read"
+      "text": "read",
+      "synonyms": [
+        "finished",
+        "done",
+        "completed",
+        "have_read"
+      ]
     },
     {
       "id": "same-page",

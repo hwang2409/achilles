@@ -248,6 +248,11 @@ export function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: R
   }
   return ids;
 }
+function listCollections(snapshot: EvalSnapshot, pageId: string) {
+  const layout = (snapshot.layouts ?? []).filter(row => row.page_id === pageId).sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0)).at(-1);
+  const blocks = (layout?.document as { blocks?: unknown[] } | undefined)?.blocks;
+  return Array.isArray(blocks) ? blocks.flatMap(block => block && typeof block === "object" && !Array.isArray(block) && (block as Record<string, unknown>).type === "list" && typeof (block as Record<string, unknown>).collection === "string" ? [(block as Record<string, unknown>).collection as string] : []) : [];
+}
 async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
   if (!task.checks.some(check => check.type === "browser_text")) return [];
   signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
@@ -257,7 +262,14 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
       const pageId = pages.get(plan.alias); if (!pageId) continue;
       const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
       const page = await browser.newPage();
+      const remaining = listCollections(snapshot, pageId); const finished: Promise<unknown>[] = [];
+      const recordsSettled = remaining.length ? page.waitForResponse(response => {
+        const path = new URL(response.url()).pathname; const index = remaining.findIndex(collection => path === `/api/pages/${pageId}/records/${collection}`);
+        if (index < 0) return false; remaining.splice(index, 1); finished.push(response.finished().then(error => { if (error) throw error; })); return remaining.length === 0;
+      }, { timeout: 10_000 }) : undefined;
       await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
+      if (recordsSettled) try { await recordsSettled; await page.waitForLoadState("networkidle", { timeout: 10_000 }); await Promise.all(finished); }
+      catch { signal.throwIfAborted(); throw new Error(`browser list records did not settle for page ${plan.alias}: ${remaining.join(", ") || "response body"}`); }
       signal.throwIfAborted();
       let abortReady: (() => void) | undefined;
       try {
