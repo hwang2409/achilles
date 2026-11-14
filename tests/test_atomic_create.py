@@ -109,6 +109,72 @@ def state(root):
     return counts, files
 
 
+def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
+    _, store, client, home_headers = creation_client
+    tools = []
+    blocks = []
+    for index in range(32):
+        name = f"tool_{index}_{'x' * 54}"
+        collection = f"collection_{index}_{'y' * 49}"
+        schema = {"type": "object", "properties": {"value": {"type": "string"}}}
+        tools.append(
+            {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": name,
+                "description": "x" * 2_000,
+                "input_schema": schema,
+                "output_schema": {"type": "object"},
+                "implementation": {
+                    "operation": "insert",
+                    "collection": collection,
+                    "data_schema": schema,
+                },
+            }
+        )
+        blocks.append({"type": "list", "title": "b" * 256, "collection": collection})
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(tools=tools, layout={"blocks": blocks}),
+        },
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    with store.transaction() as db:
+        for index in range(32):
+            db.execute(
+                "INSERT INTO page_record("
+                "page_id,collection,record_id,version,document,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    page_id,
+                    f"collection_{index}_{'y' * 49}",
+                    f"record-{index}",
+                    1,
+                    "{}",
+                    "now",
+                    "now",
+                ),
+            )
+    summary = mcp(
+        client,
+        home_headers,
+        40,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    text = summary["content"][0]["text"]
+    value = json.loads(text)
+    assert len(text.encode()) <= 8 * 1024
+    assert value["truncated"] is True
+    assert set(value["omitted"]) == {"blocks", "tools", "collections"}
+    assert sum(value["omitted"].values()) > 0
+
+
 def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_client):
     root, store, client, home_headers = creation_client
     created = mcp(
