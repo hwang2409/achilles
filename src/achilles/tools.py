@@ -14,7 +14,8 @@ MAX_BUNDLE_BYTES = 64 * 1024
 MAX_DESCRIPTION = 2_000
 _NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 _OPERATIONS = ["list", "get", "insert", "update"]
-_RESERVED_NAMES = ["create_page", "create_tool"]
+BUILTIN_TOOL_NAMES = ("inspect_page", "create_page", "create_tool")
+_RESERVED_NAMES = BUILTIN_TOOL_NAMES
 
 _JSON_SCHEMA = {
     "type": "object",
@@ -75,31 +76,33 @@ def _validate_json_schema(value: dict[str, Any], path: str) -> None:
         raise ValidationError(path, "valid JSON Schema") from exc
 
 
-def derived_output_schema(bundle: dict[str, Any]) -> dict[str, Any]:
+def derived_output_schema(bundle: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     operation = bundle["implementation"]["operation"]
     record = deepcopy(bundle["implementation"]["data_schema"])
     record["type"] = "object"
     record["properties"] = {
         **record.get("properties", {}),
         "record_id": {"type": "string"},
+        "revision": {"type": "integer"},
     }
     record["required"] = [
-        *[key for key in record.get("required", []) if key != "record_id"],
+        *[key for key in record.get("required", []) if key not in {"record_id", "revision"}],
         "record_id",
+        "revision",
     ]
     if operation == "list":
-        return {"type": "array", "items": record}
+        return {"type": "array", "items": record}, False
     if operation == "get":
-        return {"anyOf": [record, {"type": "null"}]}
-    return record
+        return {"anyOf": [record, {"type": "null"}]}, False
+    return record, True
 
 
 def _derived_output_expectation(operation: str) -> str:
     if operation == "list":
-        return "derived list result: array of objects with required record_id and collection fields"
+        return "derived list result: array of records with required record_id and revision"
     if operation == "get":
-        return "derived get result: object with required record_id and collection fields, or null"
-    return f"derived {operation} result: object with required record_id and collection fields"
+        return "derived get result: record with required record_id and revision, or null"
+    return f"derived {operation} result: record with required record_id and revision"
 
 
 def validate_bundle(
@@ -112,7 +115,16 @@ def validate_bundle(
     _validate_json_schema(
         bundle["implementation"]["data_schema"], f"{prefix}/implementation/data_schema"
     )
-    output_schema = derived_output_schema(bundle)
+    if bundle["implementation"]["operation"] == "update":
+        input_schema = bundle["input_schema"]
+        revision = input_schema.get("properties", {}).get("revision", {})
+        if (
+            not isinstance(revision, dict)
+            or revision.get("type") != "integer"
+            or "revision" not in input_schema.get("required", [])
+        ):
+            raise ValidationError(f"{prefix}/input_schema", "required integer property: revision")
+    output_schema, _ = derived_output_schema(bundle)
     if reject_conflicting_output and bundle.get("output_schema", output_schema) != output_schema:
         operation = bundle["implementation"]["operation"]
         raise ValidationError(f"{prefix}/output_schema", _derived_output_expectation(operation))

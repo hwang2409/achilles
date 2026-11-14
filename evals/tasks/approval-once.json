@@ -1,0 +1,65 @@
+{
+  "id": "approval-once",
+  "page_plan": [
+    {
+      "alias": "approval",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 6,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "write",
+      "kind": "prompt",
+      "page": "approval",
+      "chat": "approval-chat",
+      "prompt": "use add_note once to add a note with text approved note"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_note",
+        "operation": "insert",
+        "collection": "notes"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "approval",
+      "type": "approval",
+      "page": "approval",
+      "tool": "achilles__add_note",
+      "count": 1
+    },
+    {
+      "id": "result",
+      "type": "successful_result",
+      "page": "approval",
+      "tool": "achilles__add_note",
+      "value": {
+        "text": "approved note"
+      }
+    },
+    {
+      "id": "record",
+      "type": "records_exact",
+      "page": "approval",
+      "value": [
+        {
+          "text": "approved note"
+        }
+      ]
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "approval"
+    }
+  ]
+}
