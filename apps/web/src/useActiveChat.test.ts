@@ -20,7 +20,11 @@ function deferred<T>() {
 }
 
 describe("create mode tool refresh", () => {
-  test("holds send through a pending refresh and ignores a duplicate toggle", async () => {
+  test.each([
+    { name: "successful refresh", reset: false, refreshError: null, sendReady: true },
+    { name: "successful refresh after reset", reset: true, refreshError: null, sendReady: false },
+    { name: "blocked refresh after reset", reset: true, refreshError: Object.assign(new Error("failed"), { code: -32005 }), sendReady: false },
+  ])("holds send through $name", async ({ reset, refreshError, sendReady: expectedSendReady }) => {
     const refresh = deferred<unknown>();
     const requestReached = deferred<void>();
     let fetches = 0; let requests = 0;
@@ -29,14 +33,19 @@ describe("create mode tool refresh", () => {
     const first = owner.run(input); const duplicate = owner.run(input);
     let sendReady = false;
     const send = owner.beforeSend().then(() => { sendReady = true; });
-    await requestReached.promise;
+    const cancel = () => refresh.reject(new Error("cancelled controlled refresh"));
+    const drain = () => Promise.allSettled([first, send]);
+    await waitBounded(requestReached.promise, cancel, drain);
     expect(sendReady).toBe(false);
     expect(duplicate).toBe(first);
     expect(fetches).toBe(1); expect(requests).toBe(1);
-    refresh.resolve({ session_id: "session", servers: ["achilles"] });
-    expect(await first).toEqual({ createMode: true, error: null, blocked: false });
-    await send;
-    expect(sendReady).toBe(true);
+    if (reset) owner.reset();
+    if (refreshError) refresh.reject(refreshError);
+    else refresh.resolve({ session_id: "session", servers: ["achilles"] });
+    expect((await waitBounded(first, cancel, drain)).blocked).toBe(Boolean(refreshError));
+    if (expectedSendReady) await waitBounded(send, cancel, drain);
+    else await expect(waitBounded(send, cancel, drain)).rejects.toThrow("send is off");
+    expect(sendReady).toBe(expectedSendReady);
   });
 
   test.each([
@@ -69,10 +78,10 @@ describe("create mode tool refresh", () => {
   });
 });
 
-async function waitBounded(wait: Promise<void>, cancel: () => void, drain: () => Promise<unknown>) {
+async function waitBounded<T>(wait: Promise<T>, cancel: () => void, drain: () => Promise<unknown>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([wait, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("controlled wait timed out after 10 seconds")), CONTROLLED_TIMEOUT_MS); })]);
+    return await Promise.race([wait, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("controlled wait timed out after 10 seconds")), CONTROLLED_TIMEOUT_MS); })]);
   } catch (caught) {
     cancel();
     await drain().catch(() => {});

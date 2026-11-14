@@ -208,8 +208,9 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
       return pending;
     },
     async beforeSend() {
-      if (pending) await pending;
-      if (retry) throw new Error("send is off until page tools refresh. retry create mode.");
+      const mine = generation;
+      const result = pending ? await pending : null;
+      if (result?.blocked || mine !== generation || retry) throw new Error("send is off until page tools refresh. retry create mode.");
     },
     reset() { generation += 1; pending = null; retry = null; },
   };
