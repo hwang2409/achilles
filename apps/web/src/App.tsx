@@ -61,6 +61,26 @@ function storeSnapshot(store: ReturnType<typeof createRunStore> | null): string 
   return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
 }
 
+function subscribePageChanges(
+  store: ReturnType<typeof createRunStore> | null,
+  completed: Set<string>,
+  refreshPage: () => Promise<void>,
+  onComplete: () => void,
+) {
+  return store?.subscribe(() => {
+    for (const item of store.getState().outline) {
+      if (item.kind !== "tool") continue;
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
+      const name = value?.tool_call?.name ?? "";
+      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completed.has(item.id)) {
+        completed.add(item.id);
+        onComplete();
+        if (["update_layout", "achilles__update_layout"].includes(name)) void refreshPage();
+      }
+    }
+  });
+}
+
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
   switch (state.phase) {
@@ -105,18 +125,10 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
-  useEffect(() => store?.subscribe(() => {
-    for (const item of store.getState().outline) {
-      if (item.kind !== "tool") continue;
-      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
-      const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
-        completedCreatePages.current.add(item.id);
-        setPageRefreshNonce((current) => current + 1);
-        if (["update_layout", "achilles__update_layout"].includes(name)) void active.refreshPage();
-      }
-    }
-  }), [active.refreshPage, store]);
+  useEffect(
+    () => subscribePageChanges(store, completedCreatePages.current, active.refreshPage, () => setPageRefreshNonce((current) => current + 1)),
+    [active.refreshPage, store],
+  );
   useEffect(() => {
     if (previousRefreshKey.current === refreshKey) return;
     previousRefreshKey.current = refreshKey;
