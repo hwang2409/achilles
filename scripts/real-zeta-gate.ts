@@ -391,7 +391,11 @@ try {
   const bookAdded = page.getByText("book added", { exact: true });
   await field.fill("add Synthetic Book");
   await field.press("Enter");
-  await addBookApproval.waitFor({ timeout: 20000 });
+  await addBookApproval.waitFor({ timeout: 20000 }).catch(async (error) => {
+    throw new Error(
+      `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+    );
+  });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
   await page.goto(origin);
@@ -431,7 +435,6 @@ try {
       required: ["text"],
       additionalProperties: false,
     },
-    output_schema: { type: "object" },
     implementation: {
       operation: "insert",
       collection: "trace_annotations",

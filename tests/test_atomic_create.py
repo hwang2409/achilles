@@ -7,6 +7,7 @@ from starlette.testclient import TestClient
 
 import achilles.web as web
 from achilles.pages import PageStore
+from achilles.tools import derived_output_schema
 
 
 def bundle(name="add_book", operation="insert"):
@@ -22,7 +23,6 @@ def bundle(name="add_book", operation="insert"):
         "name": name,
         "description": f"{operation} books",
         "input_schema": data_schema,
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": operation,
             "collection": "books",
@@ -124,7 +124,6 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
                 "name": name,
                 "description": "x" * 2_000,
                 "input_schema": schema,
-                "output_schema": {"type": "object"},
                 "implementation": {
                     "operation": "insert",
                     "collection": collection,
@@ -349,6 +348,176 @@ def test_update_catalog_tells_callers_to_pass_the_returned_revision(creation_cli
         tool["description"] for tool in catalog["tools"] if tool["name"] == "update_book"
     )
     assert description == "update books; read or list first, then pass the returned revision"
+
+
+def test_create_tool_rejects_wrong_output_and_derives_usable_result(creation_client):
+    _, _, client, headers = creation_client
+    wrong = bundle(name="wrong_output")
+    wrong["output_schema"] = {
+        "type": "object",
+        "properties": {"id": {"type": "string"}},
+        "required": ["id"],
+    }
+    rejected = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": wrong}},
+    )
+    assert rejected["isError"], "a conflicting generated-tool output schema was accepted"
+    assert json.loads(rejected["content"][0]["text"]) == {
+        "code": "invalid_input",
+        "path": "/bundle/output_schema",
+        "expected": "derived insert result: record with required record_id and revision",
+    }
+
+    generated = bundle(name="add_derived_book")
+    generated["implementation"]["data_schema"]["properties"]["details"] = {
+        "type": "object",
+        "properties": {"author": {"type": "string"}, "year": {"type": "integer"}},
+        "required": ["author", "year"],
+        "additionalProperties": False,
+    }
+    generated["output_schema"], _ = derived_output_schema(generated)
+    generated["output_schema"]["required"].reverse()
+    generated["output_schema"]["properties"]["details"]["required"].reverse()
+    created = mcp(
+        client,
+        headers,
+        3,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": generated}},
+    )
+    assert not created.get("isError")
+    catalog = mcp(client, headers, 4, "tools/list", {})
+    listed = next(tool for tool in catalog["tools"] if tool["name"] == "add_derived_book")
+    assert listed["outputSchema"]["required"] == ["title", "record_id", "revision"]
+    inserted = mcp(
+        client,
+        headers,
+        5,
+        "tools/call",
+        {"name": "add_derived_book", "arguments": {"title": "Synthetic Book"}},
+    )
+    value = json.loads(inserted["content"][0]["text"])
+    assert value["title"] == "Synthetic Book"
+    assert value["record_id"]
+    assert value["revision"] == 1
+
+
+def test_create_tool_compares_instance_values_without_required_normalization(creation_client):
+    _, _, client, headers = creation_client
+    generated = bundle(name="add_const_book")
+    generated["implementation"]["data_schema"]["properties"]["metadata"] = {
+        "const": {"required": ["first", "second"]}
+    }
+    generated["output_schema"], _ = derived_output_schema(generated)
+    generated["output_schema"]["properties"]["metadata"]["const"]["required"].reverse()
+
+    rejected = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": generated}},
+    )
+
+    assert rejected["isError"], "reordered const instance data was accepted"
+    assert json.loads(rejected["content"][0]["text"]) == {
+        "code": "invalid_input",
+        "path": "/bundle/output_schema",
+        "expected": "derived insert result: record with required record_id and revision",
+    }
+
+
+def test_create_tool_handles_mixed_type_enum(creation_client):
+    _, _, client, headers = creation_client
+    generated = bundle(name="add_enum_book")
+    generated["implementation"]["data_schema"]["properties"]["edition"] = {"enum": [1, "second"]}
+    generated["output_schema"], _ = derived_output_schema(generated)
+
+    created = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": generated}},
+    )
+
+    assert not created.get("isError")
+
+
+def test_all_operation_tools_list_and_run_over_mcp(creation_client):
+    _, store, client, headers = creation_client
+    data_schema = bundle()["implementation"]["data_schema"]
+    inputs = {
+        "insert": data_schema,
+        "get": {
+            "type": "object",
+            "properties": {"record_id": {"type": "string"}},
+            "required": ["record_id"],
+            "additionalProperties": False,
+        },
+        "list": {"type": "object", "additionalProperties": False},
+        "update": {
+            "type": "object",
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+                "title": {"type": "string"},
+            },
+            "required": ["record_id", "revision", "title"],
+            "additionalProperties": False,
+        },
+    }
+    for operation in ("insert", "get", "list", "update"):
+        store.create_tool(
+            "home",
+            {
+                **bundle(name=f"{operation}_book", operation=operation),
+                "input_schema": inputs[operation],
+            },
+        )
+
+    catalog = mcp(client, headers, 2, "tools/list", {})
+    tools = {tool["name"]: tool for tool in catalog["tools"]}
+    assert "outputSchema" in tools["insert_book"]
+    assert "outputSchema" in tools["update_book"]
+    assert "outputSchema" not in tools["list_book"]
+    assert "outputSchema" not in tools["get_book"]
+
+    inserted = json.loads(
+        mcp(
+            client,
+            headers,
+            3,
+            "tools/call",
+            {"name": "insert_book", "arguments": {"title": "Synthetic Book"}},
+        )["content"][0]["text"]
+    )
+    record_id = inserted["record_id"]
+    fetched = mcp(
+        client,
+        headers,
+        4,
+        "tools/call",
+        {"name": "get_book", "arguments": {"record_id": record_id}},
+    )
+    assert json.loads(fetched["content"][0]["text"])["title"] == "Synthetic Book"
+    updated = mcp(
+        client,
+        headers,
+        5,
+        "tools/call",
+        {
+            "name": "update_book",
+            "arguments": {"record_id": record_id, "revision": 1, "title": "Updated Book"},
+        },
+    )
+    assert json.loads(updated["content"][0]["text"])["revision"] == 2
+    listed = mcp(client, headers, 6, "tools/call", {"name": "list_book", "arguments": {}})
+    assert json.loads(listed["content"][0]["text"])[0]["title"] == "Updated Book"
 
 
 def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):

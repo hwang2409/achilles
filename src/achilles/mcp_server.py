@@ -11,7 +11,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from .pages import CREATE_PAGE_SCHEMA, PageStore
 from .records import call_record
-from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA
+from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
 INSPECT_PAGE_SCHEMA = {
@@ -149,9 +149,10 @@ def build_mcp(store: PageStore):
                         name="create_tool",
                         description=(
                             "create a page-owned immutable declarative tool version; "
-                            "available only in create mode; operations are list, get, "
-                            "insert, or update; nested schemas must be valid JSON Schema; "
-                            "bundle <= 64 KB"
+                            "available only in create mode; results: insert/update -> "
+                            "{record_id, revision, ...collection fields}, get -> that object "
+                            "or null, list -> an array of those objects; omit output_schema "
+                            "or provide the exact derived schema; bundle <= 64 KB"
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
@@ -163,6 +164,7 @@ def build_mcp(store: PageStore):
         }
         for bundle in bundles:
             description = bundle["description"]
+            output_schema, publish_output_schema = derived_output_schema(bundle)
             if bundle["implementation"]["operation"] == "update":
                 description += "; read or list first, then pass the returned revision"
             tools.append(
@@ -170,6 +172,7 @@ def build_mcp(store: PageStore):
                     name=bundle["name"],
                     description=description,
                     inputSchema=bundle["input_schema"],
+                    outputSchema=output_schema if publish_output_schema else None,
                 )
             )
         return ListToolsResult(tools=tools)
