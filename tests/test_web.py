@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
 from achilles.pages import PageStore
-from achilles.tools import bundle_digest
+from achilles.tools import bundle_digest, validate_bundle
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +38,6 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
             "required": ["text"],
             "additionalProperties": False,
         },
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": "insert",
             "collection": "notes",
@@ -127,7 +126,7 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
         audit = db.execute(
             "SELECT version_digest FROM audit WHERE action='invoke:add_note'"
         ).fetchone()
-    assert audit["version_digest"] == bundle_digest(bundle)
+    assert audit["version_digest"] == bundle_digest(validate_bundle(bundle))
 
 
 def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: Path) -> None:
@@ -156,7 +155,6 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
             "required": ["record_id", "revision", "text"],
             "additionalProperties": False,
         },
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": "update",
             "collection": "notes",
@@ -254,7 +252,6 @@ def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_pa
             "required": ["text"],
             "additionalProperties": False,
         },
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": "insert",
             "collection": "notes",
@@ -521,7 +518,6 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
         "name": "annotate_trace",
         "description": "annotate",
         "input_schema": {"type": "object"},
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": "insert",
             "collection": "annotations",

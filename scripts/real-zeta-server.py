@@ -107,7 +107,6 @@ def book_tool(name: str, operation: str, description: str) -> dict:
         "name": name,
         "description": description,
         "input_schema": input_schema,
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": operation,
             "collection": "books",
