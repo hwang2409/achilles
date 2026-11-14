@@ -10,8 +10,6 @@ class MemoryStorage {
 }
 
 const input = (client: object, map = false): ChatCreationInput => ({ client: client as never, pageId: "home", credential: "synthetic", cwd: "/tmp", mode: "allow", ...(map ? { mapExpectedSessionId: null } : {}) });
-const record = (storage: MemoryStorage) => storage.value && JSON.parse(storage.value)[0] as { sessionId: string; stage: string };
-
 const CONTROLLED_TIMEOUT_MS = 10_000;
 
 async function waitBounded(wait: Promise<void>, cancel: () => void, drain: () => Promise<unknown>) {
@@ -103,10 +101,10 @@ describe("active chat attachment", () => {
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
-  test("reconnect clears a publish error after attaching the completed creation", async () => {
+  test("a later attachment failure cannot retain a completed creation error", async () => {
     const originalFetch = globalThis.fetch;
     const storage = new MemoryStorage();
-    let mappingAttempts = 0; let creationError: string | null = null;
+    let mappingAttempts = 0;
     globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
       const url = String(resource);
       if (url === "/api/pages/home") return Response.json(page(null));
@@ -118,15 +116,13 @@ describe("active chat attachment", () => {
     }) as typeof fetch;
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(storage);
-    const client = attachmentClient();
+    const client = attachmentClient((method) => { if (method === "resume") throw new Error("forced later attachment failure"); });
     try {
-      await attachPage(client as never, "home", null, owner, creation, owner.begin("first", true)).catch((caught) => { creationError = String(caught); });
-      expect(creationError).toContain("could not save session mapping");
+      await attachPage(client as never, "home", null, owner, creation, owner.begin("first", true)).catch(() => {});
+      expect(creation.status("home").error).toContain("could not save session mapping");
 
-      const attached = await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true));
-      if ((attached as typeof attached & { completedCreation?: boolean }).completedCreation) creationError = null;
-      expect(creationError).toBeNull();
-      expect(attached.sessionId).toBe("created-on-zeta");
+      await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true)).catch(() => {});
+      expect(creation.status("home")).toEqual({ pending: null, error: null });
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
@@ -154,12 +150,12 @@ describe("active chat attachment", () => {
 
 describe("chat creation lifecycle", () => {
   test.each([
-    { name: "registration fails", fail: "register", retained: "created" },
-    { name: "session settings fail after registration", fail: "session_settings", retained: "registered" },
-    { name: "status fails after registration", fail: "status", retained: "registered" },
-    { name: "settings publish fails after registration", fail: "set_settings", retained: "registered" },
-    { name: "mapping fails after approval", fail: "map", retained: "approvalApplied" },
-  ])("retains and resumes the exact session when $name", async ({ fail, retained }) => {
+    { name: "registration fails", fail: "register", retained: "created", recovery: "restart" },
+    { name: "session settings fail after registration", fail: "session_settings", retained: "registered", recovery: "retry" },
+    { name: "status fails after registration", fail: "status", retained: "registered", recovery: "attach" },
+    { name: "settings publish fails after registration", fail: "set_settings", retained: "registered", recovery: "duplicate" },
+    { name: "mapping fails after approval", fail: "map", retained: "approvalApplied", recovery: "retry" },
+  ])("owns the error and resumes the exact session when $name", async ({ fail, retained, recovery }) => {
     const storage = new MemoryStorage();
     let sessions = 0; let registrations = 0; let mappings = 0; let mode = "ask"; let failed = false;
     const client = { request: async (method: string) => {
@@ -180,16 +176,21 @@ describe("chat creation lifecycle", () => {
       return new Response(null, { status: 200 });
     }) as typeof fetch;
 
-    await expect(createChatCreationOwner(storage, fetcher).create(input(client, true))).rejects.toThrow();
-    expect(record(storage)).toEqual({ sessionId: "created-on-zeta", pageId: "home", mode: "allow", stage: retained, expectedSessionId: null });
+    const original = createChatCreationOwner(storage, fetcher);
+    await expect(original.create(input(client, true))).rejects.toThrow();
+    expect(original.status("home")).toMatchObject({ pending: { sessionId: "created-on-zeta", stage: retained }, error: expect.any(String) });
 
-    const restarted = createChatCreationOwner(storage, fetcher);
-    const resumed = await restarted.resume(input(client, true));
+    const owner = recovery === "restart" ? createChatCreationOwner(storage, fetcher) : original;
+    if (recovery === "restart") expect(owner.status("home").error).toEqual(expect.any(String));
+    const resumed = recovery === "duplicate" ? await owner.create(input(client, true))
+      : recovery === "retry" ? await owner.resume("home")
+      : await owner.resume(input(client, true));
     expect(resumed?.mappedSessionId).toBe("created-on-zeta");
     expect(sessions).toBe(1);
     expect(registrations).toBe(fail === "register" ? 2 : 1);
     expect(mappings).toBe(fail === "map" ? 2 : 1);
     expect(mode).toBe("allow");
+    expect(owner.status("home")).toEqual({ pending: null, error: null });
     expect(storage.value).toBeNull();
   });
 
@@ -240,6 +241,7 @@ describe("chat creation lifecycle", () => {
       release();
       await operation;
       expect({ sessions, registrations, mode }).toEqual({ sessions: 1, registrations: 1, mode: "allow" });
+      expect(owner.status("home")).toEqual({ pending: null, error: null });
       expect(storage.value).toBeNull();
     } finally { release(); await operation.catch(() => {}); }
   }, CONTROLLED_TIMEOUT_MS + 5_000);
@@ -270,6 +272,7 @@ describe("chat creation lifecycle", () => {
       expect(created).toMatchObject({ sessionId: "only-session", mappedSessionId: "only-session" });
       expect(repeated.sessionId).toBe("only-session");
       expect({ sessions, registrations }).toEqual({ sessions: 1, registrations: 1 });
+      expect(owner.status("home")).toEqual({ pending: null, error: null });
       expect(storage.value).toBeNull();
     } finally { release(); await first.catch(() => {}); }
   }, CONTROLLED_TIMEOUT_MS + 5_000);
@@ -284,6 +287,6 @@ describe("chat creation lifecycle", () => {
       { sessionId: "s", pageId: "home", mode: "allow", stage: "approvalApplied", expectedSessionId: 4 },
       { sessionId: "s", pageId: "home", mode: "allow", stage: "mapped", expectedSessionId: null },
     ]);
-    expect(createChatCreationOwner(storage).pending("home")).toBeNull();
+    expect(createChatCreationOwner(storage).status("home")).toEqual({ pending: null, error: null });
   });
 });
