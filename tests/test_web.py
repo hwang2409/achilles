@@ -65,8 +65,12 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
     headers = {"authorization": f"Bearer {token}"}
     catalog = client.get("/api/pages/home/tools", headers=headers)
     assert catalog.status_code == 200
-    assert catalog.json()["tools"][0]["input_schema"] == bundle["input_schema"]
-    assert "implementation" not in catalog.text and "credential" not in catalog.text
+    assert catalog.json()["tools"][0] == {
+        "name": bundle["name"],
+        "description": bundle["description"],
+        "input_schema": bundle["input_schema"],
+        "version": 1,
+    }
     invalid = client.post(
         "/api/pages/home/tools/add_note/invoke",
         headers=headers,
