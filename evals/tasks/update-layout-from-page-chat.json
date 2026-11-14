@@ -15,7 +15,7 @@
       "kind": "prompt",
       "page": "records",
       "chat": "records-chat",
-      "prompt": "add a block to this page that shows a list of the page's records"
+      "prompt": "use update_layout to add a block to this page that shows a list of the page's records"
     }
   ],
   "setup": {

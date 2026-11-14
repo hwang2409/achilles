@@ -15,6 +15,21 @@ test("report aggregates pass rate per task and states tools", () => {
   expect(reportJson(report)).toContain("tool_policy");
 });
 
+test("reports reading-list unmapped after values as needs review", () => {
+  const check = { id: "update-and-read", pass: false, expected: "Synthetic Book", actual: false, reason: "unmapped_after_value: progress=bogus", evidence: { type: "updated_record", page: "p1", transition: { field: "progress", before: "unread", after: "bogus" } } };
+  const task = { task_id: "reading-list-one-prompt", pass: false, status: "agent_fail", score: 50, turns: 1, tool_calls: 3, wall_ms: 1, approvals: 0, checks: [check], host_tools_gap: false, usage: "unavailable", diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } };
+  const report = makeReport({ run_id: "run", repeats: 1, agent: { provider: "scripted", model: "offline", tool_policy: "achilles__*", observed_catalog: [] }, tasks: [task] as never });
+  expect(report.tasks[0].status).toBe("needs_review");
+  expect(aggregateTaskResults(report.tasks)).toEqual({});
+  expect(reportJson(report)).toContain('"after": "bogus"');
+  expect(reportMarkdown(report)).toContain("| reading-list-one-prompt | update-and-read | progress | unread | bogus |");
+  expect(reportMarkdown(report)).toContain("needs review: extend the value map or confirm agent fail");
+
+  const mixed = makeReport({ run_id: "run", repeats: 1, agent: { provider: "scripted", model: "offline", tool_policy: "achilles__*", observed_catalog: [] }, tasks: [{ ...task, checks: [check, { ...check, id: "other", reason: "wrong_value" }] }] as never });
+  expect(mixed.tasks[0].status).toBe("agent_fail");
+  expect(aggregateTaskResults(mixed.tasks)["reading-list-one-prompt"].total).toBe(1);
+});
+
 test("goal capability gaps label agent failures without changing status", () => {
   const report = makeReport({ run_id: "run", repeats: 1, agent: { provider: "scripted", model: "offline", tool_policy: "achilles__*", observed_catalog: [] }, tasks: [{ task_id: "reading", pass: false, status: "agent_fail", gap: "capability_missing:create_page_with_tools", score: 0, turns: 1, tool_calls: 0, wall_ms: 1, approvals: 0, checks: [], host_tools_gap: false, usage: "unavailable", diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } }] as never });
   expect(report.tasks[0].status).toBe("agent_fail");
