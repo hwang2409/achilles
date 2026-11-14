@@ -55,11 +55,11 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
   const running = new Map<string, Promise<AttachedChat>>();
   const contexts = new Map<string, ChatCreationInput>();
   const listeners = new Set<() => void>();
-  const snapshots = new Map<string, { pending: PendingChat | null; error: string | null }>();
+  const snapshots = new Map<string, { pending: PendingChat | null; error: string | null; createMode: boolean | undefined }>();
   const volatile = new Map<string, PendingChat>();
   const pending = (pageId: string) => volatile.get(pageId) ?? readRecords(storage).find((record) => record.pageId === pageId) ?? null;
   const publish = (pageId: string, record: PendingChat | null) => {
-    snapshots.set(pageId, { pending: record, error: record?.lastError ?? null });
+    snapshots.set(pageId, { pending: record, error: record?.lastError ?? null, createMode: readModes(storage)[pageId] });
     listeners.forEach((listener) => listener());
   };
   const save = (record: PendingChat) => {
@@ -162,13 +162,13 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
   return {
     status(pageId: string) {
       let snapshot = snapshots.get(pageId);
-      if (!snapshot) { const record = pending(pageId); snapshot = { pending: record, error: record?.lastError ?? null }; snapshots.set(pageId, snapshot); }
-      return { ...snapshot, createMode: readModes(storage)[pageId] };
+      if (!snapshot) { const record = pending(pageId); snapshot = { pending: record, error: record?.lastError ?? null, createMode: readModes(storage)[pageId] }; snapshots.set(pageId, snapshot); }
+      return snapshot;
     },
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
     setCreateMode(pageId: string, enabled: boolean) {
       writeModes(storage, { ...readModes(storage), [pageId]: enabled });
-      listeners.forEach((listener) => listener());
+      publish(pageId, pending(pageId));
     },
     ensure,
   };
