@@ -647,6 +647,10 @@ try {
   if (!staleLayoutResult?.is_error)
     throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
   console.log("stale chat update_layout showed a readable version conflict");
+  const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
+  await page.getByRole("button", { name: "create mode on", exact: true }).click();
+  if (!(await readingModeOffResponse).ok()) throw new Error("reading page create mode reset failed");
+  await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
 
   await page.goto(origin);
   await field.waitFor({ timeout: 20000 });
