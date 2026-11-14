@@ -165,6 +165,7 @@ type CreateModeToggleInput = {
   enabled: boolean;
 };
 type CreateModeToggleResult = { createMode: boolean | null; error: string | null; blocked: boolean; retryable: boolean };
+type CreateModeToggleRun = { generation: number; outcome: CreateModeToggleResult; cancelled: boolean };
 
 function refreshToolsError(caught: unknown): { message: string; blocked: boolean; retryable: boolean } {
   const error = caught as { code?: unknown; message?: unknown; data?: { reason?: unknown } };
@@ -179,7 +180,9 @@ function refreshToolsError(caught: unknown): { message: string; blocked: boolean
 
 export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   let generation = 0;
-  let pending: Promise<CreateModeToggleResult> | null = null;
+  let pending: Promise<CreateModeToggleRun> | null = null;
+  let published: Promise<CreateModeToggleResult> | null = null;
+  let active: { generation: number; cancelled: boolean } | null = null;
   let retry: { input: CreateModeToggleInput; refreshOnly: boolean } | null = null;
   const refresh = async (input: CreateModeToggleInput, createMode: boolean, mine: number): Promise<CreateModeToggleResult> => {
     if (!input.client.features.includes("mcp_refresh_tools")) return { createMode, error: null, blocked: false, retryable: false };
@@ -195,10 +198,12 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   };
   return {
     run(input: CreateModeToggleInput) {
-      if (pending) return pending;
+      if (published) return published;
       const mine = generation;
+      const run = { generation: mine, cancelled: false };
+      active = run;
       const target = retry?.input ?? input;
-      pending = (async () => {
+      const task = (async () => {
         if (retry?.refreshOnly) return refresh(target, target.enabled, mine);
         const response = await fetchFn(`/api/pages/${target.pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: target.enabled }) });
         if (!response.ok) throw new Error(`could not update create mode (${response.status})`);
@@ -207,17 +212,25 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
       })().catch((caught) => {
         if (mine === generation) retry = { input: target, refreshOnly: false };
         return { createMode: null, error: caught instanceof Error ? caught.message : String(caught), blocked: true, retryable: true };
-      }).finally(() => {
-        if (mine === generation) pending = null;
       });
-      return pending;
+      pending = task.then((outcome) => ({ generation: run.generation, outcome, cancelled: run.cancelled })).finally(() => {
+        if (active === run) { active = null; pending = null; published = null; }
+      });
+      published = pending.then(({ outcome }) => outcome);
+      return published;
     },
     async beforeSend() {
       const mine = generation;
-      const result = pending ? await pending : null;
-      if (result?.blocked || mine !== generation || retry) throw new Error("send is off until page tools refresh. retry create mode.");
+      const awaited = pending;
+      const blockedWithoutRun = !awaited && retry !== null;
+      const result = awaited ? await awaited : null;
+      if (blockedWithoutRun || (result && (result.generation !== mine || result.cancelled || result.outcome.blocked))) throw new Error("send is off until page tools refresh. retry create mode.");
     },
-    reset() { generation += 1; pending = null; retry = null; },
+    reset() {
+      generation += 1;
+      if (active) active.cancelled = true;
+      active = null; pending = null; published = null; retry = null;
+    },
   };
 }
 

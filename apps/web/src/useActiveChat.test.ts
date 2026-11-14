@@ -22,7 +22,7 @@ function deferred<T>() {
 describe("create mode tool refresh", () => {
   test.each([
     { name: "successful refresh", reset: false, refreshError: null, sendReady: true },
-    { name: "successful refresh after reset", reset: true, refreshError: null, sendReady: false },
+    { name: "successful refresh after reset keeps the old draft", reset: true, refreshError: null, sendReady: false },
     { name: "blocked refresh after reset", reset: true, refreshError: Object.assign(new Error("failed"), { code: -32005 }), sendReady: false },
   ])("holds send through $name", async ({ reset, refreshError, sendReady: expectedSendReady }) => {
     const refresh = deferred<unknown>();
