@@ -151,9 +151,6 @@ export function PlainComposer(props: ComposerAdapterProps) {
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>
-          {model.error?.kind === "dropped" ? (
-            <button type="button" data-part="composer-resend" aria-label="send again" disabled={model.sending} onClick={submit}>Send again</button>
-          ) : null}
           {model.error?.kind === "uncertain" || model.error?.kind === "dropped" ? (
             <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button>
           ) : null}

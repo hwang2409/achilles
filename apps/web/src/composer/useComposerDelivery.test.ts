@@ -24,7 +24,7 @@ const scenarios: Scenario[] = [
     statuses: [{ status: "queued" }, { status: "dropped" }, { status: "delivered" }, { status: "dropped" }],
     statusReads: 4,
     expectedDraft: "keep this exact draft",
-    expectedError: "this message was not sent. your text is still here.",
+    expectedError: "this message was not sent. your text is still here; press send to try again.",
     resendDropped: true,
   },
   {

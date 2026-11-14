@@ -24,7 +24,7 @@ export type ComposerEvent =
   | { type: "edit"; draft: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "confirm"; attempt: number }
-  | { type: "reject"; attempt: number; message: string; uncertain?: boolean; dropped?: boolean }
+  | { type: "reject"; attempt: number; message: string; rejection?: "uncertain" | "dropped" }
   | { type: "dismiss-error" }
   | { type: "settle"; attempt: number }
   | { type: "stop" }
@@ -66,7 +66,7 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       return { model: { ...model, draft: unsentDraft(model.draft, model.send.sent), send: undefined, error: model.error?.kind === "submit" || model.error?.kind === "dropped" ? undefined : model.error } };
     case "reject": {
       if (model.send?.attempt !== event.attempt) return { model };
-      if (!event.uncertain) return { model: { ...model, error: { kind: event.dropped ? "dropped" : "submit", text: event.message } } };
+      if (event.rejection !== "uncertain") return { model: { ...model, error: { kind: event.rejection === "dropped" ? "dropped" : "submit", text: event.message } } };
       const uncertainDelivery: UncertainDelivery = { kind: "uncertain", text: event.message, draft: model.send.sent };
       return { model: { ...model, error: uncertainDelivery, uncertainDelivery } };
     }

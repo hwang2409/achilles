@@ -680,7 +680,12 @@ try {
   const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
   if (lateStatuses.at(-1) !== "dropped")
     throw new Error(`late steer terminal status was not dropped: ${JSON.stringify(lateStatuses)}`);
-  await page.getByText("this message was not sent. your text is still here.", { exact: true }).waitFor({ timeout: 20_000 });
+  const droppedNotice = page.getByText("this message was not sent. your text is still here; press send to try again.", { exact: true });
+  await droppedNotice.waitFor({ timeout: 20_000 });
+  const droppedPanel = droppedNotice.locator("..");
+  const droppedPanelText = await droppedPanel.innerText();
+  if (droppedPanelText !== droppedPanelText.toLowerCase()) throw new Error(`dropped notice labels were not lowercase: ${droppedPanelText}`);
+  await droppedPanel.getByRole("button", { name: "dismiss delivery warning", exact: true }).waitFor();
   if (screenshotDir) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
@@ -704,16 +709,16 @@ try {
     throw new Error(`achilles sent the dropped steer ${lateSteerRequests.length} times`);
 
   await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
-  await page.getByRole("button", { name: "send again", exact: true }).click();
+  await page.getByRole("button", { name: "send message", exact: true }).click();
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "new request after dropped steer");
   const afterDroppedSteer = JSON.parse(await Bun.file(control).text());
   const repeatedMessages = afterDroppedSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length;
   if (repeatedMessages !== 1)
-    throw new Error(`send again did not deliver the dropped prompt exactly once: ${JSON.stringify(afterDroppedSteer.user_messages)}`);
+    throw new Error(`send did not deliver the dropped prompt exactly once: ${JSON.stringify(afterDroppedSteer.user_messages)}`);
   const resendRequests = requests().filter((frame) => frame.method === "send" && frame.params?.text === "repeat that layout update with the old version");
   if (resendRequests.length !== 1 || resendRequests[0]?.params?.delivery_id === lateSteer.params.delivery_id)
-    throw new Error(`send again did not use one new delivery id: ${JSON.stringify(resendRequests)}`);
-  await waitFor(async () => await field.inputValue() === "", "draft clear after send again delivery");
+    throw new Error(`send did not use one new delivery id: ${JSON.stringify(resendRequests)}`);
+  await waitFor(async () => await field.inputValue() === "", "draft clear after confirmed retry delivery");
   await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
   await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }).waitFor({ timeout: 20000 });
@@ -988,8 +993,6 @@ try {
   if (!(await retryToggle.isVisible())) throw new Error("create mode error retry was not visible above the transcript");
   await retryToggle.click();
   await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
-  await page.getByRole("button", { name: "create mode off", exact: true }).click();
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
@@ -997,13 +1000,21 @@ try {
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
-  const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
-  await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
-  if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
-  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
-  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
+  if (await homeSessionId() !== homeAfterRestart) throw new Error("achilles restart changed home session id");
+  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
+  const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
+  const restartedToggleResponse = page.waitForResponse((response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  if (!(await restartedToggleResponse).ok()) throw new Error("post-restart create mode toggle request failed");
+  await waitFor(async () => requests().filter((frame) => frame.method === "mcp_refresh_tools").length > refreshCountBeforeRestartToggle, "post-restart tool refresh request");
+  const restartedRefresh = requests().filter((frame) => frame.method === "mcp_refresh_tools").at(-1);
+  await waitFor(async () => requests().some((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error)), "post-restart tool refresh result");
+  const restartedRefreshResult = requests().find((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error));
+  if (restartedRefreshResult?.error) throw new Error(`post-restart tool refresh did not enable create mode without a zeta restart: ${JSON.stringify(restartedRefreshResult.error)}`);
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  if (await page.getByText("restart zeta serve, then reload", { exact: false }).count()) throw new Error("automatic post-restart tool refresh showed the manual restart message");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
@@ -1022,20 +1033,20 @@ try {
   if (!(await reconnectIdleWrite).ok()) throw new Error("reconnect idle state write failed before achilles restart");
   const postReconnect = JSON.parse(await Bun.file(control).text());
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
-  if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
+  if (!postReconnect.schemas.includes("achilles__create_page") || !postReconnect.schemas.includes("achilles__create_tool")) throw new Error(`post-restart turn did not receive create tools: ${JSON.stringify(postReconnect.schemas)}`);
   const restartAnnotationResult = postReconnect.tool_results?.find((result: { call_id: string }) => result.call_id === "annotate-after-restart");
   if (!restartAnnotationResult || restartAnnotationResult.is_error) throw new Error(`generated tool did not recover after achilles restart: ${JSON.stringify(postReconnect.tool_results)}`);
   const restartRecords = await (await fetch(`${origin}/api/pages/home/records/trace_annotations`, { headers: { Authorization: `Bearer ${credential}` } })).json();
   const restartRecordTexts = Array.isArray(restartRecords) ? restartRecords.map((record: { text?: string }) => record.text).sort() : [];
   if (JSON.stringify(restartRecordTexts) !== JSON.stringify(["after achilles restart", "from zeta"])) throw new Error(`post-restart generated tool result was not recorded: ${JSON.stringify(restartRecords)}`);
-  if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after reload");
+  if ((logs.get(zetaProcess) ?? "").toLowerCase().includes("failed to mount")) throw new Error("zeta failed to mount a bound server after the achilles restart");
   mcpSessions.delete(credential);
   await mcp(credential, 3, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "gate", version: "1" } });
   const invalid = await mcp(credential, 5, "tools/call", { name: "create_page", arguments: { route: "/invalid", title: "invalid", layout: { blocks: [{ type: "text", text: "x", extra: true }] } } });
   if (!invalid.result?.isError || (await fetch(`${origin}/api/pages/invalid`)).status !== 404) throw new Error("invalid layout published");
   const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
-  console.log("reconnect refresh asserted: reload kept the session and refreshed the achilles catalog");
+  console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
   console.log("expected skip: reload during pending approval waits for fulcrum hello params");
 
   await homeMcp(14, "tools/list", {});
