@@ -153,10 +153,10 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
       <div className="vim-guidance">
         <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
-        <p data-part="composer-status" data-tone={model.error?.kind === "uncertain" ? "warning" : model.error ? "danger" : message ? "busy" : undefined} title={model.error?.text}>
+        <p data-part="composer-status" data-tone={model.error?.kind === "uncertain" || model.error?.kind === "dropped" ? "warning" : model.error ? "danger" : message ? "busy" : undefined} title={model.error?.text}>
           <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
-          {model.error?.kind === "uncertain" ? <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button> : null}
+          {model.error?.kind === "uncertain" || model.error?.kind === "dropped" ? <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button> : null}
         </p>
       </div>
       <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
