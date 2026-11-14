@@ -421,6 +421,19 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, can
     finally { if (owner.current.current(token)) setToggling(false); }
   }, [canWrite, state, updateReady]);
 
+  const refreshPage = useCallback(async () => {
+    if (state.phase !== "ready") return;
+    const current = state; const token = owner.current.token();
+    try {
+      const response = await fetch(`/api/pages/${current.page.id}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`could not refresh page (${response.status})`);
+      const page = await response.json() as Page;
+      updateReady(token, (value) => value.page.id === page.id ? { ...value, page: { ...page, approval_mode: value.page.approval_mode } } : value);
+    } catch (caught) {
+      if (owner.current.current(token)) console.error("could not refresh page", caught);
+    }
+  }, [state, updateReady]);
+
   const settleApprovalMode = useCallback(async () => {
     if (!canWrite || !client || state.phase !== "ready" || state.kind !== "controller" || !state.pendingApprovalMode) return;
     const current = state; const mode = state.pendingApprovalMode; const token = owner.current.token();
@@ -437,5 +450,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, can
       .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [canWrite, state]);
 
-  return { state, selectedId, listRefresh, toggleError, toggling, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, settleApprovalMode, recordLastState };
+  return { state, selectedId, listRefresh, toggleError, toggling, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
 }

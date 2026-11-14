@@ -246,6 +246,40 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
+                    "update-reading-layout",
+                    "achilles__update_layout",
+                    {
+                        "layout": {
+                            "blocks": [
+                                {"type": "text", "text": "layout updated without reload"},
+                                {"type": "list", "title": "books", "collection": "books"},
+                            ]
+                        },
+                        "expected_version": 1,
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("layout updated")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "stale-reading-layout",
+                    "achilles__update_layout",
+                    {"layout": {"blocks": []}, "expected_version": 1},
+                )
+            ]
+        ),
+        ScriptedTurn(
+            content=[
+                TextContent(
+                    "layout version conflict: inspect the page and retry with its current version."
+                )
+            ]
+        ),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
                     "annotate",
                     "achilles__annotate_trace",
                     {"text": "from zeta"},

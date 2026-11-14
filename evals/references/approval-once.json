@@ -1,0 +1,72 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "approval"
+      }
+    ],
+    "approvals": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": true,
+        "data": {
+          "text": "approved note"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "data": {
+          "text": "approved note"
+        }
+      }
+    ],
+    "errors": []
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "approval"
+      }
+    ],
+    "approvals": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": true,
+        "data": {
+          "text": "approved note"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "data": {
+          "text": "approved note"
+        }
+      }
+    ],
+    "errors": []
+  }
+}

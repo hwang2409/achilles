@@ -615,6 +615,45 @@ try {
   });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
+  const readingModeResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+
+  const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
+  const updateLayoutApprovalBefore = await updateLayoutApproval.count();
+  await field.fill("put the page note before the books list");
+  await field.press("Enter");
+  await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
+  await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  await page.getByText("layout updated", { exact: true }).waitFor({ timeout: 20000 });
+  await waitFor(async () => {
+    const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
+    return blocks[0] === "layout updated without reload" && blocks[1]?.includes("books");
+  }, "open page layout re-render after chat tool completion");
+  const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
+  const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
+  if (!updateLayoutResult || updateLayoutResult.is_error)
+    throw new Error(`update_layout tool result was missing or failed: ${JSON.stringify(afterLayoutUpdate.tool_results)}`);
+  console.log("open page re-rendered without reload after chat update_layout: page note before books");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
+
+  const staleLayoutApprovalBefore = await updateLayoutApproval.count();
+  await field.fill("repeat that layout update with the old version");
+  await field.press("Enter");
+  await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
+  await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  await page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }).waitFor({ timeout: 20000 });
+  const afterStaleLayout = JSON.parse(await Bun.file(control).text());
+  const staleLayoutResult = afterStaleLayout.tool_results?.find((result: { call_id: string }) => result.call_id === "stale-reading-layout");
+  if (!staleLayoutResult?.is_error)
+    throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
+  console.log("stale chat update_layout showed a readable version conflict");
+  const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
+  await page.getByRole("button", { name: "create mode on", exact: true }).click();
+  if (!(await readingModeOffResponse).ok()) throw new Error("reading page create mode reset failed");
+  await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
+
   await page.goto(origin);
   await field.waitFor({ timeout: 20000 });
   const catalog = await homeMcp(2, "tools/list", {});
