@@ -30,6 +30,20 @@ def _pointer(parts: Sequence[Any], schema: Mapping[str, Any]) -> str:
             break
         properties = current.get("properties", {})
         if part not in properties:
+            alternatives = current.get("oneOf", current.get("anyOf", ()))
+            branch = next(
+                (
+                    candidate
+                    for candidate in alternatives
+                    if part in candidate.get("properties", {})
+                ),
+                None,
+            )
+            if branch is None:
+                break
+            current = branch
+            properties = current.get("properties", {})
+        if part not in properties:
             break
         safe.append(part.replace("~", "~0").replace("/", "~1"))
         current = properties[part]
