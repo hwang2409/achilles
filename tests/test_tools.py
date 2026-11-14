@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 
 from achilles.pages import PageStore
 from achilles.records import VersionConflict, call_record
-from achilles.tools import CREATE_TOOL_SCHEMA, ValidationError
+from achilles.tools import CREATE_TOOL_SCHEMA, ValidationError, bundle_digest, validate_bundle
 
 
 def _start_store(root: str, ready, start, outcomes) -> None:
@@ -37,7 +37,6 @@ BUNDLE = {
         "required": ["text"],
         "additionalProperties": False,
     },
-    "output_schema": {"type": "object"},
     "implementation": {
         "operation": "insert",
         "collection": "annotations",
@@ -77,6 +76,14 @@ def test_every_operation_matches_catalog_and_store(tmp_path, operation):
     store.set_create_mode("home", True)
     created, _ = store.create_tool("home", bundle)
     assert created["name"] == bundle["name"]
+    output = store.page_tools("home")[0]["output_schema"]
+    if operation == "list":
+        assert output["type"] == "array"
+        output = output["items"]
+    elif operation == "get":
+        assert output["anyOf"][1] == {"type": "null"}
+        output = output["anyOf"][0]
+    assert output["required"] == ["text", "record_id", "revision"]
 
 
 def test_update_schema_requires_record_revision(tmp_path):
@@ -179,6 +186,35 @@ def test_sqlite_is_owned_by_pages_module():
         if path.name != "pages.py" and "import sqlite3" in path.read_text()
     ]
     assert not offenders, "keep sqlite3 ownership in src/achilles/pages.py"
+
+
+def test_legacy_tool_uses_derived_output_schema_at_call_time(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    store.create_tool("home", BUNDLE)
+    with store.transaction() as db:
+        row = db.execute("SELECT tool_id, version, bundle FROM tool_version").fetchone()
+        legacy = json.loads(row["bundle"])
+        legacy["output_schema"] = {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        }
+        stored_digest = bundle_digest(legacy)
+        db.execute(
+            "UPDATE tool_version SET digest=?, bundle=? WHERE tool_id=? AND version=?",
+            (stored_digest, json.dumps(legacy), row["tool_id"], row["version"]),
+        )
+
+    result = call_record(store, "home", "annotate_trace", {"text": "legacy"}, 1)
+    assert result["text"] == "legacy"
+    assert result["record_id"]
+    assert result["revision"] == 1
+    with store.transaction() as db:
+        audit_digest = db.execute(
+            "SELECT version_digest FROM audit WHERE action='invoke:annotate_trace'"
+        ).fetchone()["version_digest"]
+    assert audit_digest == stored_digest
 
 
 def test_generated_tool_versions_and_page_scope(tmp_path):
@@ -400,7 +436,7 @@ def test_record_id_is_authoritative(tmp_path):
 def test_bundle_publish_cleans_stale_temp(tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    digest = __import__("achilles.tools", fromlist=["bundle_digest"]).bundle_digest(BUNDLE)
+    digest = bundle_digest(validate_bundle(BUNDLE))
     (tmp_path / "bundles" / f"{digest}.tmp").write_text("stale")
     error = None
     try:
