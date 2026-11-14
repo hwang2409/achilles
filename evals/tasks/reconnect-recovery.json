@@ -1,0 +1,80 @@
+{
+  "id": "reconnect-recovery",
+  "page_plan": [
+    {
+      "alias": "reconnect",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "write",
+      "kind": "prompt",
+      "page": "reconnect",
+      "chat": "reconnect-chat",
+      "prompt": "use add_note once to add reconnect note"
+    },
+    {
+      "id": "disconnect",
+      "kind": "reconnect",
+      "page": "reconnect",
+      "chat": "reconnect-chat"
+    },
+    {
+      "id": "read",
+      "kind": "prompt",
+      "page": "reconnect",
+      "chat": "reconnect-chat",
+      "prompt": "after reconnect, use list_notes to read the note"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_note",
+        "operation": "insert",
+        "collection": "notes"
+      },
+      {
+        "name": "list_notes",
+        "operation": "list",
+        "collection": "notes"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "record",
+      "type": "records_exact",
+      "page": "reconnect",
+      "value": [
+        {
+          "text": "reconnect note"
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "type": "successful_result",
+      "page": "reconnect",
+      "tool": "achilles__list_notes",
+      "value": {
+        "text": "reconnect note"
+      }
+    },
+    {
+      "id": "continuity",
+      "type": "reconnect",
+      "page": "reconnect"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "reconnect"
+    }
+  ]
+}

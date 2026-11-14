@@ -1,0 +1,72 @@
+{
+  "id": "record-crud",
+  "page_plan": [
+    {
+      "alias": "records",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "steps": [
+    {
+      "id": "crud",
+      "kind": "prompt",
+      "page": "records",
+      "chat": "records-chat",
+      "prompt": "use the tools to add record-1 and record-2, update record-1 status to done, then list all records"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_record",
+        "operation": "insert",
+        "collection": "records"
+      },
+      {
+        "name": "update_record",
+        "operation": "update",
+        "collection": "records"
+      },
+      {
+        "name": "list_records",
+        "operation": "list",
+        "collection": "records"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "records",
+      "value": [
+        {
+          "id": "record-1",
+          "status": "done"
+        },
+        {
+          "id": "record-2"
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "type": "successful_result",
+      "page": "records",
+      "tool": "achilles__list_records",
+      "value": [
+        {
+          "id": "record-1",
+          "status": "done"
+        },
+        {
+          "id": "record-2"
+        }
+      ]
+    }
+  ]
+}

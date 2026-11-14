@@ -11,8 +11,8 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from .pages import CREATE_PAGE_SCHEMA, PageStore
 from .records import call_record
-from .tools import CREATE_TOOL_SCHEMA
-from .validation import ValidationError, validate_schema
+from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA
+from .validation import ValidationError, error_document, validate_schema
 
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
@@ -50,9 +50,7 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
         content=[
             TextContent(
                 type="text",
-                text=json.dumps(
-                    {"code": exc.code, "path": exc.path, "expected": exc.expected}, sort_keys=True
-                ),
+                text=json.dumps(error_document(exc), sort_keys=True),
             )
         ],
     )
@@ -159,11 +157,18 @@ def build_mcp(store: PageStore):
                     ),
                 ]
             )
-        for bundle in await anyio.to_thread.run_sync(store.page_tools, page["id"]):
+        bundles = await anyio.to_thread.run_sync(store.page_tools, page["id"])
+        connection.state[f"achilles-tool-versions:{page['id']}"] = {
+            bundle["name"]: bundle["version"] for bundle in bundles
+        }
+        for bundle in bundles:
+            description = bundle["description"]
+            if bundle["implementation"]["operation"] == "update":
+                description += "; read or list first, then pass the returned revision"
             tools.append(
                 Tool(
                     name=bundle["name"],
-                    description=bundle["description"],
+                    description=description,
                     inputSchema=bundle["input_schema"],
                 )
             )
@@ -201,7 +206,7 @@ def build_mcp(store: PageStore):
         args = params.arguments or {}
         if params.name == "inspect_page":
             return await inspect_page(page, args)
-        if params.name in {"create_page", "create_tool"}:
+        if params.name in BUILTIN_TOOL_NAMES:
             if not page["create_mode"]:
                 return CallToolResult(
                     isError=True,
@@ -237,10 +242,25 @@ def build_mcp(store: PageStore):
                 )
             await notify(page["id"])
             return _text(result)
+        listed_versions = context.session._connection.state.get(
+            f"achilles-tool-versions:{page['id']}", {}
+        )
+        if params.name not in listed_versions:
+            await context.session.send_tool_list_changed()
+            return _safe_error(ValidationError("", "list tools again", "tool_changed"))
         try:
             result = await anyio.to_thread.run_sync(
-                call_record, store, page["id"], params.name, args
+                call_record,
+                store,
+                page["id"],
+                params.name,
+                args,
+                listed_versions[params.name],
             )
+        except ValidationError as exc:
+            if exc.code == "conflict" and exc.path == "/version":
+                return _safe_error(ValidationError("", "list tools again", "tool_changed"))
+            return _safe_error(exc)
         except (PermissionError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
         return _text(result)
