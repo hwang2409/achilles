@@ -109,7 +109,7 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.goto(`${origin}/allow`);
   const menu = page.getByRole("button", { name: "open menu" });
   await menu.click();
-  await page.getByRole("button", { name: "close menu" }).click();
+  await page.getByRole("button", { name: "close menu" }).click({ position: { x: 370, y: 400 } });
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "open menu");
   await menu.click();
   const sidebar = page.locator(".sidebar");
