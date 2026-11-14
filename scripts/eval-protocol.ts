@@ -48,10 +48,16 @@ class Client implements EvalProtocol {
     const rows: unknown[] = []; let offset = 0;
     for (;;) { const page = await this.request("session_history", { session_id: sessionId, offset }); rows.push(...(page?.messages ?? [])); if (page?.next_offset == null) return rows; offset = page.next_offset; }
   }
-  async close() {
+  async close(signal?: AbortSignal, timeoutMs = 5_000) {
     if (this.socket.readyState === WebSocket.CLOSED) return;
     if (this.socket.readyState < WebSocket.CLOSING) this.socket.close();
-    await this.closed;
+    try { await withDeadline(this.closed, "zeta websocket close", timeoutMs, signal); }
+    catch (error) {
+      // Forced cleanup must not replace the close timeout or cancellation.
+      try { this.socket.terminate(); } catch {}
+      try { await withDeadline(this.closed, "zeta websocket termination", timeoutMs); } catch {}
+      throw error;
+    }
   }
 }
 
@@ -62,11 +68,19 @@ export type EvalProtocol = {
   abort(sessionId: string): Promise<void>;
   resume(sessionId: string, binding: Record<string, unknown>): Promise<{ session?: { session_id?: string }; session_id?: string }>;
   sessionHistory(sessionId: string): Promise<unknown[]>;
-  close(): Promise<void>;
+  close(signal?: AbortSignal, timeoutMs?: number): Promise<void>;
 };
 
-function withDeadline<T>(work: Promise<T>, label: string, timeoutMs = RPC_TIMEOUT_MS): Promise<T> {
-  return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs); work.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); }); });
+async function withDeadline<T>(work: Promise<T>, label: string, timeoutMs = RPC_TIMEOUT_MS, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  let timer: ReturnType<typeof setTimeout> | undefined; let abort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs); }),
+      ...(signal ? [new Promise<never>((_, reject) => { abort = () => reject(signal.reason); signal.addEventListener("abort", abort, { once: true }); })] : []),
+    ]);
+  } finally { clearTimeout(timer); if (abort) signal?.removeEventListener("abort", abort); }
 }
 
 async function connectOnce(discovery: { url: string; controller_token: string }, onEvent?: EventHandler, signal?: AbortSignal): Promise<EvalProtocol> {
