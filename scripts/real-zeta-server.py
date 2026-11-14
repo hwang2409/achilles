@@ -204,6 +204,20 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "form", "title": "add book", "tool": "add_book"},
+                                {
+                                    "type": "metric",
+                                    "label": (
+                                        "legacy total with an unusually long descriptive label"
+                                    ),
+                                    "value": "9,999,999,999,999,999",
+                                },
+                                {
+                                    "type": "metric",
+                                    "label": "reading",
+                                    "collection": "books",
+                                    "count": True,
+                                    "where": {"field": "status", "equals": "reading"},
+                                },
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
@@ -255,6 +269,20 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "text", "text": "layout updated without reload"},
+                                {
+                                    "type": "metric",
+                                    "label": (
+                                        "legacy total with an unusually long descriptive label"
+                                    ),
+                                    "value": "9,999,999,999,999,999",
+                                },
+                                {
+                                    "type": "metric",
+                                    "label": "reading",
+                                    "collection": "books",
+                                    "count": True,
+                                    "where": {"field": "status", "equals": "reading"},
+                                },
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
@@ -277,6 +305,34 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             content=[
                 TextContent(
                     "layout version conflict: inspect the page and retry with its current version."
+                )
+            ]
+        ),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "invalid-metric-layout",
+                    "achilles__update_layout",
+                    {
+                        "layout": {
+                            "blocks": [
+                                {
+                                    "type": "metric",
+                                    "label": "invalid",
+                                    "collection": "books",
+                                    "count": "yes",
+                                }
+                            ]
+                        },
+                        "expected_version": 2,
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(
+            content=[
+                TextContent(
+                    "metric update rejected: /layout/blocks/0 must match one valid schema variant."
                 )
             ]
         ),

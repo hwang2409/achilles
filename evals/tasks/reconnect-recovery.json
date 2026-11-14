@@ -15,7 +15,7 @@
       "kind": "prompt",
       "page": "reconnect",
       "chat": "reconnect-chat",
-      "prompt": "use add_note once to add reconnect note"
+      "prompt": "use add_note once to add a note with text \"reconnect note\""
     },
     {
       "id": "disconnect",
@@ -36,7 +36,15 @@
       {
         "name": "add_note",
         "operation": "insert",
-        "collection": "notes"
+        "collection": "notes",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" }
+          },
+          "required": ["text"],
+          "additionalProperties": false
+        }
       },
       {
         "name": "list_notes",
