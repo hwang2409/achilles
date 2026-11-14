@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 
 import pytest
 from starlette.testclient import TestClient
@@ -183,15 +184,36 @@ def test_create_page_file_failure_leaves_no_rows_or_files(creation_client, monke
 
 
 def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_client):
-    root, _store, client, headers = creation_client
+    root, store, client, headers = creation_client
     first = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
     first_value = json.loads(first["content"][0]["text"])
+    credential = (root / "credentials" / first_value["page_id"]).read_bytes()
+    with store.transaction() as db:
+        credential_hash = db.execute(
+            "SELECT credential_hash FROM page WHERE id=?", (first_value["page_id"],)
+        ).fetchone()[0]
+    first_serialized = json.dumps(first_value)
+    assert set(first_value) == {"page_id", "route", "digest", "existing"}
+    assert credential.decode() not in first_serialized
+    assert credential_hash not in first_serialized
+
     before = state(root)
     duplicate = mcp(
         client, headers, 3, "tools/call", {"name": "create_page", "arguments": request()}
     )
     duplicate_value = json.loads(duplicate["content"][0]["text"])
+    duplicate_serialized = json.dumps(duplicate_value)
     assert duplicate_value == {**first_value, "existing": True}
+    assert credential == (root / "credentials" / first_value["page_id"]).read_bytes()
+    with store.transaction() as db:
+        assert (
+            db.execute(
+                "SELECT credential_hash FROM page WHERE id=?", (first_value["page_id"],)
+            ).fetchone()[0]
+            == credential_hash
+        )
+    assert credential.decode() not in duplicate_serialized
+    assert credential_hash not in duplicate_serialized
     assert state(root) == before
     conflict = mcp(
         client,
@@ -208,3 +230,50 @@ def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_c
         "path": "/route",
     }
     assert state(root) == before
+
+
+def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client):
+    root, store, client, headers = creation_client
+    barrier = threading.Barrier(2)
+    results = [None, None]
+    errors = []
+    concurrent_headers = [
+        initialize(client, store.ensure_credential("home"), 10),
+        initialize(client, store.ensure_credential("home"), 11),
+    ]
+
+    def call(index):
+        try:
+            barrier.wait(timeout=10)
+            results[index] = mcp(
+                client,
+                concurrent_headers[index],
+                20 + index,
+                "tools/call",
+                {"name": "create_page", "arguments": request()},
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=call, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for index, thread in enumerate(threads):
+        thread.join(timeout=10)
+        assert not thread.is_alive(), f"concurrent create caller {index} hung"
+    assert not errors, errors
+    values = [json.loads(result["content"][0]["text"]) for result in results]
+    assert sorted(value["existing"] for value in values) == [False, True]
+    assert len({value["page_id"] for value in values}) == 1
+    counts, files = state(root)
+    assert counts == {
+        "page": 2,
+        "layout_version": 1,
+        "tool": 1,
+        "tool_version": 1,
+        "page_tool": 1,
+        "audit": 2,
+    }
+    assert len([path for path in files if path.startswith("bundles/")]) == 2
+    page_id = values[0]["page_id"]
+    assert store.page_tools(page_id)[0]["name"] == "add_book"
