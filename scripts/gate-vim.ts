@@ -15,7 +15,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (screenshotDir) await page.setViewportSize({ width: 1440, height: 900 });
   const settingsDialog = page.getByRole("dialog", { name: "settings" });
   const setVim = async (enabled: boolean) => {
-    await page.keyboard.press("Meta+,");
+    await page.keyboard.press("Control+Comma");
     await settingsDialog.waitFor({ state: "visible", timeout: 10_000 });
     const toggle = settingsDialog.getByRole("switch", { name: "vim mode" });
     if ((await toggle.getAttribute("aria-checked")) !== String(enabled)) await toggle.click();
@@ -90,7 +90,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   await field.focus();
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("vim did not start in INSERT");
-  await page.keyboard.press("Meta+,");
+  await page.keyboard.press("Control+Comma");
   await settingsDialog.waitFor({ state: "visible", timeout: 10_000 });
   await page.keyboard.press("Escape");
   await settingsDialog.waitFor({ state: "hidden", timeout: 10_000 });
