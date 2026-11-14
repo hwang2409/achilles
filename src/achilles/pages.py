@@ -269,7 +269,8 @@ def _json_scalar_match(
 
 
 def validate_record_filter(value: Any) -> dict[str, Any]:
-    return validate_schema(value, _EQUALITY_FILTER_SCHEMA)
+    validate_schema(value, _EQUALITY_FILTER_SCHEMA)
+    return value
 
 
 class PageStore:
