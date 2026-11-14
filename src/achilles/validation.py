@@ -18,21 +18,39 @@ class ValidationError(ValueError):
         super().__init__(expected)
 
 
-def _pointer(parts: Sequence[Any]) -> str:
+def _pointer(parts: Sequence[Any], schema: Mapping[str, Any]) -> str:
     safe = []
+    current: Mapping[str, Any] = schema
     for part in parts:
         if isinstance(part, int):
             safe.append(str(part))
-        elif isinstance(part, str) and _SAFE_KEY.fullmatch(part):
-            safe.append(part.replace("~", "~0").replace("/", "~1"))
-        else:
+            current = current.get("items", {}) if isinstance(current, Mapping) else {}
+            continue
+        if not isinstance(part, str) or not _SAFE_KEY.fullmatch(part):
             break
+        properties = current.get("properties", {})
+        if part not in properties:
+            break
+        safe.append(part.replace("~", "~0").replace("/", "~1"))
+        current = properties[part]
     return "/" + "/".join(safe) if safe else ""
+
+
+_FIXED_EXPECTATIONS = {
+    "oneOf": "one valid schema variant",
+    "additionalProperties": "additional properties not allowed",
+}
 
 
 def _expected(error: JsonSchemaError) -> str:
     keyword = error.validator
     rule = error.validator_value
+    if keyword in _FIXED_EXPECTATIONS:
+        if keyword == "additionalProperties":
+            properties = error.schema.get("properties", {})
+            allowed = ", ".join(properties)
+            return f"only properties: {allowed}" if allowed else _FIXED_EXPECTATIONS[keyword]
+        return _FIXED_EXPECTATIONS[keyword]
     if keyword == "enum":
         return "one of: " + ",".join(str(value) for value in rule)
     if keyword == "const":
@@ -40,27 +58,9 @@ def _expected(error: JsonSchemaError) -> str:
     if keyword == "pattern":
         return f"pattern {rule}"
     if keyword == "required":
-        missing = next((key for key in rule if key not in error.instance), None)
-        return f"required: {missing}" if missing else "required property"
-    if keyword == "additionalProperties":
-        properties = error.schema.get("properties", {})
-        extra = next(
-            (
-                key
-                for key in error.instance
-                if key not in properties and isinstance(key, str) and _SAFE_KEY.fullmatch(key)
-            ),
-            None,
-        )
-        return (
-            f"additional properties not allowed: {extra}"
-            if extra
-            else "additional properties not allowed"
-        )
+        return "required property"
     if keyword in {"type", "minLength", "maxLength", "minItems", "maxItems"}:
         return f"{keyword}: {rule}"
-    if keyword == "oneOf":
-        return "one valid schema variant"
     if keyword == "not":
         values = rule.get("enum", []) if isinstance(rule, Mapping) else []
         return "not one of: " + ",".join(str(value) for value in values)
@@ -70,5 +70,5 @@ def _expected(error: JsonSchemaError) -> str:
 def validate_schema(instance: Any, schema: Mapping[str, Any], prefix: str = "") -> None:
     error = next(iter(Draft202012Validator(schema).iter_errors(instance)), None)
     if error is not None:
-        path = prefix.rstrip("/") + _pointer(tuple(error.absolute_path))
+        path = prefix.rstrip("/") + _pointer(tuple(error.absolute_path), schema)
         raise ValidationError(path, _expected(error))

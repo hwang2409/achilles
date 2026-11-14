@@ -445,8 +445,10 @@ class PageStore:
         assert row is not None
         return row, digest
 
-    def create_tool(self, page_id: str, bundle: Any) -> tuple[dict[str, Any], str]:
-        bundle = validate_bundle(bundle)
+    def create_tool(
+        self, page_id: str, bundle: Any, validation_prefix: str = ""
+    ) -> tuple[dict[str, Any], str]:
+        bundle = validate_bundle(bundle, validation_prefix)
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
         stamp = now()

@@ -107,21 +107,22 @@ def test_structured_errors_never_echo_rejected_values(tmp_path, implementation):
     assert caught.value.path.startswith("/implementation/")
 
 
-@pytest.mark.parametrize(
-    ("extra_key", "expected"),
-    [
-        ("safe_extra", "additional properties not allowed: safe_extra"),
-        ("sk-secret/do-not-echo", "additional properties not allowed"),
-    ],
-)
-def test_additional_property_errors_only_name_safe_identifiers(tmp_path, extra_key, expected):
+@pytest.mark.parametrize("extra_key", ["sk_secret_do_not_echo", "Users_henry_private_path"])
+def test_additional_property_errors_never_echo_user_keys(tmp_path, extra_key):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
     with pytest.raises(ValidationError) as caught:
         store.create_tool("home", {**BUNDLE, extra_key: True})
-    assert caught.value.expected == expected
-    if extra_key != "safe_extra":
-        assert extra_key not in str(caught.value)
+    error = {
+        "code": caught.value.code,
+        "path": caught.value.path,
+        "expected": caught.value.expected,
+    }
+    assert extra_key not in json.dumps(error)
+    assert caught.value.expected == (
+        "only properties: format_version, kind, name, description, input_schema, output_schema, "
+        "implementation"
+    )
 
 
 def test_sqlite_is_owned_by_pages_module():

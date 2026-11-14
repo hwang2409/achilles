@@ -134,7 +134,7 @@ def build_mcp(store: PageStore):
                     result = {"page_id": created["id"], "route": created["route"], "digest": digest}
                 else:
                     created, digest = await anyio.to_thread.run_sync(
-                        store.create_tool, page["id"], args["bundle"]
+                        store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
                     result = {**created, "digest": digest}
             except ValidationError as exc:
