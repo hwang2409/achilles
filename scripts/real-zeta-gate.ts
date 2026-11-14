@@ -232,9 +232,9 @@ try {
   const approvalCompleteBefore = await approvalComplete.count();
   await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
-  await gateTranscript(page, waitFor);
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor);
+  await gateTranscript(page, waitFor);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests(), approvalModeResponse);
