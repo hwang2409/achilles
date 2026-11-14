@@ -14,6 +14,13 @@ from .records import call_record
 from .tools import CREATE_TOOL_SCHEMA
 from .validation import ValidationError, validate_schema
 
+INSPECT_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {"route": {"type": "string"}, "page_id": {"type": "string"}},
+    "additionalProperties": False,
+}
+_INSPECT_MAX_BYTES = 8 * 1024
+
 
 def _token(context):
     request = context.request
@@ -51,6 +58,51 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
     )
 
 
+def _inspect_result(value: dict[str, Any]) -> CallToolResult:
+    result = {
+        **value,
+        "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
+        "tools": list(value["tools"]),
+        "collections": dict(value["collections"]),
+    }
+
+    def serialize() -> str:
+        return json.dumps(result, sort_keys=True, separators=(",", ":"))
+
+    encoded = serialize()
+    if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
+        return CallToolResult(content=[TextContent(type="text", text=encoded)])
+
+    result["truncated"] = True
+    original_counts = {
+        "blocks": len(result["layout"]["blocks"]),
+        "tools": len(result["tools"]),
+        "collections": len(result["collections"]),
+    }
+    result["omitted"] = {key: 0 for key in original_counts}
+    for key, container in (
+        ("blocks", result["layout"]["blocks"]),
+        ("tools", result["tools"]),
+        ("collections", result["collections"]),
+    ):
+        while len(serialize().encode()) > _INSPECT_MAX_BYTES and container:
+            if isinstance(container, dict):
+                container.popitem()
+            else:
+                container.pop()
+            result["omitted"][key] = original_counts[key] - len(container)
+    result["title"] = result["title"][:256]
+    encoded = serialize()
+    while len(encoded.encode()) > _INSPECT_MAX_BYTES and result["title"]:
+        result["title"] = result["title"][:-1]
+        encoded = serialize()
+    return CallToolResult(content=[TextContent(type="text", text=encoded)])
+
+
+def _inspect_error() -> CallToolResult:
+    return _safe_error(ValidationError("", "authorized page", "forbidden"))
+
+
 def _validate_create(name: str, args: Any) -> None:
     schema = CREATE_PAGE_SCHEMA if name == "create_page" else CREATE_TOOL_SCHEMA
     validate_schema(args, schema)
@@ -86,6 +138,11 @@ def build_mcp(store: PageStore):
             tools.extend(
                 [
                     Tool(
+                        name="inspect_page",
+                        description="inspect safe summaries of the caller's page",
+                        inputSchema=INSPECT_PAGE_SCHEMA,
+                    ),
+                    Tool(
                         name="create_page",
                         description="create a page; available only in create mode",
                         inputSchema=CREATE_PAGE_SCHEMA,
@@ -112,6 +169,29 @@ def build_mcp(store: PageStore):
             )
         return ListToolsResult(tools=tools)
 
+    async def inspect_page(page, args) -> CallToolResult:
+        try:
+            validate_schema(args, INSPECT_PAGE_SCHEMA)
+            if "route" in args and "page_id" in args:
+                raise ValidationError("", "one selector", "invalid_input")
+            if not page["create_mode"]:
+                return _inspect_error()
+            target = page
+            if "route" in args or "page_id" in args:
+                target = await anyio.to_thread.run_sync(
+                    store.page, args.get("route", args.get("page_id"))
+                )
+            if target is None or (
+                target["id"] != page["id"] and target["created_by_page_id"] != page["id"]
+            ):
+                return _inspect_error()
+            summary = await anyio.to_thread.run_sync(store.inspect_page, target["id"])
+            return _inspect_result(summary)
+        except ValidationError as exc:
+            return _safe_error(exc)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return _inspect_error()
+
     async def call_tool(context, params) -> CallToolResult:
         page = await principal(context)
         if not page:
@@ -119,6 +199,8 @@ def build_mcp(store: PageStore):
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         args = params.arguments or {}
+        if params.name == "inspect_page":
+            return await inspect_page(page, args)
         if params.name in {"create_page", "create_tool"}:
             if not page["create_mode"]:
                 return CallToolResult(

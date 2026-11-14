@@ -135,7 +135,8 @@ class PageStore:
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           zeta_session_id TEXT, active_layout_version INTEGER,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-          create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT
+          create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT,
+          created_by_page_id TEXT REFERENCES page(id)
         );
         CREATE TABLE IF NOT EXISTS layout_version (
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
@@ -178,6 +179,8 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN create_mode INTEGER NOT NULL DEFAULT 0")
         if "credential_hash" not in columns:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
+        if "created_by_page_id" not in columns:
+            db.execute("ALTER TABLE page ADD COLUMN created_by_page_id TEXT REFERENCES page(id)")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -275,6 +278,50 @@ class PageStore:
                 (page_id,),
             ).fetchone()
             return json.loads(row[0]) if row else {"blocks": []}
+
+    def inspect_page(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            layout = db.execute(
+                "SELECT version, digest, document FROM layout_version "
+                "WHERE page_id=? ORDER BY version DESC LIMIT 1",
+                (page_id,),
+            ).fetchone()
+            counts = db.execute(
+                "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
+                (page_id,),
+            ).fetchall()
+        row = self.page(page_id)
+        if row is None:
+            raise KeyError(page_id)
+        document = json.loads(layout[2]) if layout else {"blocks": []}
+        tools = self.page_tools(page_id)
+        return {
+            "route": row["route"],
+            "title": row["title"],
+            "create_mode": bool(row["create_mode"]),
+            "layout": {
+                "version": layout[0] if layout else None,
+                "digest": layout[1] if layout else None,
+                "blocks": [
+                    {
+                        key: block[key]
+                        for key in ("type", "title", "tool", "collection")
+                        if key in block
+                    }
+                    for block in document.get("blocks", [])
+                ],
+            },
+            "tools": [
+                {
+                    "name": tool["name"],
+                    "version": tool["version"],
+                    "operations": [tool["implementation"]["operation"]],
+                    "collection": tool["implementation"]["collection"],
+                }
+                for tool in tools
+            ],
+            "collections": {collection: count for collection, count in counts},
+        }
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -496,7 +543,7 @@ class PageStore:
                 stamp = now()
                 db.execute(
                     "INSERT INTO page(id,route,title,active_layout_version,created_at,"
-                    "updated_at,credential_hash) VALUES(?,?,?,?,?,?,?)",
+                    "updated_at,credential_hash,created_by_page_id) VALUES(?,?,?,?,?,?,?,?)",
                     (
                         page_id,
                         route,
@@ -505,6 +552,7 @@ class PageStore:
                         stamp,
                         stamp,
                         hashlib.sha256(token.encode()).hexdigest(),
+                        principal_id,
                     ),
                 )
                 db.execute(
