@@ -4,7 +4,34 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+
+def holder_alive(value: str) -> bool:
+    try:
+        pid = int(value)
+    except ValueError:
+        return True
+    status = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return status.returncode == 0 and not status.stdout.strip().startswith("Z")
+
+
+# dead holder: macOS CI can delay kernel flock release; this grace is bounded.
+def wait_for_dead_holder_release(lock: object, holder: str) -> bool:
+    for _attempt in range(50):
+        time.sleep(0.01)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            continue
+    return False
 
 
 def main() -> int:
@@ -17,9 +44,16 @@ def main() -> int:
         except BlockingIOError:
             lock.seek(0)
             holder = lock.read().strip()
-            suffix = f" (pid {holder})" if holder else ""
-            print(f"make dev is already running{suffix}", file=sys.stderr)
-            return 1
+            if holder_alive(holder):
+                suffix = f" (pid {holder})" if holder else ""
+                print(f"make dev is already running{suffix}", file=sys.stderr)
+                return 1
+            if not wait_for_dead_holder_release(lock, holder):
+                print(
+                    f"make dev is already running (pid {holder})",
+                    file=sys.stderr,
+                )
+                return 1
 
         lock.seek(0)
         lock.truncate()

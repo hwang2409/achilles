@@ -1,5 +1,28 @@
 import type { Page } from "playwright";
 
+export async function waitForIdleTurn(
+  page: Page,
+  waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
+) {
+  const composer = page.locator('[data-part="composer"]');
+  const runState = page.locator(".run-state");
+  await waitFor(
+    async () =>
+      (await composer.getAttribute("data-state")) === "idle" &&
+      (await composer.locator('[data-part="composer-submit"]').innerText()) === "send" &&
+      (await composer.locator('[data-part="composer-stop"]').count()) === 0 &&
+      (await runState.innerText()) === "idle",
+    "idle transcript turn",
+  ).catch(async () => {
+    throw new Error(`timed out waiting for the transcript turn to become idle: ${JSON.stringify({
+      composer: await composer.getAttribute("data-state"),
+      submit: await composer.locator('[data-part="composer-submit"]').innerText().catch(() => null),
+      stop: await composer.locator('[data-part="composer-stop"]').count(),
+      transcript: await runState.innerText().catch(() => null),
+    })}`);
+  });
+}
+
 export async function gateTranscript(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
@@ -90,23 +113,7 @@ export async function gateTranscript(
   const approval = page.locator('[data-part="approval"][data-state="pending"]').filter({ hasText: "read" });
   await approval.getByRole("button", { name: "deny", exact: true }).click();
   await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
-  const composer = page.locator('[data-part="composer"]');
-  const runState = page.locator(".run-state");
-  await waitFor(
-    async () =>
-      (await composer.getAttribute("data-state")) === "idle" &&
-      (await composer.locator('[data-part="composer-submit"]').innerText()) === "send" &&
-      (await composer.locator('[data-part="composer-stop"]').count()) === 0 &&
-      (await runState.innerText()) === "idle",
-    "idle transcript turn after stream tool completion",
-  ).catch(async () => {
-    throw new Error(`timed out waiting for the transcript turn to become idle: ${JSON.stringify({
-      composer: await composer.getAttribute("data-state"),
-      submit: await composer.locator('[data-part="composer-submit"]').innerText().catch(() => null),
-      stop: await composer.locator('[data-part="composer-stop"]').count(),
-      transcript: await runState.innerText().catch(() => null),
-    })}`);
-  });
+  await waitForIdleTurn(page, waitFor);
 
   await field.fill("stream text only lines to overflow");
   await field.press("Enter");
