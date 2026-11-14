@@ -30,8 +30,9 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
   };
 }
 
-function attachmentError(caught: unknown): string {
+function attachmentError(caught: unknown, context: "loading" | "creation" = "loading"): string {
   const message = caught instanceof Error ? caught.message : String(caught);
+  if (message === "Failed to fetch" || message === "Load failed") return `achilles is unavailable while ${context === "creation" ? "creating the chat" : "loading the chat"}.`;
   return message.includes("MCP server is not a trusted global server: achilles")
     ? "achilles is not trusted by zeta. add it to $ZETA_HOME/mcp.json, then restart zeta serve."
     : message;
@@ -137,7 +138,7 @@ class MissingChatError extends Error {
 }
 
 class PendingCreationError extends Error {
-  constructor(caught: unknown, readonly input: ChatCreationInput) { super(attachmentError(caught)); }
+  constructor(caught: unknown, readonly input: ChatCreationInput) { super(attachmentError(caught, "creation")); }
 }
 
 const NO_CREATION = { pending: null, error: null };
@@ -150,11 +151,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
+  const [routeRefresh, setRouteRefresh] = useState(0);
   const owner = useRef(createAttachmentOwner());
   const creation = useRef(createChatCreationOwner());
   const status = useSyncExternalStore(creation.current.subscribe, () => creationPageId ? creation.current.status(creationPageId) : NO_CREATION);
-  const creationError = status.error;
+  const creationError = status.error ? attachmentError(status.error, "creation") : null;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
+  const createAfterLoad = useRef(false);
 
   useEffect(() => {
     if (!client || !connected) return;
@@ -174,7 +177,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
     });
     return () => owner.current.clear(token);
-  }, [client, connected, selectedId]);
+  }, [client, connected, routeRefresh, selectedId]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
@@ -211,6 +214,15 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
 
   const newChat = useCallback(async () => {
     if (!client) return;
+    if (state.phase === "error" && state.error === "page not found") {
+      createAfterLoad.current = true;
+      owner.current.clear();
+      history.pushState({}, "", "/");
+      setState({ phase: "loading" });
+      setSelectedId(null);
+      setRouteRefresh((value) => value + 1);
+      return;
+    }
     const context = state.phase === "ready"
       ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } }
       : state.phase === "missing" ? missingCreation.current : null;
@@ -221,7 +233,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     try {
       publishCreated(context.route, await creation.current.create(context.input), token);
     } catch (caught) {
-      if (!creation.current.status(context.input.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
+      if (!creation.current.status(context.input.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     }
   }, [client, publishCreated, state]);
 
@@ -231,6 +243,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       if (pending) publishCreated(location.pathname, pending);
     }).catch(() => {});
   }, [creationPageId, publishCreated]);
+
+  useEffect(() => {
+    if (!createAfterLoad.current || state.phase !== "ready") return;
+    createAfterLoad.current = false;
+    void newChat();
+  }, [newChat, state]);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     if (!owner.current.current(token)) return;

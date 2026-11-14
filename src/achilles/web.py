@@ -16,6 +16,8 @@ from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
 from .pages import PageStore
+from .records import VersionConflict, call_record
+from .validation import ValidationError, error_document
 
 
 def _home() -> Path:
@@ -247,7 +249,11 @@ def create_app() -> Starlette:
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        next_cursor = _chat_cursor(rows[-1]["updated_at"], rows[-1]["session_id"]) if rows else None
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = (
+            _chat_cursor(rows[-1]["updated_at"], rows[-1]["session_id"]) if has_more else None
+        )
         approval_count = await anyio.to_thread.run_sync(store.approval_count)
         return JSONResponse({"chats": rows, "next": next_cursor, "approval_count": approval_count})
 
@@ -289,6 +295,76 @@ def create_app() -> Starlette:
         except KeyError as exc:
             raise HTTPException(404, "chat not found") from exc
         return JSONResponse(row)
+
+    async def page_tools(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        page_id = request.path_params["id"]
+        if await anyio.to_thread.run_sync(store.page, page_id) is None:
+            raise HTTPException(404, "page not found")
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(403, "forbidden")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        tools = await anyio.to_thread.run_sync(store.page_tools, page_id)
+        return JSONResponse(
+            {
+                "tools": [
+                    {
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "operation": tool["implementation"]["operation"],
+                        "collection": tool["implementation"]["collection"],
+                        "input_schema": tool["input_schema"],
+                        "version": tool["version"],
+                        "needs_record_id": tool["implementation"]["operation"] in {"get", "update"},
+                        "needs_version": True,
+                    }
+                    for tool in tools
+                ]
+            }
+        )
+
+    async def invoke_tool(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        page_id = request.path_params["id"]
+        if await anyio.to_thread.run_sync(store.page, page_id) is None:
+            raise HTTPException(404, "page not found")
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(403, "forbidden")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            error = ValidationError("", "valid JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        if not isinstance(body, dict) or set(body) - {"arguments", "version"}:
+            error = ValidationError("", "only properties: arguments, version")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        arguments = body.get("arguments", {})
+        version = body.get("version")
+        if isinstance(version, bool) or not isinstance(version, int):
+            error = ValidationError("/version", "type: integer")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        try:
+            result = await anyio.to_thread.run_sync(
+                call_record, store, page_id, request.path_params["name"], arguments, version
+            )
+        except VersionConflict as exc:
+            return JSONResponse({"error": error_document(exc)}, status_code=409)
+        except PermissionError as exc:
+            raise HTTPException(404, "tool not found") from exc
+        except ValidationError as exc:
+            return JSONResponse({"error": error_document(exc)}, status_code=400)
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(result)
 
     async def records(request):
         page_id = request.path_params["id"]
@@ -361,6 +437,8 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/tools", page_tools),
+            Route("/api/pages/{id}/tools/{name}/invoke", invoke_tool, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
