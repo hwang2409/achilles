@@ -18,7 +18,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   let releaseChunk = () => {};
   const chunkReleased = new Promise<void>((resolve) => { releaseChunk = resolve; });
   let heldChunk: Route | null = null;
-  const holdVimChunk = async (route: Route) => { heldChunk = route; await chunkReleased; await route.continue(); };
+  let finishChunk = () => {};
+  const chunkFinished = new Promise<void>((resolve) => { finishChunk = resolve; });
+  const holdVimChunk = async (route: Route) => { heldChunk = route; await chunkReleased; try { await route.continue(); } finally { finishChunk(); } };
   await page.route("**/assets/VimComposer-*.js", holdVimChunk);
   try {
     await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ vim: true })));
@@ -29,6 +31,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     if (!(await loadingField.isDisabled())) throw new Error("vim loading fallback accepted typed input");
   } finally {
     releaseChunk();
+    if (heldChunk) await chunkFinished;
     await page.unroute("**/assets/VimComposer-*.js", holdVimChunk);
   }
   const composer = page.locator('.vim-composer[data-part="composer"]');
