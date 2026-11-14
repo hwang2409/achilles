@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
+import { isEditableTarget } from "./keyboard";
 import { createPageListOwner, initialPageListState, type PageLink, type PageListOwner } from "./pageList";
 
 export type Chat = {
@@ -176,7 +177,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
-      if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
+      if (isEditableTarget(event)) return;
+      if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [loading, onNewChat, onToggleCreateMode, settingsOpen]);
