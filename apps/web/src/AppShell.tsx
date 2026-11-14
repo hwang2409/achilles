@@ -173,7 +173,13 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     if (!rows.length) return;
     event.preventDefault();
     const current = rows.indexOf(document.activeElement as HTMLElement);
-    const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1 : current < 0 ? (event.key === "ArrowDown" ? 0 : rows.length - 1) : current + (event.key === "ArrowDown" ? 1 : -1);
+    let next = current;
+    switch (event.key) {
+      case "Home": next = 0; break;
+      case "End": next = rows.length - 1; break;
+      case "ArrowDown": next = current < 0 ? 0 : current + 1; break;
+      case "ArrowUp": next = current < 0 ? rows.length - 1 : current - 1; break;
+    }
     if (next >= 0 && next < rows.length) rows[next].focus();
   };
   const searchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {

@@ -30,7 +30,7 @@ export async function expectBrowserErrors(
     observed.push(description);
     const index = expected.findIndex((item, i) => responses[i] < (item.count ?? 1) && request.method() === item.method && sameUrl(value.url(), item.url) && value.status() === item.status);
     if (index >= 0) responses[index] += 1;
-    else if (expected.some((item) => item.status === value.status())) violations.push(`unexpected browser response: ${description}`);
+    else if (value.status() >= 400) violations.push(`unexpected browser response: ${description}`);
   };
   const consoleMessage = (value: ResponseLike | MessageLike) => {
     if (!("location" in value) || value.type() !== "error") return;

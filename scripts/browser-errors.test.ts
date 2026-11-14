@@ -27,9 +27,10 @@ describe("expectBrowserErrors", () => {
     const page = fakePage();
     let stepFinished = false;
     await expect(expectBrowserErrors(page, expected, async () => {
-      page.emit("response", response("GET", "http://test/other", 503));
+      page.emit("response", response("GET", "http://test/fail", 503));
+      page.emit("response", response("GET", "http://test/other", 500));
       stepFinished = true;
-    })).rejects.toThrow("unexpected browser response: GET http://test/other 503");
+    })).rejects.toThrow("unexpected browser response: GET http://test/other 500");
     expect(stepFinished).toBe(true);
   });
 });
