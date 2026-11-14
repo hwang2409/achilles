@@ -20,6 +20,34 @@ from .records import call_record
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
+_UPDATE_TOOL_EXAMPLE = {
+    "bundle": {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "update_item",
+        "description": "update an item",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+            },
+            "required": ["record_id", "revision"],
+        },
+        "implementation": {
+            "operation": "update",
+            "collection": "items",
+            "data_schema": {"type": "object"},
+        },
+    }
+}
+_UPDATE_TOOL_EXAMPLE_TEXT = json.dumps(_UPDATE_TOOL_EXAMPLE, separators=(",", ":"))
+_FIELD_GUIDANCE = (
+    "Use the user's exact field words: if they say verdict, name it verdict, not label. "
+    "If status, done, verdict, rating, or another field will change later, also create an "
+    "update tool. "
+)
+
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
     "properties": {"route": {"type": "string"}, "page_id": {"type": "string"}},
@@ -144,6 +172,12 @@ def _inspect_error() -> CallToolResult:
     return _safe_error(ValidationError("", "authorized page", "forbidden"))
 
 
+def _with_note(result: dict[str, Any], note: str | None) -> dict[str, Any]:
+    if note:
+        result["note"] = note
+    return result
+
+
 def _validate_create(name: str, args: Any) -> None:
     schema = {
         "create_page": CREATE_PAGE_SCHEMA,
@@ -200,7 +234,9 @@ def build_mcp(store: PageStore):
                     Tool(
                         name="create_page",
                         description=(
-                            "create a page; available only in create mode. A detail block can "
+                            "create a page; available only in create mode. "
+                            + _FIELD_GUIDANCE
+                            + "A detail block can "
                             "select records with collection and filter, for example "
                             '{"field":"run_id","equals":"run-002"}; use a field from the '
                             "collection's assigned tool schema. The result reports how many "
@@ -214,10 +250,12 @@ def build_mcp(store: PageStore):
                         name="create_tool",
                         description=(
                             "create a page-owned immutable declarative tool version; "
-                            "available only in create mode; results: insert/update -> "
-                            "{record_id, revision, ...collection fields}, get -> that object "
-                            "or null, list -> an array of those objects; omit output_schema "
-                            "or provide the exact derived schema; bundle <= 64 KB"
+                            + _FIELD_GUIDANCE
+                            + "For an update tool, use this minimal example: "
+                            + _UPDATE_TOOL_EXAMPLE_TEXT
+                            + ". revision comes from list/get results and guards against "
+                            "overwriting a newer change. Results include record_id and revision; "
+                            "omit output_schema because it is derived; bundle <= 64 KB"
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
@@ -303,7 +341,13 @@ def build_mcp(store: PageStore):
             try:
                 _validate_create(params.name, args)
                 if params.name == "create_page":
-                    created, digest, existing, detail_summary = await anyio.to_thread.run_sync(
+                    (
+                        created,
+                        digest,
+                        existing,
+                        detail_summary,
+                        note,
+                    ) = await anyio.to_thread.run_sync(
                         store.create_page,
                         args["route"],
                         args["title"],
@@ -311,13 +355,16 @@ def build_mcp(store: PageStore):
                         page["id"],
                         args.get("tools"),
                     )
-                    result = {
-                        "page_id": created["id"],
-                        "route": created["route"],
-                        "digest": digest,
-                        "existing": existing,
-                        "detail_filter_matches": detail_summary,
-                    }
+                    result = _with_note(
+                        {
+                            "page_id": created["id"],
+                            "route": created["route"],
+                            "digest": digest,
+                            "existing": existing,
+                            "detail_filter_matches": detail_summary,
+                        },
+                        note,
+                    )
                 elif params.name == "update_layout":
                     version, digest, detail_summary = await anyio.to_thread.run_sync(
                         store.update_layout,
@@ -331,10 +378,10 @@ def build_mcp(store: PageStore):
                         "detail_filter_matches": detail_summary,
                     }
                 else:
-                    created, digest = await anyio.to_thread.run_sync(
+                    created, digest, note = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
-                    result = {**created, "digest": digest}
+                    result = _with_note({**created, "digest": digest}, note)
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
