@@ -53,6 +53,27 @@ test("reserved tool refusal requires the exact current or baseline error", () =>
   expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" })).toBe(false);
 });
 
+test("record-crud list matching is order-independent, distinct, and complete", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const check = { id: "list", type: "successful_result" as const, page: "p", tool: "achilles__list_records", value: [{ id: "record-1", status: "done" }, { id: "record-2" }] };
+  const result = (records: unknown[]) => gradeCheck(check, { pages, results: [{ page_id: "p1", tool: "achilles__list_records", success: true, data: { records } }] }).pass;
+  expect(result([{ id: "record-2", extra: true }, { id: "record-1", status: "done", extra: true }])).toBe(true);
+  expect(result([{ id: "record-1", status: "done" }])).toBe(false);
+  expect(structurallyContains([{ id: "record-1" }], [{ id: "record-1" }, { id: "record-1" }])).toBe(false);
+});
+
+test("reading-list requires successful update and read results in the follow-up chat", () => {
+  const pages = [{ id: "p1", alias: "p" }]; const final = { title: "Synthetic Book", status: "read" };
+  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: { before: { title: "Synthetic Book", status: "unread" }, after: final } };
+  const tool_versions = [{ page_id: "p1", name: "add_book", collection: "books", operation: "insert" }, { page_id: "p1", name: "update_book", collection: "books", operation: "update" }, { page_id: "p1", name: "list_books", collection: "books", operation: "list" }];
+  const insertedFinal = [{ page_id: "p1", chat_id: "reading-chat", tool: "achilles__add_book", success: true, data: final }];
+  expect(gradeCheck(check, { pages, tool_versions, records: [{ page_id: "p1", data: final }], results: insertedFinal }).pass).toBe(false);
+  const finalResults = [{ page_id: "p1", chat_id: "reading-chat", tool: "achilles__update_book", success: true, data: final }, { page_id: "p1", chat_id: "reading-chat", tool: "achilles__list_books", success: true, data: { records: [final] } }];
+  expect(gradeCheck(check, { pages, tool_versions, results: [...insertedFinal, ...finalResults] }).pass).toBe(false);
+  const initial = { page_id: "p1", chat_id: "reading-chat", tool: "achilles__add_book", success: true, data: { title: "Synthetic Book", status: "unread" } };
+  expect(gradeCheck(check, { pages, tool_versions, results: [initial, ...finalResults] }).pass).toBe(true);
+});
+
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {
   const pages = [{ id: "p1", alias: "p" }];
   expect(gradeCheck({ id: "ops", type: "operations", page: "p", value: ["insert", "update"] }, { pages, tool_versions: [{ page_id: "p1", collection: "books", operation: "insert" }, { page_id: "p1", collection: "books", operation: "update" }] }).pass).toBe(true);

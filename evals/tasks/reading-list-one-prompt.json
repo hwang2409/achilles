@@ -47,6 +47,22 @@
       ]
     },
     {
+      "id": "update-and-read",
+      "type": "updated_record",
+      "page": "reading",
+      "chat": "reading-chat",
+      "value": {
+        "before": {
+          "title": "Synthetic Book",
+          "status": "unread"
+        },
+        "after": {
+          "title": "Synthetic Book",
+          "status": "read"
+        }
+      }
+    },
+    {
       "id": "record",
       "type": "record",
       "page": "reading",

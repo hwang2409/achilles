@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "approval" | "reconnect" | "record" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "history_absent" | "layout_contains";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "approval" | "reconnect" | "record" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "history_absent" | "layout_contains";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -26,7 +26,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "approval", "reconnect", "record", "successful_result", "no_error", "browser_text", "prompt", "same_page", "history_absent", "layout_contains"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "approval", "reconnect", "record", "successful_result", "no_error", "browser_text", "prompt", "same_page", "history_absent", "layout_contains"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -75,7 +75,12 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "operations" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => ["insert", "update", "list", "get"].includes(String(value))))) throw new Error(`checks[${i}] needs operation kinds`);
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
-  if (["record", "layout_contains"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (["record", "updated_record", "layout_contains"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (check.type === "updated_record") {
+    if (typeof check.chat !== "string" || !check.value || typeof check.value !== "object" || Array.isArray(check.value)) throw new Error(`checks[${i}] needs chat and transition`);
+    own(check.value as object, ["before", "after"], `checks[${i}].value`); const transition = check.value as Record<string, unknown>;
+    if (transition.before === undefined || transition.after === undefined) throw new Error(`checks[${i}] needs before and after`);
+  }
   if (["browser_text", "prompt", "history_absent"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
 }
@@ -107,8 +112,14 @@ const expectedPageId = (snapshot: EvalSnapshot, alias?: string) => rows(snapshot
 const successful = (row: Record<string, unknown>) => row.success === true || (row.success !== false && row.error == null && row.ok !== false);
 export function structurallyContains(actual: unknown, expected: unknown): boolean {
   if (Object.is(actual, expected)) return true;
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual)) return Boolean(actual && typeof actual === "object" && Object.values(actual).some(value => structurallyContains(value, expected)));
+    if (expected.length > actual.length) return false;
+    const match = (index: number, used: Set<number>): boolean => index === expected.length || actual.some((value, candidate) => !used.has(candidate) && structurallyContains(value, expected[index]) && match(index + 1, new Set([...used, candidate])));
+    return match(0, new Set());
+  }
   if (Array.isArray(actual)) return actual.some(value => structurallyContains(value, expected));
-  if (!actual || !expected || typeof actual !== "object" || typeof expected !== "object" || Array.isArray(expected)) return false;
+  if (!actual || !expected || typeof actual !== "object" || typeof expected !== "object") return false;
   const actualObject = actual as Record<string, unknown>; const entries = Object.entries(expected as Record<string, unknown>);
   if (entries.every(([key, value]) => key in actualObject && structurallyContains(actualObject[key], value))) return true;
   return Object.values(actualObject).some(value => structurallyContains(value, expected));
@@ -128,6 +139,15 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   operations: ({ check, owned }) => {
     const versions = owned("tool_versions"); const required = check.value as string[];
     return [...new Set(versions.map(row => row.collection))].some(collection => required.every(operation => versions.some(row => row.collection === collection && row.operation === operation)));
+  },
+  updated_record: ({ check, snapshot, page, owned }) => {
+    const versions = owned("tool_versions"); const results = rows(snapshot, "results").filter(row => row.page_id === page && row.chat_id === check.chat && successful(row));
+    const names = (collection: unknown, operations: string[]) => new Set(versions.filter(row => row.collection === collection && operations.includes(String(row.operation))).map(row => `achilles__${row.name}`));
+    const transition = check.value as { before: unknown; after: unknown };
+    return [...new Set(versions.map(row => row.collection))].some(collection => {
+      const inserts = names(collection, ["insert"]); const updates = names(collection, ["update"]); const reads = names(collection, ["list", "get"]);
+      return results.some(row => inserts.has(String(row.tool)) && structurallyContains(row.data ?? row.result, transition.before)) && results.some(row => updates.has(String(row.tool)) && structurallyContains(row.data ?? row.result, transition.after)) && results.some(row => reads.has(String(row.tool)) && structurallyContains(row.data ?? row.result, transition.after));
+    });
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
