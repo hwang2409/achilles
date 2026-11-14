@@ -18,22 +18,29 @@ def test_control_writes_are_always_complete(tmp_path):
     errors = []
 
     def writer():
-        for value in range(1_000):
-            write_control(control, {"value": value})
+        try:
+            for value in range(1_000):
+                write_control(control, {"value": value})
+        except BaseException as error:
+            errors.append(error)
 
     def reader():
-        while writer_thread.is_alive():
-            try:
-                document = json.loads(control.read_text())
-                assert isinstance(document["value"], int)
-            except (AssertionError, json.JSONDecodeError, FileNotFoundError) as error:
-                errors.append(error)
+        try:
+            while writer_thread.is_alive():
+                try:
+                    document = json.loads(control.read_text())
+                    assert isinstance(document["value"], int)
+                except (AssertionError, json.JSONDecodeError, FileNotFoundError) as error:
+                    errors.append(error)
+        except BaseException as error:
+            errors.append(error)
 
-    writer_thread = threading.Thread(target=writer)
-    reader_thread = threading.Thread(target=reader)
+    writer_thread = threading.Thread(target=writer, daemon=True)
+    reader_thread = threading.Thread(target=reader, daemon=True)
     writer_thread.start()
     reader_thread.start()
-    writer_thread.join()
-    reader_thread.join()
-
+    writer_thread.join(timeout=10)
+    reader_thread.join(timeout=10)
+    assert not writer_thread.is_alive(), "writer thread hung"
+    assert not reader_thread.is_alive(), "reader thread hung"
     assert not errors
