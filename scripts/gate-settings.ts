@@ -59,13 +59,22 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await openSettings(page);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("desktop settings escape did not restore opener focus"); });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
   await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
     document.body.tabIndex = -1;
     document.body.focus();
     document.body.removeAttribute("tabindex");
   });
-  if (!await page.evaluate(() => document.activeElement === document.body)) throw new Error("could not move focus to body");
+  await page.waitForFunction(() => document.activeElement === document.body, undefined, { timeout: 2_000 }).catch(async () => {
+    const focused = await page.evaluate(() => {
+      const element = document.activeElement;
+      return { tagName: element?.tagName ?? null, ariaLabel: element?.getAttribute("aria-label") ?? null };
+    });
+    throw new Error(`could not move focus to body: focused ${focused.tagName ?? "none"}${focused.ariaLabel ? ` (${focused.ariaLabel})` : ""}`);
+  });
   await openSettings(page);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("body-opened settings escape did not focus the composer"); });
