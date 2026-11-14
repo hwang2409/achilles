@@ -178,7 +178,9 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   protocol = await connectEvalProtocol(discovery, onEvent); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
     if (sessions.has(chat)) return sessions.get(chat)!; const plan = task.page_plan.find(page => page.alias === alias)!;
-    const pageId = plan.source === "created" ? createdPageId(events, plan) : pages.get(alias)!; pages.set(alias, pageId);
+    let pageId = plan.source === "created" ? undefined : pages.get(alias)!;
+    if (plan.source === "created") { try { pageId = createdPageId(events, plan); } catch { pageId = String((await databaseSnapshot(stack)).pages?.find(page => page.route === plan.route)?.id ?? ""); } }
+    if (!pageId) throw new Error(`page ${alias} is unavailable`); pages.set(alias, pageId);
     if (plan.source === "created") { const mode = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal); if (!mode.ok) throw new Error(`could not set create mode for ${alias}`); }
     const binding = await pageBinding(stack, pageId, hidden, signal); const created = await protocol.newSession({ cwd: binding.page.workspace, provider: stack.provider, model: stack.model, approval_mode: task.approval_mode ?? "allow", mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${binding.credential}` } }] });
     const id = String(created.session?.session_id ?? created.session_id ?? ""); if (!id) throw new Error("new_session returned no session id");
@@ -191,7 +193,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       const session = await getSession(step.chat, step.page); try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
-    for (const [chat, session] of sessions) histories.set(chat, await protocol.sessionHistory(session.id));
+    for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
     for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) pages.set(plan.alias, pageIdFromResults(tools.results, plan));
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }

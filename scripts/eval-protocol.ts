@@ -6,7 +6,7 @@ type Rpc = { id?: number; result?: any; error?: { message?: string; code?: numbe
 
 class Client implements EvalProtocol {
   private nextId = 1;
-  private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; method: string }>();
   constructor(private socket: WebSocket, private onEvent?: EventHandler) {
     socket.onmessage = (message) => {
       let value: Rpc;
@@ -16,7 +16,7 @@ class Client implements EvalProtocol {
         clearTimeout(waiter.timer); this.pending.delete(value.id);
         if (value.error) {
           const error = new Error(value.error.message ?? `zeta rpc error ${value.error.code ?? ""}`) as Error & { code?: number; method?: string };
-          error.code = value.error.code; error.method = method;
+          error.code = value.error.code; error.method = waiter.method;
           waiter.reject(error);
         } else waiter.resolve(value.result);
       } else if (value.method === "event" && value.params) this.onEvent?.(value.params as Record<string, any>);
@@ -29,7 +29,7 @@ class Client implements EvalProtocol {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`zeta ${method} timed out`)); }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, method });
       this.socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
     });
   }
