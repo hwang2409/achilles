@@ -207,9 +207,12 @@ def build_mcp(store: PageStore):
                     Tool(
                         name="create_page",
                         description=(
-                            "create a page; available only in create mode; a detail block shows "
-                            "field labels only and cannot pin one record; use a list block to "
-                            "show records"
+                            "create a page; available only in create mode. A detail block can "
+                            "select records with collection and filter, for example "
+                            '{"field":"run_id","equals":"run-002"}; use a field from the '
+                            "collection's assigned tool schema. It shows the highest creation "
+                            "time, with ties resolved by highest record id; without a filter it "
+                            "shows field labels only."
                         ),
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
@@ -233,8 +236,12 @@ def build_mcp(store: PageStore):
                             "only what the user asked (insert, reorder, edit, or remove blocks), "
                             "and pass the full layout with `layout_version` as expected_version. "
                             "On a version conflict, inspect again and retry. To change another "
-                            "page, open that page's chat."
-
+                            "page, open that page's chat. A detail block can select records with "
+                            "collection and filter, for example "
+                            '{"field":"run_id","equals":"run-002"}; use a field from the '
+                            "collection's assigned tool schema. It shows the highest creation "
+                            "time, with ties resolved by highest record id; without a filter it "
+                            "shows field labels only."
                         ),
                         inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),

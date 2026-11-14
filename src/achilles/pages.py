@@ -19,6 +19,19 @@ _COLLECTION_KEY_PATTERN = TOOL_BUNDLE_SCHEMA["properties"]["implementation"]["pr
     "collection"
 ]["pattern"]
 
+_EQUALITY_FILTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "field": {"type": "string", "pattern": _COLLECTION_KEY_PATTERN},
+        "equals": {
+            "type": ["string", "number", "boolean", "null"],
+            "description": "Exact JSON scalar match. Null also matches a missing field.",
+        },
+    },
+    "required": ["field", "equals"],
+    "additionalProperties": False,
+}
+
 _LAYOUT_BLOCK_SCHEMA = {
     "oneOf": [
         {
@@ -34,15 +47,20 @@ _LAYOUT_BLOCK_SCHEMA = {
         {
             "type": "object",
             "description": (
-                "shows field labels only and cannot pin one record; "
-                "use a list block to show records"
+                "Shows field labels only unless filter selects records from collection, for "
+                'example {"field":"run_id","equals":"run-002"}. One match shows its '
+                "values; multiple matches show the highest creation time, with ties resolved "
+                "by highest record id. Get field names from an assigned tool's schema."
             ),
             "properties": {
                 "type": {"const": "detail"},
                 "title": {"type": "string"},
+                "collection": {"type": "string"},
                 "fields": {"type": "array", "items": {"type": "string"}},
+                "filter": _EQUALITY_FILTER_SCHEMA,
             },
             "required": ["type", "title", "fields"],
+            "dependentRequired": {"filter": ["collection"]},
             "additionalProperties": False,
         },
         {
@@ -78,23 +96,7 @@ _LAYOUT_BLOCK_SCHEMA = {
                 "label": {"type": "string"},
                 "collection": {"type": "string"},
                 "count": {"const": True},
-                "where": {
-                    "type": "object",
-                    "properties": {
-                        "field": {
-                            "type": "string",
-                            "pattern": _COLLECTION_KEY_PATTERN,
-                        },
-                        "equals": {
-                            "type": ["string", "number", "boolean", "null"],
-                            "description": (
-                                "Exact JSON scalar match. Null also matches a missing field."
-                            ),
-                        },
-                    },
-                    "required": ["field", "equals"],
-                    "additionalProperties": False,
-                },
+                "where": _EQUALITY_FILTER_SCHEMA,
             },
             "required": ["type", "label", "collection", "count"],
             "additionalProperties": False,
@@ -184,6 +186,7 @@ def validate_layout(
     assigned_tools: set[str] | None = None,
     assigned_collections: set[str] | None = None,
     prefix: str = "",
+    collection_fields: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
@@ -198,7 +201,8 @@ def validate_layout(
                 ),
             )
         if (
-            block["type"] == "list"
+            block["type"] in {"list", "detail"}
+            and "collection" in block
             and assigned_collections is not None
             and block["collection"] not in assigned_collections
         ):
@@ -215,7 +219,57 @@ def validate_layout(
                     '"object","properties":{}}}}. A simple inferred input_schema is fine.'
                 ),
             )
+        if (
+            block["type"] == "detail"
+            and "filter" in block
+            and collection_fields is not None
+            and block["filter"]["field"] not in collection_fields.get(block["collection"], set())
+        ):
+            raise ValidationError(
+                f"{prefix}/blocks/{index}/filter/field",
+                "field in collection schema",
+                hint=(
+                    "Use one of the collection's fields; inspect its assigned tool schema in "
+                    "tools/list to see them."
+                ),
+            )
     return layout
+
+
+def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
+    fields: dict[str, set[str]] = {}
+    for bundle in bundles:
+        implementation = bundle["implementation"]
+        fields.setdefault(implementation["collection"], set()).update(
+            implementation["data_schema"].get("properties", {})
+        )
+    return fields
+
+
+def _json_scalar_match(
+    field: str, value: str | int | float | bool | None
+) -> tuple[str, tuple[Any, ...]]:
+    path = f'$."{field}"'
+    if value is None:
+        value_type = "null"
+    elif isinstance(value, bool):
+        value_type = "boolean"
+    elif isinstance(value, (int, float)):
+        value_type = "number"
+    else:
+        value_type = "text"
+    return (
+        "json_extract(document, ?) IS json_extract(?, '$') "
+        "AND CASE COALESCE(json_type(document, ?), 'null') "
+        "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' "
+        "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' "
+        "ELSE COALESCE(json_type(document, ?), 'null') END = ?",
+        (path, json.dumps(value), path, path, value_type),
+    )
+
+
+def validate_record_filter(value: Any) -> dict[str, Any]:
+    return validate_schema(value, _EQUALITY_FILTER_SCHEMA)
 
 
 class PageStore:
@@ -399,32 +453,11 @@ class PageStore:
                     (page_id, block["collection"]),
                 ).fetchone()[0]
             else:
-                path = f'$."{where["field"]}"'
-                value = where["equals"]
-                if value is None:
-                    value_type = "null"
-                elif isinstance(value, bool):
-                    value_type = "boolean"
-                elif isinstance(value, (int, float)):
-                    value_type = "number"
-                else:
-                    value_type = "text"
+                predicate, parameters = _json_scalar_match(where["field"], where["equals"])
                 count = db.execute(
-                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? "
-                    "AND json_extract(document, ?) IS json_extract(?, '$') "
-                    "AND CASE COALESCE(json_type(document, ?), 'null') "
-                    "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' "
-                    "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' "
-                    "ELSE COALESCE(json_type(document, ?), 'null') END = ?",
-                    (
-                        page_id,
-                        block["collection"],
-                        path,
-                        json.dumps(value),
-                        path,
-                        path,
-                        value_type,
-                    ),
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? AND "
+                    + predicate,
+                    (page_id, block["collection"], *parameters),
                 ).fetchone()[0]
             block["value"] = count
         return document
@@ -489,6 +522,29 @@ class PageStore:
                 "SELECT record_id, document, revision FROM page_record "
                 "WHERE page_id=? AND collection=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (page_id, collection, limit),
+            ).fetchall()
+        return (
+            [{**json.loads(row[1]), "record_id": row[0], "revision": row[2]} for row in rows],
+            total,
+        )
+
+    def matching_records(
+        self,
+        page_id: str,
+        collection: str,
+        field_filter: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], int]:
+        field_filter = validate_record_filter(field_filter)
+        predicate, parameters = _json_scalar_match(field_filter["field"], field_filter["equals"])
+        with self._connect() as db:
+            base = "FROM page_record WHERE page_id=? AND collection=? AND " + predicate
+            query_parameters = (page_id, collection, *parameters)
+            total = db.execute("SELECT COUNT(*) " + base, query_parameters).fetchone()[0]
+            rows = db.execute(
+                "SELECT record_id, document, revision "
+                + base
+                + " ORDER BY created_at DESC, record_id DESC LIMIT 1",
+                query_parameters,
             ).fetchall()
         return (
             [{**json.loads(row[1]), "record_id": row[0], "revision": row[2]} for row in rows],
@@ -660,6 +716,7 @@ class PageStore:
             {bundle["name"] for bundle in bundles},
             {bundle["implementation"]["collection"] for bundle in bundles},
             "/layout",
+            _collection_fields(bundles),
         )
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
@@ -819,6 +876,7 @@ class PageStore:
                 {tool["name"] for tool in tools},
                 {bundle["implementation"]["collection"] for bundle in bundles},
                 "/layout",
+                _collection_fields(bundles),
             )
             if expected_version != active_version:
                 raise ValidationError(
