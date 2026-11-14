@@ -48,39 +48,6 @@ function VimLoading() {
   return <div className="vim-loading" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><textarea rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
 }
 
-function storeSnapshot(store: ReturnType<typeof createRunStore> | null): string {
-  if (!store) return "idle:0:0:0::0:";
-  const state = store.getState();
-  const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
-  const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
-  const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
-  const toolStates = state.outline.map((item) => {
-    const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
-    return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
-  }).join(",");
-  return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
-}
-
-function subscribePageChanges(
-  store: ReturnType<typeof createRunStore> | null,
-  completed: Set<string>,
-  refreshPage: () => Promise<void>,
-  onComplete: () => void,
-) {
-  return store?.subscribe(() => {
-    for (const item of store.getState().outline) {
-      if (item.kind !== "tool") continue;
-      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
-      const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completed.has(item.id)) {
-        completed.add(item.id);
-        onComplete();
-        if (["update_layout", "achilles__update_layout"].includes(name)) void refreshPage();
-      }
-    }
-  });
-}
-
 function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
   return waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
 }
@@ -120,7 +87,17 @@ export function App() {
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
-  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), () => storeSnapshot(store));
+  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
+    const state = store.getState();
+    const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
+    const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
+    const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
+    const toolStates = state.outline.map((item) => {
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
+      return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
+    }).join(",");
+    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
+  } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
   const previousRefreshKey = useRef(refreshKey);
@@ -141,10 +118,18 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
-  useEffect(
-    () => subscribePageChanges(store, completedCreatePages.current, active.refreshPage, () => setPageRefreshNonce((current) => current + 1)),
-    [active.refreshPage, store],
-  );
+  useEffect(() => store?.subscribe(() => {
+    for (const item of store.getState().outline) {
+      if (item.kind !== "tool") continue;
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
+      const name = value?.tool_call?.name ?? "";
+      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+        completedCreatePages.current.add(item.id);
+        setPageRefreshNonce((current) => current + 1);
+        if (["update_layout", "achilles__update_layout"].includes(name)) void active.refreshPage();
+      }
+    }
+  }), [active.refreshPage, store]);
   useEffect(() => {
     if (previousRefreshKey.current === refreshKey) return;
     previousRefreshKey.current = refreshKey;
