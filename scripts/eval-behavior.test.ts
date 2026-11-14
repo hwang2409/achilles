@@ -51,7 +51,9 @@ async function runEval(target: string, task: string, extraEnv: Record<string, st
   }
   const [stdout, stderr] = await output;
   expect(timed.timeout, `eval exceeded 45 seconds\n${stdout}\n${stderr}`).toBe(false);
-  const row = JSON.parse(await readFile(join(report, "report.json"), "utf8"));
+  const reportPath = join(report, "report.json");
+  expect(await Bun.file(reportPath).exists(), `eval exited ${timed.code} without a report\n${stdout}\n${stderr}`).toBe(true);
+  const row = JSON.parse(await readFile(reportPath, "utf8"));
   return { code: timed.code, stdout, stderr, task: row.tasks[0] };
 }
 
