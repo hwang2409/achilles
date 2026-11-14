@@ -359,6 +359,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const creationError = status.error ? attachmentError(status.error, "creation") : null;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
   const createAfterLoad = useRef(false);
+  const pendingSelection = useRef<{ sessionId: string; sawRunning: boolean } | null>(null);
 
   const applyPendingCreateMode = useCallback(async (ready: ReadyState, enabled: boolean) => {
     if (!client) throw new Error("zeta is not connected");
@@ -498,7 +499,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       }
     }
     const delivery_id = crypto.randomUUID();
-    await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
+    if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
+    try {
+      await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
+    } catch (error) {
+      if (pendingSelection.current?.sessionId === current.sessionId) pendingSelection.current = null;
+      throw error;
+    }
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {
@@ -547,6 +554,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, [client, state, updateReady]);
 
   const recordLastState = useCallback((lastState: string) => {
+    if (lastState === "running" && pendingSelection.current) pendingSelection.current.sawRunning = true;
+    if (lastState === "idle" && pendingSelection.current?.sawRunning) {
+      setSelectedId(pendingSelection.current.sessionId);
+      pendingSelection.current = null;
+    }
     if (state.phase !== "ready") return;
     const token = owner.current.token();
     void persistChatState(state.sessionId, lastState)
