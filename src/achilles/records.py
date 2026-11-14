@@ -7,7 +7,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .pages import now
-from .tools import bundle_digest, validate_bundle
+from .tools import validate_bundle
 from .validation import ValidationError, validate_schema
 
 
@@ -104,7 +104,7 @@ def call_record(
         raise ValueError("tool arguments must be an object")
     with store.transaction() as db:
         row = db.execute(
-            """SELECT t.id, t.owner_page_id, v.version, v.bundle FROM tool t
+            """SELECT t.id, t.owner_page_id, v.version, v.digest, v.bundle FROM tool t
                JOIN page_tool pt ON pt.tool_id=t.id JOIN tool_version v
                ON v.tool_id=t.id AND v.version=pt.active_version
                WHERE t.owner_page_id=? AND t.name=? AND pt.page_id=?""",
@@ -131,6 +131,6 @@ def call_record(
         _check(Draft202012Validator(bundle["output_schema"]), result)
         db.execute(
             "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-            (page_id, f"invoke:{tool_name}", bundle_digest(bundle), now()),
+            (page_id, f"invoke:{tool_name}", row["digest"], now()),
         )
         return result
