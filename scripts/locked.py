@@ -4,7 +4,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
@@ -22,18 +21,6 @@ def holder_status(value: str) -> str:
     return status.stdout.strip() if status.returncode == 0 else "missing"
 
 
-# dead holder: macOS CI can delay kernel flock release; this grace is bounded.
-def wait_for_dead_holder_release(lock: object, holder: str) -> bool:
-    for _attempt in range(50):
-        time.sleep(0.01)
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            continue
-    return False
-
-
 def main() -> int:
     lock_path = Path(__file__).resolve().parents[1] / ".cache" / "dev" / "lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,20 +32,12 @@ def main() -> int:
             lock.seek(0)
             holder = lock.read().strip()
             status = holder_status(holder)
-            if status not in {"missing"} and not status.startswith("Z"):
-                suffix = f" (pid {holder})" if holder else ""
-                print(
-                    f"make dev is already running{suffix} (live holder, ps state {status})",
-                    file=sys.stderr,
-                )
-                return 1
-            if not wait_for_dead_holder_release(lock, holder):
-                print(
-                    f"make dev is already running (pid {holder}) "
-                    f"(dead-holder grace exhausted, ps state {status})",
-                    file=sys.stderr,
-                )
-                return 1
+            suffix = f" (pid {holder})" if holder else ""
+            print(
+                f"make dev is already running{suffix} (lock holder ps state {status})",
+                file=sys.stderr,
+            )
+            return 1
 
         lock.seek(0)
         lock.truncate()
