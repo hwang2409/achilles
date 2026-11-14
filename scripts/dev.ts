@@ -27,9 +27,9 @@ export function serveDecision(document: unknown, requestedOrigin: string, comman
   if (!Number.isInteger(value.pid) || !Number.isInteger(value.port) || !Array.isArray(value.origins) || !command || !/(^|[\/\s])zeta\s+serve(?:\s|$)/.test(command)) return { kind: "start" };
   const origins = value.origins.filter((item): item is string => typeof item === "string");
   const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
-  const allowed = origins.includes(requestedOrigin) ? requestedOrigin : origins.includes(alternate) ? alternate : null;
+  const allowed = [alternate, requestedOrigin].find((origin) => origins.includes(origin));
   if (allowed) return { kind: "reuse", document: value as Discovery, origin: allowed };
-  return { kind: "origin-missing", command: `${command} --ws-origin ${shellQuote(requestedOrigin)}` };
+  return { kind: "origin-missing", command: `${command} --ws-origin ${shellQuote(requestedOrigin)} --ws-origin ${shellQuote(alternate)}` };
 }
 
 export function mcpUrl(port: number): string {
@@ -143,7 +143,8 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   if (decision.kind === "origin-missing") throw new Error(`zeta serve is running without ${requestedOrigin}; stop it first, then restart it with: ${decision.command}`);
   const ws = await freePort(); let control = await freePort(); while (control === ws) control = await freePort(); await mkdir(cache, { recursive: true });
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
-  const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-origin", requestedOrigin];
+  const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
+  const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-origin", requestedOrigin, "--ws-origin", alternate];
   const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: { ...process.env, PWD: home }, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
@@ -151,7 +152,7 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
   const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
-  console.log(`started zeta serve on port ${ws}`); return { origin: requestedOrigin };
+  console.log(`started zeta serve on port ${ws}`); return { origin: alternate };
 }
 async function portPid(): Promise<number | null> {
   const result = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
