@@ -1,6 +1,6 @@
 {
   "id": "reading-list-one-prompt",
-  "prompt": "make a page that tracks my reading list",
+  "prompt": "make a page that tracks my reading list with required string fields named `title` and `status`",
   "page_plan": [
     {
       "alias": "home",
