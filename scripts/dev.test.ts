@@ -32,12 +32,38 @@ function alive(pid: number): boolean {
   return result.exitCode === 0 && !result.stdout.toString().trim().startsWith("Z");
 }
 
-function processesContaining(text: string): number[] {
+function processesContaining(text: string): string[] {
   const result = Bun.spawnSync(["ps", "-axo", "pid=,args="]);
   return result.stdout.toString().split("\n").flatMap((line) => {
     const match = line.trim().match(/^(\d+)\s+(.*)$/);
-    return match && match[2].includes(text) ? [Number(match[1])] : [];
+    return match && match[2].includes(text) ? [`pid ${match[1]} ${match[2]}`] : [];
   });
+}
+
+async function diagnostic(args: string[]): Promise<string> {
+  const child = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+    .then(([stdout, stderr]) => stdout + stderr);
+  let timedOut = false;
+  const result = await Promise.race([
+    output,
+    Bun.sleep(5_000).then(() => { timedOut = true; return ""; }),
+  ]);
+  if (timedOut) {
+    try { child.kill("SIGKILL"); } catch {}
+    await Promise.race([child.exited, Bun.sleep(1_000)]);
+    return `[diagnostic timeout: ${args.join(" ")}]`;
+  }
+  await child.exited;
+  return result;
+}
+
+async function killAndReap(child: Bun.Subprocess): Promise<void> {
+  try { child.kill("SIGKILL"); } catch {}
+  await Promise.race([
+    child.exited,
+    Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping pid ${child.pid}`); }),
+  ]);
 }
 
 async function spawnTracked(args: string[], options: Parameters<typeof Bun.spawn>[1]) {
@@ -108,7 +134,8 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   const devCache = resolve(root, ".cache/dev");
   const oldWebStamp = await Bun.file(webStamp).exists() ? await readFile(webStamp) : null;
   const managed: ProcessIdentity[] = [];
-  const spawned: ProcessIdentity[] = [];
+  const spawned: Bun.Subprocess[] = [];
+  const discovered: ProcessIdentity[] = [];
   let zetaPid = 0;
   let foreignPid = 0;
   let crashedChildPid = 0;
@@ -181,7 +208,7 @@ process.exit(0);
   };
   const track = async (args: string[], options: Parameters<typeof Bun.spawn>[1]) => {
     const tracked = await spawnTracked(args, options);
-    spawned.push(tracked.identity);
+    spawned.push(tracked.child);
     return tracked;
   };
   const runDev = async (env = baseEnv) => {
@@ -241,7 +268,7 @@ process.exit(0);
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
     crashedChildPid = Number(await readFile(waiterReady, "utf8"));
     const crashedChildIdentity = await processIdentity(crashedChildPid);
-    if (crashedChildIdentity) spawned.push(crashedChildIdentity);
+    if (crashedChildIdentity) discovered.push(crashedChildIdentity);
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     crashedLockIdentity = crashedIdentity.pid === crashedLockPid ? crashedIdentity : null;
     const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
@@ -255,9 +282,9 @@ process.exit(0);
     const recoveredExit = await recovered.exited;
     const recoveredStderr = await new Response(recovered.stderr).text();
     if (recoveredExit !== 0) {
-      const lsof = Bun.spawnSync(["lsof", resolve(devCache, "lock")]);
-      const ps = Bun.spawnSync(["ps", "-o", "pid,ppid,stat,command", "-p", `${crashedLockPid},${crashedChildPid}`]);
-      console.error(recoveredStderr, lsof.stdout.toString(), lsof.stderr.toString(), ps.stdout.toString(), ps.stderr.toString());
+      const lsof = await diagnostic(["lsof", resolve(devCache, "lock")]);
+      const ps = await diagnostic(["ps", "-o", "pid,ppid,stat,command", "-p", `${crashedLockPid},${crashedChildPid}`]);
+      console.error(recoveredStderr, lsof, ps);
     }
     expect(recoveredExit, recoveredStderr).toBe(0);
     await stop(crashedChildIdentity!);
@@ -277,7 +304,8 @@ process.exit(0);
     await rm(home, { recursive: true, force: true });
     await waitFor(() => !alive(zetaPid), "fake zeta to stop after its home is removed");
   } finally {
-    const owned: ProcessIdentity[] = [...managed, ...spawned];
+    for (const child of spawned) await killAndReap(child).catch(() => {});
+    const owned: ProcessIdentity[] = [...managed, ...discovered];
     const addStoredIdentity = async (path: string) => {
       try {
         const value = JSON.parse(await readFile(path, "utf8"));
