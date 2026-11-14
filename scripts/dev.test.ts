@@ -38,18 +38,20 @@ async function stop(pid: number) {
   await waitFor(() => !alive(pid), `pid ${pid} to stop`);
 }
 
-test("serve discovery requires a live zeta process and an exact origin", () => {
-  expect(serveDecision(null, "http://127.0.0.1:43002", null).kind).toBe("start");
-  expect(serveDecision({ pid: 123, port: 43003, origins: ["http://127.0.0.1:43002"] }, "http://127.0.0.1:43002", zetaCommand).kind).toBe("reuse");
-  const localhost = serveDecision({ pid: 123, port: 43003, origins: ["http://localhost:43002"] }, "http://127.0.0.1:43002", zetaCommand);
-  expect(localhost).toMatchObject({ kind: "reuse", origin: "http://localhost:43002" });
-  expect(serveDecision({ pid: 123, port: 43003, origins: [] }, "http://127.0.0.1:43002", zetaCommand)).toEqual({
+test("serve discovery requires a live zeta process and allows either local origin", () => {
+  const requested = "http://127.0.0.1:43002";
+  const localhost = "http://localhost:43002";
+  expect(serveDecision(null, requested, null).kind).toBe("start");
+  expect(serveDecision({ pid: 123, port: 43003, origins: [localhost] }, requested, zetaCommand)).toMatchObject({ kind: "reuse", origin: localhost });
+  expect(serveDecision({ pid: 123, port: 43003, origins: [requested] }, requested, zetaCommand)).toMatchObject({ kind: "reuse", origin: requested });
+  expect(serveDecision({ pid: 123, port: 43003, origins: [requested, localhost] }, requested, zetaCommand)).toMatchObject({ kind: "reuse", origin: localhost });
+  expect(serveDecision({ pid: 123, port: 43003, origins: [] }, requested, zetaCommand)).toEqual({
     kind: "origin-missing",
-    command: `${zetaCommand} --ws-origin 'http://127.0.0.1:43002'`,
+    command: `${zetaCommand} --ws-origin '${requested}' --ws-origin '${localhost}'`,
   });
-  expect(serveDecision({ pid: 123, port: 43003, origins: ["https://example.test"] }, "http://127.0.0.1:43002", zetaCommand).kind).toBe("origin-missing");
-  expect(serveDecision({ pid: 123, port: 43003, origins: ["http://127.0.0.1:43002"] }, "http://127.0.0.1:43002", null).kind).toBe("start");
-  expect(serveDecision({ pid: 123, port: 43003, origins: ["http://127.0.0.1:43002"] }, "http://127.0.0.1:43002", "python unrelated.py").kind).toBe("start");
+  expect(serveDecision({ pid: 123, port: 43003, origins: ["https://example.test"] }, requested, zetaCommand).kind).toBe("origin-missing");
+  expect(serveDecision({ pid: 123, port: 43003, origins: [requested] }, requested, null).kind).toBe("start");
+  expect(serveDecision({ pid: 123, port: 43003, origins: [requested] }, requested, "python unrelated.py").kind).toBe("start");
 });
 
 test("an existing different MCP entry is left unchanged with an exact fix command", () => {
@@ -112,9 +114,9 @@ if (process.env.FAKE_ZETA_BLOCK && args[0] === "mcp" && args[1] === "--help") {
 }
 if (args[0] === "serve") {
   const ws = Number(args[args.indexOf("--ws") + 1]);
-  const origin = args[args.indexOf("--ws-origin") + 1];
+  const origins = args.reduce<string[]>((values, arg, index) => arg === "--ws-origin" ? [...values, args[index + 1]] : values, []);
   const run = resolve(process.env.ZETA_HOME!, "run"); mkdirSync(run, { recursive: true });
-  writeFileSync(resolve(run, "serve.ws.json"), JSON.stringify({ pid: process.pid, port: ws, origins: [origin] }));
+  writeFileSync(resolve(run, "serve.ws.json"), JSON.stringify({ pid: process.pid, port: ws, origins }));
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
   await new Promise(() => {});
 }
@@ -127,7 +129,6 @@ process.exit(0);
   await Promise.all(["uv", "open", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
 
   const port = await freePort();
-  const ws = await freePort();
   const baseEnv = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
@@ -145,14 +146,13 @@ process.exit(0);
   };
 
   try {
-    const zeta = Bun.spawn([fakeZeta, "serve", "--port", String(await freePort()), "--ws", String(ws), "--ws-origin", `http://localhost:${port}`], { env: baseEnv, stdout: "ignore", stderr: "ignore" });
-    zetaPid = zeta.pid;
-    await waitFor(() => Bun.file(resolve(home, "run/serve.ws.json")).exists(), "zeta discovery");
-
     const first = await runDev();
     expect(first.exitCode, first.stderr).toBe(0);
     expect(first.stdout).toContain("mcp.json: unchanged");
     const callsAfterFirst = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    const startedServe = callsAfterFirst.find((args) => args[0] === "serve");
+    expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+    zetaPid = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")).pid;
     expect(callsAfterFirst.some((args) => args[0] === "mcp" && ["add", "remove"].includes(args[1]) && !args.includes("--help"))).toBe(false);
     const firstState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
     managed.push(firstState.pid);
