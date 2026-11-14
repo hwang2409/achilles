@@ -247,6 +247,75 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     assert off["isError"]
 
 
+def test_stale_mcp_catalog_rejects_call_until_tools_are_listed_again(creation_client):
+    _root, store, client, headers = creation_client
+    store.create_tool("home", bundle(name="same_name"))
+    first_catalog = mcp(client, headers, 2, "tools/list", {})
+    assert [tool["name"] for tool in first_catalog["tools"]][-1] == "same_name"
+
+    store.create_tool(
+        "home",
+        {
+            **bundle(name="same_name"),
+            "implementation": {
+                **bundle(name="same_name")["implementation"],
+                "collection": "new_books",
+            },
+        },
+    )
+    stale = mcp(
+        client,
+        headers,
+        3,
+        "tools/call",
+        {"name": "same_name", "arguments": {"title": "Synthetic Book"}},
+    )
+    assert stale.get("isError") is True, "stale catalog call executed the new tool version"
+    assert json.loads(stale["content"][0]["text"]) == {
+        "code": "tool_changed",
+        "expected": "list tools again",
+        "path": "",
+    }
+    assert store.records("home", "new_books") == ([], 0)
+    with store._connect() as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM audit WHERE action='invoke:same_name'").fetchone()[0]
+            == 0
+        )
+
+    mcp(client, headers, 4, "tools/list", {})
+    current = mcp(
+        client,
+        headers,
+        5,
+        "tools/call",
+        {"name": "same_name", "arguments": {"title": "Synthetic Book"}},
+    )
+    assert json.loads(current["content"][0]["text"])["title"] == "Synthetic Book"
+    assert store.records("home", "new_books")[1] == 1
+
+
+def test_update_catalog_tells_callers_to_pass_the_returned_revision(creation_client):
+    _root, store, client, headers = creation_client
+    update = bundle(name="update_book", operation="update")
+    update["input_schema"] = {
+        "type": "object",
+        "properties": {
+            "record_id": {"type": "string"},
+            "revision": {"type": "integer"},
+            "title": {"type": "string"},
+        },
+        "required": ["record_id", "revision", "title"],
+        "additionalProperties": False,
+    }
+    store.create_tool("home", update)
+    catalog = mcp(client, headers, 2, "tools/list", {})
+    description = next(
+        tool["description"] for tool in catalog["tools"] if tool["name"] == "update_book"
+    )
+    assert description == "update books; read or list first, then pass the returned revision"
+
+
 def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):
     root, store, client, headers = creation_client
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})

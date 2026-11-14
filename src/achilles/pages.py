@@ -99,6 +99,18 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
 def validate_layout(
     layout: Any,
     assigned_tools: set[str] | None = None,
@@ -179,12 +191,8 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN create_mode INTEGER NOT NULL DEFAULT 0")
         if "credential_hash" not in columns:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
-        if "created_by_page_id" not in columns:
-            db.execute("ALTER TABLE page ADD COLUMN created_by_page_id TEXT REFERENCES page(id)")
-        record_columns = {row[1] for row in db.execute("PRAGMA table_info(page_record)")}
-        if "revision" not in record_columns:
-            db.execute("ALTER TABLE page_record ADD COLUMN revision INTEGER")
-            db.execute("UPDATE page_record SET revision=1 WHERE revision IS NULL")
+        ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
+        ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501

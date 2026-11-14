@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, wait
+from threading import Barrier
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -244,6 +245,74 @@ def test_existing_records_start_at_revision_one(tmp_path):
     assert store.records("home", "notes")[0] == [{"text": "old", "record_id": "old", "revision": 1}]
 
 
+def test_concurrent_startup_adds_revision_once(tmp_path, monkeypatch):
+    tmp_path.mkdir(exist_ok=True)
+    database = tmp_path / "achilles.sqlite3"
+    real_connect = sqlite3.connect
+    with real_connect(database) as db:
+        db.execute(
+            """CREATE TABLE page_record (
+            page_id TEXT NOT NULL, collection TEXT NOT NULL, record_id TEXT NOT NULL,
+            version INTEGER NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, PRIMARY KEY(page_id, collection, record_id))"""
+        )
+
+    barrier = Barrier(2)
+
+    class InterleavedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.in_immediate = False
+
+        @property
+        def row_factory(self):
+            return self.connection.row_factory
+
+        @row_factory.setter
+        def row_factory(self, value):
+            self.connection.row_factory = value
+
+        def execute(self, sql, *args):
+            if sql == "BEGIN IMMEDIATE":
+                self.in_immediate = True
+            if sql == "PRAGMA table_info(page_record)" and not self.in_immediate:
+                barrier.wait(timeout=10)
+            return self.connection.execute(sql, *args)
+
+        def commit(self):
+            self.connection.commit()
+            self.in_immediate = False
+
+        def rollback(self):
+            self.connection.rollback()
+            self.in_immediate = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+    monkeypatch.setattr(
+        sqlite3,
+        "connect",
+        lambda *args, **kwargs: InterleavedConnection(
+            real_connect(*args, check_same_thread=False, **kwargs)
+        ),
+    )
+
+    def start_store(_):
+        try:
+            return PageStore(tmp_path)
+        except Exception as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(start_store, range(2)))
+    errors = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+    assert not errors, f"concurrent startup failed: {errors}"
+    with real_connect(database) as db:
+        columns = [row[1] for row in db.execute("PRAGMA table_info(page_record)")]
+    assert columns.count("revision") == 1
+
+
 def test_stale_record_revision_cannot_overwrite_or_audit(tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
@@ -264,23 +333,30 @@ def test_stale_record_revision_cannot_overwrite_or_audit(tmp_path):
     }
     store.create_tool("home", BUNDLE)
     store.create_tool("home", update_bundle)
-    created = call_record(store, "home", "annotate_trace", {"text": "first"})
-    updated = call_record(
-        store,
-        "home",
-        "update_annotation",
-        {"record_id": created["record_id"], "revision": 1, "text": "second"},
-    )
-    assert updated["revision"] == 2
-    with pytest.raises(VersionConflict) as caught:
-        call_record(
-            store,
-            "home",
-            "update_annotation",
-            {"record_id": created["record_id"], "revision": 1, "text": "stale"},
-        )
-    assert caught.value.code == "conflict"
-    assert store.records("home", "annotations")[0][0]["text"] == "second"
+    call_record(store, "home", "annotate_trace", {"text": "first"})
+    barrier = Barrier(2)
+
+    def update(text):
+        connection = PageStore(tmp_path)
+        record = connection.records("home", "annotations")[0][0]
+        barrier.wait(timeout=10)
+        try:
+            return call_record(
+                connection,
+                "home",
+                "update_annotation",
+                {"record_id": record["record_id"], "revision": record["revision"], "text": text},
+            )
+        except VersionConflict as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(update, ("second", "stale")))
+    winners = [outcome for outcome in outcomes if isinstance(outcome, dict)]
+    conflicts = [outcome for outcome in outcomes if isinstance(outcome, VersionConflict)]
+    assert len(winners) == 1 and winners[0]["revision"] == 2
+    assert len(conflicts) == 1 and conflicts[0].code == "conflict"
+    assert store.records("home", "annotations")[0][0]["text"] in {"second", "stale"}
     with store._connect() as db:
         assert (
             db.execute(
