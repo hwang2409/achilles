@@ -64,6 +64,20 @@ describe("create mode tool refresh", () => {
     expect(fetches).toBe(1); expect(requests).toBe(2);
   });
 
+  test("keeps send blocked and retries the mode update when the endpoint fails", async () => {
+    let requests = 0;
+    const owner = createModeToggleOwner(async () => {
+      requests += 1;
+      if (requests === 1) return new Response(null, { status: 503 });
+      return Response.json({ create_mode: true });
+    });
+    const input = { pageId: "home", sessionId: "session", enabled: true, client: { features: ["mcp_refresh_tools"], request: async () => ({}) } };
+    expect(await owner.run(input)).toEqual({ createMode: null, error: "could not update create mode (503)", blocked: true, retryable: true });
+    await expect(owner.beforeSend()).rejects.toThrow("send is off");
+    expect(await owner.run(input)).toEqual({ createMode: true, error: null, blocked: false, retryable: false });
+    expect(requests).toBe(2);
+  });
+
   test("explains how to recover an expired MCP session without offering a dead retry", async () => {
     const client = { features: ["mcp_refresh_tools"], request: async () => { throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "achilles: MCP HTTP 404: Session not found" } }); } };
     const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));

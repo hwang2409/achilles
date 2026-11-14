@@ -180,7 +180,7 @@ function refreshToolsError(caught: unknown): { message: string; blocked: boolean
 export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   let generation = 0;
   let pending: Promise<CreateModeToggleResult> | null = null;
-  let retry: CreateModeToggleInput | null = null;
+  let retry: { input: CreateModeToggleInput; refreshOnly: boolean } | null = null;
   const refresh = async (input: CreateModeToggleInput, createMode: boolean, mine: number): Promise<CreateModeToggleResult> => {
     if (!input.client.features.includes("mcp_refresh_tools")) return { createMode, error: null, blocked: false, retryable: false };
     try {
@@ -189,7 +189,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
       return { createMode, error: null, blocked: false, retryable: false };
     } catch (caught) {
       const failure = refreshToolsError(caught);
-      if (mine === generation) retry = failure.blocked ? { ...input, enabled: createMode } : null;
+      if (mine === generation) retry = failure.blocked ? { input: { ...input, enabled: createMode }, refreshOnly: true } : null;
       return { createMode: failure.blocked ? null : createMode, error: failure.message || null, blocked: failure.blocked, retryable: failure.retryable };
     }
   };
@@ -197,14 +197,17 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
     run(input: CreateModeToggleInput) {
       if (pending) return pending;
       const mine = generation;
-      const target = retry ?? input;
+      const target = retry?.input ?? input;
       pending = (async () => {
-        if (retry) return refresh(target, target.enabled, mine);
+        if (retry?.refreshOnly) return refresh(target, target.enabled, mine);
         const response = await fetchFn(`/api/pages/${target.pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: target.enabled }) });
         if (!response.ok) throw new Error(`could not update create mode (${response.status})`);
         const result = await response.json() as { create_mode: boolean };
         return refresh(target, result.create_mode, mine);
-      })().catch((caught) => ({ createMode: null, error: caught instanceof Error ? caught.message : String(caught), blocked: false, retryable: false })).finally(() => {
+      })().catch((caught) => {
+        if (mine === generation) retry = { input: target, refreshOnly: false };
+        return { createMode: null, error: caught instanceof Error ? caught.message : String(caught), blocked: true, retryable: true };
+      }).finally(() => {
         if (mine === generation) pending = null;
       });
       return pending;
