@@ -188,7 +188,7 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(
     if not layout_complete:
         assert value["layout"] is None
         assert value["message"] == (
-            "this layout is too large to inspect here; do not call update_layout"
+            "do not change this page; tell the user it is too large to edit from chat"
         )
     assert "blocks" not in value["omitted"]
     assert sum(value["omitted"].values()) > 0
@@ -834,6 +834,52 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
     }
 
 
+def test_update_layout_refuses_page_too_large_to_inspect(creation_client):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    updated = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": large_layout, "expected_version": 1},
+        },
+    )
+    assert json.loads(updated["content"][0]["text"])["version"] == 2
+
+    inspected = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {}},
+    )
+    value = json.loads(inspected["content"][0]["text"])
+    assert value["layout"] is None
+    assert value["layout_complete"] is False
+
+    refused = mcp(
+        client,
+        home_headers,
+        4,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
+        },
+    )
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "current layout small enough to inspect",
+        "hint": "Do not change the page. Tell the user it is too large to edit from chat.",
+    }
+    assert store.layout("home") == large_layout
+
+
 def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
     _, store, client, home_headers = creation_client
     created = mcp(
@@ -854,8 +900,9 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
     assert update_tool["description"] == (
         "REPLACES the whole layout; any block you leave out is deleted. First call "
-        "achilles__inspect_page. If layout_complete is false, do not call update_layout. "
-        "Otherwise, copy its `layout` exactly, change only what the user asked (insert, "
+        "achilles__inspect_page. If layout_complete is false, do not change the page; tell "
+        "the user it is too large to edit from chat. Otherwise, copy its `layout` exactly, "
+        "change only what the user asked (insert, "
         "reorder, edit, or remove blocks), and pass the full layout with "
         "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
         "To change another page, open that page's chat. A detail block shows field labels only "
@@ -864,8 +911,8 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]
         == "When achilles__inspect_page reports layout_complete true, copy its complete stored "
-        "layout; any block you leave out is deleted. Do not call update_layout when "
-        "layout_complete is false."
+        "layout; any block you leave out is deleted. When layout_complete is false, do not "
+        "change the page; tell the user it is too large to edit from chat."
     )
     assert (
         update_tool["inputSchema"]["properties"]["expected_version"]["description"]
@@ -878,11 +925,19 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     )
     inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
     assert "when layout_complete is true" in inspect_tool["description"]
-    assert "when layout_complete is false, do not call update_layout" in inspect_tool["description"]
+    assert (
+        "when layout_complete is false, do not change the page and tell the user it is too large "
+        "to edit from chat" in inspect_tool["description"]
+    )
     assert (
         inspect_tool["outputSchema"]["properties"]["layout"]["description"]
         == "The complete stored layout to edit with update_layout, or null when "
         "layout_complete is false."
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout_complete"]["description"]
+        == "When false, do not change the page; tell the user the page is too large to edit "
+        "from chat."
     )
     assert (
         inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]

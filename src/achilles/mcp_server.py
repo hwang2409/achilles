@@ -35,8 +35,8 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
         "layout_complete": {
             "type": "boolean",
             "description": (
-                "When false, the layout is too large to return and update_layout must "
-                "not be called."
+                "When false, do not change the page; tell the user the page is too large "
+                "to edit from chat."
             ),
         },
         "message": {"type": "string"},
@@ -116,7 +116,7 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
     )
 
 
-def _inspect_result(value: dict[str, Any]) -> CallToolResult:
+def _bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
     result = {
         **value,
         "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
@@ -131,21 +131,25 @@ def _inspect_result(value: dict[str, Any]) -> CallToolResult:
 
     encoded = serialize()
     if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
-        return CallToolResult(content=[TextContent(type="text", text=encoded)])
+        return result, encoded
 
     result["truncated"] = True
     result["omitted"] = {}
     for key in ("metric_values", "tools", "collections", "title"):
-        value = result.pop(key)
-        result["omitted"][key] = len(value) if not isinstance(value, str) else 1
+        omitted = result.pop(key)
+        result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
         encoded = serialize()
         if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
-            return CallToolResult(content=[TextContent(type="text", text=encoded)])
+            return result, encoded
 
     result["layout"] = None
     result["layout_complete"] = False
-    result["message"] = "this layout is too large to inspect here; do not call update_layout"
-    encoded = serialize()
+    result["message"] = "do not change this page; tell the user it is too large to edit from chat"
+    return result, serialize()
+
+
+def _inspect_result(value: dict[str, Any]) -> CallToolResult:
+    _, encoded = _bounded_inspect(value)
     return CallToolResult(content=[TextContent(type="text", text=encoded)])
 
 
@@ -197,7 +201,8 @@ def build_mcp(store: PageStore):
                             "inspect this page and pages it created; when layout_complete is "
                             "true, layout is the complete stored layout to edit and layout_version "
                             "is the value for update_layout expected_version; when layout_complete "
-                            "is false, do not call update_layout; metric_values reports computed "
+                            "is false, do not change the page and tell the user it is too large to "
+                            "edit from chat; metric_values reports computed "
                             "counts by "
                             "layout block index; legacy pages can inspect only themselves"
                         ),
@@ -229,7 +234,8 @@ def build_mcp(store: PageStore):
                         description=(
                             "REPLACES the whole layout; any block you leave out is deleted. "
                             "First call achilles__inspect_page. If layout_complete is false, do "
-                            "not call update_layout. Otherwise, copy its `layout` exactly, change "
+                            "not change the page; tell the user it is too large to edit from chat. "
+                            "Otherwise, copy its `layout` exactly, change "
                             "only what the user asked (insert, reorder, edit, or remove blocks), "
                             "and pass the full layout with `layout_version` as expected_version. "
                             "On a version conflict, inspect again and retry. To change another "
@@ -315,6 +321,16 @@ def build_mcp(store: PageStore):
                         "existing": existing,
                     }
                 elif params.name == "update_layout":
+                    current = await anyio.to_thread.run_sync(store.inspect_page, page["id"])
+                    bounded, _ = _bounded_inspect(current)
+                    if not bounded["layout_complete"]:
+                        raise ValidationError(
+                            "/layout",
+                            "current layout small enough to inspect",
+                            "layout_too_large",
+                            "Do not change the page. Tell the user it is too large to edit "
+                            "from chat.",
+                        )
                     version, digest = await anyio.to_thread.run_sync(
                         store.update_layout,
                         page["id"],

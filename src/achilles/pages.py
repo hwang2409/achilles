@@ -114,8 +114,8 @@ UPDATE_LAYOUT_SCHEMA = {
             **LAYOUT_SCHEMA,
             "description": (
                 "When achilles__inspect_page reports layout_complete true, copy its complete "
-                "stored layout; any block you leave out is deleted. Do not call update_layout "
-                "when layout_complete is false."
+                "stored layout; any block you leave out is deleted. When layout_complete is "
+                "false, do not change the page; tell the user it is too large to edit from chat."
             ),
             "properties": {
                 "blocks": {
