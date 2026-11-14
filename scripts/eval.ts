@@ -374,7 +374,7 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && repeats.every(repeat => (repeat.result.pass || repeat.result.status === "unsupported") && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => (task.pass || task.status === "unsupported") && task.status !== "needs_review") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {

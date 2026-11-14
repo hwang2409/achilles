@@ -1,6 +1,6 @@
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
-export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported"; cap_hit?: boolean; gap?: string };
+export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported" | "needs_review"; cap_hit?: boolean; gap?: string };
 export type UnmappedValue = { task_id: string; check_id: string; field: string; before: unknown; after: unknown };
 export type EvalReport = {
   run_id: string;
@@ -26,7 +26,11 @@ function aggregateUsage(tasks: EvalReport["tasks"]): TranscriptUsage | "unavaila
 }
 
 export function makeReport(input: Omit<EvalReport, "tasks" | "unmapped_values"> & { tasks: EvalReport["tasks"] }): EvalReport {
-  const tasks = input.tasks.map((task) => ({ ...task, usage: task.usage ?? "unavailable" }));
+  const tasks = input.tasks.map((task) => {
+    const failedChecks = task.checks.filter(check => !check.pass);
+    const onlyUnmapped = task.task_id === "reading-list-one-prompt" && failedChecks.length > 0 && failedChecks.every(check => check.reason?.startsWith("unmapped_after_value:"));
+    return { ...task, status: onlyUnmapped ? "needs_review" : task.status, usage: task.usage ?? "unavailable" };
+  });
   const unmapped_values = tasks.flatMap(task => task.task_id === "reading-list-one-prompt" ? task.checks.flatMap(check => {
     if (!check.reason?.startsWith("unmapped_after_value:")) return [];
     const transition = (check.evidence as { transition?: Omit<UnmappedValue, "task_id" | "check_id"> }).transition;
@@ -37,7 +41,7 @@ export function makeReport(input: Omit<EvalReport, "tasks" | "unmapped_values"> 
 
 export function aggregateTaskResults(results: Array<{ task_id: string; pass: boolean; score: number; turns: number; tool_calls: number; wall_ms: number }>) {
   const grouped = new Map<string, typeof results>();
-  for (const result of results) if (!["harness_error", "unsupported"].includes((result as { status?: string }).status ?? "")) grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
+  for (const result of results) if (!["harness_error", "unsupported", "needs_review"].includes((result as { status?: string }).status ?? "")) grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
   return Object.fromEntries([...grouped].map(([task_id, rows]) => [task_id, {
     passes: rows.filter((row) => row.pass).length,
     total: rows.length,
@@ -73,6 +77,7 @@ export function reportMarkdown(report: EvalReport): string {
     `suite tokens: ${usageText(report.totals?.usage)}`,
     `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`,
     `unsupported: ${report.tasks.filter(task => task.status === "unsupported").length}`,
+    `needs review: ${report.tasks.filter(task => task.status === "needs_review").length}`,
     `cap hits: ${report.tasks.filter(task => task.cap_hit).length}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
     "", "| task | status | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors | cap hit |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | --- |",
@@ -87,7 +92,7 @@ export function reportMarkdown(report: EvalReport): string {
     lines.push("| task | check | field | before | after |", "| --- | --- | --- | --- | --- |");
     for (const value of report.unmapped_values) lines.push(`| ${value.task_id} | ${value.check_id} | ${value.field} | ${String(value.before)} | ${String(value.after)} |`);
   }
-  lines.push("", "## grouped repeat metrics", "", "unsupported and harness-error runs are excluded from comparable task metrics.", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time | cap hits | action |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
+  lines.push("", "## grouped repeat metrics", "", "unsupported, needs-review, and harness-error runs are excluded from comparable task metrics.", "needs review: extend the value map or confirm agent fail", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time | cap hits | action |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.score_min}–${value.score_max} | ${value.median_turns} | ${value.median_tool_calls} | ${value.median_wall_ms} ms | ${value.cap_hits} | ${value.cap_action} |`);
   return lines.join("\n") + "\n";
 }
