@@ -168,7 +168,7 @@ describe("active chat attachment", () => {
   const failed = (token: number, step: string): AttachmentEvent => ({ type: "failed", token, error: `failed at ${step}` });
   const controllerAwaits = ["page fetch", "page body", "credential fetch", "credential body", "resume creation", "find chat", "open or create session", "load session", "finish title"];
   const failureSteps = ["page", "credential", "resume", "find chat", "open session", "create session", "load session", "finish"];
-  const transitionRows: Array<{ name: string; initial?: "controller" | "observer"; steps: Array<{ events?: AttachmentEvent[]; canWrite: boolean; phase: string; kind?: "controller" | "observer"; credential?: boolean; transcript?: boolean }> }> = [
+  const transitionRows: Array<{ name: string; initial?: "controller" | "observer"; steps: Array<{ events?: AttachmentEvent[]; canWrite: boolean; phase: string; kind?: "controller" | "observer"; credential?: boolean; transcript?: boolean; pageTitle?: string }> }> = [
     { name: "controller success", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true }] },
     { name: "observer success", steps: [{ events: [started(1, "observer"), attached(1, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true }] },
     ...controllerAwaits.map((step) => ({ name: `stale result after ${step}`, initial: "controller" as const, steps: [
@@ -195,6 +195,8 @@ describe("active chat attachment", () => {
     { name: "chat switch", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller", "first"), { type: "loading", token: 2, authority: "controller" }], canWrite: true, phase: "loading", credential: false, transcript: false }] },
     { name: "restart", initial: "controller", steps: [{ canWrite: true, phase: "loading", credential: false, transcript: false }] },
     { name: "duplicate attach keeps first result", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller", "first"), attached(1, "controller", "duplicate")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true }] },
+    { name: "page refresh preserves observer authority", steps: [{ events: [started(1, "observer"), attached(1, "observer"), { type: "page-replaced", token: 1, pageId: "home", page: { ...page("session"), title: "refreshed" } }], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true, pageTitle: "refreshed" }] },
+    { name: "page refresh after navigation is dropped", steps: [{ events: [started(1, "observer"), attached(1, "observer"), { type: "loading", token: 2, authority: "observer" }, { type: "page-replaced", token: 1, pageId: "home", page: { ...page("session"), title: "stale" } }], canWrite: false, phase: "loading", credential: false, transcript: false }] },
   ];
 
   test.each(transitionRows)("attachment state: $name", ({ name, initial = "observer", steps }) => {
@@ -209,6 +211,7 @@ describe("active chat attachment", () => {
       expect(view.phase).toBe(step.phase);
       expect(view.phase === "ready" ? view.kind : undefined).toBe(step.kind);
       expect(view.phase === "ready", `${name}: transcript availability`).toBe(step.transcript ?? false);
+      if (step.pageTitle) expect(view.phase === "ready" ? view.page.title : null, `${name}: refreshed page`).toBe(step.pageTitle);
     }
   });
 

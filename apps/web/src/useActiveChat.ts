@@ -18,6 +18,7 @@ export type AttachmentEvent =
   | { type: "failed"; token: number; error: string }
   | { type: "missing"; token: number }
   | { type: "loading"; token: number; authority: Attachment["kind"] }
+  | { type: "page-replaced"; token: number; pageId: string; page: Page }
   | { type: "update"; token: number; update: (current: ReadyState) => ReadyState };
 
 export const createAttachmentModel = (authority: Attachment["kind"]): AttachmentModel => ({ token: 0, authority, attaching: false, state: { phase: "loading" } });
@@ -32,6 +33,10 @@ export function reduceAttachment(model: AttachmentModel, event: AttachmentEvent)
   if (event.type === "attached") return model.attaching && event.attachment.kind === model.authority ? { ...model, attaching: false, state: { phase: "ready", ...event.attachment } } : model;
   if (event.type === "failed") return { ...model, attaching: false, state: model.state.phase === "ready" ? model.state : { phase: "error", error: event.error } };
   if (event.type === "missing") return { ...model, attaching: false, state: { phase: "missing" } };
+  if (event.type === "page-replaced") {
+    if (model.state.phase !== "ready" || model.state.page.id !== event.pageId) return model;
+    return { ...model, state: { ...model.state, page: { ...event.page, approval_mode: model.state.page.approval_mode } } };
+  }
   return model.state.phase === "ready" ? { ...model, state: event.update(model.state) } : model;
 }
 
@@ -428,11 +433,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, can
       const response = await fetch(`/api/pages/${current.page.id}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`could not refresh page (${response.status})`);
       const page = await response.json() as Page;
-      updateReady(token, (value) => value.page.id === page.id ? { ...value, page: { ...page, approval_mode: value.page.approval_mode } } : value);
+      dispatchAttachment({ type: "page-replaced", token, pageId: current.page.id, page });
     } catch (caught) {
       if (owner.current.current(token)) console.error("could not refresh page", caught);
     }
-  }, [state, updateReady]);
+  }, [state]);
 
   const settleApprovalMode = useCallback(async () => {
     if (!canWrite || !client || state.phase !== "ready" || state.kind !== "controller" || !state.pendingApprovalMode) return;
