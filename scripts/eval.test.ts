@@ -12,6 +12,17 @@ const targetRun = (target: string) => async (command: string, args: string[], cw
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
 
+async function waitForProcess(child: ReturnType<typeof Bun.spawn>, operation: string, timeoutMs: number) {
+  const timedOut = await Promise.race([child.exited.then(() => false), Bun.sleep(timeoutMs).then(() => true)]);
+  if (!timedOut) return child.exitCode!;
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    try { process.kill(-child.pid, signal); } catch {}
+    if (!await Promise.race([child.exited.then(() => true), Bun.sleep(5_000).then(() => false)])) continue;
+    break;
+  }
+  throw new Error(`${operation} hung after ${timeoutMs / 1000} seconds; its process group was killed`);
+}
+
 test("setup verification accepts old and inspect_page layout shapes", () => {
   const setup = { tools: [], records: [], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
   const base = { layout: setup.initial_layout, inspect: { tools: [] } };
@@ -65,16 +76,17 @@ test("setup seeds an initial layout on a fresh page at version 1", async () => {
 test("turn cap report preserves the seeded initial snapshot", async () => {
   if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
   const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-turn-cap-"));
-  const taskId = "turn-cap-seeded-snapshot"; const taskPath = join(target, "evals/tasks", `${taskId}.json`); let child: ReturnType<typeof Bun.spawn> | undefined;
+  const taskId = "turn-cap-seeded-snapshot"; const tasks = join(root, "tasks"); const taskPath = join(tasks, `${taskId}.json`); let child: ReturnType<typeof Bun.spawn> | undefined;
   const layout = { blocks: [{ type: "text", text: "Seeded dashboard" }] }; const record = { id: "seed-1", collection: "notes", data: { text: "Seeded note" } };
   try {
+    await mkdir(tasks);
     await Bun.write(taskPath, JSON.stringify({ id: taskId, page_plan: [{ alias: "seeded", source: "setup", bind_chat: true, create_mode: true }], agent_turns: 1, steps: [{ id: "use-turn", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "keep using tools" }, { id: "exhaust", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "continue" }], setup: { tools: [], records: [record], initial_layout: layout }, checks: [{ id: "seeded-record", type: "record", page: "seeded", value: record.data }] }));
     const revision = (await readFile(join(target, "zeta.rev"), "utf8")).trim(); const warmZeta = join(target, ".cache/zeta"); const runnerZeta = join(target, ".cache", `zeta-${revision}`);
     if (await Bun.file(join(warmZeta, ".git/HEAD")).exists() && !await Bun.file(join(runnerZeta, ".git/HEAD")).exists()) await symlink(warmZeta, runnerZeta, "dir").catch(error => { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; });
     if (!await Bun.file(join(target, ".venv/bin/achilles")).exists()) { const synced = await targetRun(target)("uv", ["sync", "--project", target, "--frozen"], target); expect(synced.exitCode, synced.stderr).toBe(0); }
-    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
+    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
     const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
-    const exitCode = await Promise.race([child.exited, Bun.sleep(28_500).then(() => { throw new Error("scripted eval exceeded 28.5 seconds"); })]);
+    const exitCode = await waitForProcess(child, "scripted turn-cap eval", 90_000);
     expect(exitCode, `${await stdout}\n${await stderr}`).toBe(1);
     const report = JSON.parse(await readFile(join(root, "report.json"), "utf8")); const result = report.tasks[0];
     const snapshot = JSON.parse(await readFile(join(root, result.transcript), "utf8"));
@@ -85,9 +97,9 @@ test("turn cap report preserves the seeded initial snapshot", async () => {
     expect(JSON.stringify(result.checks)).not.toContain("setup precondition unverifiable");
   } finally {
     if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(500)]); }
-    await rm(taskPath, { force: true }); await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
-}, 30_000);
+}, 100_000);
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();

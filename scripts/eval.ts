@@ -408,7 +408,7 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const tasks = await selectTasks(selection); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {
