@@ -1,8 +1,11 @@
 export const REQUIRED_FEATURES = ["session_cwd", "session_mcp_bindings", "new_session_settings", "approval_history", "session_history_fidelity", "served_turn_end", "delivery_id", "user_message_event"] as const;
 
 const RPC_TIMEOUT_MS = 15_000;
+const CONNECTION_CAPACITY = -32001;
+const RECONNECT_DELAYS_MS = [50, 100, 200, 400, 800, 1_600, 1_850] as const;
 type EventHandler = (event: Record<string, any>) => void;
 type Rpc = { id?: number; result?: any; error?: { message?: string; code?: number }; method?: string; params?: any };
+type ConnectOptions = { retryCapacity?: boolean; wait?: (delayMs: number) => Promise<void> };
 
 class Client implements EvalProtocol {
   private nextId = 1;
@@ -66,7 +69,7 @@ function withDeadline<T>(work: Promise<T>, label: string, timeoutMs = RPC_TIMEOU
   return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs); work.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); }); });
 }
 
-export async function connectEvalProtocol(discovery: { url: string; controller_token: string }, onEvent?: EventHandler): Promise<EvalProtocol> {
+async function connectOnce(discovery: { url: string; controller_token: string }, onEvent?: EventHandler): Promise<EvalProtocol> {
   const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
   const socket = new WebSocket(url, ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]);
   await withDeadline(new Promise<void>((resolve, reject) => { socket.addEventListener("open", () => resolve(), { once: true }); socket.addEventListener("error", () => reject(new Error("zeta websocket failed")), { once: true }); }), "zeta websocket open");
@@ -79,6 +82,20 @@ export async function connectEvalProtocol(discovery: { url: string; controller_t
     if (missing.length) throw new Error(`zeta lacks required features: ${missing.join(", ")}`);
     return client;
   } catch (error) { await client.close(); throw error; }
+}
+
+export async function connectEvalProtocol(discovery: { url: string; controller_token: string }, onEvent?: EventHandler, options: ConnectOptions = {}): Promise<EvalProtocol> {
+  const wait = options.wait ?? (delayMs => Bun.sleep(delayMs));
+  let firstCapacityError: unknown;
+  for (const delayMs of [0, ...(options.retryCapacity ? RECONNECT_DELAYS_MS : [])]) {
+    if (delayMs) await wait(delayMs);
+    try { return await connectOnce(discovery, onEvent); }
+    catch (error) {
+      if ((error as { code?: unknown }).code !== CONNECTION_CAPACITY) throw error;
+      firstCapacityError ??= error;
+    }
+  }
+  throw firstCapacityError;
 }
 
 export function reserveTurns(tasks: Array<{ agent_turns: number }>, repeats: number) { return repeats * tasks.reduce((total, task) => total + task.agent_turns, 0); }

@@ -227,7 +227,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
     const request = event.data ?? event; approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name }); void protocol.approve(session[1].id, String(requestId)).catch(error => { fatal = error; });
   };
-  protocol = await connectEvalProtocol(discovery, onEvent); const started = Date.now();
+  protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true }); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
     if (sessions.has(chat)) return sessions.get(chat)!; const plan = task.page_plan.find(page => page.alias === alias)!;
     let pageId = plan.source === "created" ? undefined : pages.get(alias)!;
@@ -242,7 +242,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   try {
     for (const step of task.steps) {
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new TurnCapFailure("task model turn limit has no remaining turn");
-      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
+      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true }); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       const session = await getSession(step.chat, step.page); if (!session) break; try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
