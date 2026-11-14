@@ -72,6 +72,7 @@ export async function gateTranscript(
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");
 
+  await waitForIdleTurn(page, waitFor);
   await field.fill("stream enough lines to overflow");
   await field.press("Enter");
   const stream = messages.filter({ hasText: "stream line 000" });

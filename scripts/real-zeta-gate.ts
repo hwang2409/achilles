@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { controlSnapshot, diagnostic } from "./gate-diagnostics";
+import { controlSnapshot, createFrameRing, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -34,6 +34,7 @@ const logs = new Map<ChildProcess, string>();
 const secrets: string[] = [];
 const redact = (text: string) => diagnostic(text, secrets);
 const safeControl = (text: string) => controlSnapshot(text, secrets);
+const frameRing = createFrameRing();
 const start = (
   command: string,
   args: string[],
@@ -56,7 +57,7 @@ const waitFor = async (check: () => Promise<boolean>, label: string) => {
     if (await check()) return;
     await Bun.sleep(100);
   }
-  throw new Error(`timed out waiting for ${label}; backend catalog=${safeControl(await Bun.file(control).text())}`);
+  throw new Error(`timed out waiting for ${label}; websocket frames=${JSON.stringify(frameRing.snapshot())}; backend catalog=${safeControl(await Bun.file(control).text())}`);
 };
 const waitForExit = (child: ChildProcess, timeoutMs: number) =>
   new Promise<boolean>((resolve) => {
@@ -150,9 +151,11 @@ try {
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
+  let nextSocket = 0;
   page.on("websocket", (socket) => {
-    socket.on("framesent", (event) => frames.push(String(event.payload)));
-    socket.on("framereceived", (event) => frames.push(String(event.payload)));
+    const socketId = nextSocket++;
+    socket.on("framesent", (event) => { const payload = String(event.payload); frames.push(payload); frameRing.record(socketId, "sent", payload); });
+    socket.on("framereceived", (event) => { const payload = String(event.payload); frames.push(payload); frameRing.record(socketId, "received", payload); });
   });
   page.on("pageerror", (e) => errors.push(`${e.message}${requestFailures.length ? `; latest request failure: ${requestFailures.at(-1)}` : ""}${consoleErrors.length ? `; latest console error: ${consoleErrors.at(-1)}` : ""}`));
   page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${requestPath(request.url())}: ${request.failure()?.errorText ?? "unknown failure"}`));
