@@ -12,6 +12,11 @@ const rows: [string, unknown, ReturnType<typeof formFields>][] = [
     { name: "status", kind: "enum", required: true, options: ["to read", "done"] },
     { name: "stars", kind: "enum", required: false, options: [1, 2, 3] },
   ] }],
+  ["required fields lead, the rest keep their order", { type: "object", properties: { author: { type: "string" }, favorite: { type: "boolean" }, title: { type: "string" } }, required: ["title"] }, { fields: [
+    { name: "title", kind: "string", required: true },
+    { name: "author", kind: "string", required: false },
+    { name: "favorite", kind: "boolean", required: false },
+  ] }],
   ["no properties", { type: "object" }, { fields: [] }],
   ["nested object", { type: "object", properties: { title: { type: "string" }, meta: { type: "object", properties: {} } } }, { unsupported: "meta" }],
   ["array", { type: "object", properties: { tags: { type: "array", items: { type: "string" } } } }, { unsupported: "tags" }],

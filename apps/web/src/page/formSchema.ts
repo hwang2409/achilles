@@ -21,7 +21,8 @@ export function formFields(schema: unknown): { fields: FormField[] } | { unsuppo
     else if (typeof property.type === "string" && SCALARS.has(property.type) && !("enum" in property)) fields.push({ ...base, kind: property.type as "string" | "number" | "integer" | "boolean" });
     else return { unsupported: name };
   }
-  return { fields };
+  // Stored schemas come back with sorted keys, so the agent's order is lost; required fields lead instead.
+  return { fields: [...fields.filter((field) => field.required), ...fields.filter((field) => !field.required)] };
 }
 
 export function emptyValues(fields: FormField[]): FormValues {
