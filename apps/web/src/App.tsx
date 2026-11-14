@@ -70,6 +70,7 @@ export function App() {
   const activePage = ready?.page ?? empty?.page ?? null;
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
+  const activeStore = store ?? emptyStore;
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
     const state = store.getState();
     const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
@@ -159,24 +160,19 @@ export function App() {
       ? { state: "read-only", reason: "send is off until page tools refresh", onSubmit: send, placeholder: "message zeta" }
       : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => { if (ready) void client.request("abort", { session_id: ready.sessionId }); }, placeholder: "message zeta" };
   const content = <>
-    {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} />}
-    {ready && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>retry</button>}</div>}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} />}
+    {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>retry</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry creating chat</button></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
-      : empty && emptyStore ? <RunProvider store={emptyStore}>
-        {empty.page.layout.blocks.length > 0 && <div className="layout-blocks">{empty.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={empty.page.id} credential={empty.credential} refreshKey={refreshKey} />)}</div>}
-        <section className="transcript"><EmptyChat page={empty.page} send={send} continueWaiting={active.continueWaitingChat} /></section>
-        <ComposerSlot sessionId={`new:${empty.page.id}`} focus vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
-      </RunProvider>
-      : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
-      : <RunProvider store={store}>
-        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+      : !activePage || !activeStore ? <div className="full-state"><p role="status">loading chat…</p></div>
+      : <RunProvider store={activeStore}>
+        {activePage.layout.blocks.length > 0 && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
+        <section ref={ready ? transcriptRef : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat page={activePage} send={send} continueWaiting={active.continueWaitingChat} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
       </RunProvider>}
   </>;
   return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
@@ -188,7 +184,7 @@ function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
 
 function EmptyChat({ page, send, continueWaiting }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void> }) {
   const starters = ["make a page that tracks my reading list", "what changed in my repos since yesterday", "continue: grade last night's eval runs"];
-  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
+  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>choose create mode above before you send if this chat should make pages or use page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
 }
 
 function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; disabled: boolean; toggle: () => void }) {

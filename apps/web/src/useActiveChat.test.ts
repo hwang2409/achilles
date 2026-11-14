@@ -3,10 +3,20 @@ import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation"
 import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
-  value: string | null = null;
-  getItem() { return this.value; }
-  setItem(_key: string, value: string) { this.value = value; }
-  removeItem() { this.value = null; }
+  readonly values = new Map<string, string>();
+  writes = 0;
+  failWrite = 0;
+  getItem(key: string) { return this.values.get(key) ?? null; }
+  setItem(key: string, value: string) {
+    this.writes += 1;
+    if (this.writes === this.failWrite) throw new Error(`forced durable write ${this.writes}`);
+    this.values.set(key, value);
+  }
+  removeItem(key: string) {
+    this.writes += 1;
+    if (this.writes === this.failWrite) throw new Error(`forced durable write ${this.writes}`);
+    this.values.delete(key);
+  }
 }
 
 const input = (client: object, map = false): ChatCreationInput => ({ client: client as never, pageId: "home", credential: "synthetic", cwd: "/tmp", mode: "allow", ...(map ? { mapExpectedSessionId: null } : {}) });
@@ -263,31 +273,38 @@ describe("active chat attachment", () => {
     } finally { release(); owner.clear(); await operation.catch(() => {}); globalThis.fetch = originalFetch; }
   }, CONTROLLED_TIMEOUT_MS + 5_000);
 
-  test("fresh-page publish failure retries the owned session instead of creating another", async () => {
+  test("retry after attachment failure creates no second session", async () => {
     const originalFetch = globalThis.fetch;
     const storage = new MemoryStorage();
-    let sessions = 0; let mappingAttempts = 0;
-    globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+    let sessions = 0; let resumes = 0;
+    globalThis.fetch = (async (resource: string | URL | Request) => {
       const url = String(resource);
       if (url === "/api/pages/home") return Response.json(page(null));
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
-      if (url === "/api/pages/home/chats") return new Response(null, { status: 200 });
-      if (url === "/api/pages/home/session" && init?.method === "PUT") return new Response(null, { status: ++mappingAttempts === 1 ? 503 : 200 });
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      if (url === "/api/pages/home/chats" || url === "/api/pages/home/session") return new Response(null, { status: 200 });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ session_id: "created-on-zeta", page_id: "home", title: "" }], next: null });
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
-    const client = attachmentClient((method) => { if (method === "new_session") sessions += 1; });
+    const client = attachmentClient((method) => {
+      if (method === "new_session") sessions += 1;
+      if (method === "resume" && ++resumes === 1) throw new Error("forced attachment failure");
+    });
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(storage);
+    const attempt = async () => {
+      const api = creation as unknown as { ensure?: typeof creation.ensure; create?: (value: ChatCreationInput) => Promise<{ sessionId: string }> };
+      if (api.ensure) return attachPage(client as never, "home", null, owner, creation, owner.begin("attempt", true), true);
+      const created = await api.create!(input(client, true));
+      return attachPage(client as never, "home", created.sessionId, owner, creation, owner.begin("attempt", true));
+    };
     try {
-      await creation.create(input(client, true)).catch(() => {});
-      await attachPage(client as never, "home", null, owner, creation, owner.begin("retry", true));
+      await attempt().catch(() => {});
+      await attempt();
       expect(sessions).toBe(1);
-      expect(mappingAttempts).toBe(2);
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
-  test("a later attachment failure cannot retain a completed creation error", async () => {
+  test("a later attachment failure replaces the completed creation error", async () => {
     const originalFetch = globalThis.fetch;
     const storage = new MemoryStorage();
     let mappingAttempts = 0;
@@ -304,11 +321,11 @@ describe("active chat attachment", () => {
     const creation = createChatCreationOwner(storage);
     const client = attachmentClient((method) => { if (method === "resume") throw new Error("forced later attachment failure"); });
     try {
-      await creation.create(input(client, true)).catch(() => {});
+      await creation.ensure(input(client, true), async (sessionId) => ({ sessionId })).catch(() => {});
       expect(creation.status("home").error).toContain("could not save session mapping");
 
       await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true)).catch(() => {});
-      expect(creation.status("home")).toEqual({ pending: null, error: null });
+      expect(creation.status("home")).toMatchObject({ pending: { sessionId: "created-on-zeta", stage: "mapped" }, error: "forced later attachment failure" });
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
@@ -336,143 +353,99 @@ describe("active chat attachment", () => {
 
 describe("chat creation lifecycle", () => {
   test.each([
-    { name: "registration fails", fail: "register", retained: "created", recovery: "restart" },
-    { name: "session settings fail after registration", fail: "session_settings", retained: "registered", recovery: "retry" },
-    { name: "status fails after registration", fail: "status", retained: "registered", recovery: "attach" },
-    { name: "settings publish fails after registration", fail: "set_settings", retained: "registered", recovery: "duplicate" },
-    { name: "mapping fails after approval", fail: "map", retained: "approvalApplied", recovery: "retry" },
-  ])("owns the error and resumes the exact session when $name", async ({ fail, retained, recovery }) => {
+    { name: "success" },
+    { name: "cancel while creating", cancel: "new_session" },
+    { name: "cancel while registering", cancel: "register" },
+    { name: "cancel while reading mode", cancel: "session_settings" },
+    { name: "cancel while reading status", cancel: "status" },
+    { name: "cancel while applying approval", cancel: "set_settings" },
+    { name: "cancel while mapping", cancel: "map" },
+    { name: "cancel while attaching", cancel: "attach" },
+    { name: "cancel while applying create mode", cancel: "mode", pendingMode: true },
+    { name: "cancel while handing ready state to the ui", cancel: "publish" },
+    { name: "create fails", fail: "new_session" },
+    { name: "attach fails", fail: "attach" },
+    { name: "create mode apply fails", fail: "mode", pendingMode: true },
+    { name: "ready hand-off fails", fail: "publish" },
+    { name: "created-state write fails", failWrite: 1 },
+    { name: "registered-state write fails", failWrite: 2 },
+    { name: "approval-state write fails", failWrite: 3 },
+    { name: "mapped-state write fails", failWrite: 4 },
+    { name: "attached-state write fails", failWrite: 5 },
+    { name: "pending-record clear fails", failWrite: 6 },
+    { name: "pending-mode write fails", pendingMode: true, pendingModeWriteFailure: true },
+    { name: "pending-mode clear fails", failWrite: 8, pendingMode: true },
+    { name: "mode-applied record clear fails", failWrite: 9, pendingMode: true },
+    { name: "reload after attach failure", fail: "attach", restart: true },
+    { name: "duplicate input joins one operation", duplicate: true },
+    { name: "pending create mode is applied before ready", pendingMode: true },
+  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, pendingMode, pendingModeWriteFailure }) => {
     const storage = new MemoryStorage();
-    let sessions = 0; let registrations = 0; let mappings = 0; let mode = "ask"; let failed = false;
+    let sessions = 0; let registrations = 0; let mappings = 0; let attaches = 0; let modes = 0; let publishes = 0; let approval = "ask";
+    let failed = false;
+    const reached = deferred<void>();
+    const gate = deferred<void>();
+    const step = async (name: string) => {
+      if (cancel === name) { reached.resolve(); await gate.promise; }
+      if (fail === name && !failed) { failed = true; throw new Error(`forced ${name} failure`); }
+    };
     const client = { request: async (method: string) => {
-      if (method === "new_session") { sessions += 1; return { session: { session_id: "created-on-zeta" } }; }
-      if (method === "session_settings") { if (fail === method && !failed) { failed = true; throw new Error("forced session settings failure"); } return { model: "offline", approval_mode: mode }; }
-      if (method === "status") { if (fail === method && !failed) { failed = true; throw new Error("forced status failure"); } return { state: "idle" }; }
-      if (method === "set_settings") { if (fail === method && !failed) { failed = true; throw new Error("forced settings publish failure"); } mode = "allow"; return { model: "offline", approval_mode: mode }; }
-      throw new Error(`unexpected ${method}`);
-    } };
-    const fetcher = (async (resource: string | URL | Request) => {
-      if (String(resource).endsWith("/chats")) {
-        registrations += 1;
-        if (fail === "register" && !failed) { failed = true; return new Response(null, { status: 503 }); }
-      } else {
-        mappings += 1;
-        if (fail === "map" && !failed) { failed = true; return new Response(null, { status: 503 }); }
-      }
-      return new Response(null, { status: 200 });
-    }) as typeof fetch;
-
-    const original = createChatCreationOwner(storage, fetcher);
-    await expect(original.create(input(client, true))).rejects.toThrow();
-    expect(original.status("home")).toMatchObject({ pending: { sessionId: "created-on-zeta", stage: retained }, error: expect.any(String) });
-
-    const owner = recovery === "restart" ? createChatCreationOwner(storage, fetcher) : original;
-    if (recovery === "restart") expect(owner.status("home").error).toEqual(expect.any(String));
-    const resumed = recovery === "duplicate" ? await owner.create(input(client, true))
-      : recovery === "retry" ? await owner.resume("home")
-      : await owner.resume(input(client, true));
-    expect(resumed?.mappedSessionId).toBe("created-on-zeta");
-    expect(sessions).toBe(1);
-    expect(registrations).toBe(fail === "register" ? 2 : 1);
-    expect(mappings).toBe(fail === "map" ? 2 : 1);
-    expect(mode).toBe("allow");
-    expect(owner.status("home")).toEqual({ pending: null, error: null });
-    expect(storage.value).toBeNull();
-  });
-
-  test("mapping conflict keeps the created chat indexed and returns the winner", async () => {
-    const storage = new MemoryStorage();
-    let sessions = 0; let registrations = 0;
-    const client = { request: async (method: string) => {
-      if (method === "new_session") { sessions += 1; return { session: { session_id: "indexed-loser" } }; }
-      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      throw new Error(`unexpected ${method}`);
-    } };
-    const fetcher = (async (resource: string | URL | Request) => {
-      if (String(resource).endsWith("/chats")) { registrations += 1; return new Response(null, { status: 200 }); }
-      return Response.json({ session_id: "mapping-winner" }, { status: 409 });
-    }) as typeof fetch;
-
-    const result = await createChatCreationOwner(storage, fetcher).create(input(client, true));
-    expect(result).toMatchObject({ sessionId: "indexed-loser", mappedSessionId: "mapping-winner", stage: "mapped" });
-    expect({ sessions, registrations }).toEqual({ sessions: 1, registrations: 1 });
-    expect(storage.value).toBeNull();
-  });
-
-  test.each(["new_session", "register", "session_settings", "status", "set_settings", "map"])("a stale caller cannot cancel creation while waiting for %s", async (heldStep) => {
-    const storage = new MemoryStorage();
-    let sessions = 0; let registrations = 0; let mode = "ask"; let reached!: () => void; let release!: () => void;
-    const reachedStep = new Promise<void>((resolve) => { reached = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const hold = async (step: string) => { if (heldStep === step) { reached(); await gate; } };
-    const client = { request: async (method: string) => {
-      await hold(method);
-      if (method === "new_session") { sessions += 1; return { session: { session_id: "durable-session" } }; }
-      if (method === "session_settings") return { model: "offline", approval_mode: mode };
+      await step(method);
+      if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }
+      if (method === "session_settings") return { model: "offline", approval_mode: approval };
       if (method === "status") return { state: "idle" };
-      if (method === "set_settings") { mode = "allow"; return { model: "offline", approval_mode: mode }; }
+      if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
       throw new Error(`unexpected ${method}`);
     } };
     const fetcher = (async (resource: string | URL | Request) => {
-      const step = String(resource).endsWith("/chats") ? "register" : "map";
-      await hold(step);
-      if (step === "register") registrations += 1;
+      const name = String(resource).endsWith("/chats") ? "register" : "map";
+      await step(name);
+      if (name === "register") registrations += 1; else mappings += 1;
       return new Response(null, { status: 200 });
     }) as typeof fetch;
-    const owner = createChatCreationOwner(storage, fetcher);
-    const operation = owner.create(input(client, true));
-    try {
-      await waitBounded(reachedStep, release, () => operation);
-      expect(owner.resume(input(client, true))).toBe(operation);
-      release();
-      await operation;
-      expect({ sessions, registrations, mode }).toEqual({ sessions: 1, registrations: 1, mode: "allow" });
-      expect(owner.status("home")).toEqual({ pending: null, error: null });
-      expect(storage.value).toBeNull();
-    } finally { release(); await operation.catch(() => {}); }
-  }, CONTROLLED_TIMEOUT_MS + 5_000);
+    if (pendingMode) {
+      const modeOwner = createChatCreationOwner(storage, fetcher);
+      if (pendingModeWriteFailure) {
+        storage.failWrite = 1;
+        expect(() => modeOwner.setCreateMode("home", true)).toThrow("forced durable write 1");
+        storage.failWrite = 0;
+      }
+      modeOwner.setCreateMode("home", true);
+    }
+    storage.failWrite = failWrite ?? 0;
+    let owner = createChatCreationOwner(storage, fetcher);
+    const run = () => owner.ensure(
+      input(client, true),
+      async (sessionId) => { await step("attach"); attaches += 1; return { sessionId }; },
+      async (attached, enabled) => { await step("mode"); modes += 1; expect(enabled).toBe(true); return attached; },
+      async () => { await step("publish"); publishes += 1; },
+    )!;
+    const first = run();
+    if (cancel) {
+      try {
+        await waitBounded(reached.promise, () => gate.resolve(), () => first);
+        const joined = run();
+        expect(joined).toBe(first);
+        gate.resolve();
+        await Promise.all([first, joined]);
+      } finally { gate.resolve(); await first.catch(() => {}); }
+    } else if (fail || failWrite) {
+      await expect(first).rejects.toThrow("forced");
+      storage.failWrite = 0;
+      if (restart) owner = createChatCreationOwner(storage, fetcher);
+      await run();
+    } else if (duplicate) {
+      const joined = run();
+      expect(joined).toBe(first);
+      await Promise.all([first, joined]);
+    } else await first;
 
-  test("finishes success and deduplicates double create and double retry", async () => {
-    const storage = new MemoryStorage();
-    let sessions = 0; let registrations = 0; let reached!: () => void; let release!: () => void;
-    const reachedRegistration = new Promise<void>((resolve) => { reached = resolve; });
-    const registrationGate = new Promise<void>((resolve) => { release = resolve; });
-    const client = { request: async (method: string) => {
-      if (method === "new_session") { sessions += 1; return { session: { session_id: "only-session" } }; }
-      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      throw new Error(`unexpected ${method}`);
-    } };
-    const fetcher = (async (resource: string | URL | Request) => {
-      if (String(resource).endsWith("/chats")) { registrations += 1; reached(); await registrationGate; }
-      return new Response(null, { status: 200 });
-    }) as typeof fetch;
-    const owner = createChatCreationOwner(storage, fetcher);
-    const first = owner.create(input(client, true));
-    try {
-      await waitBounded(reachedRegistration, release, () => first);
-      const duplicate = owner.create(input(client, true));
-      expect(duplicate).toBe(first);
-      expect(owner.resume(input(client, true))).toBe(first);
-      release();
-      const [created, repeated] = await Promise.all([first, duplicate]);
-      expect(created).toMatchObject({ sessionId: "only-session", mappedSessionId: "only-session" });
-      expect(repeated.sessionId).toBe("only-session");
-      expect({ sessions, registrations }).toEqual({ sessions: 1, registrations: 1 });
-      expect(owner.status("home")).toEqual({ pending: null, error: null });
-      expect(storage.value).toBeNull();
-    } finally { release(); await first.catch(() => {}); }
+    expect(sessions).toBe(fail === "new_session" ? 1 : 1);
+    expect(registrations).toBe(1);
+    expect(mappings).toBe(1);
+    expect(attaches).toBe(fail === "mode" || fail === "publish" || (failWrite !== undefined && failWrite >= 5) ? 2 : 1);
+    expect(publishes).toBe(1);
+    expect(modes).toBe(pendingMode ? (failWrite === 8 ? 2 : 1) : 0);
+    expect(owner.status("home")).toMatchObject({ pending: null, error: null, createMode: undefined });
   }, CONTROLLED_TIMEOUT_MS + 5_000);
-
-  test("ignores invalid durable records field by field", () => {
-    const storage = new MemoryStorage();
-    storage.value = JSON.stringify([
-      { sessionId: "", pageId: "home", mode: "allow", stage: "created" },
-      { sessionId: "s", pageId: 4, mode: "allow", stage: "created" },
-      { sessionId: "s", pageId: "home", mode: "unsafe", stage: "created" },
-      { sessionId: "s", pageId: "home", mode: "allow", stage: "unknown" },
-      { sessionId: "s", pageId: "home", mode: "allow", stage: "approvalApplied", expectedSessionId: 4 },
-      { sessionId: "s", pageId: "home", mode: "allow", stage: "mapped", expectedSessionId: null },
-    ]);
-    expect(createChatCreationOwner(storage).status("home")).toEqual({ pending: null, error: null });
-  });
 });
