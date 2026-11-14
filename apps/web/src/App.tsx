@@ -81,6 +81,22 @@ function subscribePageChanges(
   });
 }
 
+function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
+  return waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+}
+
+function activeComposerProps(
+  connected: boolean,
+  toggleBlocked: boolean,
+  turn: "idle" | "running",
+  onSubmit: ComposerProps["onSubmit"],
+  onStop: () => void,
+): ComposerProps {
+  if (!connected) return { state: "read-only", reason: "send is off until zeta is back", onSubmit, placeholder: "message zeta" };
+  if (toggleBlocked) return { state: "read-only", reason: "send is off until page tools refresh", onSubmit, placeholder: "message zeta" };
+  return { state: turn === "running" ? "steerable" : "idle", onSubmit, onStop, placeholder: "message zeta" };
+}
+
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
   switch (state.phase) {
@@ -161,7 +177,7 @@ export function App() {
     const previous = previousTurn.current; previousTurn.current = turn;
     if (previous === "running" && turn === "idle") void active.settleApprovalMode();
   }, [active.settleApprovalMode, turn]);
-  const lastState = waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+  const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
@@ -169,11 +185,7 @@ export function App() {
   const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
-  const composerProps: ComposerProps = !connected || !client
-    ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: send, placeholder: "message zeta" }
-    : active.toggleBlocked
-      ? { state: "read-only", reason: "send is off until page tools refresh", onSubmit: send, placeholder: "message zeta" }
-      : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => { if (ready) void client.request("abort", { session_id: ready.sessionId }); }, placeholder: "message zeta" };
+  const composerProps = activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
   const content = <>
     {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>retry</button>}</div>}
