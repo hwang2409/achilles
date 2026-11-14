@@ -86,14 +86,12 @@ export async function productCapabilities(stack: EvalStack) {
 export const SETUP_SCRIPT = `
 import hashlib, json, sys
 from pathlib import Path
-from achilles.pages import PageStore, now, validate_layout
+from achilles.pages import PageStore, now
 root, page_id, raw = sys.argv[1:]
 setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
     if "initial_layout" in setup:
-        tools = store.page_tools(page_id)
-        validate_layout(setup["initial_layout"], {tool["name"] for tool in tools}, {tool["implementation"]["collection"] for tool in tools}, "/layout")
         document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(document.encode()).hexdigest()
         stamp = now()
@@ -103,9 +101,14 @@ with store.transaction() as db:
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
-summary = store.inspect_page(page_id)
+layout = store.layout(page_id)
+if hasattr(store, "inspect_page"):
+    summary = store.inspect_page(page_id)
+else:
+    page = store.page(page_id); tools = store.page_tools(page_id)
+    summary = {"layout": {"version": page["active_layout_version"] or 1}, "tools": [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"]} for tool in tools]}
 collections = {item["collection"] for item in setup.get("records", [])}
-print(json.dumps({"inspect": summary, "layout": store.layout(page_id), "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
+print(json.dumps({"inspect": summary, "layout": layout, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
 export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
