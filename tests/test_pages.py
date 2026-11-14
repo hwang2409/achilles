@@ -37,7 +37,7 @@ _BUNDLE = {
 
 def _update_page(store: PageStore) -> str:
     store.set_create_mode("home", True)
-    page, _, _ = store.create_page(
+    page, _, _, _ = store.create_page(
         "/reading",
         "reading",
         {"blocks": [{"type": "list", "title": "books", "collection": "books"}]},
@@ -170,7 +170,17 @@ def test_computed_metrics_count_records_at_read_time(tmp_path):
             {"type": "metric", "label": "missing", "collection": "other", "count": True},
         ]
     }
-    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    schema = {
+        "type": "object",
+        "properties": {"status": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    metric_bundle = {
+        **_BUNDLE,
+        "input_schema": schema,
+        "implementation": {**_BUNDLE["implementation"], "data_schema": schema},
+    }
+    page, _, _, _ = store.create_page("/metrics", "metrics", layout, tools=[metric_bundle])
     store.set_create_mode(page["id"], True)
     assert store.update_layout(page["id"], layout, 1)[0] == 2
     with store.transaction() as db:
@@ -199,7 +209,7 @@ def test_inspected_computed_metric_layout_round_trips_to_update(tmp_path):
     layout = {
         "blocks": [{"type": "metric", "label": "books", "collection": "books", "count": True}]
     }
-    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    page, _, _, _ = store.create_page("/metrics", "metrics", layout)
     store.set_create_mode(page["id"], True)
 
     inspected = store.inspect_page(page["id"])
@@ -223,7 +233,21 @@ def test_computed_metric_equals_preserves_json_scalar_types(tmp_path):
             for value in equals_values
         ]
     }
-    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    schema = {
+        "type": "object",
+        "properties": {"value": {}},
+        "additionalProperties": False,
+    }
+    metric_bundle = {
+        **_BUNDLE,
+        "input_schema": schema,
+        "implementation": {
+            **_BUNDLE["implementation"],
+            "collection": "items",
+            "data_schema": schema,
+        },
+    }
+    page, _, _, _ = store.create_page("/metrics", "metrics", layout, tools=[metric_bundle])
     with store.transaction() as db:
         for index, document in enumerate(
             (
@@ -275,7 +299,7 @@ def test_layout_rejects_unknown_tool_reference() -> None:
 def test_create_page_commits_layout_and_audit(tmp_path) -> None:
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    page, digest, existing = store.create_page(
+    page, digest, existing, _ = store.create_page(
         "/reports", "reports", {"blocks": [{"type": "text", "text": "hello"}]}
     )
     assert page["route"] == "/reports"

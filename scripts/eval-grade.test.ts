@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { expectationTokens, gradeCheck, gradeReference, gradeTask, structurallyContains, validateTask } from "./eval-grade";
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
 import metricTaskJson from "../evals/tasks/reading-metric-count.json";
+import readingListTaskJson from "../evals/tasks/reading-list-one-prompt.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -9,6 +10,24 @@ test("static file failures are harness errors, not agent failures", () => {
   const result = gradeReference(task, { browser: [{ text: "static file not found" }] });
   expect(result.status).toBe("harness_error");
   expect(result.pass).toBe(false);
+});
+
+test("status checks match whole normalized tokens and declared synonyms", () => {
+  const task = validateTask(readingListTaskJson);
+  const storedCheck = task.checks.find(check => check.id === "record")!;
+  const visibleCheck = task.checks.find(check => check.id === "visible-status")!;
+  const snapshot = (status: string) => ({
+    pages: [{ id: "reading-id", alias: "reading" }],
+    tool_versions: [{ page_id: "reading-id", name: "list_books", collection: "books", data_schema: { type: "object", properties: { title: { type: "string" }, status: { type: "string" } } } }],
+    records: [{ page_id: "reading-id", collection: "books", data: { title: "Synthetic Book", status } }],
+    results: [{ page_id: "reading-id", tool: "achilles__list_books", success: true, data: [{ title: "Synthetic Book", status }] }],
+  });
+  for (const [status, expected] of [["to-read", false], ["Read", true], ["finished", true], ["reading", false]] as const) {
+    expect(gradeCheck(storedCheck, snapshot(status)).pass, `stored ${status}`).toBe(expected);
+  }
+  for (const [text, expected] of [["to-read", false], ["read", true], ["reading", false]] as const) {
+    expect(gradeCheck(visibleCheck, { ...snapshot("read"), browser: [{ page_id: "reading-id", text }] }).pass, `visible ${text}`).toBe(expected);
+  }
 });
 
 test("a setup task without an initial snapshot is a harness error", () => {

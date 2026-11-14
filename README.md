@@ -26,7 +26,7 @@ use `{"type":"metric","label":"books","collection":"books","count":true}` to cou
 
 see [EVALS.md](EVALS.md) for how to run one task or the suite, read the report, and add a task.
 
-run the scripted harness with `make eval TASK=harness-smoke`. the current suite covers `agent-data-access`, `create-and-use-tool-same-chat`, `harness-smoke`, `judge-page-and-annotate`, and `second-chat-tools`. the other six evaluation tasks return in a follow-up PR. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
+run the scripted harness with `make eval TASK=harness-smoke`. the current suite covers `agent-data-access`, `create-and-use-tool-same-chat`, `harness-smoke`, `judge-page-and-annotate`, and `second-chat-tools`. use `N=2` for repeats and `MODEL=provider/model` to override the settings-resolved model. `make eval-stack` starts a retained private stack for a ux test; it prints the local achilles url, model, tool policy, and retained state path. the stack uses `--tools 'achilles__*,mcp_discover'` and never forwards api-key environment variables.
 
 use `make stop` to stop only processes started by `make dev`.
 
