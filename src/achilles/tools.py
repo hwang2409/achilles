@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -29,7 +30,13 @@ _TOOL_BUNDLE_PROPERTIES = {
     },
     "description": {"type": "string", "minLength": 1, "maxLength": MAX_DESCRIPTION},
     "input_schema": _JSON_SCHEMA,
-    "output_schema": _JSON_SCHEMA,
+    "output_schema": {
+        **_JSON_SCHEMA,
+        "description": (
+            "optional; when present, must exactly match the result schema "
+            "derived from the operation"
+        ),
+    },
     "implementation": {
         "type": "object",
         "properties": {
@@ -44,7 +51,7 @@ _TOOL_BUNDLE_PROPERTIES = {
 TOOL_BUNDLE_SCHEMA = {
     "type": "object",
     "properties": _TOOL_BUNDLE_PROPERTIES,
-    "required": list(_TOOL_BUNDLE_PROPERTIES),
+    "required": [key for key in _TOOL_BUNDLE_PROPERTIES if key != "output_schema"],
     "additionalProperties": False,
     "description": (
         f"immutable page-owned declarative tool; bundle <= {MAX_BUNDLE_BYTES // 1024} KB; "
@@ -68,13 +75,48 @@ def _validate_json_schema(value: dict[str, Any], path: str) -> None:
         raise ValidationError(path, "valid JSON Schema") from exc
 
 
-def validate_bundle(bundle: Any, prefix: str = "") -> dict[str, Any]:
+def derived_output_schema(bundle: dict[str, Any]) -> dict[str, Any]:
+    operation = bundle["implementation"]["operation"]
+    record = deepcopy(bundle["implementation"]["data_schema"])
+    record["type"] = "object"
+    record["properties"] = {
+        **record.get("properties", {}),
+        "record_id": {"type": "string"},
+    }
+    record["required"] = [
+        *[key for key in record.get("required", []) if key != "record_id"],
+        "record_id",
+    ]
+    if operation == "list":
+        return {"type": "array", "items": record}
+    if operation == "get":
+        return {"anyOf": [record, {"type": "null"}]}
+    return record
+
+
+def _derived_output_expectation(operation: str) -> str:
+    if operation == "list":
+        return "derived list result: array of objects with required record_id and collection fields"
+    if operation == "get":
+        return "derived get result: object with required record_id and collection fields, or null"
+    return f"derived {operation} result: object with required record_id and collection fields"
+
+
+def validate_bundle(
+    bundle: Any, prefix: str = "", *, reject_conflicting_output: bool = False
+) -> dict[str, Any]:
     validate_schema(bundle, TOOL_BUNDLE_SCHEMA, prefix)
-    for key in ("input_schema", "output_schema"):
-        _validate_json_schema(bundle[key], f"{prefix}/{key}")
+    _validate_json_schema(bundle["input_schema"], f"{prefix}/input_schema")
+    if "output_schema" in bundle:
+        _validate_json_schema(bundle["output_schema"], f"{prefix}/output_schema")
     _validate_json_schema(
         bundle["implementation"]["data_schema"], f"{prefix}/implementation/data_schema"
     )
+    output_schema = derived_output_schema(bundle)
+    if reject_conflicting_output and bundle.get("output_schema", output_schema) != output_schema:
+        operation = bundle["implementation"]["operation"]
+        raise ValidationError(f"{prefix}/output_schema", _derived_output_expectation(operation))
+    bundle = {**bundle, "output_schema": output_schema}
     if len(canonical_bundle(bundle)) > MAX_BUNDLE_BYTES:
         raise ValidationError(prefix, f"serialized size <= {MAX_BUNDLE_BYTES} bytes")
     return bundle

@@ -46,7 +46,7 @@ export async function loadTask(id: string, dir = new URL("../evals/tasks/", impo
   if (task.id !== id) throw new Error(`task id ${task.id} does not match ${id}`); return task;
 }
 
-const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : { type: "object", additionalProperties: true }, output_schema: {}, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
+const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : { type: "object", additionalProperties: true }, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
 const SETUP_SCRIPT = `
 import json, sys
 from achilles.pages import PageStore, now

@@ -208,7 +208,6 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
         "name": "annotate_trace",
         "description": "annotate",
         "input_schema": {"type": "object"},
-        "output_schema": {"type": "object"},
         "implementation": {
             "operation": "insert",
             "collection": "annotations",

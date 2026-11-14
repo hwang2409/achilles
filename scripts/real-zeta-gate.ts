@@ -401,7 +401,6 @@ try {
       required: ["text"],
       additionalProperties: false,
     },
-    output_schema: { type: "object" },
     implementation: {
       operation: "insert",
       collection: "trace_annotations",

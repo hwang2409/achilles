@@ -151,9 +151,10 @@ def build_mcp(store: PageStore):
                         name="create_tool",
                         description=(
                             "create a page-owned immutable declarative tool version; "
-                            "available only in create mode; operations are list, get, "
-                            "insert, or update; nested schemas must be valid JSON Schema; "
-                            "bundle <= 64 KB"
+                            "available only in create mode; results: insert/update -> "
+                            "{record_id, ...collection fields}, get -> that object or null, "
+                            "list -> an array of those objects; omit output_schema or provide "
+                            "the exact derived schema; bundle <= 64 KB"
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
@@ -165,6 +166,7 @@ def build_mcp(store: PageStore):
                     name=bundle["name"],
                     description=bundle["description"],
                     inputSchema=bundle["input_schema"],
+                    outputSchema=bundle["output_schema"],
                 )
             )
         return ListToolsResult(tools=tools)
