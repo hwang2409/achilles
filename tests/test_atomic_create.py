@@ -247,6 +247,41 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     assert off["isError"]
 
 
+def test_fresh_mcp_session_must_list_tools_before_generated_call(creation_client):
+    _root, store, client, headers = creation_client
+    store.create_tool("home", bundle(name="same_name"))
+
+    unlisted = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "same_name", "arguments": {"title": "Synthetic Book"}},
+    )
+    assert unlisted.get("isError") is True, "fresh session wrote a record without tools/list"
+    assert json.loads(unlisted["content"][0]["text"]) == {
+        "code": "tool_changed",
+        "expected": "list tools again",
+        "path": "",
+    }
+    assert store.records("home", "books") == ([], 0)
+    with store._connect() as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM audit WHERE action='invoke:same_name'").fetchone()[0]
+            == 0
+        )
+
+    mcp(client, headers, 3, "tools/list", {})
+    listed = mcp(
+        client,
+        headers,
+        4,
+        "tools/call",
+        {"name": "same_name", "arguments": {"title": "Synthetic Book"}},
+    )
+    assert json.loads(listed["content"][0]["text"])["title"] == "Synthetic Book"
+
+
 def test_stale_mcp_catalog_rejects_call_until_tools_are_listed_again(creation_client):
     _root, store, client, headers = creation_client
     store.create_tool("home", bundle(name="same_name"))

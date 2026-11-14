@@ -210,12 +210,17 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
             },
         )
         mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
         stale_mcp = client.post(
             "/mcp/",
             headers=mcp_headers,
             json={
                 "jsonrpc": "2.0",
-                "id": 2,
+                "id": 3,
                 "method": "tools/call",
                 "params": {"name": "update_note", "arguments": arguments},
             },
@@ -295,12 +300,17 @@ def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_pa
             },
         )
         mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
         called = client.post(
             "/mcp/",
             headers=mcp_headers,
             json={
                 "jsonrpc": "2.0",
-                "id": 2,
+                "id": 3,
                 "method": "tools/call",
                 "params": {"name": "add_note", "arguments": {"text": 7}},
             },

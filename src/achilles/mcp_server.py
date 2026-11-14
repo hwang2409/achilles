@@ -245,6 +245,9 @@ def build_mcp(store: PageStore):
         listed_versions = context.session._connection.state.get(
             f"achilles-tool-versions:{page['id']}", {}
         )
+        if params.name not in listed_versions:
+            await context.session.send_tool_list_changed()
+            return _safe_error(ValidationError("", "list tools again", "tool_changed"))
         try:
             result = await anyio.to_thread.run_sync(
                 call_record,
@@ -252,7 +255,7 @@ def build_mcp(store: PageStore):
                 page["id"],
                 params.name,
                 args,
-                listed_versions.get(params.name),
+                listed_versions[params.name],
             )
         except ValidationError as exc:
             if exc.code == "conflict" and exc.path == "/version":

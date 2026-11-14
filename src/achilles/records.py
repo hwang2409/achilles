@@ -98,7 +98,7 @@ def call_record(
     page_id: str,
     tool_name: str,
     arguments: dict[str, Any],
-    expected_version: int | None = None,
+    expected_version: int,
 ) -> Any:
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")
@@ -112,7 +112,7 @@ def call_record(
         ).fetchone()
         if row is None:
             raise PermissionError("forbidden: tool is not assigned to this page")
-        if expected_version is not None and expected_version != row["version"]:
+        if expected_version != row["version"]:
             raise VersionConflict("/version", "active tool version")
         bundle = validate_bundle(json.loads(row["bundle"]))
         _check(Draft202012Validator(bundle["input_schema"]), arguments)
