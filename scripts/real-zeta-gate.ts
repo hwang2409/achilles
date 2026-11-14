@@ -486,9 +486,22 @@ try {
   const catalogRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
   const pageRequestsBeforeStreamingTurn = pageIndexRequests.length;
   await field.fill("catalog refresh");
+  let releaseToggle!: () => void;
+  let markToggleReached!: () => void;
+  const toggleRelease = new Promise<void>((resolve) => { releaseToggle = resolve; });
+  const toggleReached = new Promise<void>((resolve) => { markToggleReached = resolve; });
+  const holdToggle = async (route: Route) => { markToggleReached(); await toggleRelease; await route.continue(); };
+  await page.route("**/api/pages/home/create-mode", holdToggle);
   const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
-  await modeToggle.click();
-  await field.press("Enter");
+  const toggleClick = modeToggle.click();
+  try {
+    await toggleReached;
+    await field.press("Enter");
+  } finally {
+    releaseToggle();
+    await toggleClick;
+    await page.unroute("**/api/pages/home/create-mode", holdToggle);
+  }
   const toggleResult = await toggleResponse;
   if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
   await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
