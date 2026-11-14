@@ -240,12 +240,25 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
     if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
-    const delivery_id = crypto.randomUUID(); track(delivery_id);
+    let delivery_id = crypto.randomUUID(); track(delivery_id);
     try {
       await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+      if (intent.steer) {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const status = await client.request("delivery_status", { delivery_id }) as { status?: string };
+          if (status.status === "delivered") break;
+          if (status.status === "dropped") {
+            delivery_id = crypto.randomUUID(); track(delivery_id);
+            await client.request("send", { session_id: current.sessionId, text, delivery_id });
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
     } catch (error) {
       // A stale turn view can race its server-side turn end. send queues the same draft instead of losing it.
       if (!intent.steer || !(error instanceof Error) || !error.message.includes("no turn is running")) throw error;
+      delivery_id = crypto.randomUUID(); track(delivery_id);
       await client.request("send", { session_id: current.sessionId, text, delivery_id });
     }
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
