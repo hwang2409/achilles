@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from achilles.pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, PageStore, validate_layout
 from achilles.records import call_record
 from achilles.tools import ValidationError
+from achilles.validation import error_document
 
 _BUNDLE = {
     "format_version": 1,
@@ -93,6 +94,45 @@ def test_layout_rejects_unknown_tool_reference() -> None:
         validate_layout({"blocks": [{"type": "form", "title": "x", "tool": "other"}]})
     assert caught.value.path == "/blocks/0/tool"
     assert caught.value.expected == "assigned tool name"
+
+
+def test_actionable_layout_errors_name_the_fix_without_echoing_values(tmp_path) -> None:
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page_id = _update_page(store)
+
+    cases = [
+        (
+            lambda: validate_layout(
+                {"blocks": [{"type": "list", "title": "runs", "collection": "private value!"}]},
+                assigned_collections=set(),
+                prefix="/layout",
+            ),
+            "create_page.tools",
+            "private value!",
+        ),
+        (
+            lambda: validate_layout(
+                {"blocks": [{"type": "form", "title": "edit", "tool": "private value!"}]},
+                assigned_tools=set(),
+                prefix="/layout",
+            ),
+            "create_tool",
+            "private value!",
+        ),
+        (
+            lambda: store.update_layout(page_id, {"blocks": []}, 99),
+            "inspect_page",
+            "99",
+        ),
+    ]
+
+    for action, named_fix, private_value in cases:
+        with pytest.raises(ValidationError) as caught:
+            action()
+        document = error_document(caught.value)
+        assert named_fix in document["hint"]
+        assert private_value not in document["hint"]
 
 
 def test_create_page_commits_layout_and_audit(tmp_path) -> None:

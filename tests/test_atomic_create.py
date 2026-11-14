@@ -574,7 +574,11 @@ def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments,
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": arguments})
     error = json.loads(result["content"][0]["text"])
     assert result["isError"] is True
-    assert error == {"code": code, "expected": error["expected"], "path": path}
+    assert {key: error[key] for key in ("code", "expected", "path")} == {
+        "code": code,
+        "expected": error["expected"],
+        "path": path,
+    }
     assert state(root) == before
 
 
@@ -747,6 +751,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         "code": "conflict",
         "path": "/expected_version",
         "expected": "current active layout version",
+        "hint": "Call inspect_page, set expected_version to layout.version, and retry.",
     }
 
 
