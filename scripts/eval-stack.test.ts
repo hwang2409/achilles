@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,9 +31,10 @@ const cases = [
 ] as const;
 
 test("eval lifecycle owner leaves no process group or port behind", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
   for (const scenario of cases) {
     const report = await mkdtemp(join(tmpdir(), "achilles-eval-lifecycle-")); const seen = new Map<number, ProcessRow>(); const ports = new Set<number>();
-    const child = spawn("make", [scenario.target], { cwd: new URL("..", import.meta.url).pathname, env: { ...process.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", MODEL: "ollama/qwen3:4b", TASK: "harness-smoke", REPORT_DIR: report, ...scenario.env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("make", [scenario.target], { cwd: new URL("..", import.meta.url).pathname, env: { ...process.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_PROCESS_PROOF: join(report, "process-proof.json"), MODEL: "ollama/qwen3:4b", TASK: "harness-smoke", REPORT_DIR: report, ...scenario.env }, stdio: ["ignore", "pipe", "pipe"] });
     const output: Buffer[] = []; child.stdout!.on("data", chunk => output.push(Buffer.from(chunk))); child.stderr!.on("data", chunk => output.push(Buffer.from(chunk)));
     const exited = new Promise<number>(resolve => child.once("exit", code => resolve(code ?? -1))); let sent = false; let code: number | undefined;
     try {
@@ -45,9 +46,11 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
       if (code === undefined) throw new Error(`${scenario.name} did not exit: ${Buffer.concat(output).toString()}`);
       expect(seen.size, `${scenario.name} recorded no child processes`).toBeGreaterThan(0); if (scenario.signal) expect(sent, `${scenario.name} was not delivered`).toBe(true);
       expect(scenario.exit === "zero" ? code : code === 0, `${scenario.name} exit ${code}: ${Buffer.concat(output).toString()}`).toBe(scenario.exit === "zero" ? 0 : false);
+      const proof = JSON.parse(await readFile(join(report, "process-proof.json"), "utf8")) as { pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; pids_dead: boolean; pgids_dead: boolean };
+      expect(proof.pids_dead && proof.pgids_dead, `${scenario.name} owner cleanup failed`).toBe(true); expect(proof.process_groups.some(group => group.pids.some(pid => pid !== group.pgid)), `${scenario.name} did not record a wrapper child`).toBe(true);
       await Bun.sleep(200); const remaining = processRows(); const livePids = [...seen.keys()].filter(pid => remaining.some(row => row.pid === pid)); const ownedPgids = new Set([...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)).map(row => row.pgid)); const livePgids = [...ownedPgids].filter(pgid => remaining.some(row => row.pgid === pgid));
       expect(livePids, `${scenario.name} left pids alive`).toEqual([]); expect(livePgids, `${scenario.name} left process groups alive`).toEqual([]); expect(await Promise.all([...ports].map(portClosed)), `${scenario.name} left ports open`).not.toContain(false);
-      const serverRows = [...seen.values()].filter(row => ownedPgids.has(row.pgid)); expect(serverRows.some(row => row.pid === row.pgid), `${scenario.name} missed uv wrapper/group leader pids`).toBe(true); expect(serverRows.every(row => seen.has(row.pid)), `${scenario.name} missed a process-group member`).toBe(true);
+      const serverRows = [...seen.values()].filter(row => ownedPgids.has(row.pgid)); expect(serverRows.every(row => proof.pgids.includes(row.pgid)), `${scenario.name} owner missed a server process group`).toBe(true); expect(serverRows.every(row => seen.has(row.pid)), `${scenario.name} missed a process-group member`).toBe(true);
     } finally { if (code === undefined) { try { process.kill(-child.pid!, "SIGKILL"); } catch {} } for (const pgid of new Set([...seen.values()].filter(row => /(?:achilles|zeta).*serve|uv wrapper\/group leader/.test(row.command)).map(row => row.pgid))) { try { process.kill(-pgid, "SIGKILL"); } catch {} } await rm(report, { recursive: true, force: true }); }
   }
 }, 180_000);

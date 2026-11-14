@@ -48,10 +48,11 @@ class ProcessOwner {
   async run(command: string, args: string[], cwd?: string, timeoutMs = 15_000) {
     const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     const read = (stream: NodeJS.ReadableStream) => new Promise<string>((resolveRead, reject) => { const chunks: Buffer[] = []; stream.on("data", chunk => chunks.push(Buffer.from(chunk))); stream.once("end", () => resolveRead(Buffer.concat(chunks).toString())); stream.once("error", reject); });
-    const stdout = read(process.stdout!); const stderr = read(process.stderr!); let timer: ReturnType<typeof setTimeout>;
-    const exitCode = await Promise.race([new Promise<number>(resolveExit => process.once("exit", code => resolveExit(code ?? -1))), new Promise<number>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(-1), timeoutMs); })]); clearTimeout(timer!);
-    if (exitCode === -1) await this.stopGroup(process.pid!);
-    return { exitCode, stdout: await stdout, stderr: await stderr };
+    const stdout = read(process.stdout!); const stderr = read(process.stderr!); let timer: ReturnType<typeof setTimeout>; let spawnError = "";
+    const exited = new Promise<number>(resolveExit => { process.once("exit", code => resolveExit(code ?? -1)); process.once("error", error => { spawnError = error.message; resolveExit(-1); }); });
+    const exitCode = await Promise.race([exited, new Promise<number>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(-1), timeoutMs); })]); clearTimeout(timer!);
+    if (exitCode === -1 && process.pid) await this.stopGroup(process.pid);
+    return { exitCode, stdout: await stdout, stderr: `${await stderr}${spawnError}` };
   }
   private async stopGroup(pgid: number) {
     for (const signal of ["SIGTERM", "SIGKILL"] as const) {
@@ -64,6 +65,7 @@ class ProcessOwner {
     this.detachAbort(); const before = processGroups(); const pgids = this.processes.map(process => process.pid!).filter(Boolean); const process_groups = pgids.map(pgid => ({ pgid, pids: [...new Set([pgid, ...(before.get(pgid) ?? [])])] }));
     for (const pgid of [...pgids].reverse()) await this.stopGroup(pgid);
     const after = processGroups(); const pids = [...new Set(process_groups.flatMap(group => group.pids))]; const proof = { pids, pgids, process_groups, pids_dead: pids.every(pid => !pidAlive(pid)), pgids_dead: pgids.every(pgid => !after.has(pgid)) };
+    if (Bun.env.EVAL_PROCESS_PROOF) await Bun.write(Bun.env.EVAL_PROCESS_PROOF, JSON.stringify(proof));
     if (!proof.pids_dead || !proof.pgids_dead) throw new Error(`eval process cleanup failed: ${JSON.stringify(proof)}`);
     return proof;
   })(); }
