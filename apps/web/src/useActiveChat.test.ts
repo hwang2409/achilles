@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
   value: string | null = null;
@@ -11,6 +11,58 @@ class MemoryStorage {
 
 const input = (client: object, map = false): ChatCreationInput => ({ client: client as never, pageId: "home", credential: "synthetic", cwd: "/tmp", mode: "allow", ...(map ? { mapExpectedSessionId: null } : {}) });
 const CONTROLLED_TIMEOUT_MS = 10_000;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((accept, decline) => { resolve = accept; reject = decline; });
+  return { promise, resolve, reject };
+}
+
+describe("create mode tool refresh", () => {
+  test("holds send through a pending refresh and ignores a duplicate toggle", async () => {
+    const refresh = deferred<unknown>();
+    const requestReached = deferred<void>();
+    let fetches = 0; let requests = 0;
+    const owner = createModeToggleOwner(async () => { fetches += 1; return Response.json({ create_mode: true }); });
+    const input = { pageId: "home", sessionId: "session", enabled: true, client: { request: () => { requests += 1; requestReached.resolve(); return refresh.promise; } } };
+    const first = owner.run(input); const duplicate = owner.run(input);
+    let sendReady = false;
+    const send = owner.beforeSend().then(() => { sendReady = true; });
+    await requestReached.promise;
+    expect(sendReady).toBe(false);
+    expect(duplicate).toBe(first);
+    expect(fetches).toBe(1); expect(requests).toBe(1);
+    refresh.resolve({ session_id: "session", servers: ["achilles"] });
+    expect(await first).toEqual({ createMode: true, error: null, blocked: false });
+    await send;
+    expect(sendReady).toBe(true);
+  });
+
+  test.each([
+    { code: -32005, text: "could not refresh page tools" },
+    { code: -32602, text: "could not find the achilles" },
+    { code: -32003, text: "different chat" },
+  ])("blocks send on refresh error $code and retries only the refresh", async ({ code, text }) => {
+    let fetches = 0; let requests = 0;
+    const client = { request: async () => { requests += 1; if (requests === 1) throw Object.assign(new Error("failed"), { code }); return { session_id: "session", servers: ["achilles"] }; } };
+    const owner = createModeToggleOwner(async () => { fetches += 1; return Response.json({ create_mode: true }); });
+    const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
+    expect(result.blocked).toBe(true); expect(result.error).toContain(text);
+    await expect(owner.beforeSend()).rejects.toThrow("send is off");
+    expect(await owner.run({ pageId: "home", sessionId: "session", enabled: false, client })).toEqual({ createMode: true, error: null, blocked: false });
+    await owner.beforeSend();
+    expect(fetches).toBe(1); expect(requests).toBe(2);
+  });
+
+  test("keeps the old toggle behavior with a clear message when zeta lacks refresh", async () => {
+    const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
+    const client = { request: async () => { throw Object.assign(new Error("unknown method"), { code: -32601 }); } };
+    const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
+    expect(result).toEqual({ createMode: true, error: "update zeta to refresh page tools without reconnecting.", blocked: false });
+    await owner.beforeSend();
+  });
+});
 
 async function waitBounded(wait: Promise<void>, cancel: () => void, drain: () => Promise<unknown>) {
   let timer: ReturnType<typeof setTimeout> | undefined;

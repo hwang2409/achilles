@@ -476,13 +476,6 @@ try {
     if (request.method() === "GET" && url.pathname === "/api/pages") pageIndexRequests.push(request.url());
   });
   const modeToggle = page.getByRole("button", { name: "create mode off", exact: true });
-  const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
-  await modeToggle.click();
-  const toggleResult = await toggleResponse;
-  if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
-  if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
-    throw new Error("create mode toggle did not show on");
   await homeMcp(1, "initialize", {
     protocolVersion: "2025-03-26",
     capabilities: {},
@@ -493,7 +486,14 @@ try {
   const catalogRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
   const pageRequestsBeforeStreamingTurn = pageIndexRequests.length;
   await field.fill("catalog refresh");
+  const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
+  await modeToggle.click();
   await field.press("Enter");
+  const toggleResult = await toggleResponse;
+  if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
+    throw new Error("create mode toggle did not show on");
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
   if (pageIndexRequests.length !== pageRequestsBeforeStreamingTurn)
     throw new Error(`streaming turn made ${pageIndexRequests.length - pageRequestsBeforeStreamingTurn} extra /api/pages requests`);
