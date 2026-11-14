@@ -56,21 +56,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   stockField = page.getByRole("textbox", { name: "message", exact: true });
   if (await stockField.inputValue() !== multilineStockDraft) throw new Error(`stock remount row: expected ${JSON.stringify(multilineStockDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
 
-  const beforeStockSend = JSON.parse(await Bun.file(control).text());
-  await stockField.fill("stock confirmed once");
-  await stockField.press("Enter");
-  await waitFor(async () => {
-    const current = JSON.parse(await Bun.file(control).text());
-    return current.request_count === (beforeStockSend.request_count ?? 0) + 1 && current.last_message.includes("stock confirmed once");
-  }, "stock message on this backend turn");
-  await waitFor(async () => await stockField.inputValue() === "", "confirmed stock send to clear its draft");
-  await switchTo(originalSession);
-  await switchTo(stockSession);
-  stockField = page.getByRole("textbox", { name: "message", exact: true });
-  const afterStockSend = JSON.parse(await Bun.file(control).text());
-  if (await stockField.inputValue() !== "" || afterStockSend.request_count !== (beforeStockSend.request_count ?? 0) + 1) throw new Error(`duplicate-send row: expected empty draft and exactly one send, got ${JSON.stringify(await stockField.inputValue())} and ${afterStockSend.request_count - (beforeStockSend.request_count ?? 0)} sends`);
   await screenshot("plain-after");
-
   await stockField.fill("first\n\n  third");
   let releaseChunk = () => {};
   const chunkReleased = new Promise<void>((resolve) => { releaseChunk = resolve; });
@@ -162,6 +148,25 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const stockAfterOperator = page.locator('textarea[aria-label="message"]');
   await stockAfterOperator.waitFor({ state: "visible", timeout: 20_000 });
   if (await stockAfterOperator.inputValue() !== "keep") throw new Error(`switching after vim dd restored a stale draft: ${JSON.stringify(await stockAfterOperator.inputValue())}`);
+
+  await stockAfterOperator.fill("stock confirmed once");
+  await setVim(true);
+  await composer.waitFor({ state: "visible", timeout: 20_000 });
+  await setVim(false);
+  let confirmedStock = page.getByRole("textbox", { name: "message", exact: true });
+  await confirmedStock.waitFor({ state: "visible", timeout: 20_000 });
+  const beforeStockSend = JSON.parse(await Bun.file(control).text());
+  await confirmedStock.press("Enter");
+  await waitFor(async () => {
+    const current = JSON.parse(await Bun.file(control).text());
+    return current.request_count === (beforeStockSend.request_count ?? 0) + 1 && current.last_message.includes("stock confirmed once");
+  }, "stock message on this backend turn");
+  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed stock send to clear its draft");
+  await switchTo(originalSession);
+  await switchTo(stockSession);
+  confirmedStock = page.getByRole("textbox", { name: "message", exact: true });
+  const afterStockSend = JSON.parse(await Bun.file(control).text());
+  if (await confirmedStock.inputValue() !== "" || afterStockSend.request_count !== (beforeStockSend.request_count ?? 0) + 1) throw new Error(`duplicate-send row: expected empty draft and exactly one send, got ${JSON.stringify(await confirmedStock.inputValue())} and ${afterStockSend.request_count - (beforeStockSend.request_count ?? 0)} sends`);
 
   await setVim(true);
   await composer.waitFor({ state: "visible", timeout: 20_000 });

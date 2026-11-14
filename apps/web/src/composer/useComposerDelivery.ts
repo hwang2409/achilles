@@ -45,10 +45,11 @@ export function useComposerDelivery({
   draftChangeRef.current = onDraftChange;
 
   const apply = useCallback((event: ComposerEvent) => {
+    const previousDraft = modelRef.current.draft;
     const result = transition(modelRef.current, event);
     modelRef.current = result.model;
     setModel(result.model);
-    if (event.type === "edit" || event.type === "confirm")
+    if (event.type === "edit" || result.model.draft !== previousDraft)
       draftChangeRef.current(result.model.draft);
     return result.effect;
   }, []);

@@ -49,6 +49,10 @@ describe("composer delivery machine", () => {
       const failed = apply(submitted, { type: "reject", attempt: 1, message: "denied", delivered: false }, { type: "settle", attempt: 1 });
       expect(failed).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "could not send: denied" } });
     }],
+    ["submit rejection after delivery confirms", () => {
+      const submitted = transition(createComposerModel("hello", "idle"), { type: "submit" }).model;
+      expect(apply(submitted, { type: "reject", attempt: 1, message: "offline", delivered: true })).toMatchObject({ draft: "", error: undefined, send: undefined });
+    }],
     ["draft clears only on confirmed send", () => {
       const submitted = transition(createComposerModel("hello again", "idle"), { type: "submit" }).model;
       expect(apply(submitted, { type: "edit", draft: "hello again later" }, { type: "settle", attempt: 1 }).draft).toBe("hello again later");
