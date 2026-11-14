@@ -21,12 +21,21 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
-    (listener) => draftStore.subscribeRemote(sessionId, listener),
+    (listener) => {
+      const unsubscribeLocal = draftStore.subscribe(sessionId, listener);
+      const unsubscribeRemote = draftStore.subscribeRemote(sessionId, listener);
+      return () => { unsubscribeLocal(); unsubscribeRemote(); };
+    },
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
-  const adapterProps = { ...props, defaultValue: draft, onDraftChange: (text: string) => draftStore.set(sessionId, text) };
+  const adapterProps = {
+    ...props,
+    defaultValue: draft,
+    onDraftChange: (text: string) => draftStore.set(sessionId, text),
+    onDeliveryConfirm: (sent: string) => draftStore.confirm(sessionId, sent),
+  };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
     : <PlainComposer {...adapterProps} />;

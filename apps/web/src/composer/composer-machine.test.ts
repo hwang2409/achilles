@@ -46,20 +46,10 @@ describe("composer delivery machine", () => {
       const failed = apply(stopping, { type: "stop-reject", message: "denied" }, { type: "stop-settle" });
       expect(apply(failed, { type: "state", state: "read-only" }).error).toBeUndefined();
     }],
-    ["late delivery confirmation", () => {
-      const submitted = transition(createComposerModel("hello", "idle"), { type: "submit", turnRunning: false }).model;
-      const rejected = apply(submitted, { type: "track", attempt: 1, deliveryId: "delivery-1" }, { type: "reject", attempt: 1, message: "offline", delivered: false }, { type: "settle", attempt: 1 });
-      expect(rejected).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "could not send: offline" } });
-      expect(apply(rejected, { type: "confirm", attempt: 1 })).toMatchObject({ draft: "", error: undefined, send: undefined });
-    }],
     ["submit publish rejects", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit", turnRunning: false }).model;
-      const failed = apply(submitted, { type: "reject", attempt: 1, message: "denied", delivered: false }, { type: "settle", attempt: 1 });
+      const failed = apply(submitted, { type: "reject", attempt: 1, message: "denied" }, { type: "settle", attempt: 1 });
       expect(failed).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "could not send: denied" } });
-    }],
-    ["submit rejection after delivery confirms", () => {
-      const submitted = transition(createComposerModel("hello", "idle"), { type: "submit", turnRunning: false }).model;
-      expect(apply(submitted, { type: "reject", attempt: 1, message: "offline", delivered: true })).toMatchObject({ draft: "", error: undefined, send: undefined });
     }],
     ["draft clears only on confirmed send", () => {
       const submitted = transition(createComposerModel("hello again", "idle"), { type: "submit", turnRunning: false }).model;

@@ -10,7 +10,7 @@ describe("draft store", () => {
   ])("%s", (_name, sessionId, writes, expected) => {
     for (const text of writes) draftStore.set(sessionId, text);
     expect(draftStore.get(sessionId)).toBe(expected);
-    draftStore.clear(sessionId);
+    draftStore.set(sessionId, "");
   });
 
   test("keeps sessions separate and publishes changes", () => {
@@ -18,11 +18,11 @@ describe("draft store", () => {
     const unsubscribe = draftStore.subscribe("one", () => values.push(draftStore.get("one")));
     draftStore.set("one", "alpha");
     draftStore.set("two", "beta");
-    draftStore.clear("one");
+    draftStore.set("one", "");
     unsubscribe();
     expect(draftStore.get("two")).toBe("beta");
     expect(values).toEqual(["alpha", ""]);
-    draftStore.clear("two");
+    draftStore.set("two", "");
   });
 
   test("reconciles independent tabs and caps drafts by utf-8 bytes", async () => {
@@ -46,7 +46,7 @@ describe("draft store", () => {
       tabA.subscribe("chat-1", () => values.set("chat-1", tabA.get("chat-1")));
       tabA.set("chat-1", "already sent");
       tabB.get("chat-1");
-      tabA.clear("chat-1");
+      tabA.confirm("chat-1", "already sent");
       tabB.set("chat-2", "other draft");
       expect(tabA.get("chat-1")).toBe("");
 

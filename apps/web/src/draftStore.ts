@@ -4,7 +4,7 @@ type StoredDraft = { text: string; updatedAt: number };
 type DraftStore = {
   get(sessionId: string): string;
   set(sessionId: string, text: string): void;
-  clear(sessionId: string): void;
+  confirm(sessionId: string, sent: string): void;
   subscribe(sessionId: string, listener: Listener): () => void;
   subscribeRemote(sessionId: string, listener: Listener): () => void;
 };
@@ -85,7 +85,15 @@ export function createDraftStore(): DraftStore {
   };
   globalThis.addEventListener?.("storage", onStorage);
 
-  return {
+  const clear = (sessionId: string) => {
+    load();
+    dirty.delete(sessionId);
+    drafts.delete(sessionId);
+    try { storage()?.removeItem(PREFIX + sessionId); } catch { /* keep the in-memory clear */ }
+    notify(sessionId);
+  };
+
+  const store: DraftStore = {
     get(sessionId) {
       load();
       return drafts.get(sessionId)?.text ?? "";
@@ -122,12 +130,11 @@ export function createDraftStore(): DraftStore {
       }
       notify(sessionId);
     },
-    clear(sessionId) {
-      load();
-      dirty.delete(sessionId);
-      drafts.delete(sessionId);
-      try { storage()?.removeItem(PREFIX + sessionId); } catch { /* keep the in-memory clear */ }
-      notify(sessionId);
+    confirm(sessionId, sent) {
+      const current = store.get(sessionId);
+      const remaining = current.startsWith(sent) ? current.slice(sent.length) : current;
+      if (remaining) store.set(sessionId, remaining);
+      else clear(sessionId);
     },
     subscribe(sessionId, listener) {
       const sessionListeners = listeners.get(sessionId) ?? new Set<Listener>();
@@ -148,6 +155,7 @@ export function createDraftStore(): DraftStore {
       };
     },
   };
+  return store;
 }
 
 export const draftStore = createDraftStore();
