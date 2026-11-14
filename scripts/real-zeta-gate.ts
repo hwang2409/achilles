@@ -210,7 +210,7 @@ try {
       })
       .filter(Boolean);
   const zetaSessionCount = () => requests().filter((frame) => frame.method === "new_session").length;
-  const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`)).json()) as { chats: unknown[] }).chats.length;
+  const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: unknown[] }).chats.length;
   const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
     const messages = requests();
     let requestIndex = messages.length - 1;
@@ -640,16 +640,16 @@ try {
   await readingLink.waitFor({ timeout: 20000 });
   const chatsBeforeReading = await chatCount();
   const sessionsBeforeReading = zetaSessionCount();
-  await readingLink.click();
-  await page.waitForURL((url) => new URL(url).pathname === "/reading");
+  await readingLink.click({ timeout: 20_000 });
+  await page.waitForURL((url) => new URL(url).pathname === "/reading", { timeout: 20_000 });
   await page.getByText("reading list layout", { exact: true }).waitFor({ state: "visible", timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\ncreated page layout did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
   });
   if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
     throw new Error("created page layout did not appear before chat creation");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true });
-  await field.fill("open created page");
-  await field.press("Enter");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true, timeout: 20_000 });
+  await field.fill("open created page", { timeout: 20_000 });
+  await field.press("Enter", { timeout: 20_000 });
   await page.getByText("new page ready", { exact: true }).waitFor({ timeout: 20_000 });
   if (await chatCount() !== chatsBeforeReading + 1) throw new Error("first created-page send did not create exactly one chat");
   if (zetaSessionCount() !== sessionsBeforeReading + 1) throw new Error("first created-page send did not create exactly one zeta session");
