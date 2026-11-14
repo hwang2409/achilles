@@ -7,6 +7,8 @@ bun.lock
 apps/web/bun.lock
 vendor/
 .cache/
+evals/reports/
+.cache/evals/
 .zeta/
 *.tsbuildinfo
 .env
