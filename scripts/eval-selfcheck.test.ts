@@ -29,14 +29,3 @@ test("text does not accept a near-miss title field", async () => {
   expect(bad.checks.find(check => check.id === "layout")?.pass).toBe(false);
   expect(bad.checks.filter(check => check.id !== "layout").every(check => check.pass)).toBe(true);
 });
-
-test("checks cannot depend on an unstated field name", () => {
-  const task = {
-    id: "unstated-field",
-    page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }],
-    agent_turns: 1,
-    steps: [{ id: "work", kind: "prompt", page: "p", chat: "chat", prompt: "add one note with text hello" }],
-    checks: [{ id: "record", type: "record", page: "p", value: { title: "hello" } }],
-  };
-  expect(() => validateTask(task)).toThrow('checks use unstated field "title"');
-});

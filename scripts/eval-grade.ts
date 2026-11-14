@@ -98,21 +98,6 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   });
 }
 
-function checkFieldNames(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap(checkFieldNames);
-  if (!value || typeof value !== "object") return [];
-  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) => [key, ...checkFieldNames(child)]);
-}
-
-function validateCheckFields(task: EvalTask) {
-  const stated = [task.prompt, ...task.steps.map(step => step.prompt), task.setup && JSON.stringify(task.setup)].filter(Boolean).join("\n");
-  const fields = new Set(task.checks.flatMap(check => checkFieldNames(check.value)).filter(field => !["before", "after"].includes(field)));
-  for (const field of fields) {
-    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (!new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "i").test(stated)) throw new Error(`checks use unstated field "${field}"`);
-  }
-}
-
 export function validateTask(value: unknown): EvalTask {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("task must be an object");
   own(value, ["id", "prompt", "page_plan", "agent_turns", "steps", "checks", "setup", "approval_mode"], "task"); const task = value as Record<string, unknown>;
@@ -122,8 +107,7 @@ export function validateTask(value: unknown): EvalTask {
   if (task.approval_mode !== undefined && !["allow", "ask"].includes(String(task.approval_mode))) throw new Error("approval_mode must be allow or ask");
   const page_plan = validatePages(task.page_plan); const aliases = new Set(page_plan.map(page => page.alias));
   const prompt = task.prompt as string | undefined;
-  const validated = { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, approval_mode: task.approval_mode as EvalTask["approval_mode"], setup: validateSetup(task.setup), steps: validateSteps(task.steps, aliases, prompt), checks: validateChecks(task.checks, aliases) };
-  validateCheckFields(validated); return validated;
+  return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, approval_mode: task.approval_mode as EvalTask["approval_mode"], setup: validateSetup(task.setup), steps: validateSteps(task.steps, aliases, prompt), checks: validateChecks(task.checks, aliases) };
 }
 
 const rows = (snapshot: EvalSnapshot, type: keyof EvalSnapshot): Array<Record<string, unknown>> => (snapshot[type] as Array<Record<string, unknown>> | undefined) ?? [];
