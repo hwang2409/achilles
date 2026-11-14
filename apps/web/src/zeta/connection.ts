@@ -207,6 +207,7 @@ export function createConnection({
     if (opened.kind === "rejected") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
     const next = opened.client;
     if (!current()) return next.close();
+    const tookOver = takeover;
     if (takeover) client?.close();
     takeover = false;
     client = next;
@@ -216,6 +217,7 @@ export function createConnection({
       send({ type: "closed", now: now() });
     });
     send({ type: "connected", authority });
+    if (tookOver) { state = { phase: "connected", authority, takingControl: true }; listeners.forEach((listener) => listener()); }
   };
   void attempt();
   return {
