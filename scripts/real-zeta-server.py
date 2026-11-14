@@ -431,6 +431,23 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 raise RuntimeError("late steer commit release timed out after 15 seconds")
         return delivery
 
+    original_send = DeliveryRequests.send
+
+    async def held_send(instance, params, features):
+        outcome = await original_send(instance, params, features)
+        if params.get("text") == "steer while running":
+            document = json.loads(control.read_text())
+            document["fallback_send_barrier"] = "held"
+            write_control(control, document)
+            for _ in range(300):
+                document = json.loads(control.read_text())
+                if document.get("release_fallback_send_barrier"):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise RuntimeError("fallback send barrier release timed out after 15 seconds")
+        return outcome
+
     original_finalize_turn = DeliveryRequests.finalize_turn
 
     async def held_finalize_turn(instance, *args, **kwargs):
@@ -450,6 +467,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
         await original_finalize_turn(instance, *args, **kwargs)
 
     ConversationStore.append_client_delivery_async = held_append_delivery
+    DeliveryRequests.send = held_send
     DeliveryRequests.finalize_turn = held_finalize_turn
     await server.start()
     websocket = server._websocket
