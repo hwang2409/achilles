@@ -114,8 +114,8 @@ UPDATE_LAYOUT_SCHEMA = {
             **LAYOUT_SCHEMA,
             "description": (
                 "When achilles__inspect_page reports layout_complete true, copy its complete "
-                "stored layout; any block you leave out is deleted. Do not call update_layout "
-                "when layout_complete is false."
+                "stored layout; any block you leave out is deleted. When layout_complete is "
+                "false, do not change the page; tell the user it is too large to edit from chat."
             ),
             "properties": {
                 "blocks": {
@@ -139,6 +139,8 @@ UPDATE_LAYOUT_SCHEMA = {
     "required": ["layout", "expected_version"],
     "additionalProperties": False,
 }
+INSPECT_MAX_BYTES = 8 * 1024
+
 CREATE_PAGE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -157,6 +159,49 @@ CREATE_PAGE_SCHEMA = {
     "required": ["route", "title", "layout"],
     "additionalProperties": False,
 }
+
+
+def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    result = {
+        **value,
+        "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
+        "layout_complete": True,
+        "metric_values": list(value["metric_values"]),
+        "tools": list(value["tools"]),
+        "collections": dict(value["collections"]),
+    }
+
+    def serialize() -> str:
+        return json.dumps(result, sort_keys=True, separators=(",", ":"))
+
+    encoded = serialize()
+    if len(encoded.encode()) <= INSPECT_MAX_BYTES:
+        return result, encoded
+
+    result["truncated"] = True
+    result["omitted"] = {}
+    for key in ("metric_values", "tools", "collections", "title"):
+        omitted = result.pop(key)
+        result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
+        encoded = serialize()
+        if len(encoded.encode()) <= INSPECT_MAX_BYTES:
+            return result, encoded
+
+    result["layout"] = None
+    result["layout_complete"] = False
+    result["message"] = "do not change this page; tell the user it is too large to edit from chat"
+    return result, serialize()
+
+
+def require_inspectable(value: dict[str, Any]) -> None:
+    bounded, _ = bounded_inspect(value)
+    if not bounded["layout_complete"]:
+        raise ValidationError(
+            "/layout",
+            f"inspect_page result no larger than {INSPECT_MAX_BYTES} bytes",
+            "layout_too_large",
+            "Keep the page smaller, e.g. use fewer or shorter blocks.",
+        )
 
 
 def validate_page_route(route: str) -> None:
@@ -434,29 +479,48 @@ class PageStore:
             active = self._active_layout(db, page_id)
             return self._computed_layout(db, page_id, active[2]) if active else {"blocks": []}
 
-    def inspect_page(self, page_id: str) -> dict[str, Any]:
-        with self._connect() as db:
-            row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
-            if row is None:
-                raise KeyError(page_id)
+    @staticmethod
+    def _page_tools(db: sqlite3.Connection, page_id: str) -> list[dict[str, Any]]:
+        rows = db.execute(
+            """SELECT t.name, v.bundle, v.version FROM page_tool pt
+            JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id
+            AND v.version=pt.active_version
+            WHERE pt.page_id=? ORDER BY t.name""",
+            (page_id,),
+        ).fetchall()
+        return [
+            {"name": row[0], **validate_bundle(json.loads(row[1])), "version": row[2]}
+            for row in rows
+        ]
+
+    def _inspect_page(
+        self,
+        db: sqlite3.Connection,
+        page_id: str,
+        active: tuple[int, str | None, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
+        if row is None:
+            raise KeyError(page_id)
+        if active is None:
             active = self._active_layout(db, page_id)
-            assert active is not None
-            version, digest, document = active
-            computed = self._computed_layout(
-                db,
-                page_id,
-                {"blocks": [dict(block) for block in document.get("blocks", [])]},
-            )
-            metric_values = [
-                {"block": index, "value": block["value"]}
-                for index, block in enumerate(computed["blocks"])
-                if block.get("type") == "metric" and block.get("count") is True
-            ]
-            counts = db.execute(
-                "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
-                (page_id,),
-            ).fetchall()
-        tools = self.page_tools(page_id)
+        assert active is not None
+        version, digest, document = active
+        computed = self._computed_layout(
+            db,
+            page_id,
+            {"blocks": [dict(block) for block in document.get("blocks", [])]},
+        )
+        metric_values = [
+            {"block": index, "value": block["value"]}
+            for index, block in enumerate(computed["blocks"])
+            if block.get("type") == "metric" and block.get("count") is True
+        ]
+        counts = db.execute(
+            "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
+            (page_id,),
+        ).fetchall()
+        tools = self._page_tools(db, page_id)
         return {
             "route": row["route"],
             "title": row["title"],
@@ -476,6 +540,10 @@ class PageStore:
             ],
             "collections": {collection: count for collection, count in counts},
         }
+
+    def inspect_page(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            return self._inspect_page(db, page_id)
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -699,6 +767,31 @@ class PageStore:
                     raise ValidationError(
                         "/route", "unused route or equivalent request", "conflict"
                     )
+                require_inspectable(
+                    {
+                        "route": route,
+                        "title": title,
+                        "create_mode": False,
+                        "layout": layout,
+                        "layout_version": 1,
+                        "layout_digest": digest,
+                        "metric_values": [
+                            {"block": index, "value": 0}
+                            for index, block in enumerate(layout["blocks"])
+                            if block.get("type") == "metric" and block.get("count") is True
+                        ],
+                        "tools": [
+                            {
+                                "name": bundle["name"],
+                                "version": 1,
+                                "operations": [bundle["implementation"]["operation"]],
+                                "collection": bundle["implementation"]["collection"],
+                            }
+                            for bundle in sorted(bundles, key=lambda item: item["name"])
+                        ],
+                        "collections": {},
+                    }
+                )
                 hook = getattr(self, "before_create_commit", None)
                 if hook is not None:
                     hook()
@@ -806,6 +899,7 @@ class PageStore:
                 raise PermissionError("forbidden: create mode is off")
             active = self._active_layout(db, page_id)
             assert active is not None
+            require_inspectable(self._inspect_page(db, page_id, active))
             active_version = active[0]
             tools = db.execute(
                 "SELECT t.name, v.bundle FROM page_tool pt "
@@ -828,6 +922,7 @@ class PageStore:
                     "Call inspect_page, set expected_version to layout.version, and retry.",
                 )
             version = active_version + 1
+            require_inspectable(self._inspect_page(db, page_id, (version, digest, layout)))
             stamp = now()
             db.execute(
                 "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
@@ -897,14 +992,7 @@ class PageStore:
 
     def page_tools(self, page_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:
-            rows = db.execute(
-                """SELECT t.name, v.bundle, v.version FROM page_tool pt
-                JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id
-                AND v.version=pt.active_version
-                WHERE pt.page_id=? ORDER BY t.name""",
-                (page_id,),
-            ).fetchall()
-        return [{"name": r[0], **validate_bundle(json.loads(r[1])), "version": r[2]} for r in rows]
+            return self._page_tools(db, page_id)
 
     def rollback_tool(self, page_id: str, name: str, version: int) -> None:
         with self.transaction() as db:
