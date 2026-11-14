@@ -15,7 +15,7 @@
       "route": "/eval-smoke"
     }
   ],
-  "agent_turns": 3,
+  "agent_turns": 4,
   "steps": [
     {
       "id": "create",

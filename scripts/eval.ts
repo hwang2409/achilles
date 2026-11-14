@@ -12,10 +12,13 @@ export { assertTurnBudget, reserveTurns, REQUIRED_FEATURES, connectEvalProtocol,
 export type { EvalStackConfig, EvalStack } from "./eval-stack";
 
 const TASK_TIMEOUT_MS = 180_000;
-const MCP_UNAVAILABLE = "MCP server achilles is unavailable";
 const sensitiveNames = /(?:TOKEN|KEY|SECRET|PASSWORD|AUTH|COOKIE|CREDENTIAL)/i;
 const fatalAccountFailure = /(?:oauth credentials.*login required|login[_ -]?required|log in required|not logged in|account (?:no longer exists|unavailable|disabled|expired)|authentication (?:failed|required)|unauthorized|quota|usage[_ -]?limit|insufficient (?:credits|quota)|billing limit)/i;
 class SecretScanFailure extends Error {}
+class TaskRunFailure extends Error {
+  constructor(readonly original: unknown, readonly snapshot: EvalSnapshot) { super(original instanceof Error ? original.message : String(original)); }
+}
+class TurnCapFailure extends Error {}
 export function stopsSuite(error: unknown) { return error instanceof SecretScanFailure || fatalAccountFailure.test(error instanceof Error ? error.message : String(error)); }
 const redact = (value: string, hidden: string[]) => hidden.reduce((text, secret) => secret ? text.replaceAll(secret, "[REDACTED]") : text, value);
 export function hiddenValues(accountHome?: string) {
@@ -55,7 +58,31 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
   return Promise.all(ids.map(id => loadTask(id, dir)));
 }
 
-const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
+const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
+async function preflightBrowser(tasks: EvalTask[]) {
+  if (!tasks.some(task => task.checks.some(check => check.type === "browser_text"))) return;
+  try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
+  catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
+}
+
+const bundle = (name: string, operation: string, collection: string) => {
+  const record = { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] };
+  const output_schema = operation === "list" ? { type: "array", items: record } : operation === "get" ? { anyOf: [record, { type: "null" }] } : record;
+  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, output_schema, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } };
+};
+const CAPABILITIES_SCRIPT = `
+import inspect, json
+from achilles import tools
+from achilles.pages import PageStore
+names = list(getattr(tools, "BUILTIN_TOOL_NAMES", ("create_page", "create_tool")))
+if "tools" in inspect.signature(PageStore.create_page).parameters:
+    names.append("create_page_with_tools")
+print(json.dumps(names))`;
+export async function productCapabilities(stack: EvalStack) {
+  const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);
+  if (process.exitCode !== 0) throw new Error(`capability preflight failed: ${process.stderr}`);
+  return new Set(JSON.parse(process.stdout) as string[]);
+}
 const SETUP_SCRIPT = `
 import hashlib, json, sys
 from pathlib import Path
@@ -114,7 +141,6 @@ function parseHistory(histories: Array<{ chat: string; page_id: string; rows: an
 }
 function pageIdFromResults(results: Array<Record<string, any>>, plan: PagePlan) {
   for (const value of results) { const data = value.data as Record<string, unknown>; if (value.tool === "achilles__create_page" && value.success && (!plan.route || data?.route === plan.route) && typeof data.page_id === "string") return data.page_id; }
-  throw new Error(`create_page did not return page_id for ${plan.alias}`);
 }
 function createdPageId(events: Record<string, any>[], plan: PagePlan) {
   return pageIdFromResults(events.filter(event => event.event === "tool_end").map(event => { const value = toolEnd(event); return { ...value, tool: value.name }; }), plan);
@@ -136,6 +162,28 @@ for k in ("records","layouts"):
 for r in out["tool_versions"]:
  b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]; r["input_schema"]=b["input_schema"]; r["data_schema"]=b["implementation"]["data_schema"]
 print(json.dumps(out))`;
+const BUNDLE_VALIDATION_SCRIPT = `import inspect,json,sys,uuid
+from achilles.tools import validate_bundle
+attempts=json.loads(sys.argv[1]); out=[]
+for attempt in attempts:
+ bundle={**attempt["bundle"],"name":f"eval_{uuid.uuid4().hex[:8]}"}
+ try:
+  kwargs={"reject_conflicting_output":True} if "reject_conflicting_output" in inspect.signature(validate_bundle).parameters else {}
+  validate_bundle(bundle,**kwargs); valid=True
+ except Exception: valid=False
+ out.append({"call_id":attempt["call_id"],"valid":valid})
+print(json.dumps(out))`;
+export async function validateReservedBundles(stack: EvalStack, calls: Record<string, unknown>[], results: Record<string, unknown>[]) {
+  const failed = new Set(results.filter(row => row.success === false || row.is_error === true).map(row => row.call_id));
+  const attempts = calls.filter(row => row.tool === "achilles__create_tool" && failed.has(row.id)).flatMap(row => {
+    const args = row.arguments; const candidate = args && typeof args === "object" ? (args as Record<string, unknown>).bundle : undefined;
+    return candidate && typeof candidate === "object" && !Array.isArray(candidate) ? [{ call_id: row.id, bundle: candidate }] : [];
+  });
+  if (!attempts.length) return [];
+  const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", BUNDLE_VALIDATION_SCRIPT, JSON.stringify(attempts)], stack.achillesDir);
+  if (process.exitCode !== 0) throw new Error(`bundle validation snapshot failed: ${process.stderr}`);
+  return JSON.parse(process.stdout) as Array<Record<string, unknown>>;
+}
 async function databaseSnapshot(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "python", "-c", SNAPSHOT_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3")]);
   if (process.exitCode !== 0) throw new Error(`snapshot failed: ${process.stderr}`); return JSON.parse(process.stdout) as EvalSnapshot;
@@ -152,8 +200,7 @@ function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: Record<s
 }
 async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
   if (!task.checks.some(check => check.type === "browser_text")) return [];
-  signal.throwIfAborted(); const modulePath = pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
-  const { chromium } = await import(modulePath); const browser = await chromium.launch({ headless: true });
+  signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
   try {
     const output = [];
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
@@ -169,7 +216,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
-  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
+  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
   const reconnects: Array<Record<string, any>> = [];
   for (const plan of task.page_plan.filter(page => page.source !== "created")) pages.set(plan.alias, "home");
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol;
@@ -177,7 +224,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const onEvent = (event: Record<string, any>) => {
     events.push(event);
     const eventFailure = new Error(JSON.stringify(event)); if (!fatal && stopsSuite(eventFailure)) { fatal = eventFailure; void abortAll(); return; }
-    if (event.event === "turn_start" && ++turns > task.agent_turns && !fatal) { fatal = new Error("task model turn limit exceeded"); void abortAll(); }
+    if (event.event === "turn_start" && ++turns > task.agent_turns && !fatal) { fatal = new TurnCapFailure("task model turn limit exceeded"); void abortAll(); }
     if (event.event !== "approval_request") return;
     const session = [...sessions.entries()].find(([, value]) => value.id === event.session_id); const requestId = event.data?.request_id ?? event.request_id;
     if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
@@ -187,29 +234,34 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const getSession = async (chat: string, alias: string) => {
     if (sessions.has(chat)) return sessions.get(chat)!; const plan = task.page_plan.find(page => page.alias === alias)!;
     let pageId = plan.source === "created" ? undefined : pages.get(alias)!;
-    if (plan.source === "created") { try { pageId = createdPageId(events, plan); } catch { pageId = String((await databaseSnapshot(stack)).pages?.find(page => page.route === plan.route)?.id ?? ""); } }
-    if (!pageId) throw new Error(`page ${alias} is unavailable`); pages.set(alias, pageId);
+    if (plan.source === "created") pageId = createdPageId(events, plan) ?? String((await databaseSnapshot(stack)).pages?.find(page => page.route === plan.route)?.id ?? "");
+    if (!pageId) return undefined; pages.set(alias, pageId);
     if (plan.source === "created") { const mode = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal); if (!mode.ok) throw new Error(`could not set create mode for ${alias}`); }
-    const binding = await pageBinding(stack, pageId, hidden, signal); const created = await protocol.newSession({ cwd: binding.page.workspace, provider: stack.provider, model: stack.model, approval_mode: task.approval_mode ?? "allow", mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${binding.credential}` } }] });
+    const page = await pageBinding(stack, pageId, hidden, signal); const binding = { cwd: page.page.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${page.credential}` } }] }; const created = await protocol.newSession({ ...binding, provider: stack.provider, model: stack.model, approval_mode: task.approval_mode ?? "allow" });
     const id = String(created.session?.session_id ?? created.session_id ?? ""); if (!id) throw new Error("new_session returned no session id");
     const registration = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: id }) }, signal); if (!registration.ok) throw new Error(`chat registration failed (${registration.status})`);
-    const session = { id, alias, page_id: pageId }; sessions.set(chat, session); return session;
+    const session = { id, alias, page_id: pageId, binding }; sessions.set(chat, session); return session;
   };
   try {
     for (const step of task.steps) {
-      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new Error("task model turn limit has no remaining turn");
-      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
-      const session = await getSession(step.chat, step.page); try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
+      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new TurnCapFailure("task model turn limit has no remaining turn");
+      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
+      const session = await getSession(step.chat, step.page); if (!session) break; try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
-    for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) pages.set(plan.alias, pageIdFromResults(tools.results, plan));
+    for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) { const pageId = pageIdFromResults(tools.results, plan); if (pageId) pages.set(plan.alias, pageId); }
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
+    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
+  } catch (error) {
+    for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
+    const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
+    const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
+    throw new TaskRunFailure(error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 
@@ -224,7 +276,11 @@ function scriptedProvider() {
     const body = await request.json() as Record<string, unknown>; requests.push(body); if (Bun.env.EVAL_FORCE_ERROR === "1") return new Response("forced provider error", { status: 500 });
     const turn = requests.length; const prompt = JSON.stringify((body.messages as unknown[]) ?? []);
     let toolCalls: unknown[] = [];
-    if (prompt.includes("/run-review") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
+    if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
+    else if (prompt.includes("add_note once")) {
+      if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
+      else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
+    }
     else if (prompt.includes("/eval-smoke") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", layout: { blocks: [{ type: "text", text: "smoke" }] } } } }];
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
@@ -232,13 +288,25 @@ function scriptedProvider() {
   } });
   return { requests, url: `http://127.0.0.1:${server.port}`, close: () => server.stop(true) };
 }
-function catalogProof(requests: Record<string, unknown>[]) {
+function catalogProof(requests: Record<string, unknown>[], task: EvalTask) {
   const catalogs = requests.map(request => ((request.tools ?? []) as { function?: { name?: string } }[]).map(tool => tool.function?.name).filter((name): name is string => Boolean(name)));
-  catalogs.forEach(catalog => validateCatalog(catalog)); validateCatalog(catalogs[0] ?? [], "achilles__create_tool"); return [...new Set(catalogs.flat())];
+  const required = task.page_plan.some(page => page.create_mode) ? "achilles__create_tool" : task.setup?.tools[0] ? `achilles__${task.setup.tools[0].name}` : undefined;
+  catalogs.forEach(catalog => validateCatalog(catalog)); if (required) validateCatalog(catalogs[0] ?? [], required); return [...new Set(catalogs.flat())];
 }
-function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
+export function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
   const detail = error as Error & { code?: number; method?: string; sessionId?: string; pageId?: string };
   return { task_id: task.id, status: "harness_error", pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
+}
+export function unsupportedResult(task: EvalTask, missing: string[]) {
+  return { task_id: task.id, status: "unsupported", pass: false, score: 0, checks: [{ id: "capability", pass: false, expected: task.requires, actual: [...(task.requires ?? []).filter(item => !missing.includes(item))], evidence: { missing } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>;
+}
+export async function classifyTaskSupport(stack: EvalStack, task: EvalTask, hidden: string[]) {
+  try {
+    const capabilities = await productCapabilities(stack); const missing = (task.requires ?? []).filter(capability => !capabilities.has(capability));
+    const result = missing.length ? unsupportedResult(task, missing) : undefined;
+    if (result) Object.defineProperty(result, "capabilities", { value: capabilities });
+    return result;
+  } catch (error) { return failureResult(task, error, hidden); }
 }
 
 type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean; stop_suite?: boolean };
@@ -248,9 +316,17 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
   try {
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
     options.hidden.push(...hiddenValues(stack.accountHome));
-    if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>; }
-    else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider?.requests.length) catalog = catalogProof(provider.requests); if (Bun.env.EVAL_SETUP_ONLY === "1") result.status = "pass"; else result = gradeReference(task, snapshot!); result.diagnostics.observed_catalog = catalog;
-  } catch (error) { failed = true; stopSuite = stopsSuite(error); result = failureResult(task, stopSuite ? new Error("suite stopped after an account, login, quota, or secret-scan failure") : error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
+    if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 }, status: "pass" } as ReturnType<typeof gradeTask>; }
+    else {
+      const classification = await classifyTaskSupport(stack, task, options.hidden);
+      if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }
+      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); const capabilities = (await productCapabilities(stack)); const missingGoal = (task.goal_capabilities ?? []).find(capability => !capabilities.has(capability)); if (missingGoal && result.status === "agent_fail" && !task.requires?.length) result = { ...result, gap: `capability_missing:${missingGoal}` } as ReturnType<typeof gradeTask>; }
+    }
+    if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
+  } catch (error) { const original = error instanceof TaskRunFailure ? error.original : error; if (error instanceof TaskRunFailure) snapshot = error.snapshot; else if (stack) snapshot = await databaseSnapshot(stack).catch(() => ({})); stopSuite = stopsSuite(original);
+    if (original instanceof TurnCapFailure) result = { ...gradeReference(task, snapshot ?? {}), pass: false, status: "agent_fail", cap_hit: true } as ReturnType<typeof gradeTask>;
+    else { failed = true; result = failureResult(task, stopSuite ? new Error("suite stopped after an account, login, quota, or secret-scan failure") : original, options.hidden); }
+    if (provider?.requests.length) { try { catalog = catalogProof(provider.requests, task); } catch (catalogError) { failed = true; result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
   if (!stack) return { result: result!, catalog, failed: true, stop_suite: stopSuite };
   let cleanup: CleanupProof | undefined;
@@ -259,7 +335,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     finally { cleanup = await stack.close(); }
     await Bun.write(join(stack.root, "cleanup.json"), JSON.stringify(cleanup, null, 2)); await sanitizeAndScanRoot(stack.root, options.hidden);
     if (retainedRoot) { await mkdir(join(retainedRoot, ".."), { recursive: true }); await cp(stack.root, retainedRoot, { recursive: true, force: true }); await scanArtifactTree(retainedRoot, options.hidden); }
-  } catch (error) { failed = true; stopSuite ||= stopsSuite(error); result = failureResult(task, new Error(stopSuite ? "suite stopped after a secret-scan failure" : "artifact finalization failed"), options.hidden); snapshot = undefined; if (retainedRoot) await rm(retainedRoot, { recursive: true, force: true }); }
+  } catch (error) { failed = true; stopSuite ||= stopsSuite(error); result = failureResult(task, new Error(stopSuite ? "suite stopped after a secret-scan failure" : "artifact finalization failed"), options.hidden); if (retainedRoot) await rm(retainedRoot, { recursive: true, force: true }); }
   finally { await stack.close().catch(() => undefined); await rm(stack.root, { recursive: true, force: true }); }
   return { result: result!, snapshot, cleanup, catalog, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, failed, stop_suite: stopSuite };
 }
@@ -280,7 +356,7 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && repeats.every(repeat => repeat.result.pass && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && repeats.every(repeat => (repeat.result.pass || repeat.result.status === "unsupported") && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {
@@ -292,7 +368,7 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const tasks = await selectTasks(selection); assertTurnBudget(reserveTurns(tasks, repeats));
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const tasks = await selectTasks(selection); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {

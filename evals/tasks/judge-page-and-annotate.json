@@ -15,7 +15,7 @@
       "route": "/run-review"
     }
   ],
-  "agent_turns": 18,
+  "agent_turns": 12,
   "steps": [
     {
       "id": "create-review",
@@ -91,5 +91,8 @@
       "type": "same_page",
       "page": "review"
     }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
   ]
 }
