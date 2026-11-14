@@ -690,6 +690,66 @@ def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client
     assert store.page_tools(page_id)[0]["name"] == "add_book"
 
 
+def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_client):
+    _, _, client, home_headers = creation_client
+    inspected = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {}},
+    )
+    before = json.loads(inspected["content"][0]["text"])
+    assert before["layout"]["version"] == 1
+
+    layout = {"blocks": [{"type": "detail", "title": "changed", "fields": ["id"]}]}
+    updated = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {
+                "layout": layout,
+                "expected_version": before["layout"]["version"],
+            },
+        },
+    )
+    assert json.loads(updated["content"][0]["text"])["version"] == 2
+
+    inspected = mcp(
+        client,
+        home_headers,
+        4,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {}},
+    )
+    after = json.loads(inspected["content"][0]["text"])
+    assert after["layout"]["version"] == 2
+    assert after["layout"]["blocks"] == [{"type": "detail", "title": "changed"}]
+
+    stale = mcp(
+        client,
+        home_headers,
+        5,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {
+                "layout": {"blocks": []},
+                "expected_version": before["layout"]["version"],
+            },
+        },
+    )
+    assert stale["isError"] is True
+    assert json.loads(stale["content"][0]["text"]) == {
+        "code": "conflict",
+        "path": "/expected_version",
+        "expected": "current active layout version",
+    }
+
+
 def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
     _, store, client, home_headers = creation_client
     created = mcp(

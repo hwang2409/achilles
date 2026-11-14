@@ -292,40 +292,46 @@ class PageStore:
         with self._connect() as db:
             return db.execute("SELECT * FROM page WHERE id=? OR route=?", (key, key)).fetchone()
 
+    @staticmethod
+    def _active_layout(
+        db: sqlite3.Connection, page_id: str
+    ) -> tuple[int, str | None, dict[str, Any]] | None:
+        row = db.execute(
+            "SELECT COALESCE(p.active_layout_version, 1),lv.digest,lv.document FROM page p "
+            "LEFT JOIN layout_version lv ON lv.page_id=p.id "
+            "AND lv.version=COALESCE(p.active_layout_version, 1) WHERE p.id=?",
+            (page_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        document = json.loads(row[2]) if row[2] else {"blocks": []}
+        return row[0], row[1], document
+
     def layout(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
-            row = db.execute(
-                "SELECT lv.document FROM page p LEFT JOIN layout_version lv "
-                "ON lv.page_id=p.id AND lv.version=COALESCE(p.active_layout_version, 1) "
-                "WHERE p.id=?",
-                (page_id,),
-            ).fetchone()
-            return json.loads(row[0]) if row and row[0] else {"blocks": []}
+            active = self._active_layout(db, page_id)
+        return active[2] if active else {"blocks": []}
 
     def inspect_page(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
             if row is None:
                 raise KeyError(page_id)
-            layout = db.execute(
-                "SELECT lv.version, lv.digest, lv.document FROM page p "
-                "LEFT JOIN layout_version lv ON lv.page_id=p.id "
-                "AND lv.version=COALESCE(p.active_layout_version, 1) WHERE p.id=?",
-                (page_id,),
-            ).fetchone()
+            active = self._active_layout(db, page_id)
+            assert active is not None
             counts = db.execute(
                 "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
                 (page_id,),
             ).fetchall()
-        document = json.loads(layout[2]) if layout and layout[2] else {"blocks": []}
+        version, digest, document = active
         tools = self.page_tools(page_id)
         return {
             "route": row["route"],
             "title": row["title"],
             "create_mode": bool(row["create_mode"]),
             "layout": {
-                "version": layout[0] if layout else None,
-                "digest": layout[1] if layout else None,
+                "version": version,
+                "digest": digest,
                 "blocks": [
                     {
                         key: block[key]
@@ -674,6 +680,9 @@ class PageStore:
             page = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
             if page is None or not page["create_mode"]:
                 raise PermissionError("forbidden: create mode is off")
+            active = self._active_layout(db, page_id)
+            assert active is not None
+            active_version = active[0]
             tools = db.execute(
                 "SELECT t.name, v.bundle FROM page_tool pt "
                 "JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id "
@@ -687,17 +696,16 @@ class PageStore:
                 {bundle["implementation"]["collection"] for bundle in bundles},
                 "/layout",
             )
-            version = expected_version + 1
-            stamp = now()
-            updated = db.execute(
-                "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=? AND "
-                "(active_layout_version=? OR (active_layout_version IS NULL AND ?=1))",
-                (version, stamp, page_id, expected_version, expected_version),
-            ).rowcount
-            if updated != 1:
+            if expected_version != active_version:
                 raise ValidationError(
                     "/expected_version", "current active layout version", "conflict"
                 )
+            version = active_version + 1
+            stamp = now()
+            db.execute(
+                "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
+                (version, stamp, page_id),
+            )
             db.execute(
                 "INSERT INTO layout_version VALUES(?,?,?,?,?)",
                 (page_id, version, digest, encoded, stamp),
