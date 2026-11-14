@@ -13,6 +13,52 @@ _COLLECTION = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
+class ValidationError(ValueError):
+    def __init__(self, code: str, path: str, expected: str, message: str | None = None):
+        self.code, self.path, self.expected = code, path, expected
+        super().__init__(message or expected)
+
+
+_JSON_SCHEMA = {
+    "type": "object",
+    "description": "a JSON Schema describing the fields and their types",
+}
+_TOOL_BUNDLE_PROPERTIES = {
+    "format_version": {"const": 1},
+    "kind": {"const": "data_operation"},
+    "name": {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,63}$"},
+    "description": {"type": "string", "minLength": 1, "maxLength": MAX_DESCRIPTION},
+    "input_schema": _JSON_SCHEMA,
+    "output_schema": _JSON_SCHEMA,
+    "implementation": {
+        "type": "object",
+        "properties": {
+            "operation": {"enum": ["list", "get", "insert", "update"]},
+            "collection": {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,63}$"},
+            "data_schema": _JSON_SCHEMA,
+        },
+        "required": ["operation", "collection", "data_schema"],
+        "additionalProperties": False,
+    },
+}
+TOOL_BUNDLE_SCHEMA = {
+    "type": "object",
+    "properties": _TOOL_BUNDLE_PROPERTIES,
+    "required": list(_TOOL_BUNDLE_PROPERTIES),
+    "additionalProperties": False,
+    "description": (
+        "immutable page-owned versioned declarative data tool; "
+        "operation is one of list, get, insert, update"
+    ),
+}
+CREATE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {"bundle": TOOL_BUNDLE_SCHEMA},
+    "required": ["bundle"],
+    "additionalProperties": False,
+}
+
+
 def _schema(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be an object")

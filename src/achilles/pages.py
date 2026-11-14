@@ -22,6 +22,80 @@ BLOCK_KEYS: dict[str, frozenset[str]] = {
     "metric": frozenset({"type", "label", "value"}),
 }
 
+_LAYOUT_BLOCK_SCHEMA = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "list"},
+                "title": {"type": "string"},
+                "collection": {"type": "string"},
+            },
+            "required": ["type", "title", "collection"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "detail"},
+                "title": {"type": "string"},
+                "fields": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["type", "title", "fields"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "form"},
+                "title": {"type": "string"},
+                "tool": {"type": "string"},
+            },
+            "required": ["type", "title", "tool"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {"type": {"const": "text"}, "text": {"type": "string"}},
+            "required": ["type", "text"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "metric"},
+                "label": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["type", "label", "value"],
+            "additionalProperties": False,
+        },
+    ]
+}
+LAYOUT_SCHEMA = {
+    "type": "object",
+    "properties": {"blocks": {"type": "array", "items": _LAYOUT_BLOCK_SCHEMA}},
+    "required": ["blocks"],
+    "additionalProperties": False,
+}
+CREATE_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "route": {
+            "type": "string",
+            "pattern": (
+                r"^/(?!api(?:/|$)|assets(?:/|$)|mcp(?:/|$))"
+                r"(?:[a-z0-9][a-z0-9-]{0,62})"
+                r"(?:/(?:[a-z0-9][a-z0-9-]{0,62})){0,7}$"
+            ),
+        },
+        "title": {"type": "string", "minLength": 1},
+        "layout": LAYOUT_SCHEMA,
+    },
+    "required": ["route", "title", "layout"],
+    "additionalProperties": False,
+}
+
 _PAGE_ROUTE = re.compile(r"^/(?:[a-z0-9][a-z0-9-]{0,62})(?:/(?:[a-z0-9][a-z0-9-]{0,62})){0,7}$")
 _RESERVED_ROUTES = {"api", "assets", "mcp"}
 

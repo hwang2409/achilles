@@ -2,9 +2,12 @@ import json
 from concurrent.futures import ThreadPoolExecutor, wait
 
 import pytest
+from jsonschema import Draft202012Validator
 
+from achilles.mcp_server import _validate_create
 from achilles.pages import PageStore
 from achilles.records import call_record
+from achilles.tools import CREATE_TOOL_SCHEMA, ValidationError
 
 BUNDLE = {
     "format_version": 1,
@@ -29,6 +32,47 @@ BUNDLE = {
         },
     },
 }
+
+
+@pytest.mark.parametrize("bundle", [BUNDLE])
+def test_tool_schema_accepts_validator_valid_bundle(bundle):
+    assert Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
+
+
+@pytest.mark.parametrize(
+    "bundle",
+    [
+        {**BUNDLE, "implementation": {**BUNDLE["implementation"], "operation": "delete"}},
+        {**BUNDLE, "implementation": {**BUNDLE["implementation"], "collection": "Not valid"}},
+        {
+            **BUNDLE,
+            "implementation": {**BUNDLE["implementation"], "data_schema": "not a schema"},
+        },
+    ],
+)
+def test_tool_schema_rejects_invalid_bundle(bundle):
+    assert not Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
+    with pytest.raises(ValueError):
+        from achilles.tools import validate_bundle
+
+        validate_bundle(bundle)
+
+
+def test_invalid_nested_create_input_has_safe_structured_error():
+    with pytest.raises(ValidationError) as caught:
+        _validate_create(
+            "create_tool",
+            {
+                "bundle": {
+                    **BUNDLE,
+                    "implementation": {**BUNDLE["implementation"], "operation": "delete"},
+                }
+            },
+        )
+    assert caught.value.code == "invalid_input"
+    assert caught.value.path == "bundle.implementation.operation"
+    assert "delete" in caught.value.expected
+    assert "/" not in str(caught.value)
 
 
 def test_sqlite_is_owned_by_pages_module():

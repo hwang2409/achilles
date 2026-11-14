@@ -1,8 +1,42 @@
 import sqlite3
 
 import pytest
+from jsonschema import Draft202012Validator
 
-from achilles.pages import PageStore, validate_layout
+from achilles.pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, PageStore, validate_layout
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        {"blocks": []},
+        {"blocks": [{"type": "text", "text": "ok"}]},
+        {"blocks": [{"type": "detail", "title": "x", "fields": ["id"]}]},
+        {"blocks": [{"type": "metric", "label": "runs", "value": "3"}]},
+    ],
+)
+def test_layout_schema_accepts_validator_valid_samples(layout):
+    validate_layout(layout)
+    assert Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        {"blocks": [{"type": "text", "text": "ok", "extra": True}]},
+        {"blocks": [{"type": "text", "text": 1}]},
+        {"blocks": [{"type": "unknown"}]},
+    ],
+)
+def test_layout_schema_rejects_validator_invalid_samples(layout):
+    assert not Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
+    with pytest.raises(ValueError):
+        validate_layout(layout)
+
+
+def test_create_page_schema_rejects_reserved_route():
+    value = {"route": "/api/report", "title": "report", "layout": {"blocks": []}}
+    assert not Draft202012Validator(CREATE_PAGE_SCHEMA).is_valid(value)
 
 
 def test_layout_rejects_unknown_key() -> None:
