@@ -73,7 +73,10 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     home = private_proof_home()
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
-    restarting = control.exists()
+    try:
+        restarting_turn = json.loads(control.read_text()).get("request_count", 0) > 0
+    except (FileNotFoundError, json.JSONDecodeError):
+        restarting_turn = False
     home.mkdir(parents=True, exist_ok=True)
     if not (home / "storage-format.json").exists():
         advance(home, expected_epoch=0)
@@ -198,7 +201,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             delay=0.03,
         ),
     ]
-    if restarting:
+    if restarting_turn:
         # Resume the interrupted tool turn, then hold the cursor-stream turn open.
         turns = [*turns[:2], turns[-1]]
 
