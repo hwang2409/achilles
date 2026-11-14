@@ -375,6 +375,19 @@ def create_app() -> Starlette:
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
         collection = request.path_params["collection"]
+        field = request.query_params.get("field")
+        raw_equals = request.query_params.get("equals")
+        if field is not None or raw_equals is not None:
+            if field is None or raw_equals is None:
+                raise HTTPException(400, "field and equals must be used together")
+            try:
+                field_filter = {"field": field, "equals": json.loads(raw_equals)}
+                records, total = await anyio.to_thread.run_sync(
+                    store.matching_records, page_id, collection, field_filter
+                )
+            except (json.JSONDecodeError, ValidationError) as exc:
+                raise HTTPException(400, "invalid record filter") from exc
+            return JSONResponse(records, headers={"x-achilles-total": str(total)})
         raw_limit = request.query_params.get("limit", "100")
         try:
             limit = int(raw_limit)

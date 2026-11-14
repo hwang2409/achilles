@@ -625,6 +625,60 @@ def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "equals", "expected_ids", "expected_total"),
+    [
+        ("kind", "one", ["one"], 1),
+        ("kind", "none", [], 0),
+        ("kind", "shared", ["shared-z"], 3),
+        ("value", 1, ["number"], 1),
+        ("value", "1", ["string"], 1),
+        ("value", True, ["boolean"], 1),
+        ("nullable", None, ["null-missing"], 2),
+    ],
+)
+def test_filtered_records_observer_endpoint(
+    tmp_path: Path,
+    field: str,
+    equals: object,
+    expected_ids: list[str],
+    expected_total: int,
+) -> None:
+    store = PageStore(tmp_path / "achilles")
+    token = store.ensure_credential("home")
+    records = [
+        ("one", {"kind": "one", "nullable": "set"}, "2025-01-01"),
+        ("shared-old", {"kind": "shared", "nullable": "set"}, "2025-01-01"),
+        ("shared-a", {"kind": "shared", "nullable": "set"}, "2025-01-03"),
+        ("shared-z", {"kind": "shared", "nullable": "set"}, "2025-01-03"),
+        ("number", {"value": 1, "nullable": "set"}, "2025-01-01"),
+        ("string", {"value": "1", "nullable": "set"}, "2025-01-01"),
+        ("boolean", {"value": True, "nullable": "set"}, "2025-01-01"),
+        ("null-explicit", {"nullable": None}, "2025-01-04"),
+        ("null-missing", {}, "2025-01-05"),
+    ]
+    with store.transaction() as db:
+        db.executemany(
+            "INSERT INTO page_record("
+            "page_id,collection,record_id,version,document,created_at,updated_at"
+            ") VALUES(?,?,?,?,?,?,?)",
+            [
+                ("home", "items", record_id, 1, json.dumps(document), stamp, stamp)
+                for record_id, document, stamp in records
+            ],
+        )
+
+    response = TestClient(web.create_app(), raise_server_exceptions=False).get(
+        "/api/pages/home/records/items",
+        params={"field": field, "equals": json.dumps(equals)},
+        headers={"authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert [record["record_id"] for record in response.json()] == expected_ids
+    assert response.headers["x-achilles-total"] == str(expected_total)
+
+
 def test_mcp_connection_cleanup_removes_sessions_safely() -> None:
     class Session:
         def __init__(self, connection):
