@@ -79,7 +79,7 @@ try {
     ZETA_PROOF_CWD: cwd,
     ZETA_PROOF_CONTROL: control,
     ZETA_PROOF_ORIGIN: origin,
-    ZETA_PROOF_APPROVAL_GRACE: "2",
+    ZETA_PROOF_APPROVAL_GRACE: "10",
     ACHILLES_APPROVAL: "ask",
   };
   let zetaProcess = start(
@@ -706,9 +706,8 @@ try {
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "08-observer-read-only-review-1440x900.png"), fullPage: true });
   await controllerContext.close();
   page = observerPage;
-  await page.waitForTimeout(3_000);
   await page.getByRole("button", { name: "take control" }).click();
-  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`take control failed: ${await page.locator("body").innerText()}`); });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "09-observer-take-control-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
