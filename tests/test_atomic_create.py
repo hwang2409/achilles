@@ -567,6 +567,101 @@ def test_all_operation_tools_list_and_run_over_mcp(creation_client):
     assert json.loads(listed["content"][0]["text"])[0]["title"] == "Updated Book"
 
 
+@pytest.mark.parametrize(
+    "case",
+    ["documented_update", "missing_revision", "insert_only", "insert_and_update"],
+)
+def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client, case):
+    _, _, client, headers = creation_client
+    update = {
+        **bundle(name="update_book", operation="update"),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+                "title": {"type": "string"},
+            },
+            "required": ["record_id", "revision"],
+            "additionalProperties": False,
+        },
+    }
+
+    if case == "documented_update":
+        catalog = mcp(client, headers, 2, "tools/list", {})
+        description = next(
+            tool["description"] for tool in catalog["tools"] if tool["name"] == "create_tool"
+        )
+        marker = "For an update tool, use this minimal example: "
+        assert marker in description
+        example = json.loads(description.split(marker, 1)[1].split(". revision comes", 1)[0])
+        result = mcp(
+            client,
+            headers,
+            3,
+            "tools/call",
+            {"name": "create_tool", "arguments": example},
+        )
+        assert result.get("isError") is not True
+    elif case == "missing_revision":
+        result = mcp(
+            client,
+            headers,
+            2,
+            "tools/call",
+            {
+                "name": "create_tool",
+                "arguments": {"bundle": bundle(name="update_book", operation="update")},
+            },
+        )
+        error = json.loads(result["content"][0]["text"])
+        assert result["isError"] is True
+        assert error["expected"] == "required integer property: revision"
+        assert "input_schema properties and required" in error["hint"]
+    elif case == "insert_only":
+        expected_note = "collection books has no update tool; rows cannot be changed after insert"
+        page_result = mcp(
+            client,
+            headers,
+            2,
+            "tools/call",
+            {"name": "create_page", "arguments": request()},
+        )
+        tool_result = mcp(
+            client,
+            headers,
+            3,
+            "tools/call",
+            {"name": "create_tool", "arguments": {"bundle": bundle()}},
+        )
+        assert json.loads(page_result["content"][0]["text"])["note"] == expected_note
+        assert json.loads(tool_result["content"][0]["text"])["note"] == expected_note
+    else:
+        result = mcp(
+            client,
+            headers,
+            2,
+            "tools/call",
+            {"name": "create_page", "arguments": request(tools=[bundle(), update])},
+        )
+        assert "note" not in json.loads(result["content"][0]["text"])
+        mcp(
+            client,
+            headers,
+            3,
+            "tools/call",
+            {"name": "create_tool", "arguments": {"bundle": bundle()}},
+        )
+        created_update = mcp(
+            client,
+            headers,
+            4,
+            "tools/call",
+            {"name": "create_tool", "arguments": {"bundle": update}},
+        )
+        assert "note" not in json.loads(created_update["content"][0]["text"])
+
+
 def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):
     root, store, client, headers = creation_client
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
@@ -714,7 +809,14 @@ def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_c
             "SELECT credential_hash FROM page WHERE id=?", (first_value["page_id"],)
         ).fetchone()[0]
     first_serialized = json.dumps(first_value)
-    assert set(first_value) == {"page_id", "route", "digest", "existing", "detail_filter_matches"}
+    assert set(first_value) == {
+        "page_id",
+        "route",
+        "digest",
+        "existing",
+        "detail_filter_matches",
+        "note",
+    }
     assert credential.decode() not in first_serialized
     assert credential_hash not in first_serialized
 

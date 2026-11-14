@@ -20,6 +20,34 @@ from .records import call_record
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
+_UPDATE_TOOL_EXAMPLE = {
+    "bundle": {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "update_item",
+        "description": "update an item",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+            },
+            "required": ["record_id", "revision"],
+        },
+        "implementation": {
+            "operation": "update",
+            "collection": "items",
+            "data_schema": {"type": "object"},
+        },
+    }
+}
+_UPDATE_TOOL_EXAMPLE_TEXT = json.dumps(_UPDATE_TOOL_EXAMPLE, separators=(",", ":"))
+_FIELD_GUIDANCE = (
+    "Use the user's exact field words: if they say verdict, name it verdict, not label. "
+    "If status, done, verdict, rating, or another field will change later, also create an "
+    "update tool. "
+)
+
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
     "properties": {"route": {"type": "string"}, "page_id": {"type": "string"}},
@@ -144,6 +172,24 @@ def _inspect_error() -> CallToolResult:
     return _safe_error(ValidationError("", "authorized page", "forbidden"))
 
 
+def _missing_update_note(bundles: list[dict[str, Any]]) -> str | None:
+    operations: dict[str, set[str]] = {}
+    for bundle in bundles:
+        implementation = bundle["implementation"]
+        operations.setdefault(implementation["collection"], set()).add(implementation["operation"])
+    missing = sorted(
+        collection
+        for collection, collection_operations in operations.items()
+        if "insert" in collection_operations and "update" not in collection_operations
+    )
+    if not missing:
+        return None
+    return " ".join(
+        f"collection {collection} has no update tool; rows cannot be changed after insert"
+        for collection in missing
+    )
+
+
 def _validate_create(name: str, args: Any) -> None:
     schema = {
         "create_page": CREATE_PAGE_SCHEMA,
@@ -200,7 +246,9 @@ def build_mcp(store: PageStore):
                     Tool(
                         name="create_page",
                         description=(
-                            "create a page; available only in create mode. A detail block can "
+                            "create a page; available only in create mode. "
+                            + _FIELD_GUIDANCE
+                            + "A detail block can "
                             "select records with collection and filter, for example "
                             '{"field":"run_id","equals":"run-002"}; use a field from the '
                             "collection's assigned tool schema. The result reports how many "
@@ -214,10 +262,12 @@ def build_mcp(store: PageStore):
                         name="create_tool",
                         description=(
                             "create a page-owned immutable declarative tool version; "
-                            "available only in create mode; results: insert/update -> "
-                            "{record_id, revision, ...collection fields}, get -> that object "
-                            "or null, list -> an array of those objects; omit output_schema "
-                            "or provide the exact derived schema; bundle <= 64 KB"
+                            + _FIELD_GUIDANCE
+                            + "For an update tool, use this minimal example: "
+                            + _UPDATE_TOOL_EXAMPLE_TEXT
+                            + ". revision comes from list/get results and guards against "
+                            "overwriting a newer change. Results include record_id and revision; "
+                            "omit output_schema because it is derived; bundle <= 64 KB"
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
                     ),
@@ -318,6 +368,9 @@ def build_mcp(store: PageStore):
                         "existing": existing,
                         "detail_filter_matches": detail_summary,
                     }
+                    note = _missing_update_note(args.get("tools", []))
+                    if note:
+                        result["note"] = note
                 elif params.name == "update_layout":
                     version, digest, detail_summary = await anyio.to_thread.run_sync(
                         store.update_layout,
@@ -335,6 +388,11 @@ def build_mcp(store: PageStore):
                         store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
                     result = {**created, "digest": digest}
+                    note = _missing_update_note(
+                        await anyio.to_thread.run_sync(store.page_tools, page["id"])
+                    )
+                    if note:
+                        result["note"] = note
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
