@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 
 export type Chat = {
@@ -89,6 +89,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const chatList = useRef<HTMLElement>(null);
+  const pendingFocusIndex = useRef<number | null>(null);
   const settingsOpener = useRef<Element>(null);
   const loading = chats === null;
   const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => restoreFocus(menuButton.current)); };
@@ -116,6 +117,15 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useEffect(() => { setActiveResult(0); }, [search]);
   useEffect(() => { const media = matchMedia("(max-width: 760px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => firstFocusable(sidebar.current)?.focus()); }, [drawer, narrow]);
+  useLayoutEffect(() => {
+    const index = pendingFocusIndex.current;
+    if (index === null) return;
+    const row = chatList.current?.querySelectorAll<HTMLElement>(".chat-row")[index];
+    if (row) {
+      row.focus();
+      pendingFocusIndex.current = null;
+    }
+  }, [chats]);
   useEffect(() => {
     let live = true;
     const params = new URLSearchParams({ limit: "50" });
@@ -195,11 +205,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
     if (!response.ok) return;
     const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
+    pendingFocusIndex.current = existingCount;
     setChats((current) => [...(current ?? []), ...result.chats]);
-    requestAnimationFrame(() => {
-      const rows = chatList.current?.querySelectorAll<HTMLElement>(".chat-row");
-      rows?.[existingCount]?.focus() ?? chatList.current?.querySelector<HTMLElement>(".load-older")?.focus();
-    });
     setApprovalCount(result.approval_count);
     setNext(result.chats.length ? result.next : null);
   };

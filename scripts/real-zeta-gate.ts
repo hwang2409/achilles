@@ -252,7 +252,15 @@ try {
   if (!(await loadOlder.evaluate((button) => document.activeElement === button))) throw new Error("load older was not keyboard reachable");
   await page.keyboard.press("Enter");
   await waitFor(async () => (await initialChatRows.count()) > 50, "older chats");
-  await waitFor(async () => await initialChatRows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
+  try {
+    await waitFor(async () => await initialChatRows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
+  } catch (error) {
+    const focus = await page.evaluate(() => {
+      const element = document.activeElement;
+      return { tag: element?.tagName, text: element?.textContent?.trim().slice(0, 120), data: element ? Object.fromEntries([...element.attributes].filter((attribute) => attribute.name.startsWith("data-")).map((attribute) => [attribute.name, attribute.value])) : {} };
+    });
+    throw new Error(`${error}; pagination focus=${JSON.stringify(focus)}; rows before=50 after=${await initialChatRows.count()}`);
+  }
   await gateTranscript(page, waitFor);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
