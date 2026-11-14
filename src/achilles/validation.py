@@ -11,8 +11,8 @@ _SAFE_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ValidationError(ValueError):
-    def __init__(self, path: str, expected: str):
-        self.code = "invalid_input"
+    def __init__(self, path: str, expected: str, code: str = "invalid_input"):
+        self.code = code
         self.path = path
         self.expected = expected
         super().__init__(expected)

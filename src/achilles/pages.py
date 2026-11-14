@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import sqlite3
 import tempfile
 from contextlib import contextmanager
@@ -11,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .tools import bundle_digest, canonical_bundle, validate_bundle
+from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
 _LAYOUT_BLOCK_SCHEMA = {
@@ -83,6 +84,7 @@ CREATE_PAGE_SCHEMA = {
         },
         "title": {"type": "string", "minLength": 1},
         "layout": LAYOUT_SCHEMA,
+        "tools": {"type": "array", "items": TOOL_BUNDLE_SCHEMA},
     },
     "required": ["route", "title", "layout"],
     "additionalProperties": False,
@@ -98,13 +100,22 @@ def now() -> str:
 
 
 def validate_layout(
-    layout: Any, assigned_tools: set[str] | None = None, prefix: str = ""
+    layout: Any,
+    assigned_tools: set[str] | None = None,
+    assigned_collections: set[str] | None = None,
+    prefix: str = "",
 ) -> dict[str, Any]:
     validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
     for index, block in enumerate(layout["blocks"]):
         if block["type"] == "form" and block["tool"] not in tools:
             raise ValidationError(f"{prefix}/blocks/{index}/tool", "assigned tool name")
+        if (
+            block["type"] == "list"
+            and assigned_collections is not None
+            and block["collection"] not in assigned_collections
+        ):
+            raise ValidationError(f"{prefix}/blocks/{index}/collection", "assigned collection")
     return layout
 
 
@@ -390,60 +401,156 @@ class PageStore:
             return updated == 1, row[0]
 
     def create_page(
-        self, route: str, title: str, layout: Any, principal_id: str = "home"
-    ) -> tuple[sqlite3.Row, str]:
-        value = {"route": route, "title": title, "layout": layout}
+        self,
+        route: str,
+        title: str,
+        layout: Any,
+        principal_id: str = "home",
+        tools: Any = None,
+    ) -> tuple[sqlite3.Row, str, bool]:
+        bundles = [] if tools is None else tools
+        value = {"route": route, "title": title, "layout": layout, "tools": bundles}
         validate_schema(value, CREATE_PAGE_SCHEMA)
-        validate_layout(layout, set(), "/layout")
+        bundles = [
+            validate_bundle(bundle, f"/tools/{index}") for index, bundle in enumerate(bundles)
+        ]
+        validate_layout(
+            layout,
+            {bundle["name"] for bundle in bundles},
+            {bundle["implementation"]["collection"] for bundle in bundles},
+            "/layout",
+        )
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
-        with self.transaction() as db:
-            principal = db.execute(
-                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
-            ).fetchone()
-            if principal is None or not principal[0]:
-                raise PermissionError("forbidden: create mode is off")
-            hook = getattr(self, "before_create_commit", None)
-            if hook is not None:
-                hook()
-            principal = db.execute(
-                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
-            ).fetchone()
-            if principal is None or not principal[0]:
-                raise PermissionError("forbidden: create mode is off")
-            path = self.root / "bundles" / f"{digest}.json"
-            if not path.exists():
-                self._atomic_private_write(path, (encoded + "\n").encode())
-            page_id = secrets.token_hex(12)
-            workspace = self.root / "pages" / page_id / "workspace"
-            workspace.mkdir(mode=0o700, parents=True)
-            workspace.chmod(0o700)
-            token = secrets.token_urlsafe(32)
-            self._atomic_private_write(self.root / "credentials" / page_id, token.encode())
-            stamp = now()
-            db.execute(
-                "INSERT INTO page(id,route,title,active_layout_version,created_at,"
-                "updated_at,credential_hash) VALUES(?,?,?,?,?,?,?)",
-                (
-                    page_id,
-                    route,
-                    title,
-                    1,
-                    stamp,
-                    stamp,
-                    hashlib.sha256(token.encode()).hexdigest(),
-                ),
-            )
-            db.execute(
-                "INSERT INTO layout_version VALUES(?,?,?,?,?)", (page_id, 1, digest, encoded, stamp)
-            )
-            db.execute(
-                "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-                (page_id, "create_page", digest, stamp),
-            )
-        row = self.page(page_id)
+        created_paths: set[Path] = set()
+        page_id: str | None = None
+        try:
+            with self.transaction() as db:
+                principal = db.execute(
+                    "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+                ).fetchone()
+                if principal is None or not principal[0]:
+                    raise PermissionError("forbidden: create mode is off")
+                existing = db.execute("SELECT * FROM page WHERE route=?", (route,)).fetchone()
+                if existing is not None:
+                    existing_layout = db.execute(
+                        "SELECT document FROM layout_version WHERE page_id=? "
+                        "ORDER BY version DESC LIMIT 1",
+                        (existing["id"],),
+                    ).fetchone()
+                    existing_tools = db.execute(
+                        "SELECT v.bundle FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
+                        "JOIN tool_version v ON v.tool_id=t.id AND v.version=pt.active_version "
+                        "WHERE pt.page_id=? ORDER BY t.name",
+                        (existing["id"],),
+                    ).fetchall()
+                    requested_tools = [
+                        canonical_bundle(bundle)
+                        for bundle in sorted(bundles, key=lambda item: item["name"])
+                    ]
+                    if (
+                        existing["title"] == title
+                        and existing_layout is not None
+                        and existing_layout[0] == encoded
+                        and [row[0] for row in existing_tools] == requested_tools
+                    ):
+                        return existing, digest, True
+                    raise ValidationError(
+                        "/route", "unused route or equivalent request", "conflict"
+                    )
+                hook = getattr(self, "before_create_commit", None)
+                if hook is not None:
+                    hook()
+                principal = db.execute(
+                    "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+                ).fetchone()
+                if principal is None or not principal[0]:
+                    raise PermissionError("forbidden: create mode is off")
+                page_id = secrets.token_hex(12)
+                workspace = self.root / "pages" / page_id / "workspace"
+                workspace.mkdir(mode=0o700, parents=True)
+                workspace.chmod(0o700)
+                created_paths.add(workspace.parent)
+                files = [(self.root / "bundles" / f"{digest}.json", (encoded + "\n").encode())]
+                files.extend(
+                    (
+                        self.root / "bundles" / f"{bundle_digest(bundle)}.json",
+                        (canonical_bundle(bundle) + "\n").encode(),
+                    )
+                    for bundle in bundles
+                )
+                for path, content in files:
+                    existed = path.exists()
+                    try:
+                        self._atomic_private_write(path, content)
+                    finally:
+                        if not existed and path.exists():
+                            created_paths.add(path)
+                token = secrets.token_urlsafe(32)
+                credential = self.root / "credentials" / page_id
+                try:
+                    self._atomic_private_write(credential, token.encode())
+                finally:
+                    if credential.exists():
+                        created_paths.add(credential)
+                stamp = now()
+                db.execute(
+                    "INSERT INTO page(id,route,title,active_layout_version,created_at,"
+                    "updated_at,credential_hash) VALUES(?,?,?,?,?,?,?)",
+                    (
+                        page_id,
+                        route,
+                        title,
+                        1,
+                        stamp,
+                        stamp,
+                        hashlib.sha256(token.encode()).hexdigest(),
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO layout_version VALUES(?,?,?,?,?)",
+                    (page_id, 1, digest, encoded, stamp),
+                )
+                db.execute(
+                    "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+                    (page_id, "create_page", digest, stamp),
+                )
+                for bundle in bundles:
+                    tool_id = secrets.token_hex(12)
+                    tool_digest = bundle_digest(bundle)
+                    db.execute(
+                        "INSERT INTO tool VALUES(?,?,?,?)",
+                        (tool_id, page_id, bundle["name"], stamp),
+                    )
+                    db.execute(
+                        "INSERT INTO tool_version VALUES(?,?,?,?,?)",
+                        (tool_id, 1, tool_digest, canonical_bundle(bundle), stamp),
+                    )
+                    db.execute(
+                        "INSERT INTO page_tool VALUES(?,?,?,?)", (page_id, tool_id, 1, stamp)
+                    )
+                    db.execute(
+                        "INSERT INTO audit(page_id,action,version_digest,created_at) "
+                        "VALUES(?,?,?,?)",
+                        (page_id, "create_tool", tool_digest, stamp),
+                    )
+        except (ValidationError, PermissionError):
+            self._cleanup_create_paths(created_paths)
+            raise
+        except Exception as exc:
+            self._cleanup_create_paths(created_paths)
+            raise ValidationError("", "atomic page creation", "create_failed") from exc
+        row = self.page(page_id or "")
         assert row is not None
-        return row, digest
+        return row, digest, False
+
+    @staticmethod
+    def _cleanup_create_paths(paths: set[Path]) -> None:
+        for path in sorted(paths, key=lambda item: len(item.parts), reverse=True):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
 
     def create_tool(
         self, page_id: str, bundle: Any, validation_prefix: str = ""
