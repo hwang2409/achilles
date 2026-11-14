@@ -150,7 +150,7 @@ export async function confirmSteerDelivery(
   text: string,
   deliveryId: string,
   track: (id: string) => void,
-  deadlineMs = 5_000,
+  deadlineMs = 15_000,
 ): Promise<string> {
   const deadline = Date.now() + deadlineMs;
   let id = deliveryId;
