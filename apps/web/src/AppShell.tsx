@@ -48,6 +48,10 @@ const restorableFocus = (...candidates: Array<Element | null>) => candidates.fin
   return (element.tabIndex >= 0 || element.matches(nativelyFocusable)) && style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
 }) ?? null;
 
+export const restoreFocus = (...candidates: Array<Element | null>) => {
+  restorableFocus(...candidates)?.focus();
+};
+
 function useFocusAfterCommit() {
   const pending = useRef<(() => HTMLElement | null) | null>(null);
   useLayoutEffect(() => {

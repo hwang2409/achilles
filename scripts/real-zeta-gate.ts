@@ -301,6 +301,7 @@ try {
         await reloadShell();
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
+        console.log("debug page links", await links.count(), await page.locator(".page-list").innerText());
         await showMore.waitFor();
         const before = await links.count();
         await showMore.click();
