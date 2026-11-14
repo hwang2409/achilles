@@ -67,7 +67,13 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ),
         ScriptedTurn(content=[TextContent("stream tool complete")]),
         ScriptedTurn(
-            content=[TextContent(f"text-only line {index:03d}: enough content to overflow the transcript viewport\n") for index in range(120)],
+            content=[
+                TextContent(
+                    f"text-only line {index:03d}: "
+                    "enough content to overflow the transcript viewport\n"
+                )
+                for index in range(120)
+            ],
             delay=0.03,
         ),
         ScriptedTurn(content=[TextContent("catalog ready")]),
