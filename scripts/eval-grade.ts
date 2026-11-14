@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "detail_selects" | "layout_update" | "no_unrecovered_error";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "layout_update" | "no_unrecovered_error";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -29,7 +29,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "detail_selects", "layout_update", "no_unrecovered_error"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "layout_update", "no_unrecovered_error"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -79,6 +79,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
   if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "layout_update"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (check.type === "list_shows" && !identifier(check.collection) && typeof check.value !== "string") throw new Error(`checks[${i}] needs a collection or string value`);
   if (check.type === "detail_selects" && (typeof check.value !== "string" || !identifier(check.collection))) throw new Error(`checks[${i}] needs a collection and string value`);
   if (check.type === "records_exact" && !Array.isArray(check.value)) throw new Error(`checks[${i}] needs a record array`);
   if (check.type === "schema_roundtrip" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string"))) throw new Error(`checks[${i}] needs string values`);
@@ -110,7 +111,7 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "type", // fixed discriminator in every layout block
   "collection", // fixed data-source field in list and detail blocks
 ]);
-const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "detail_selects"]);
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects"]);
 function nestedTokens(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
@@ -299,6 +300,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),
   same_page: ({ snapshot, page }) => (snapshot.related_page_ids?.length ?? 0) > 0 && snapshot.related_page_ids!.every(id => id === page),
   layout_contains: ({ check, owned }) => owned("layouts").some(row => structurallyContains(row.document, check.value)),
+  list_shows: ({ owned }) => owned("layouts").some(row => structurallyContains(row.document, { type: "list" })),
   detail_selects: ({ check, owned }) => {
     const layouts = owned("layouts").sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0));
     const blocks = (layouts.at(-1)?.document as { blocks?: unknown[] } | undefined)?.blocks;

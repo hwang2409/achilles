@@ -71,6 +71,26 @@ const detailSnapshot = (block: Record<string, unknown> | Array<Record<string, un
   records: records.map(record => ({ page_id: "review-page", ...record })),
 });
 const annotation = (data: Record<string, unknown>, id = "annotation-1", collection = "annotations") => ({ id, collection, data });
+const listCheck = (spec: { collection?: string; value?: string }) => ({ id: "list", type: "list_shows" as const, page: "review", ...spec });
+
+for (const testCase of [
+  { name: "list on annotations, judge spec", check: listCheck({ collection: "annotations" }), blocks: [{ type: "list", collection: "annotations" }], records: [annotation({ run_id: "run-002" })], pass: true },
+  { name: "list on other, judge spec", check: listCheck({ collection: "annotations" }), blocks: [{ type: "list", collection: "other" }], records: [annotation({ run_id: "run-002" })], pass: false, reason: "list on other, expected annotations" },
+  { name: "two lists, one right", check: listCheck({ collection: "annotations" }), blocks: [{ type: "list", collection: "other" }, { type: "list", collection: "annotations" }], records: [], pass: true },
+  { name: "no list", check: listCheck({ collection: "annotations" }), blocks: [{ type: "text" }], records: [], pass: false },
+  { name: "reading list holds Synthetic Book", check: listCheck({ value: "Synthetic Book" }), blocks: [{ type: "list", collection: "books" }], records: [annotation({ title: "Synthetic Book" }, "book-1", "books")], pass: true },
+  { name: "Synthetic Book is only in another collection", check: listCheck({ value: "Synthetic Book" }), blocks: [{ type: "list", collection: "books" }], records: [annotation({ title: "Synthetic Book" }, "book-1", "reading_list")], pass: false },
+  { name: "book identity field is agent-designed", check: listCheck({ value: "Synthetic Book" }), blocks: [{ type: "list", collection: "books" }], records: [annotation({ name: "Synthetic Book" }, "book-1", "books")], pass: true },
+  { name: "list filter excludes the value record", check: listCheck({ value: "Synthetic Book" }), blocks: [{ type: "list", collection: "books", filter: { field: "status", equals: "unread" } }], records: [annotation({ title: "Synthetic Book", status: "read" }, "book-1", "books")], pass: false },
+] as const) test(`list_shows: ${testCase.name}`, () => {
+  const result = gradeCheck(testCase.check, detailSnapshot([...testCase.blocks], [...testCase.records]));
+  expect(result.pass).toBe(testCase.pass);
+  if ("reason" in testCase) expect(result.reason).toBe(testCase.reason);
+});
+
+test("list_shows requires a collection or value", () => {
+  expect(() => validateTask({ ...task, checks: [{ id: "list", type: "list_shows", page: "p" }] })).toThrow("collection or string value");
+});
 
 for (const testCase of [
   { name: "filter run_id=run-002, record has run_id run-002", block: { type: "detail", collection: "annotations", filter: { field: "run_id", equals: "run-002" } }, records: [annotation({ run_id: "run-002" })], pass: true },
