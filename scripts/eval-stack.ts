@@ -34,7 +34,7 @@ function processGroups() {
   return groups;
 }
 class ProcessOwner {
-  private processes: ChildProcess[] = [];
+  private groups = new Map<number, ChildProcess>();
   private closing?: Promise<{ pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; pids_dead: boolean; pgids_dead: boolean }>;
   private detachAbort: () => void;
   constructor(signal?: AbortSignal) {
@@ -43,7 +43,9 @@ class ProcessOwner {
   }
   spawn(command: string, args: string[], options: Parameters<typeof spawn>[2]) {
     if (this.closing) throw new Error("eval process owner is closing");
-    const process = spawn(command, args, { ...options, detached: true }); this.processes.push(process); return process;
+    const process = spawn(command, args, { ...options, detached: true }); const pgid = process.pid;
+    if (pgid) { this.groups.set(pgid, process); process.once("exit", () => { if (this.groups.get(pgid) === process) this.groups.delete(pgid); }); }
+    return process;
   }
   async run(command: string, args: string[], cwd?: string, timeoutMs = 15_000) {
     const process = this.spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -51,21 +53,22 @@ class ProcessOwner {
     const stdout = read(process.stdout!); const stderr = read(process.stderr!); let timer: ReturnType<typeof setTimeout>; let spawnError = "";
     const exited = new Promise<number>(resolveExit => { process.once("exit", code => resolveExit(code ?? -1)); process.once("error", error => { spawnError = error.message; resolveExit(-1); }); });
     const exitCode = await Promise.race([exited, new Promise<number>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(-1), timeoutMs); })]); clearTimeout(timer!);
-    if (exitCode === -1 && process.pid) await this.stopGroup(process.pid);
+    if (exitCode === -1 && process.pid) await this.stopGroup(process.pid, process);
     return { exitCode, stdout: await stdout, stderr: `${await stderr}${spawnError}` };
   }
-  private async stopGroup(pgid: number) {
+  private async stopGroup(pgid: number, owned: ChildProcess) {
+    const stillOwned = () => this.groups.get(pgid) === owned && owned.exitCode === null;
     for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+      if (!stillOwned()) return;
       try { globalThis.process.kill(-pgid, signal); } catch {}
       for (let i = 0; i < 20 && processGroups().has(pgid); i++) await Bun.sleep(100);
-      if (!processGroups().has(pgid)) return;
+      if (!processGroups().has(pgid) || !stillOwned()) return;
     }
   }
   close() { return this.closing ??= (async () => {
-    this.detachAbort(); const before = processGroups(); const pgids = this.processes.map(process => process.pid!).filter(Boolean); const process_groups = pgids.map(pgid => ({ pgid, pids: [...new Set([pgid, ...(before.get(pgid) ?? [])])] }));
-    for (const pgid of [...pgids].reverse()) await this.stopGroup(pgid);
+    this.detachAbort(); const before = processGroups(); const owned = [...this.groups.entries()].filter(([pgid, process]) => this.groups.get(pgid) === process && process.exitCode === null); const pgids = owned.map(([pgid]) => pgid); const process_groups = pgids.map(pgid => ({ pgid, pids: [...new Set([pgid, ...(before.get(pgid) ?? [])])] }));
+    for (const [pgid, process] of [...owned].reverse()) await this.stopGroup(pgid, process);
     const after = processGroups(); const pids = [...new Set(process_groups.flatMap(group => group.pids))]; const proof = { pids, pgids, process_groups, pids_dead: pids.every(pid => !pidAlive(pid)), pgids_dead: pgids.every(pgid => !after.has(pgid)) };
-    if (Bun.env.EVAL_PROCESS_PROOF) await Bun.write(Bun.env.EVAL_PROCESS_PROOF, JSON.stringify(proof));
     if (!proof.pids_dead || !proof.pgids_dead) throw new Error(`eval process cleanup failed: ${JSON.stringify(proof)}`);
     return proof;
   })(); }
