@@ -1,0 +1,717 @@
+{
+  "initial": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "title": "Home"
+      }
+    ],
+    "tools": [
+      {
+        "id": "add-id",
+        "page_id": "home",
+        "name": "add_book"
+      },
+      {
+        "id": "list-id",
+        "page_id": "home",
+        "name": "list_books"
+      }
+    ],
+    "assignments": [
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "active_version": 1
+      },
+      {
+        "page_id": "home",
+        "tool_id": "list-id",
+        "active_version": 1
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "name": "add_book",
+        "version": 1,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "list-id",
+        "name": "list_books",
+        "version": 1,
+        "operation": "list",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "books",
+        "id": "legacy-book",
+        "version": 1,
+        "data": {
+          "title": "Legacy Book"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "reading",
+        "route": "/",
+        "title": "Home"
+      }
+    ],
+    "tools": [
+      {
+        "id": "add-id",
+        "page_id": "home",
+        "name": "add_book"
+      },
+      {
+        "id": "list-id",
+        "page_id": "home",
+        "name": "list_books"
+      }
+    ],
+    "assignments": [
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "active_version": 2
+      },
+      {
+        "page_id": "home",
+        "tool_id": "list-id",
+        "active_version": 1
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "name": "add_book",
+        "version": 1,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "list-id",
+        "name": "list_books",
+        "version": 1,
+        "operation": "list",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "name": "add_book",
+        "version": 2,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "rating": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "books",
+        "id": "legacy-book",
+        "version": 1,
+        "data": {
+          "title": "Legacy Book"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "books",
+        "id": "new-book",
+        "version": 1,
+        "data": {
+          "title": "Dune",
+          "rating": 5
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "publish-call",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "add_book",
+            "description": "insert a book with an optional rating",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "rating": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "success": true
+      },
+      {
+        "id": "add-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "arguments": {
+          "title": "Dune",
+          "rating": 5
+        },
+        "success": true
+      },
+      {
+        "id": "list-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__list_books",
+        "arguments": {},
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "publish-call",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "add_book",
+          "version": 2
+        }
+      },
+      {
+        "call_id": "add-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "data": {
+          "record_id": "new-book",
+          "revision": 1,
+          "title": "Dune",
+          "rating": 5
+        }
+      },
+      {
+        "call_id": "list-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__list_books",
+        "success": true,
+        "data": [
+          {
+            "record_id": "legacy-book",
+            "revision": 1,
+            "title": "Legacy Book"
+          },
+          {
+            "record_id": "new-book",
+            "revision": 1,
+            "title": "Dune",
+            "rating": 5
+          }
+        ]
+      }
+    ],
+    "errors": [],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home"
+        }
+      ],
+      "tools": [
+        {
+          "id": "add-id",
+          "page_id": "home",
+          "name": "add_book"
+        },
+        {
+          "id": "list-id",
+          "page_id": "home",
+          "name": "list_books"
+        }
+      ],
+      "assignments": [
+        {
+          "page_id": "home",
+          "tool_id": "add-id",
+          "active_version": 1
+        },
+        {
+          "page_id": "home",
+          "tool_id": "list-id",
+          "active_version": 1
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "add-id",
+          "name": "add_book",
+          "version": 1,
+          "operation": "insert",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "list-id",
+          "name": "list_books",
+          "version": 1,
+          "operation": "list",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "collection": "books",
+          "id": "legacy-book",
+          "version": 1,
+          "data": {
+            "title": "Legacy Book"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "list",
+                "title": "Books",
+                "collection": "books"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "reading",
+        "route": "/",
+        "title": "Home"
+      }
+    ],
+    "tools": [
+      {
+        "id": "add-id",
+        "page_id": "home",
+        "name": "add_book"
+      },
+      {
+        "id": "list-id",
+        "page_id": "home",
+        "name": "list_books"
+      }
+    ],
+    "assignments": [
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "active_version": 2
+      },
+      {
+        "page_id": "home",
+        "tool_id": "list-id",
+        "active_version": 1
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "name": "add_book",
+        "version": 1,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "list-id",
+        "name": "list_books",
+        "version": 1,
+        "operation": "list",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "add-id",
+        "name": "add_book",
+        "version": 2,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "rating": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "books",
+        "id": "legacy-book",
+        "version": 1,
+        "data": {
+          "title": "Legacy Book"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "publish-call",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "add_book",
+            "description": "insert a book with an optional rating",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "rating": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "success": true
+      },
+      {
+        "id": "add-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "arguments": {
+          "title": "Dune"
+        },
+        "success": false
+      },
+      {
+        "id": "list-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__list_books",
+        "arguments": {},
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "publish-call",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "add_book",
+          "version": 2
+        }
+      },
+      {
+        "call_id": "add-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "success": false,
+        "data": {
+          "code": "version_conflict",
+          "expected": 2,
+          "actual": 1
+        }
+      },
+      {
+        "call_id": "list-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__list_books",
+        "success": true,
+        "data": [
+          {
+            "record_id": "legacy-book",
+            "revision": 1,
+            "title": "Legacy Book"
+          }
+        ]
+      }
+    ],
+    "errors": [
+      {
+        "call_id": "add-call",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "code": "version_conflict"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home"
+        }
+      ],
+      "tools": [
+        {
+          "id": "add-id",
+          "page_id": "home",
+          "name": "add_book"
+        },
+        {
+          "id": "list-id",
+          "page_id": "home",
+          "name": "list_books"
+        }
+      ],
+      "assignments": [
+        {
+          "page_id": "home",
+          "tool_id": "add-id",
+          "active_version": 1
+        },
+        {
+          "page_id": "home",
+          "tool_id": "list-id",
+          "active_version": 1
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "add-id",
+          "name": "add_book",
+          "version": 1,
+          "operation": "insert",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "list-id",
+          "name": "list_books",
+          "version": 1,
+          "operation": "list",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "collection": "books",
+          "id": "legacy-book",
+          "version": 1,
+          "data": {
+            "title": "Legacy Book"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "list",
+                "title": "Books",
+                "collection": "books"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -177,7 +177,7 @@ async function waitForTerminal(protocol: EvalProtocol, sessionId: string, prior:
 const SNAPSHOT_SCRIPT = `import json,sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row
 def q(s): return [dict(r) for r in c.execute(s)]
-out={"pages":q("select id,route,title from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,document as data from page_record"),"layouts":q("select page_id,version,document from layout_version"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id and v.version=pt.active_version")}
+out={"pages":q("select id,route,title from page"),"tools":q("select id,owner_page_id as page_id,name from tool"),"assignments":q("select page_id,tool_id,active_version from page_tool"),"records":q("select page_id,collection,record_id as id,version,document as data from page_record"),"layouts":q("select page_id,version,document from layout_version"),"tool_versions":q("select pt.page_id,t.id as tool_id,t.name,v.version,v.bundle from page_tool pt join tool t on t.id=pt.tool_id join tool_version v on v.tool_id=t.id")}
 for k in ("records","layouts"):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
 for r in out["tool_versions"]:

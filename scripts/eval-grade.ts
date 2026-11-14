@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "layout_update" | "no_unrecovered_error";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "layout_update" | "no_unrecovered_error" | "tool_evolution";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -29,7 +29,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "layout_update", "no_unrecovered_error"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "layout_update", "no_unrecovered_error", "tool_evolution"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -78,7 +78,13 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "operations" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => ["insert", "update", "list", "get"].includes(String(value))))) throw new Error(`checks[${i}] needs operation kinds`);
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
-  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "layout_update"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "layout_update", "tool_evolution"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (check.type === "tool_evolution") {
+    if (!check.value || typeof check.value !== "object" || Array.isArray(check.value)) throw new Error(`checks[${i}] needs a tool evolution spec`);
+    own(check.value, ["tool", "from", "to", "new_value", "legacy_record", "read_tool"], `checks[${i}].value`);
+    const value = check.value as Record<string, unknown>;
+    if (!identifier(value.tool) || !Number.isInteger(value.from) || !Number.isInteger(value.to) || Number(value.to) <= Number(value.from) || typeof value.new_value !== "number" || typeof value.legacy_record !== "string" || !identifier(value.read_tool)) throw new Error(`checks[${i}] has invalid tool evolution spec`);
+  }
   if (check.type === "list_shows" && ((check.collection !== undefined && !identifier(check.collection)) || (check.value !== undefined && typeof check.value !== "string") || (check.collection === undefined && check.value === undefined))) throw new Error(`checks[${i}] needs a collection or string value`);
   if (check.type === "detail_selects" && (typeof check.value !== "string" || !identifier(check.collection))) throw new Error(`checks[${i}] needs a collection and string value`);
   if (check.type === "records_exact" && !Array.isArray(check.value)) throw new Error(`checks[${i}] needs a record array`);
@@ -111,7 +117,7 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "type", // fixed discriminator in every layout block
   "collection", // fixed data-source field in list and detail blocks
 ]);
-const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects"]);
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "tool_evolution"]);
 function nestedTokens(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
@@ -293,6 +299,24 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
       return records.some(record => record.collection === version.collection && matches(record.data ?? record)) && results.some(result => result.tool === `achilles__${version.name}` && matches(result.data ?? result.result));
     });
   },
+  tool_evolution: ({ check, snapshot, page, owned }) => {
+    const spec = check.value as { tool: string; from: number; to: number; new_value: number; legacy_record: string; read_tool: string };
+    const versions = owned("tool_versions").filter(row => row.name === spec.tool);
+    const before = versions.find(row => row.version === spec.from); const after = versions.find(row => row.version === spec.to && row.tool_id === before?.tool_id);
+    const assignment = owned("assignments").find(row => row.tool_id === before?.tool_id);
+    const properties = (schema: unknown) => schema && typeof schema === "object" && !Array.isArray(schema) && (schema as Record<string, unknown>).properties && typeof (schema as Record<string, unknown>).properties === "object" ? (schema as { properties: Record<string, unknown> }).properties : {};
+    const oldProperties = properties(before?.input_schema); const newProperties = properties(after?.input_schema);
+    const required = new Set(Array.isArray((after?.input_schema as Record<string, unknown> | undefined)?.required) ? (after!.input_schema as { required: unknown[] }).required : []);
+    const numericFields = Object.entries(newProperties).filter(([name, schema]) => !(name in oldProperties) && !required.has(name) && schema && typeof schema === "object" && ["number", "integer"].includes(String((schema as Record<string, unknown>).type))).map(([name]) => name);
+    const calls = rows(snapshot, "calls").filter(row => row.page_id === page && row.chat_id === check.chat && row.tool === `achilles__${spec.tool}`);
+    const results = rows(snapshot, "results");
+    const use = calls.find(call => numericFields.some(field => structurallyContains(call.arguments, { [field]: spec.new_value })) && results.some(result => result.call_id === call.id && successful(result) && numericFields.some(field => structurallyContains(result.data ?? result.result, { [field]: spec.new_value }))));
+    const useResult = results.find(result => result.call_id === use?.id && successful(result));
+    const newRecord = matchingObjects(useResult?.data ?? useResult?.result, {}).find(row => typeof row.record_id === "string")?.record_id;
+    const read = results.find(result => result.page_id === page && result.chat_id === check.chat && result.tool === `achilles__${spec.read_tool}` && successful(result) && structurallyContains(result.data ?? result.result, { record_id: spec.legacy_record }) && typeof newRecord === "string" && structurallyContains(result.data ?? result.result, { record_id: newRecord }));
+    const legacy = owned("records").find(row => (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
+    return Boolean(before && after && assignment?.active_version === spec.to && numericFields.length && use && read && legacy);
+  },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
   record: ({ check, owned }) => owned("records").some(row => structurallyContains(row.data ?? row, check.value)),
@@ -396,7 +420,21 @@ export function declaredSeedMismatches(setup: TaskSetup, storedState: EvalSnapsh
 }
 
 export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
-  return task.setup ? declaredSeedMismatches(task.setup, snapshot) : [];
+  const failures = task.setup ? declaredSeedMismatches(task.setup, snapshot) : [];
+  const evolutionPage = task.checks.find(check => check.type === "tool_evolution")?.page;
+  const page = expectedPageId(snapshot, evolutionPage) ?? (task.page_plan.find(plan => plan.alias === evolutionPage)?.source === "created" ? undefined : "home");
+  for (const check of task.checks.filter(check => check.type === "tool_evolution")) {
+    const spec = check.value as { tool: string; from: number; legacy_record: string; read_tool: string };
+    for (const name of [spec.tool, spec.read_tool]) {
+      const tool = rows(snapshot, "tools").find(row => row.page_id === page && row.name === name);
+      const version = rows(snapshot, "tool_versions").find(row => row.page_id === page && row.tool_id === tool?.id && row.name === name && row.version === spec.from);
+      const assignment = rows(snapshot, "assignments").find(row => row.page_id === page && row.tool_id === tool?.id && row.active_version === spec.from);
+      if (!tool || !version || !assignment) failures.push(`seed mismatch: ${name} is not active at v${spec.from}`);
+    }
+    const legacy = rows(snapshot, "records").find(row => row.page_id === page && (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
+    if (!legacy) failures.push(`seed mismatch: record ${spec.legacy_record} is not v${spec.from}`);
+  }
+  return failures;
 }
 function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
   if (!task.setup) return [];

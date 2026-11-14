@@ -54,6 +54,78 @@ test("expectation tokens cover each literal-bearing check shape", () => {
   for (const [check, expected] of cases) expect(expectationTokens(check as never), check.type).toEqual(expected);
 });
 
+const toolEvolutionCheck = { id: "v2-used", type: "tool_evolution" as const, page: "reading", chat: "fresh-chat", value: { tool: "add_book", from: 1, to: 2, new_value: 5, legacy_record: "legacy-book", read_tool: "list_books" } };
+const toolEvolutionTask = (initial: Record<string, unknown>) => validateTask({
+  id: "tool-version-fresh-chat",
+  page_plan: [{ alias: "reading", source: "setup", bind_chat: true, create_mode: true }],
+  agent_turns: 10,
+  steps: [{ id: "publish-v2", kind: "prompt", page: "reading", chat: "author-chat", prompt: "add an optional numeric rating" }, { id: "use-v2", kind: "prompt", page: "reading", chat: "fresh-chat", prompt: "add Dune with a rating of 5, then list all books" }],
+  setup: {
+    tools: [
+      { name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false } },
+      { name: "list_books", operation: "list", collection: "books" },
+    ],
+    records: [{ id: "legacy-book", collection: "books", data: { title: "Legacy Book" } }],
+  },
+  checks: [toolEvolutionCheck],
+  ...initial,
+});
+const toolEvolutionSnapshot = (field = "score", type = "number") => {
+  const v1 = { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false };
+  const v2 = { type: "object", properties: { title: { type: "string" }, [field]: { type } }, required: ["title"], additionalProperties: false };
+  const initial = {
+    pages: [{ id: "home", alias: "reading" }],
+    tools: [{ id: "add-id", page_id: "home", name: "add_book" }, { id: "list-id", page_id: "home", name: "list_books" }],
+    assignments: [{ page_id: "home", tool_id: "add-id", active_version: 1 }, { page_id: "home", tool_id: "list-id", active_version: 1 }],
+    tool_versions: [
+      { page_id: "home", tool_id: "add-id", name: "add_book", version: 1, operation: "insert", collection: "books", input_schema: v1 },
+      { page_id: "home", tool_id: "list-id", name: "list_books", version: 1, operation: "list", collection: "books", input_schema: { type: "object", additionalProperties: false } },
+    ],
+    records: [{ page_id: "home", collection: "books", id: "legacy-book", version: 1, data: { title: "Legacy Book" } }],
+  };
+  return {
+    initial,
+    pages: initial.pages,
+    tools: initial.tools,
+    assignments: [{ page_id: "home", tool_id: "add-id", active_version: 2 }, initial.assignments[1]],
+    tool_versions: [...initial.tool_versions, { page_id: "home", tool_id: "add-id", name: "add_book", version: 2, operation: "insert", collection: "books", description: "insert a rated book", input_schema: v2 }],
+    records: [structuredClone(initial.records[0]), { page_id: "home", collection: "books", id: "new-book", version: 1, data: { title: "Dune", [field]: 5 } }],
+    calls: [
+      { id: "add-call", page_id: "home", chat_id: "fresh-chat", tool: "achilles__add_book", arguments: { title: "Dune", [field]: 5 } },
+      { id: "list-call", page_id: "home", chat_id: "fresh-chat", tool: "achilles__list_books", arguments: {} },
+    ],
+    results: [
+      { call_id: "add-call", page_id: "home", chat_id: "fresh-chat", tool: "achilles__add_book", success: true, data: { record_id: "new-book", title: "Dune", [field]: 5 } },
+      { call_id: "list-call", page_id: "home", chat_id: "fresh-chat", tool: "achilles__list_books", success: true, data: [{ record_id: "legacy-book", title: "Legacy Book" }, { record_id: "new-book", title: "Dune", [field]: 5 }] },
+    ],
+  };
+};
+
+for (const testCase of [
+  { name: "number field named score with a description change", snapshot: toolEvolutionSnapshot("score", "number"), status: "pass" },
+  { name: "integer field named stars", snapshot: toolEvolutionSnapshot("stars", "integer"), status: "pass" },
+  { name: "two new fields with one used", snapshot: (() => { const snapshot = toolEvolutionSnapshot("score", "number"); (snapshot.tool_versions.at(-1)!.input_schema as any).properties.note = { type: "string" }; return snapshot; })(), status: "pass" },
+  { name: "publication does not depend on a specific authoring tool", snapshot: toolEvolutionSnapshot(), status: "pass" },
+  { name: "v2 published but fresh chat uses cached v1", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.calls[0].arguments as any) = { title: "Dune" }; return snapshot; })(), status: "agent_fail" },
+  { name: "fresh chat uses v2 but list omits legacy row", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.results[1].data as any[]) = [(snapshot.results[1].data as any[])[1]]; return snapshot; })(), status: "agent_fail" },
+  { name: "v2 makes the new field required", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.tool_versions.at(-1)!.input_schema as any).required.push("score"); return snapshot; })(), status: "agent_fail" },
+  { name: "agent deletes the v1 row", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); snapshot.records = snapshot.records.slice(1); return snapshot; })(), status: "agent_fail" },
+  { name: "agent rewrites the v1 row as v2", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); snapshot.records[0].version = 2; return snapshot; })(), status: "agent_fail" },
+] as const) test(`tool_evolution: ${testCase.name}`, () => {
+  expect(gradeReference(toolEvolutionTask({}), testCase.snapshot as never).status).toBe(testCase.status);
+});
+
+test("tool_evolution reports broken v1 seeds as harness errors", () => {
+  for (const mutate of [
+    (snapshot: ReturnType<typeof toolEvolutionSnapshot>) => { snapshot.initial.assignments[0].active_version = 2; },
+    (snapshot: ReturnType<typeof toolEvolutionSnapshot>) => { snapshot.initial.tool_versions = snapshot.initial.tool_versions.filter(row => row.name !== "list_books"); },
+    (snapshot: ReturnType<typeof toolEvolutionSnapshot>) => { snapshot.initial.records[0].version = 2; },
+  ]) {
+    const snapshot = toolEvolutionSnapshot(); mutate(snapshot);
+    expect(gradeReference(toolEvolutionTask({}), snapshot as never).status).toBe("harness_error");
+  }
+});
+
 test("same-page grading rejects empty and wrong-page evidence", () => {
   const check = { id: "same", type: "same_page" as const, page: "p" };
   const base = { pages: [{ id: "p1", alias: "p" }] };
