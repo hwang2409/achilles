@@ -117,7 +117,7 @@ export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   if (!inspect) throw new Error("task setup verification returned no page inspection");
   const expectedTools = setup.tools.map(tool => ({ name: tool.name, operations: [tool.operation], collection: tool.collection }));
   for (const expected of expectedTools) if (!inspect.tools?.some((tool: Record<string, unknown>) => expected.name === tool.name && expected.collection === tool.collection && equal(expected.operations, tool.operations))) throw new Error(`task setup verification failed for tool ${expected.name}`);
-  if (setup.initial_layout && (inspect.layout?.version !== 1 || !equal(actual.layout, setup.initial_layout))) throw new Error("task setup verification failed for initial_layout at version 1");
+  if (setup.initial_layout && ((inspect.layout_version ?? inspect.layout?.version) !== 1 || !equal(actual.layout, setup.initial_layout))) throw new Error("task setup verification failed for initial_layout at version 1");
   for (const expected of setup.records) {
     const record = actual.records?.[expected.collection]?.find((item: Record<string, unknown>) => item.record_id === expected.id);
     if (!record || Object.entries(expected.data).some(([key, value]) => !equal(record[key], value))) throw new Error(`task setup verification failed for record ${expected.collection}/${expected.id}`);

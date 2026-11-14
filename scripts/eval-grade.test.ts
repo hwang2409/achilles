@@ -3,6 +3,13 @@ import { gradeCheck, gradeReference, gradeTask, structurallyContains, validateTa
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
+test("a setup task without an initial snapshot is a harness error", () => {
+  const setupTask = validateTask({ ...task, setup: { tools: [{ name: "list_records", operation: "list", collection: "records" }], records: [] } });
+  const result = gradeReference(setupTask, { pages: [{ id: "home", alias: "p" }], pages_seen: [], results: [], turns: 0 });
+  expect(result.status).toBe("harness_error");
+  expect(result.checks[0]?.actual).toEqual(["setup precondition unverifiable"]);
+});
+
 test("a missing seeded layout is a harness error before grading", () => {
   const original = { blocks: [{ type: "text", text: "seeded" }] }; const added = { type: "text", text: "added" };
   const layoutTask = validateTask({ ...task, setup: { tools: [], records: [], initial_layout: original }, checks: [{ id: "layout", type: "layout_update", page: "p", value: { original, added, version: 2 } }] });

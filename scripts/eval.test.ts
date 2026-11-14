@@ -11,6 +11,13 @@ const targetRun = (target: string) => async (command: string, args: string[], cw
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
 
+test("setup verification accepts old and inspect_page layout shapes", () => {
+  const setup = { tools: [], records: [], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
+  const base = { layout: setup.initial_layout, inspect: { tools: [] } };
+  expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: { ...setup.initial_layout, version: 1, digest: "old" } } })).not.toThrow();
+  expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: setup.initial_layout, layout_version: 1, layout_digest: "new" } })).not.toThrow();
+});
+
 test("setup seeds an initial layout on a fresh page at version 1", async () => {
   const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-layout-setup-"));
   try {

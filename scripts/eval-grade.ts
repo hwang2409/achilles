@@ -235,17 +235,21 @@ export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot
   const failures: string[] = [];
   for (const expected of task.setup.tools) {
     const tool = rows(snapshot, "tool_versions").find(row => row.page_id === "home" && row.name === expected.name && row.operation === expected.operation && row.collection === expected.collection);
-    if (!tool) failures.push(`tool ${expected.name}`);
+    if (!tool) failures.push(`seed missing: tool ${expected.name}`);
   }
   for (const expected of task.setup.records) {
     const record = rows(snapshot, "records").find(row => row.page_id === "home" && row.collection === expected.collection && row.id === expected.id && structurallyContains(row.data, expected.data));
-    if (!record) failures.push(`record ${expected.collection}/${expected.id}`);
+    if (!record) failures.push(`seed missing: record ${expected.collection}/${expected.id}`);
   }
   if (task.setup.initial_layout) {
     const layout = rows(snapshot, "layouts").find(row => row.page_id === "home" && row.version === 1 && structurallyContains(row.document, task.setup!.initial_layout));
-    if (!layout) failures.push("initial_layout at version 1");
+    if (!layout) failures.push("seed missing: initial_layout at version 1");
   }
   return failures;
+}
+function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  if (!task.setup) return [];
+  return snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"];
 }
 export function assertSetupPreconditions(task: EvalTask, snapshot: EvalSnapshot) {
   const failures = setupPreconditionFailures(task, snapshot);
@@ -264,7 +268,7 @@ export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
   return { first_call_validity, structured_tool_errors: structured.map(row => ({ code: row.code, path: row.path, expected: row.expected })), unstructured_tool_errors: errors.length - structured.length };
 }
 export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
-  const preconditions = snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : [];
+  const preconditions = setupFailures(task, snapshot);
   if (preconditions.length) return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "grader preconditions", actual: preconditions, evidence: { initial: snapshot.initial } }], turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
   const checks = task.checks.map(check => gradeCheck(check, snapshot)); const required = checks.filter((_, i) => task.checks[i].required !== false);
   const score = Math.round((checks.filter(result => result.pass).length / checks.length) * 100);
@@ -272,6 +276,6 @@ export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
 }
 
 export function gradeReference(task: EvalTask, snapshot: EvalSnapshot) {
-  const result = gradeTask(task, snapshot); const preconditions = snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : [];
+  const result = gradeTask(task, snapshot); const preconditions = setupFailures(task, snapshot);
   return { ...result, status: preconditions.length ? "harness_error" as const : result.pass ? "pass" as const : "agent_fail" as const };
 }
