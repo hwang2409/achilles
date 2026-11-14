@@ -131,6 +131,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   const temp = await mkdtemp(resolve(tmpdir(), "achilles-dev-test-"));
   const home = resolve(temp, "home");
   const bin = resolve(temp, "bin");
+  const achillesHome = resolve(temp, "achilles-home");
   const calls = resolve(temp, "zeta-calls.jsonl");
   const serverPids = resolve(temp, "server-pids.jsonl");
   const webStamp = resolve(root, ".cache/web-build.stamp");
@@ -145,6 +146,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   let crashedLockIdentity: ProcessIdentity | null = null;
 
   await mkdir(resolve(home, "run"), { recursive: true });
+  await writeFile(resolve(home, "run/serve.ws.json"), "shared discovery sentinel");
   await mkdir(bin, { recursive: true });
   for (const state of ["achilles.json", "zeta-serve.json", "lock"]) {
     if (await Bun.file(resolve(devCache, state)).exists()) throw new Error("refusing to replace existing make dev state");
@@ -176,10 +178,11 @@ if (process.env.FAKE_ZETA_BLOCK && args[0] === "mcp" && args[1] === "--help") {
 if (args[0] === "serve") {
   const ws = Number(args[args.indexOf("--ws") + 1]);
   const origins = args.reduce<string[]>((values, arg, index) => arg === "--ws-origin" ? [...values, args[index + 1]] : values, []);
-  const run = resolve(process.env.ZETA_HOME!, "run"); mkdirSync(run, { recursive: true });
+  const discovery = args[args.indexOf("--ws-discovery") + 1];
+  mkdirSync(resolve(discovery, ".."), { recursive: true });
   const started = Bun.spawnSync(["ps", "-p", String(process.pid), "-o", "lstart="]).stdout.toString().trim();
   const command = Bun.spawnSync(["ps", "-o", "args=", "-p", String(process.pid)]).stdout.toString().trim();
-  writeFileSync(resolve(run, "serve.ws.json"), JSON.stringify({ pid: process.pid, started, command, port: ws, origins }));
+  writeFileSync(discovery, JSON.stringify({ pid: process.pid, started, command, port: ws, origins }));
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
   const parent = Number(process.env.FAKE_PARENT_PID);
   const watchdog = setInterval(() => {
@@ -203,6 +206,7 @@ process.exit(0);
     PATH: `${bin}:${process.env.PATH}`,
     PORT: String(port),
     ZETA_HOME: home,
+    ACHILLES_HOME: achillesHome,
     ACHILLES_DEV_SKIP_BUILD: "1",
     FAKE_MCP_URL: `http://127.0.0.1:${port}/mcp/`,
     FAKE_ZETA_CALLS: calls,
@@ -227,7 +231,11 @@ process.exit(0);
     const callsAfterFirst = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
     const startedServe = callsAfterFirst.find((args) => args[0] === "serve");
     expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
-    zetaPid = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")).pid;
+    expect(startedServe?.[startedServe.indexOf("--ws-discovery") + 1]).toBe(resolve(achillesHome, "run/serve.json"));
+    expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
+    const firstZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    zetaPid = firstZetaState.pid;
+    discovered.push(firstZetaState);
     expect(callsAfterFirst.some((args) => args[0] === "mcp" && ["add", "remove"].includes(args[1]) && !args.includes("--help"))).toBe(false);
     const firstState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8")) as ProcessIdentity & { stamp: string };
     managed.push(firstState);
@@ -237,6 +245,25 @@ process.exit(0);
     expect(second.exitCode, second.stderr).toBe(0);
     const secondState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
     expect(secondState.pid).toBe(firstState.pid);
+    const callsAfterSecond = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(callsAfterSecond.filter((args) => args[0] === "serve")).toHaveLength(1);
+    expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
+
+    const ownedDiscovery = resolve(achillesHome, "run/serve.json");
+    await writeFile(ownedDiscovery, "not json");
+    const afterCorruptDiscovery = await runDev();
+    expect(afterCorruptDiscovery.exitCode, afterCorruptDiscovery.stderr).toBe(0);
+    expect(alive(firstZetaState.pid), `owned zeta serve pid ${firstZetaState.pid} survived corrupt discovery`).toBe(false);
+    const secondZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    discovered.push(secondZetaState);
+
+    await rm(ownedDiscovery);
+    const afterMissingDiscovery = await runDev();
+    expect(afterMissingDiscovery.exitCode, afterMissingDiscovery.stderr).toBe(0);
+    expect(alive(secondZetaState.pid), `owned zeta serve pid ${secondZetaState.pid} survived missing discovery`).toBe(false);
+    const finalZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    discovered.push(finalZetaState);
+    zetaPid = finalZetaState.pid;
 
     await writeFile(webStamp, "test-web-stamp-2");
     const third = await runDev();
@@ -293,8 +320,11 @@ process.exit(0);
     await stop(crashedChildIdentity!);
     crashedChildPid = 0;
 
-    await stop(thirdState);
-    await rm(resolve(devCache, "achilles.json"));
+    const { child: stopped } = await track(["make", "--silent", "stop"], { cwd: root, env: baseEnv, stdout: "pipe", stderr: "pipe" });
+    const stopExit = await stopped.exited;
+    expect(stopExit, await new Response(stopped.stderr).text()).toBe(0);
+    expect(alive(thirdState.pid)).toBe(false);
+    expect(alive(zetaPid)).toBe(false);
     const { child: foreign } = await track(["bun", fakeServer, "--port", String(port)], { env: baseEnv, stdout: "ignore", stderr: "ignore" });
     foreignPid = foreign.pid;
     await waitFor(async () => { try { return (await fetch(`http://127.0.0.1:${port}/`)).ok; } catch { return false; } }, "foreign listener");
@@ -330,7 +360,7 @@ process.exit(0);
         if (typeof value.pid === "number" && typeof value.started === "string" && typeof value.command === "string") owned.push(value);
       } catch {}
     };
-    await addStoredIdentity(resolve(home, "run/serve.ws.json"));
+    await addStoredIdentity(resolve(achillesHome, "run/serve.json"));
     await addStoredIdentity(resolve(devCache, "zeta-serve.json"));
     await addStoredIdentity(resolve(devCache, "achilles.json"));
     for (const saved of owned) {

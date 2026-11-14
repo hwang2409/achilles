@@ -18,6 +18,8 @@ if (!/^[0-9a-f]{40}$/.test(zetaRef))
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));
 const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
+const ownDiscovery = join(achillesHome, "run/serve.json");
+const sharedDiscovery = join(zetaHome, "run/serve.ws.json");
 const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
 const port = 5200 + Math.floor(Math.random() * 1000);
@@ -71,6 +73,7 @@ let browser;
 let controllerContext;
 try {
   await Bun.spawn(["git", "init", cwd]).exited;
+  await mkdir(join(achillesHome, "run"), { recursive: true, mode: 0o700 });
   await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
   const env = {
     ...process.env,
@@ -80,10 +83,18 @@ try {
     ZETA_PROOF_WORKTREE: root,
     ZETA_PROOF_CWD: cwd,
     ZETA_PROOF_CONTROL: control,
+    ZETA_PROOF_DISCOVERY: ownDiscovery,
     ZETA_PROOF_ORIGIN: origin,
-    ZETA_PROOF_APPROVAL_GRACE: "10",
+    ACHILLES_ZETA_DISCOVERY: ownDiscovery,
     ACHILLES_APPROVAL: "ask",
   };
+  const sharedProcess = start(
+    "uv",
+    ["run", "--project", zeta, "zeta", "serve", "--port", "0", "--ws", "0", "--ws-origin", origin, "--provider", "codex"],
+    env,
+  );
+  await waitFor(async () => await Bun.file(sharedDiscovery).exists(), "shared zeta discovery");
+  const shared = JSON.parse(await Bun.file(sharedDiscovery).text());
   let zetaProcess = start(
     "uv",
     [
@@ -95,13 +106,8 @@ try {
     ],
     env,
   );
-  await waitFor(
-    async () => await Bun.file(join(zetaHome, "run/serve.ws.json")).exists(),
-    "zeta discovery",
-  );
-  const pending = JSON.parse(
-    await Bun.file(join(zetaHome, "run/serve.ws.json")).text(),
-  );
+  await waitFor(async () => await Bun.file(ownDiscovery).exists(), "achilles zeta discovery");
+  const pending = JSON.parse(await Bun.file(ownDiscovery).text());
   for (const key of ["controller_token", "observer_token"])
     if (typeof pending[key] === "string") secrets.push(pending[key]);
   const appEnv = env;
@@ -239,6 +245,11 @@ try {
   const approvalCompleteBefore = await approvalComplete.count();
   await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+  const own = JSON.parse(await Bun.file(ownDiscovery).text());
+  const connected = await fetch(discoveryUrl).then((response) => response.json()) as { url: string };
+  if (sharedProcess.exitCode !== null || zetaProcess.exitCode !== null) throw new Error("one of the unrelated zeta serves exited during chat");
+  if (shared.pid === own.pid || shared.port === own.port) throw new Error("shared and achilles zeta serves did not remain distinct");
+  if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor);
   const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:02}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
