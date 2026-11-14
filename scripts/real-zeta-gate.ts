@@ -738,8 +738,8 @@ try {
   await waitFor(async () => await recoveredField.inputValue({ timeout: 500 }).then((value) => value === draft, () => false), "reconnected composer draft").catch(async () => { throw new Error(`reconnected composer did not restore: ${redact(await page.locator("body").innerText())}`); });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
-  const observerSession = await page.locator("[data-session-id]").getAttribute("data-session-id");
-  if (!observerSession) throw new Error("controller session id missing before observer gate");
+  const observerSession = new URL(page.url()).searchParams.get("chat");
+  if (!observerSession) throw new Error("controller page lost its active chat before observer gate");
   const observerPage = await browser.newPage();
   await observerPage.goto(`${origin}/?chat=${encodeURIComponent(observerSession)}`);
   await observerPage.locator(".transcript").waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer attach failed: ${await observerPage.locator("body").innerText()}`); });
@@ -769,10 +769,10 @@ try {
   await observerPage.getByRole("button", { name: "retry", exact: true }).click();
   const takeoverField = observerPage.getByRole("textbox", { name: "message", exact: true });
   await takeoverField.waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover retry did not gain control: ${await observerPage.locator("body").innerText()}`); });
-  const sendsBeforeTakeover = requests().filter((frame) => frame.method === "send").length;
+  await waitFor(async () => (await observerPage.locator(".run-state").innerText()).includes("idle"), "takeover retry idle");
   await takeoverField.fill("takeover retry message");
   await takeoverField.press("Enter");
-  await waitFor(() => requests().filter((frame) => frame.method === "send").length > sendsBeforeTakeover, "takeover retry send");
+  await observerPage.getByText("takeover retry message", { exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover controller could not send: ${await observerPage.locator("body").innerText()}`); });
   page = observerPage;
 
   if (screenshotDir) {

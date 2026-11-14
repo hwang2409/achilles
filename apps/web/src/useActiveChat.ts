@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
@@ -199,11 +199,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, can
   const creationError = status.error;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     setCreationPageId(null);
-    setState((current) => current.phase === "ready" ? current : { phase: "loading" });
+    setState({ phase: "loading" });
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, !canWrite, allowMissingSelected).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);

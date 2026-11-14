@@ -47,8 +47,8 @@ function connectionFailure(state: ConnectionState): string | null {
 
 export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
-  const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
+  const client = connection.client;
   const writable = canWrite(connectionState);
   const attached = connectionState.phase === "connected" || connectionState.phase === "taking_control" || connectionState.phase === "takeover_failed";
   const readOnly = attached && !writable;
@@ -69,10 +69,7 @@ export function App() {
     return active.send(...args);
   };
 
-  useEffect(() => {
-    const unsubscribe = connection.subscribe(() => setClient(connection.client));
-    return () => { unsubscribe(); connection.stop(); };
-  }, [connection]);
+  useEffect(() => () => connection.stop(), [connection]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
