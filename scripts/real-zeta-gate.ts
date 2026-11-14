@@ -548,7 +548,7 @@ try {
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
   if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
-  if (await page.getByLabel("auto-approve").count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
@@ -583,7 +583,7 @@ try {
   await allowField.waitFor({ timeout: 20000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await page.getByLabel("auto-approve").waitFor({ state: "visible" });
+  await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
   if (approvalModeResponse("set_settings", allowSession) !== "allow")
     throw new Error("allow-mode session settings were not applied");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
@@ -611,7 +611,7 @@ try {
   const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   await page.goto(`${origin}/?chat=${first}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
-  if (await page.getByLabel("auto-approve").count()) throw new Error("user ask chat reopened under allow showed auto-approve");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("user ask chat reopened under allow showed auto-approve");
   const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
     throw new Error("reopening a user ask chat under an allow server sent set_settings");
