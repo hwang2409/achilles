@@ -25,7 +25,7 @@ describe("create mode tool refresh", () => {
     const requestReached = deferred<void>();
     let fetches = 0; let requests = 0;
     const owner = createModeToggleOwner(async () => { fetches += 1; return Response.json({ create_mode: true }); });
-    const input = { pageId: "home", sessionId: "session", enabled: true, client: { request: () => { requests += 1; requestReached.resolve(); return refresh.promise; } } };
+    const input = { pageId: "home", sessionId: "session", enabled: true, client: { features: ["mcp_refresh_tools"], request: () => { requests += 1; requestReached.resolve(); return refresh.promise; } } };
     const first = owner.run(input); const duplicate = owner.run(input);
     let sendReady = false;
     const send = owner.beforeSend().then(() => { sendReady = true; });
@@ -45,7 +45,7 @@ describe("create mode tool refresh", () => {
     { code: -32003, text: "different chat" },
   ])("blocks send on refresh error $code and retries only the refresh", async ({ code, text }) => {
     let fetches = 0; let requests = 0;
-    const client = { request: async () => { requests += 1; if (requests === 1) throw Object.assign(new Error("failed"), { code }); return { session_id: "session", servers: ["achilles"] }; } };
+    const client = { features: ["mcp_refresh_tools"], request: async () => { requests += 1; if (requests === 1) throw Object.assign(new Error("failed"), { code }); return { session_id: "session", servers: ["achilles"] }; } };
     const owner = createModeToggleOwner(async () => { fetches += 1; return Response.json({ create_mode: true }); });
     const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
     expect(result.blocked).toBe(true); expect(result.error).toContain(text);
@@ -55,12 +55,17 @@ describe("create mode tool refresh", () => {
     expect(fetches).toBe(1); expect(requests).toBe(2);
   });
 
-  test("keeps the old toggle behavior with a clear message when zeta lacks refresh", async () => {
+  test.each([
+    { name: "feature was not negotiated", features: [] as string[], code: null, requests: 0 },
+    { name: "server returns method not found", features: ["mcp_refresh_tools"], code: -32601, requests: 1 },
+  ])("keeps the old toggle behavior when $name", async ({ features, code, requests }) => {
+    let requestCount = 0;
     const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
-    const client = { request: async () => { throw Object.assign(new Error("unknown method"), { code: -32601 }); } };
+    const client = { features, request: async () => { requestCount += 1; throw Object.assign(new Error("unknown method"), { code }); } };
     const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
-    expect(result).toEqual({ createMode: true, error: "update zeta to refresh page tools without reconnecting.", blocked: false });
+    expect(result).toEqual({ createMode: true, error: null, blocked: false });
     await owner.beforeSend();
+    expect(requestCount).toBe(requests);
   });
 });
 

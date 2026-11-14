@@ -159,7 +159,7 @@ const NO_CREATION = { pending: null, error: null };
 type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" | "unknown"; outcome?: "queued" | "delivered" | "dropped" };
 
 type CreateModeToggleInput = {
-  client: Pick<ZetaClient, "request">;
+  client: Pick<ZetaClient, "features" | "request">;
   pageId: string;
   sessionId: string;
   enabled: boolean;
@@ -168,7 +168,7 @@ type CreateModeToggleResult = { createMode: boolean | null; error: string | null
 
 function refreshToolsError(caught: unknown): { message: string; blocked: boolean } {
   const error = caught as { code?: unknown; message?: unknown; data?: { reason?: unknown } };
-  if (error.code === -32601) return { message: "update zeta to refresh page tools without reconnecting.", blocked: false };
+  if (error.code === -32601) return { message: "", blocked: false };
   if (error.code === -32005) return { message: `zeta could not refresh page tools${typeof error.data?.reason === "string" ? `: ${error.data.reason}` : ""}. retry the refresh.`, blocked: true };
   if (error.code === -32602) return { message: "zeta could not find the achilles page tools. retry the refresh.", blocked: true };
   if (error.code === -32003) return { message: "zeta is attached to a different chat. retry the refresh.", blocked: true };
@@ -180,6 +180,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   let pending: Promise<CreateModeToggleResult> | null = null;
   let retry: CreateModeToggleInput | null = null;
   const refresh = async (input: CreateModeToggleInput, createMode: boolean, mine: number): Promise<CreateModeToggleResult> => {
+    if (!input.client.features.includes("mcp_refresh_tools")) return { createMode, error: null, blocked: false };
     try {
       await input.client.request("mcp_refresh_tools", { session_id: input.sessionId, server: "achilles" });
       if (mine === generation) retry = null;
@@ -187,7 +188,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
     } catch (caught) {
       const failure = refreshToolsError(caught);
       if (mine === generation) retry = failure.blocked ? { ...input, enabled: createMode } : null;
-      return { createMode: failure.blocked ? null : createMode, error: failure.message, blocked: failure.blocked };
+      return { createMode: failure.blocked ? null : createMode, error: failure.message || null, blocked: failure.blocked };
     }
   };
   return {
