@@ -15,7 +15,7 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
-    (listener) => draftStore.subscribe(sessionId, listener),
+    (listener) => draftStore.subscribeRemote(sessionId, listener),
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );

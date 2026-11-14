@@ -6,6 +6,7 @@ type DraftStore = {
   set(sessionId: string, text: string): void;
   clear(sessionId: string): void;
   subscribe(sessionId: string, listener: Listener): () => void;
+  subscribeRemote(sessionId: string, listener: Listener): () => void;
 };
 
 const PREFIX = "achilles:draft:";
@@ -35,10 +36,14 @@ export function createDraftStore(): DraftStore {
   const drafts = new Map<string, StoredDraft>();
   const dirty = new Set<string>();
   const listeners = new Map<string, Set<Listener>>();
+  const remoteListeners = new Map<string, Set<Listener>>();
   let loaded = false;
 
   const notify = (sessionId: string) => {
     for (const listener of listeners.get(sessionId) ?? []) listener();
+  };
+  const notifyRemote = (sessionId: string) => {
+    for (const listener of remoteListeners.get(sessionId) ?? []) listener();
   };
 
   const load = () => {
@@ -76,7 +81,7 @@ export function createDraftStore(): DraftStore {
     const value = parse(event.newValue);
     if (value) drafts.set(sessionId, value);
     else drafts.delete(sessionId);
-    notify(sessionId);
+    notifyRemote(sessionId);
   };
   globalThis.addEventListener?.("storage", onStorage);
 
@@ -115,6 +120,15 @@ export function createDraftStore(): DraftStore {
       return () => {
         sessionListeners.delete(listener);
         if (!sessionListeners.size) listeners.delete(sessionId);
+      };
+    },
+    subscribeRemote(sessionId, listener) {
+      const sessionListeners = remoteListeners.get(sessionId) ?? new Set<Listener>();
+      sessionListeners.add(listener);
+      remoteListeners.set(sessionId, sessionListeners);
+      return () => {
+        sessionListeners.delete(listener);
+        if (!sessionListeners.size) remoteListeners.delete(sessionId);
       };
     },
   };
