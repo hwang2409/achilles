@@ -51,6 +51,7 @@ export function App() {
   const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [fulcrumJumpToLatest, setFulcrumJumpToLatest] = useState(false);
   const transcriptRef = useRef<HTMLElement>(null);
   const send: typeof active.send = (...args) => {
     setFollowRequest((value) => value + 1);
@@ -71,6 +72,7 @@ export function App() {
     let contentHeight = scroll.scrollHeight;
     const update = () => {
       const grew = scroll.scrollHeight > contentHeight;
+      setFulcrumJumpToLatest(Boolean(transcript?.querySelector('[data-part="jump-to-latest-lane"] [data-part="jump-to-latest"]')));
       if (scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 4) setShowJumpToLatest(false);
       else if (grew) setShowJumpToLatest(true);
       contentHeight = scroll.scrollHeight;
@@ -105,7 +107,7 @@ export function App() {
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
         <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!connected || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>
       </RunProvider>}
   </>;

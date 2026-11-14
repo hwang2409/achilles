@@ -82,6 +82,8 @@ export async function gateTranscript(
     throw new Error(`streaming transcript jumped after scroll up: ${scrolledUp} -> ${afterMoreDeltas}`);
   const jump = page.locator('[data-part="jump-to-latest"]');
   await jump.waitFor({ state: "visible", timeout: 20_000 });
+  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
+    throw new Error("tool-call stream rendered more than one visible jump to latest control");
   await capture("streaming-scrolled-up-jump-1440x900.png");
   await jump.click();
   await waitFor(async () => await distanceFromBottom() <= 4, "jump to latest for this turn");
@@ -100,6 +102,8 @@ export async function gateTranscript(
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
   const textOnlyJump = page.locator('[data-part="jump-to-latest"]');
   await textOnlyJump.waitFor({ state: "visible", timeout: 20_000 });
+  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
+    throw new Error("text-only stream rendered more than one visible jump to latest control");
   await textOnlyJump.focus();
   if (!(await textOnlyJump.evaluate((element) => document.activeElement === element)))
     throw new Error("text-only jump to latest control is not keyboard focusable");
