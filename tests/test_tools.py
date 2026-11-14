@@ -74,7 +74,7 @@ def test_every_operation_matches_catalog_and_store(tmp_path, operation):
     assert Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    created, _ = store.create_tool("home", bundle)
+    created, _, _ = store.create_tool("home", bundle)
     assert created["name"] == bundle["name"]
     output = store.page_tools("home")[0]["output_schema"]
     if operation == "list":
@@ -220,7 +220,7 @@ def test_legacy_tool_uses_derived_output_schema_at_call_time(tmp_path):
 def test_generated_tool_versions_and_page_scope(tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    created, _ = store.create_tool("home", BUNDLE)
+    created, _, _ = store.create_tool("home", BUNDLE)
     assert created["version"] == 1
     assert call_record(store, "home", "annotate_trace", {"text": "one"}, 1)["text"] == "one"
     with store._connect() as db:
@@ -234,7 +234,7 @@ def test_generated_tool_versions_and_page_scope(tmp_path):
             "additionalProperties": False,
         },
     }
-    updated, _ = store.create_tool("home", version_two)
+    updated, _, _ = store.create_tool("home", version_two)
     assert updated["version"] == 2
     store.rollback_tool("home", "annotate_trace", 1)
     assert store.page_tools("home")[0]["version"] == 1
@@ -450,7 +450,7 @@ def test_bundle_publish_cleans_stale_temp(tmp_path):
 def test_bundle_is_canonical_and_private(tmp_path):
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    _, digest = store.create_tool("home", BUNDLE)
+    _, digest, _ = store.create_tool("home", BUNDLE)
     path = tmp_path / "bundles" / f"{digest}.json"
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text())["name"] == "annotate_trace"

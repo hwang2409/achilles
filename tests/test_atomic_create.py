@@ -569,10 +569,16 @@ def test_all_operation_tools_list_and_run_over_mcp(creation_client):
 
 @pytest.mark.parametrize(
     "case",
-    ["documented_update", "missing_revision", "insert_only", "insert_and_update"],
+    [
+        "documented_update",
+        "missing_revision",
+        "insert_only",
+        "insert_and_update",
+        "overlapping_update",
+    ],
 )
-def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client, case):
-    _, _, client, headers = creation_client
+def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client, monkeypatch, case):
+    root, _, client, headers = creation_client
     update = {
         **bundle(name="update_book", operation="update"),
         "input_schema": {
@@ -636,7 +642,7 @@ def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client,
         )
         assert json.loads(page_result["content"][0]["text"])["note"] == expected_note
         assert json.loads(tool_result["content"][0]["text"])["note"] == expected_note
-    else:
+    elif case == "insert_and_update":
         result = mcp(
             client,
             headers,
@@ -660,6 +666,38 @@ def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client,
             {"name": "create_tool", "arguments": {"bundle": update}},
         )
         assert "note" not in json.loads(created_update["content"][0]["text"])
+    else:
+        insert_committed = threading.Event()
+        update_committed = threading.Event()
+        original_create_tool = PageStore.create_tool
+
+        def pause_after_insert_commit(self, page_id, tool_bundle, validation_prefix=""):
+            created = original_create_tool(self, page_id, tool_bundle, validation_prefix)
+            if tool_bundle["implementation"]["operation"] == "insert":
+                insert_committed.set()
+                assert update_committed.wait(timeout=10)
+            return created
+
+        monkeypatch.setattr(PageStore, "create_tool", pause_after_insert_commit)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                mcp,
+                client,
+                headers,
+                2,
+                "tools/call",
+                {"name": "create_tool", "arguments": {"bundle": bundle()}},
+            )
+            assert insert_committed.wait(timeout=10)
+            try:
+                PageStore(root).create_tool("home", update)
+            finally:
+                update_committed.set()
+            result = pending.result(timeout=10)
+        value = json.loads(result["content"][0]["text"])
+        assert value.get("note") == (
+            "collection books has no update tool; rows cannot be changed after insert"
+        )
 
 
 def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):

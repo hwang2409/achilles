@@ -172,24 +172,6 @@ def _inspect_error() -> CallToolResult:
     return _safe_error(ValidationError("", "authorized page", "forbidden"))
 
 
-def _missing_update_note(bundles: list[dict[str, Any]]) -> str | None:
-    operations: dict[str, set[str]] = {}
-    for bundle in bundles:
-        implementation = bundle["implementation"]
-        operations.setdefault(implementation["collection"], set()).add(implementation["operation"])
-    missing = sorted(
-        collection
-        for collection, collection_operations in operations.items()
-        if "insert" in collection_operations and "update" not in collection_operations
-    )
-    if not missing:
-        return None
-    return " ".join(
-        f"collection {collection} has no update tool; rows cannot be changed after insert"
-        for collection in missing
-    )
-
-
 def _validate_create(name: str, args: Any) -> None:
     schema = {
         "create_page": CREATE_PAGE_SCHEMA,
@@ -353,7 +335,13 @@ def build_mcp(store: PageStore):
             try:
                 _validate_create(params.name, args)
                 if params.name == "create_page":
-                    created, digest, existing, detail_summary = await anyio.to_thread.run_sync(
+                    (
+                        created,
+                        digest,
+                        existing,
+                        detail_summary,
+                        note,
+                    ) = await anyio.to_thread.run_sync(
                         store.create_page,
                         args["route"],
                         args["title"],
@@ -368,7 +356,6 @@ def build_mcp(store: PageStore):
                         "existing": existing,
                         "detail_filter_matches": detail_summary,
                     }
-                    note = _missing_update_note(args.get("tools", []))
                     if note:
                         result["note"] = note
                 elif params.name == "update_layout":
@@ -384,13 +371,10 @@ def build_mcp(store: PageStore):
                         "detail_filter_matches": detail_summary,
                     }
                 else:
-                    created, digest = await anyio.to_thread.run_sync(
+                    created, digest, note = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
                     result = {**created, "digest": digest}
-                    note = _missing_update_note(
-                        await anyio.to_thread.run_sync(store.page_tools, page["id"])
-                    )
                     if note:
                         result["note"] = note
             except ValidationError as exc:
