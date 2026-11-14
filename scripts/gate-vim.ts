@@ -240,6 +240,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     throw new Error(`delayed turn did not send a steer request: ${JSON.stringify(requests().slice(delayedBeforeSteer))}`);
   await waitFor(async () => requests().some((frame) => frame.id === delayedSteer.id && (frame.result || frame.error)), "delayed steer response");
   if (await confirmedStock.inputValue() !== "") {
+    if (await confirmedStock.inputValue() !== "steer while running") throw new Error("rejected delayed steer did not keep its draft");
     await waitFor(async () => requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running"), "delayed steer fallback send");
     const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
     if (fallbackSend?.params?.delivery_id !== delayedSteer.params?.delivery_id) throw new Error("delayed steer fallback did not reuse its delivery id");

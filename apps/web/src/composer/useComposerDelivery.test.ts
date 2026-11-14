@@ -11,6 +11,7 @@ type Scenario = {
   remount?: boolean;
   race?: "send-to-steer" | "steer-to-send" | "double-rejection";
   expectedMethods?: Array<"send" | "steer">;
+  editAndRestore?: boolean;
   expectedDraft: string;
   expectedError?: string;
 };
@@ -19,7 +20,7 @@ const scenarios: Scenario[] = [
   { name: "send ok", state: "idle", expectedDraft: "" },
   { name: "send rejected after turn starts", state: "idle", race: "send-to-steer", expectedMethods: ["send", "steer"], statuses: [{ status: "delivered" }], statusReads: 1, expectedDraft: "" },
   { name: "steer rejected after turn ends", state: "steerable", race: "steer-to-send", expectedMethods: ["steer", "send"], expectedDraft: "" },
-  { name: "fallback is not retried", state: "idle", race: "double-rejection", expectedMethods: ["send", "steer"], expectedDraft: "keep this exact draft", expectedError: "could not send: no turn is running" },
+  { name: "fallback is not retried", state: "idle", race: "double-rejection", expectedMethods: ["send", "steer"], expectedDraft: "keep this exact draft", expectedError: "no turn is running" },
   { name: "steer consumed", state: "steerable", statuses: [{ status: "delivered" }], statusReads: 1, expectedDraft: "" },
   {
     name: "steer dropped",
@@ -27,7 +28,7 @@ const scenarios: Scenario[] = [
     statuses: [{ status: "queued" }, { status: "dropped" }],
     statusReads: 2,
     expectedDraft: "keep this exact draft",
-    expectedError: "could not steer: message was not sent",
+    expectedError: "this message was not sent. your text is still here.",
   },
   {
     name: "steer remains queued after bounded wait",
@@ -35,8 +36,9 @@ const scenarios: Scenario[] = [
     statuses: [{ status: "queued" }],
     statusReads: 1,
     timeout: true,
+    editAndRestore: true,
     expectedDraft: "keep this exact draft",
-    expectedError: "could not steer: this message may not have been sent yet. it may still arrive with your next message.",
+    expectedError: "this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.",
   },
   { name: "steer evicted after consumption", state: "steerable", statuses: [{ status: "evicted", outcome: "delivered" }], statusReads: 1, expectedDraft: "" },
   { name: "reload or remount during delivery", state: "idle", remount: true, expectedDraft: " plus new" },
@@ -105,7 +107,16 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
 
     expect(owner.getModel().draft).toBe(scenario.remount ? "" : scenario.expectedDraft);
     expect(persisted).toBe(scenario.expectedDraft);
+    if (scenario.editAndRestore) {
+      owner.edit(`${scenario.expectedDraft}x`);
+      expect(owner.getModel().error).toBeUndefined();
+      owner.edit(scenario.expectedDraft);
+    }
     expect(owner.getModel().error?.text).toBe(scenario.expectedError);
+    if (scenario.editAndRestore) {
+      owner.dismissError();
+      expect(owner.getModel().error).toBeUndefined();
+    }
     if (scenario.remount) expect(remounted?.getModel().draft).toBe(scenario.expectedDraft);
     if (scenario.statusReads) expect(statusReads).toBe(scenario.statusReads);
     if (scenario.expectedMethods) {

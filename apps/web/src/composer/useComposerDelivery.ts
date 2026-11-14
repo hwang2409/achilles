@@ -5,6 +5,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useRunStore, type ComposerProps } from "@fulcrum/react";
+import { UncertainSteerDeliveryError } from "../useActiveChat";
 import {
   createComposerModel,
   transition,
@@ -32,6 +33,7 @@ export type ComposerDelivery = {
   update(options: DeliveryOptions): void;
   sync(state: ComposerProps["state"], defaultValue?: string): void;
   edit(draft: string): void;
+  dismissError(): void;
   submit(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -72,6 +74,9 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     edit(draft) {
       apply({ type: "edit", draft });
     },
+    dismissError() {
+      apply({ type: "dismiss-error" });
+    },
     async submit() {
       apply({ type: "state", state: current.state });
       const effect = apply({
@@ -88,6 +93,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
           type: "reject",
           attempt: sendAttempt,
           message: errorText(failure),
+          uncertain: failure instanceof UncertainSteerDeliveryError,
         });
       } finally {
         apply({ type: "settle", attempt: sendAttempt });
@@ -124,7 +130,8 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
   }, [owner, options.defaultValue, options.state]);
 
   const edit = useCallback((draft: string) => owner.edit(draft), [owner]);
+  const dismissError = useCallback(() => owner.dismissError(), [owner]);
   const submit = useCallback(() => void owner.submit(), [owner]);
   const stop = useCallback(() => void owner.stop(), [owner]);
-  return { model, edit, submit, stop };
+  return { model, edit, dismissError, submit, stop };
 }

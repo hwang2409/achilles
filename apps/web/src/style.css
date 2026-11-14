@@ -97,6 +97,8 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
 .main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
+.main-pane [data-part="composer-status"][data-tone="warning"] { height: auto; min-height: 20px; overflow: visible; color: var(--fulcrum-warn); font-size: var(--achilles-ui-size, 14px); font-weight: 600; line-height: 1.4; white-space: normal; text-overflow: clip; }
+.main-pane [data-part="composer-dismiss"] { min-width: 0; min-height: 0; margin-left: 8px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; }
 .empty-chat { position: absolute; z-index: 1; inset-inline: max(24px, calc((100% - 880px) / 2)); margin: min(20vh, 180px) auto 32px; max-width: 880px; }
 .empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; font-size: clamp(24px, 4vw, 36px); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .empty-chat p { max-width: 68ch; color: var(--fulcrum-muted); line-height: 1.7; }
