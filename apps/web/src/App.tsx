@@ -37,7 +37,7 @@ export function App() {
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const readOnly = connectionState.phase === "connected" && connectionState.authority === "observer";
-  const active = useActiveChat(client, connectionState.phase === "connected", readOnly);
+  const active = useActiveChat(client, connectionState.phase === "connected", readOnly, connectionState.phase === "connected" && connectionState.takingControl === true);
   const ready = active.state.phase === "ready" ? active.state : null;
   const store = ready?.lease.store ?? null;
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
@@ -101,7 +101,7 @@ export function App() {
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const content = <>
     {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : lastState} toggling={active.toggling || !connected || readOnly} toggle={active.toggle} toggleError={active.toggleError} readOnly={readOnly} />}
-    {readOnly && <div className="connection-banner" role="status"><span>read-only: another tab or app controls this chat.</span><button onClick={() => connection.takeControl()}>take control</button></div>}
+    {readOnly && <div className="connection-banner" role="status"><span>{connection.state.phase === "connected" && connection.state.takingControl ? "waiting for the other tab or app to close…" : "read-only: another tab or app controls this chat."}</span><button onClick={() => connection.takeControl()}>take control</button></div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry saving this chat</button></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>

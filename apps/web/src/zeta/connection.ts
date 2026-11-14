@@ -7,7 +7,7 @@ import { createClient, webSocketTransport, ZetaError, type ZetaClient, type Zeta
  */
 export type ConnectionState =
   | { phase: "connecting"; attempt: number; lost: boolean; lastFailure?: "unresponsive" }
-  | { phase: "connected"; authority: ZetaRole }
+  | { phase: "connected"; authority: ZetaRole; takingControl?: boolean }
   | { phase: "not_running"; attempt: number; retryAt: number; lost: boolean }
   | { phase: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; attempt: number; retryAt: number; lost: boolean }
   | { phase: "dropped"; attempt: number; retryAt: number; lost: true }
@@ -124,6 +124,8 @@ export function createConnection({
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
+  let takeover = false;
+  let takeoverAttempts = 0;
   const listeners = new Set<() => void>();
   const send = (event: ConnectionEvent) => {
     const next = reduceConnection(state, event);
@@ -137,7 +139,7 @@ export function createConnection({
     timer = setTimer(() => { timer = null; void attempt(); }, Math.max(0, ms));
   };
   const attempt = async () => {
-    if (stopped || state.phase === "connected") return;
+    if (stopped || (state.phase === "connected" && !takeover)) return;
     const mine = ++generation;
     send({ type: "attempt" });
     const current = () => mine === generation && !stopped;
@@ -174,6 +176,12 @@ export function createConnection({
     const opened = await openRole(authority);
     if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
     if (opened.kind === "busy") {
+      if (takeover) {
+        takeoverAttempts++;
+        if (takeoverAttempts <= 8) schedule(backoff(takeoverAttempts));
+        else { takeover = false; state = { phase: "connected", authority: "observer" }; listeners.forEach((listener) => listener()); }
+        return;
+      }
       if (discovery.observer_token) {
         const observer = await openRole("observer");
         if (!current()) return observer.kind === "connected" ? observer.client.close() : undefined;
@@ -199,6 +207,8 @@ export function createConnection({
     if (opened.kind === "rejected") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
     const next = opened.client;
     if (!current()) return next.close();
+    if (takeover) client?.close();
+    takeover = false;
     client = next;
     next.onClose(() => {
       if (client !== next) return;
@@ -221,12 +231,11 @@ export function createConnection({
     },
     takeControl() {
       if (state.phase !== "connected" || state.authority !== "observer" || stopped) return;
-      const open = client;
-      client = null;
-      open?.close();
-      state = { phase: "capacity", attempt: attemptOf(state), retryAt: now(), lost: false };
+      takeover = true;
+      takeoverAttempts = 0;
+      state = { phase: "connected", authority: "observer", takingControl: true };
       listeners.forEach((listener) => listener());
-      schedule(1_000);
+      schedule(0);
     },
     stop() {
       stopped = true;

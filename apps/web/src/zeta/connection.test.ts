@@ -17,13 +17,13 @@ describe("controller capacity", () => {
 
   test("connects as an observer and can retry as controller", async () => {
     let role = "";
-    let closed = false;
-    const observer = { ...client(), close: () => { closed = true; } };
+    let controllerAttempts = 0;
+    const observer = client();
     const controller = client();
     const connection = createConnection({
       origin: "http://test",
       discover: async () => observerDiscovery,
-      connect: async (_discovery, nextRole) => { role = nextRole; if (nextRole === "controller" && !closed) throw new ZetaError("busy", -32001); return nextRole === "observer" ? observer as never : controller as never; },
+      connect: async (_discovery, nextRole) => { role = nextRole; if (nextRole === "controller" && controllerAttempts++ === 0) throw new ZetaError("busy", -32001); return nextRole === "observer" ? observer as never : controller as never; },
       setTimer: (callback) => { callback(); return 0; },
       clearTimer: () => {},
     });

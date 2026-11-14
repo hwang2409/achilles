@@ -72,7 +72,7 @@ type AttachmentOwner = ReturnType<typeof createAttachmentOwner>;
 class StaleAttachment extends Error {}
 const requireCurrent = (owner: AttachmentOwner, token: number) => { if (!owner.current(token)) throw new StaleAttachment(); };
 
-export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, readOnly = false): Promise<Attachment> {
+export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, readOnly = false, allowMissingSelected = false): Promise<Attachment> {
   let ownsLease = false;
   try {
     const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); requireCurrent(owner, token);
@@ -98,7 +98,7 @@ export async function attachPage(client: ZetaClient, key: string, selectedId: st
     catch (caught) { throw new PendingCreationError(caught, creationInput); }
     requireCurrent(owner, token);
     const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
-    if (selectedId && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
+    if (selectedId && !allowMissingSelected && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
     const serverApprovalMode = page.approval_mode ?? null;
     let sessionId = selectedId ?? resumedCreation?.mappedSessionId ?? page.zeta_session_id;
     let session: Awaited<ReturnType<typeof openHomeSession>> | undefined;
@@ -152,7 +152,7 @@ class PendingCreationError extends Error {
 
 const NO_CREATION = { pending: null, error: null };
 
-export function useActiveChat(client: ZetaClient | null, connected: boolean, readOnly = false) {
+export function useActiveChat(client: ZetaClient | null, connected: boolean, readOnly = false, allowMissingSelected = false) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
   const [state, setState] = useState<State>({ phase: "loading" });
   const [creationPageId, setCreationPageId] = useState<string | null>(null);
@@ -171,7 +171,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, rea
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     setCreationPageId(null);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
-    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, readOnly).then((next) => {
+    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, readOnly, allowMissingSelected).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
       setState({ phase: "ready", ...next });
