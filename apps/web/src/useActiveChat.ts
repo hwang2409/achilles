@@ -284,6 +284,10 @@ const TURN_RUNNING = -32004;
 const NO_TURN = -32005;
 const errorCode = (error: unknown) => (error as { code?: unknown } | null)?.code;
 
+export function pageDeliverySteer(phase: State["phase"], intent: { steer: boolean }) {
+  return phase === "ready" && intent.steer;
+}
+
 export async function deliverChatMessage(
   client: Pick<ZetaClient, "request">,
   sessionId: string,
@@ -468,6 +472,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (!client || (state.phase !== "ready" && state.phase !== "empty")) throw new Error("zeta is not connected");
     await modeToggle.current.beforeSend();
     const token = owner.current.token();
+    const steer = pageDeliverySteer(state.phase, intent);
     let current = state.phase === "ready" ? state : null;
     if (!current) {
       const focusClaim = claimComposerFocus();
@@ -493,7 +498,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       }
     }
     const delivery_id = crypto.randomUUID();
-    await deliverChatMessage(client, current.sessionId, text, delivery_id, intent.steer, track);
+    await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
     setSelectedId(current.sessionId);
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);

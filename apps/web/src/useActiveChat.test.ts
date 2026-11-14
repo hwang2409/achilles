@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, pageDeliverySteer, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -431,7 +431,7 @@ describe("chat creation lifecycle", () => {
         onDeliveryConfirm() {},
         onSubmit: async (text, intent, track) => {
           const attached = await run();
-          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", intent.steer, track);
+          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", pageDeliverySteer("empty", intent), track);
         },
       });
       await Promise.all([delivery.submit(), delivery.submit()]);

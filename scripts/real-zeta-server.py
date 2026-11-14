@@ -19,12 +19,13 @@ from zeta.storage_format import advance
 class BarrierBackend(FakeBackend):
     @staticmethod
     def opening_prompt(messages) -> str | None:
-        if not messages or messages[-1].role is not MessageRole.USER:
+        latest_user = next((message for message in reversed(messages) if message.role is MessageRole.USER), None)
+        if latest_user is None:
             return None
         return next(
             (
                 block.text
-                for block in messages[-1].content
+                for block in latest_user.content
                 if isinstance(block, TextContent)
                 and block.text in {"open created page", "start allow-mode chat"}
             ),
