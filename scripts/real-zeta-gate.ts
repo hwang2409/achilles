@@ -613,6 +613,10 @@ try {
   });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
+  const readingModeResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
 
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
