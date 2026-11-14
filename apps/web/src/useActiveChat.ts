@@ -32,6 +32,7 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
 
 function attachmentError(caught: unknown): string {
   const message = caught instanceof Error ? caught.message : String(caught);
+  if (message === "Failed to fetch" || message === "Load failed") return "achilles is unavailable while creating the chat.";
   return message.includes("MCP server is not a trusted global server: achilles")
     ? "achilles is not trusted by zeta. add it to $ZETA_HOME/mcp.json, then restart zeta serve."
     : message;

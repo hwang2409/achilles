@@ -20,6 +20,7 @@ type Props = {
   serverForcesAsk?: boolean;
   children: ReactNode;
   onNewChat: () => Promise<void>;
+  onToggleCreateMode: () => Promise<void>;
   onSelectChat: (chat: Chat) => void;
   refreshKey: number;
 };
@@ -73,7 +74,7 @@ function Highlight({ value, query }: { value: string; query: string }) {
   return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
 }
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onSelectChat, refreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onToggleCreateMode, onSelectChat, refreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -146,10 +147,11 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
+      if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
       if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [loading, onNewChat, settingsOpen]);
+  }, [loading, onNewChat, onToggleCreateMode, settingsOpen]);
 
   const pages = useMemo(() => {
     const values = new Map<string, PageLink>();
@@ -190,7 +192,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className="page-list">
         <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pages.length}</b></button>
-        {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}
+        {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}
       </section>
       <section className="chat-list" id="chat-search-results">
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>
@@ -209,8 +211,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
 
 function ChatRow({ chat, current, active, index, query, onSelect }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void }) {
   return <a id={index === undefined ? undefined : `chat-result-${index}`} className={`chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
-    <strong><Highlight value={titleOf(chat)} query={query} /></strong>
-    <span>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
+    <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
+    <span title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
   </a>;
 }
 

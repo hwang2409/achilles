@@ -649,7 +649,7 @@ try {
   });
   const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
   await page.getByRole("button", { name: "new chat" }).click();
-  const retryRegistration = page.getByRole("button", { name: "retry saving this chat" });
+  const retryRegistration = page.getByRole("button", { name: "retry creating chat" });
   await retryRegistration.waitFor({ timeout: 20_000 });
   const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
   if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)

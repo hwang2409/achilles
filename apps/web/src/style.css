@@ -24,24 +24,27 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .brand-mark::after { content: ""; position: absolute; width: 11px; height: 11px; left: 5px; top: 5px; background: color-mix(in srgb, var(--fulcrum-accent) 55%, white); }
 .new-chat, .chat-search { flex: 0 0 40px; margin: 12px 16px 0; display: flex; align-items: center; gap: 10px; padding: 0 10px; }
 .new-chat { justify-content: flex-start; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.new-chat kbd { margin-left: auto; font-size: 10px; }
+.new-chat kbd { margin-left: auto; font-size: 14px; }
 .chat-search { border: 1px solid var(--fulcrum-border); }
 .chat-search > span { color: var(--fulcrum-muted); font-size: 20px; }
 .chat-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
 .chat-search input::placeholder { color: var(--fulcrum-muted); }
 .chat-search:focus-within { border-color: var(--fulcrum-accent); }
-.chat-search kbd { font-size: 11px; }
+.chat-search kbd { font-size: 14px; }
 .list-head { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border: 0; text-transform: uppercase; letter-spacing: .14em; font-size: 11px; color: var(--fulcrum-muted); }
 .list-head b { color: var(--fulcrum-accent); }
 .page-list { flex: 0 0 auto; margin-top: 14px; border-bottom: 1px solid var(--fulcrum-border); padding-bottom: 8px; }
-.page-list a { display: flex; gap: 14px; padding: 8px 16px; font-size: 13px; }
-.page-list a span { color: var(--fulcrum-muted); }
+.page-list a { display: flex; gap: 14px; min-width: 0; padding: 8px 16px; font-size: 14px; }
+.page-list a span { flex: 0 0 auto; color: var(--fulcrum-muted); }
+.page-list a b { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-width: 0; font-weight: 500; }
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
 .chat-group h2 { position: sticky; top: 36px; z-index: 1; margin: 0; padding: 8px 16px 6px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 11px; font-weight: 400; text-transform: lowercase; }
 .chat-row { display: block; padding: 10px 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
 .chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.4; font-weight: 500; }
-.chat-row > span { display: flex; gap: 4px; margin-top: 5px; color: var(--fulcrum-muted); font-size: 11px; }
+.chat-row > span { display: flex; gap: 4px; min-width: 0; margin-top: 5px; color: var(--fulcrum-muted); font-size: 14px; }
+.chat-row > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-row > span i { overflow: hidden; flex: 0 0 auto; }
 .chat-row i { margin-left: auto; font-style: normal; }
 .chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
@@ -63,9 +66,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .chat-header { flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
 .chat-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.chat-heading span { color: var(--fulcrum-muted); font-size: 12px; }
-.chat-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.chat-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; font-size: 11px; }
+.chat-heading span { min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.chat-heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.chat-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; font-size: 14px; }
 .chat-actions button { min-height: 40px; padding: 8px 10px; border-color: var(--fulcrum-accent); }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--fulcrum-ok); }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
@@ -92,7 +95,9 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .chat-starters i { color: var(--fulcrum-muted); font-style: normal; font-size: 12px; }
 .connection-banner { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-left: 2px solid var(--fulcrum-danger); border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-danger) 25%, var(--fulcrum-border)); padding: 8px 24px; color: var(--fulcrum-fg); background: color-mix(in srgb, var(--fulcrum-danger) 8%, transparent); font-size: 12px; }
 .connection-banner button { padding: 6px 10px; }
-.full-state { flex: 1; display: grid; place-content: center; padding: 32px; }
+.full-state { flex: 1; display: grid; place-content: center; gap: 20px; padding: 32px; }
+.not-found-state > div { display: flex; gap: 12px; }
+.not-found-state .primary { display: inline-block; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
 .connection-state { display: block; width: min(720px, 100%); margin: auto; }
 .connection-state > p { color: var(--fulcrum-muted); }
 .connection-state h1 { max-width: 20ch; margin: 28px 0; font-size: clamp(26px, 4vw, 42px); }
@@ -129,7 +134,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .chat-header { padding: 0 12px 0 64px; }
   .chat-heading { display: block; }
   .chat-heading strong { display: block; max-width: calc(100vw - 150px); }
-  .chat-heading span { display: block; margin-top: 2px; }
+  .chat-heading span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
   .chat-actions > .approval-mode, .chat-actions > button:not(.header-overflow) { display: none; }
   .chat-actions { position: relative; gap: 12px; }
   .header-overflow { display: block; width: 40px; height: 40px; padding: 0; }
