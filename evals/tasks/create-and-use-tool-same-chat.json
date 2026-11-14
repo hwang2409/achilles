@@ -15,7 +15,7 @@
       "kind": "prompt",
       "page": "notes",
       "chat": "notes-chat",
-      "prompt": "create a page-local add_note insert tool for a notes collection"
+      "prompt": "create a page-local add_note insert tool for a notes collection with one required string field named `text`"
     },
     {
       "id": "use",

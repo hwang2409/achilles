@@ -15,7 +15,7 @@
       "kind": "prompt",
       "page": "reconnect",
       "chat": "reconnect-chat",
-      "prompt": "use add_note once to add reconnect note"
+      "prompt": "use add_note once to add a note with text reconnect note"
     },
     {
       "id": "disconnect",
