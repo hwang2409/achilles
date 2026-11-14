@@ -262,7 +262,7 @@ try {
     });
     throw new Error(`${error}; pagination focus=${JSON.stringify(focus)}; rows before=50 after=${await initialChatRows.count()}`);
   }
-  await gateTranscript(page, waitFor, requests);
+  await gateTranscript(page, waitFor, requests, control);
 
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");

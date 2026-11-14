@@ -68,23 +68,29 @@ describe("steer delivery confirmation", () => {
   test("waits for the finished turn before resending a dropped steer exactly once", async () => {
     let releaseTurnEnd!: () => void;
     const turnEnded = new Promise<void>((resolve) => { releaseTurnEnd = resolve; });
+    let markStatusReached!: () => void;
+    const statusReached = new Promise<void>((resolve) => { markStatusReached = resolve; });
     let statusChecks = 0;
     let sends = 0;
     const client = { request: async (method: string) => {
       if (method === "delivery_status") return sends ? { status: "delivered" } : { status: "dropped" };
-      if (method === "status") { statusChecks += 1; await turnEnded; return { state: "idle" }; }
+      if (method === "status") { statusChecks += 1; markStatusReached(); await turnEnded; return { state: "idle" }; }
       if (method === "send") { sends += 1; return { accepted: true }; }
       throw new Error(`unexpected ${method}`);
     }};
 
     const confirmation = confirmSteerDelivery(client as never, "session", "new turn", "initial", () => {});
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(statusChecks).toBe(1);
-    expect(sends).toBe(0);
-    releaseTurnEnd();
-    await confirmation;
-    expect(sends).toBe(1);
+    try {
+      await waitBounded(statusReached, () => releaseTurnEnd(), () => confirmation);
+      expect(statusChecks).toBe(1);
+      expect(sends).toBe(0);
+      releaseTurnEnd();
+      await confirmation;
+      expect(sends).toBe(1);
+    } finally {
+      releaseTurnEnd();
+      await confirmation.catch(() => {});
+    }
   });
 
   test.each([

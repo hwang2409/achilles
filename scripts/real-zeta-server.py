@@ -15,6 +15,31 @@ from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 
+class BarrierBackend(FakeBackend):
+    def __init__(self, turns, request_serializer, control, barrier_turn):
+        super().__init__(turns, request_serializer=request_serializer)
+        self.control = control
+        self.barrier_turn = barrier_turn
+
+    @owned_completion
+    async def complete(self, messages, tool_schemas):
+        turn_index = len(self.calls)
+        stream = FakeBackend.complete.__wrapped__(self, messages, tool_schemas)
+        async for event in stream:
+            if turn_index == self.barrier_turn and event.type.name == "MESSAGE_END":
+                document = json.loads(self.control.read_text())
+                document["turn_barrier"] = "held"
+                write_control(self.control, document)
+                for _ in range(300):
+                    document = json.loads(self.control.read_text())
+                    if document.get("release_turn_barrier"):
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise RuntimeError("turn barrier release timed out after 15 seconds")
+            yield event
+
+
 class RestartBackend:
     def __init__(self, resume_turns, cursor_turn, request_serializer):
         self.resume = FakeBackend(resume_turns, request_serializer=request_serializer)
@@ -152,7 +177,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("stream-proof-read", "read", {"path": str(cwd / "fixture.txt")})],
             delay=0.03,
         ),
-        ScriptedTurn(content=[TextContent("stream tool complete")], delay=0.2),
+        ScriptedTurn(content=[TextContent("stream tool complete")]),
         ScriptedTurn(content=[TextContent("end-of-turn followup complete")]),
         ScriptedTurn(
             content=[
@@ -291,7 +316,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     backend = (
         RestartBackend(turns[:2], turns[-1], record_request)
         if restarting_turn
-        else FakeBackend(turns, request_serializer=record_request)
+        else BarrierBackend(turns, record_request, control, barrier_turn=4)
     )
     return (
         ZetaServer(
