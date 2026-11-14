@@ -1,11 +1,12 @@
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor, wait
 
 import pytest
 from jsonschema import Draft202012Validator
 
 from achilles.pages import PageStore
-from achilles.records import call_record
+from achilles.records import VersionConflict, call_record
 from achilles.tools import CREATE_TOOL_SCHEMA, ValidationError
 
 BUNDLE = {
@@ -38,6 +39,20 @@ def test_every_operation_matches_catalog_and_store(tmp_path, operation):
     bundle = {
         **BUNDLE,
         "name": f"{operation}_annotation",
+        "input_schema": (
+            {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string"},
+                    "revision": {"type": "integer"},
+                    "text": {"type": "string"},
+                },
+                "required": ["record_id", "revision"],
+                "additionalProperties": False,
+            }
+            if operation == "update"
+            else BUNDLE["input_schema"]
+        ),
         "implementation": {**BUNDLE["implementation"], "operation": operation},
     }
     assert Draft202012Validator(CREATE_TOOL_SCHEMA).is_valid({"bundle": bundle})
@@ -45,6 +60,20 @@ def test_every_operation_matches_catalog_and_store(tmp_path, operation):
     store.set_create_mode("home", True)
     created, _ = store.create_tool("home", bundle)
     assert created["name"] == bundle["name"]
+
+
+def test_update_schema_requires_record_revision(tmp_path):
+    bundle = {
+        **BUNDLE,
+        "name": "update_annotation",
+        "implementation": {**BUNDLE["implementation"], "operation": "update"},
+    }
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    with pytest.raises(ValidationError) as caught:
+        store.create_tool("home", bundle)
+    assert caught.value.path == "/input_schema"
+    assert caught.value.expected == "required integer property: revision"
 
 
 @pytest.mark.parametrize(
@@ -196,6 +225,69 @@ def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
     assert call_record(store, "home", "annotate_trace", {"text": "late"})["text"] == "late"
     with store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 21
+
+
+def test_existing_records_start_at_revision_one(tmp_path):
+    tmp_path.mkdir(exist_ok=True)
+    with sqlite3.connect(tmp_path / "achilles.sqlite3") as db:
+        db.execute(
+            """CREATE TABLE page_record (
+            page_id TEXT NOT NULL, collection TEXT NOT NULL, record_id TEXT NOT NULL,
+            version INTEGER NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, PRIMARY KEY(page_id, collection, record_id))"""
+        )
+        db.execute(
+            "INSERT INTO page_record VALUES(?,?,?,?,?,?,?)",
+            ("home", "notes", "old", 1, '{"text":"old"}', "then", "then"),
+        )
+    store = PageStore(tmp_path)
+    assert store.records("home", "notes")[0] == [{"text": "old", "record_id": "old", "revision": 1}]
+
+
+def test_stale_record_revision_cannot_overwrite_or_audit(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    update_bundle = {
+        **BUNDLE,
+        "name": "update_annotation",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+                "text": {"type": "string"},
+            },
+            "required": ["record_id", "revision", "text"],
+            "additionalProperties": False,
+        },
+        "implementation": {**BUNDLE["implementation"], "operation": "update"},
+    }
+    store.create_tool("home", BUNDLE)
+    store.create_tool("home", update_bundle)
+    created = call_record(store, "home", "annotate_trace", {"text": "first"})
+    updated = call_record(
+        store,
+        "home",
+        "update_annotation",
+        {"record_id": created["record_id"], "revision": 1, "text": "second"},
+    )
+    assert updated["revision"] == 2
+    with pytest.raises(VersionConflict) as caught:
+        call_record(
+            store,
+            "home",
+            "update_annotation",
+            {"record_id": created["record_id"], "revision": 1, "text": "stale"},
+        )
+    assert caught.value.code == "conflict"
+    assert store.records("home", "annotations")[0][0]["text"] == "second"
+    with store._connect() as db:
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM audit WHERE action='invoke:update_annotation'"
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_reserved_bundle_names_are_rejected(tmp_path):

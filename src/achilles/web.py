@@ -16,7 +16,8 @@ from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
 from .pages import PageStore
-from .records import RecordValidationError, VersionConflict, call_record
+from .records import VersionConflict, call_record
+from .validation import ValidationError, error_document
 
 
 def _home() -> Path:
@@ -293,26 +294,29 @@ def create_app() -> Starlette:
         principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            error = ValidationError("", "valid JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
         if not isinstance(body, dict) or set(body) - {"arguments", "version"}:
-            raise HTTPException(400, "expected arguments and optional version")
+            error = ValidationError("", "only properties: arguments, version")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
         arguments = body.get("arguments", {})
         version = body.get("version")
-        if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
-            raise HTTPException(400, "version must be an integer")
+        if isinstance(version, bool) or not isinstance(version, int):
+            error = ValidationError("/version", "type: integer")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
         try:
             result = await anyio.to_thread.run_sync(
                 call_record, store, page_id, request.path_params["name"], arguments, version
             )
         except VersionConflict as exc:
-            raise HTTPException(409, str(exc)) from exc
+            return JSONResponse({"error": error_document(exc)}, status_code=409)
         except PermissionError as exc:
             raise HTTPException(404, "tool not found") from exc
-        except RecordValidationError as exc:
-            return JSONResponse(
-                {"error": {"code": "validation_error", "path": exc.path, "expected": exc.expected}},
-                status_code=400,
-            )
+        except ValidationError as exc:
+            return JSONResponse({"error": error_document(exc)}, status_code=400)
         except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return JSONResponse(result)

@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 from .pages import CREATE_PAGE_SCHEMA, PageStore
 from .records import call_record
 from .tools import CREATE_TOOL_SCHEMA
-from .validation import ValidationError, validate_schema
+from .validation import ValidationError, error_document, validate_schema
 
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
@@ -50,9 +50,7 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
         content=[
             TextContent(
                 type="text",
-                text=json.dumps(
-                    {"code": exc.code, "path": exc.path, "expected": exc.expected}, sort_keys=True
-                ),
+                text=json.dumps(error_document(exc), sort_keys=True),
             )
         ],
     )
@@ -241,6 +239,8 @@ def build_mcp(store: PageStore):
             result = await anyio.to_thread.run_sync(
                 call_record, store, page["id"], params.name, args
             )
+        except ValidationError as exc:
+            return _safe_error(exc)
         except (PermissionError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
         return _text(result)

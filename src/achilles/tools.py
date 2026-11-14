@@ -75,6 +75,15 @@ def validate_bundle(bundle: Any, prefix: str = "") -> dict[str, Any]:
     _validate_json_schema(
         bundle["implementation"]["data_schema"], f"{prefix}/implementation/data_schema"
     )
+    if bundle["implementation"]["operation"] == "update":
+        input_schema = bundle["input_schema"]
+        revision = input_schema.get("properties", {}).get("revision", {})
+        if (
+            not isinstance(revision, dict)
+            or revision.get("type") != "integer"
+            or "revision" not in input_schema.get("required", [])
+        ):
+            raise ValidationError(f"{prefix}/input_schema", "required integer property: revision")
     if len(canonical_bundle(bundle)) > MAX_BUNDLE_BYTES:
         raise ValidationError(prefix, f"serialized size <= {MAX_BUNDLE_BYTES} bytes")
     return bundle

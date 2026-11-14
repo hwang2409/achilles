@@ -14,6 +14,7 @@ from starlette.testclient import TestClient
 import achilles.web as web
 from achilles.mcp_server import _remove_connection
 from achilles.pages import PageStore
+from achilles.tools import bundle_digest
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +25,6 @@ def isolated_homes(monkeypatch, tmp_path):
 
 def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
-    monkeypatch.setattr(web, "_same_origin", lambda request: True)
     store = PageStore(tmp_path / "achilles")
     store.set_create_mode("home", True)
     bundle = {
@@ -51,9 +51,17 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
         },
     }
     store.create_tool("home", bundle)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+            ("other", "/other", "other", "2025-01-01", "2025-01-01"),
+        )
     token = store.ensure_credential("home")
+    other_token = store.ensure_credential("other")
     client = TestClient(
-        web.create_app(), headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"}
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
     )
     headers = {"authorization": f"Bearer {token}"}
     catalog = client.get("/api/pages/home/tools", headers=headers)
@@ -61,12 +69,22 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
     assert catalog.json()["tools"][0]["input_schema"] == bundle["input_schema"]
     assert "implementation" not in catalog.text and "credential" not in catalog.text
     invalid = client.post(
-        "/api/pages/home/tools/add_note/invoke", headers=headers, json={"arguments": {"text": 7}}
+        "/api/pages/home/tools/add_note/invoke",
+        headers=headers,
+        json={"arguments": {"text": 7}, "version": 1},
     )
     assert invalid.status_code == 400
     assert "/text" in invalid.text and "7" not in invalid.text
+    missing_version = client.post(
+        "/api/pages/home/tools/add_note/invoke",
+        headers=headers,
+        json={"arguments": {"text": "no write"}},
+    )
+    assert missing_version.status_code == 400
     created = client.post(
-        "/api/pages/home/tools/add_note/invoke", headers=headers, json={"arguments": {"text": "ok"}}
+        "/api/pages/home/tools/add_note/invoke",
+        headers=headers,
+        json={"arguments": {"text": "ok"}, "version": 1},
     )
     assert created.status_code == 200
     assert client.get("/api/pages/home/records/notes", headers=headers).json()[0]["text"] == "ok"
@@ -78,13 +96,232 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
     assert stale.status_code == 409
     assert (
         client.post(
-            "/api/pages/home/tools/missing/invoke", headers=headers, json={"arguments": {}}
+            "/api/pages/home/tools/missing/invoke",
+            headers=headers,
+            json={"arguments": {}, "version": 1},
         ).status_code
         == 404
     )
     assert client.get("/api/pages/home/tools").status_code == 403
+    other_headers = {"authorization": f"Bearer {other_token}"}
+    assert client.get("/api/pages/home/tools", headers=other_headers).status_code == 403
+    assert (
+        client.post(
+            "/api/pages/home/tools/add_note/invoke",
+            headers=other_headers,
+            json={"arguments": {"text": "hidden"}, "version": 1},
+        ).status_code
+        == 403
+    )
+    cross_origin = {**headers, "origin": "https://synthetic.example"}
+    assert client.get("/api/pages/home/tools", headers=cross_origin).status_code == 403
+    assert (
+        client.post(
+            "/api/pages/home/tools/add_note/invoke",
+            headers=cross_origin,
+            json={"arguments": {"text": "hidden"}, "version": 1},
+        ).status_code
+        == 403
+    )
     with store.transaction() as db:
-        assert db.execute("SELECT action FROM audit WHERE action='invoke:add_note'").fetchone()
+        audit = db.execute(
+            "SELECT version_digest FROM audit WHERE action='invoke:add_note'"
+        ).fetchone()
+    assert audit["version_digest"] == bundle_digest(bundle)
+
+
+def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    schema = {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+        "additionalProperties": False,
+    }
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "update_note",
+        "description": "update a note",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+                "text": {"type": "string"},
+            },
+            "required": ["record_id", "revision", "text"],
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": "object"},
+        "implementation": {
+            "operation": "update",
+            "collection": "notes",
+            "data_schema": schema,
+        },
+    }
+    store.create_tool("home", bundle)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page_record(page_id,collection,record_id,version,revision,document,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            ("home", "notes", "note-1", 1, 1, '{"text":"first"}', "now", "now"),
+        )
+    token = store.ensure_credential("home")
+    browser_headers = {
+        "host": "127.0.0.1:5190",
+        "origin": "http://127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+    }
+    mcp_headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+    arguments = {"record_id": "note-1", "revision": 1, "text": "second"}
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        catalog = client.get("/api/pages/home/tools", headers=browser_headers).json()
+        browser = client.post(
+            "/api/pages/home/tools/update_note/invoke",
+            headers=browser_headers,
+            json={"arguments": arguments, "version": 1},
+        )
+        stale_browser = client.post(
+            "/api/pages/home/tools/update_note/invoke",
+            headers=browser_headers,
+            json={"arguments": arguments, "version": 1},
+        )
+        initialized = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        stale_mcp = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "update_note", "arguments": arguments},
+            },
+        ).json()["result"]
+    expected = {"code": "conflict", "path": "/revision", "expected": "current record revision"}
+    assert catalog["tools"][0]["input_schema"]["required"] == [
+        "record_id",
+        "revision",
+        "text",
+    ]
+    assert browser.status_code == 200 and browser.json()["revision"] == 2
+    assert stale_browser.status_code == 409
+    assert stale_browser.json()["error"] == expected
+    assert stale_mcp["isError"] is True
+    assert json.loads(stale_mcp["content"][0]["text"]) == expected
+
+
+def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "add_note",
+        "description": "add a note",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": "object"},
+        "implementation": {
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    store.create_tool("home", bundle)
+    token = store.ensure_credential("home")
+    browser_headers = {
+        "host": "127.0.0.1:5190",
+        "origin": "http://127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+    }
+    mcp_headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        browser = client.post(
+            "/api/pages/home/tools/add_note/invoke",
+            headers=browser_headers,
+            json={"arguments": {"text": 7}, "version": 1},
+        )
+        initialized = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        called = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "add_note", "arguments": {"text": 7}},
+            },
+        ).json()["result"]
+        malformed = client.post(
+            "/api/pages/home/tools/add_note/invoke",
+            headers={**browser_headers, "content-type": "application/json"},
+            content="{",
+        )
+    expected = {"code": "invalid_input", "path": "/text", "expected": "type: string"}
+    assert browser.status_code == 400
+    assert browser.json()["error"] == expected
+    assert called["isError"] is True
+    assert json.loads(called["content"][0]["text"]) == expected
+    assert "7" not in called["content"][0]["text"]
+    assert malformed.status_code == 400
+    assert malformed.json()["error"] == {
+        "code": "invalid_input",
+        "path": "",
+        "expected": "valid JSON object",
+    }
 
 
 def test_approval_mode_validation(monkeypatch) -> None:

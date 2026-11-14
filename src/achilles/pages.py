@@ -163,8 +163,8 @@ class PageStore:
         );
         CREATE TABLE IF NOT EXISTS page_record (
           page_id TEXT NOT NULL REFERENCES page(id), collection TEXT NOT NULL,
-          record_id TEXT NOT NULL, version INTEGER NOT NULL, document TEXT NOT NULL,
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          record_id TEXT NOT NULL, version INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+          document TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           PRIMARY KEY(page_id, collection, record_id)
         );
         CREATE TABLE IF NOT EXISTS chat (
@@ -181,6 +181,10 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         if "created_by_page_id" not in columns:
             db.execute("ALTER TABLE page ADD COLUMN created_by_page_id TEXT REFERENCES page(id)")
+        record_columns = {row[1] for row in db.execute("PRAGMA table_info(page_record)")}
+        if "revision" not in record_columns:
+            db.execute("ALTER TABLE page_record ADD COLUMN revision INTEGER")
+            db.execute("UPDATE page_record SET revision=1 WHERE revision IS NULL")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -332,11 +336,14 @@ class PageStore:
                 (page_id, collection),
             ).fetchone()[0]
             rows = db.execute(
-                "SELECT record_id, document FROM page_record "
+                "SELECT record_id, document, revision FROM page_record "
                 "WHERE page_id=? AND collection=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (page_id, collection, limit),
             ).fetchall()
-        return ([{**json.loads(row[1]), "record_id": row[0]} for row in rows], total)
+        return (
+            [{**json.loads(row[1]), "record_id": row[0], "revision": row[2]} for row in rows],
+            total,
+        )
 
     def set_create_mode(self, page_id: str, enabled: bool) -> sqlite3.Row:
         with self.transaction() as db:

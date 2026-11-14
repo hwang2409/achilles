@@ -48,8 +48,12 @@ def book_tool(name: str, operation: str, description: str) -> dict:
     elif operation == "update":
         input_schema = {
             "type": "object",
-            "properties": {"record_id": {"type": "string"}, **properties},
-            "required": ["record_id"],
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+                **properties,
+            },
+            "required": ["record_id", "revision"],
             "additionalProperties": False,
         }
     else:
