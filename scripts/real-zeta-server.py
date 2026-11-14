@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
-from zeta.core.store import ConversationStore
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
 from zeta.providers.completion import owned_completion
 from zeta.server.delivery import DeliveryRequests
@@ -459,34 +458,6 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
         await original_event(event, *args, **kwargs)
 
     server.control._event = held_event
-    original_append_delivery = ConversationStore.append_client_delivery_async
-
-    async def held_append_delivery(instance, delivery_id, method, status, outcome, **kwargs):
-        delivery = await original_append_delivery(
-            instance, delivery_id, method, status, outcome, **kwargs
-        )
-        accepted_message = kwargs.get("accepted_message")
-        if (
-            method == "steer"
-            and accepted_message is not None
-            and any(
-                isinstance(block, TextContent)
-                and block.text == "repeat that layout update with the old version"
-                for block in accepted_message.content
-            )
-        ):
-            document = json.loads(control.read_text())
-            document["late_steer_commit"] = "held"
-            write_control(control, document)
-            for _ in range(300):
-                document = json.loads(control.read_text())
-                if document.get("release_late_steer_commit"):
-                    break
-                await asyncio.sleep(0.05)
-            else:
-                raise RuntimeError("late steer commit release timed out after 15 seconds")
-        return delivery
-
     original_send = DeliveryRequests.send
 
     async def held_send(instance, params, features):
@@ -522,7 +493,6 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 raise RuntimeError("late turn barrier release timed out after 15 seconds")
         await original_finalize_turn(instance, *args, **kwargs)
 
-    ConversationStore.append_client_delivery_async = held_append_delivery
     DeliveryRequests.send = held_send
     DeliveryRequests.finalize_turn = held_finalize_turn
     await server.start()

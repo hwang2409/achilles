@@ -138,7 +138,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       <div data-part="composer-bar">
         <p
           data-part="composer-status"
-          data-tone={model.error?.kind === "uncertain" ? "warning" : model.error ? "danger" : message ? "busy" : undefined}
+          data-tone={model.error?.kind === "uncertain" || model.error?.kind === "dropped" ? "warning" : model.error ? "danger" : message ? "busy" : undefined}
           title={model.error?.text}
         >
           <span
@@ -151,7 +151,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>
-          {model.error?.kind === "uncertain" ? (
+          {model.error?.kind === "uncertain" || model.error?.kind === "dropped" ? (
             <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button>
           ) : null}
         </p>
