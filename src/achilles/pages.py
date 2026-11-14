@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import secrets
+import shutil
 import sqlite3
 import tempfile
 from contextlib import contextmanager
@@ -12,94 +12,110 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .tools import bundle_digest, canonical_bundle, validate_bundle
+from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
+from .validation import ValidationError, validate_schema
 
-BLOCK_KEYS: dict[str, frozenset[str]] = {
-    "list": frozenset({"type", "title", "collection"}),
-    "detail": frozenset({"type", "title", "fields"}),
-    "form": frozenset({"type", "title", "tool"}),
-    "text": frozenset({"type", "text"}),
-    "metric": frozenset({"type", "label", "value"}),
+_LAYOUT_BLOCK_SCHEMA = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "list"},
+                "title": {"type": "string"},
+                "collection": {"type": "string"},
+            },
+            "required": ["type", "title", "collection"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "detail"},
+                "title": {"type": "string"},
+                "fields": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["type", "title", "fields"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "form"},
+                "title": {"type": "string"},
+                "tool": {"type": "string"},
+            },
+            "required": ["type", "title", "tool"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {"type": {"const": "text"}, "text": {"type": "string"}},
+            "required": ["type", "text"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "metric"},
+                "label": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["type", "label", "value"],
+            "additionalProperties": False,
+        },
+    ]
 }
-
-_PAGE_ROUTE = re.compile(r"^/(?:[a-z0-9][a-z0-9-]{0,62})(?:/(?:[a-z0-9][a-z0-9-]{0,62})){0,7}$")
-_RESERVED_ROUTES = {"api", "assets", "mcp"}
+LAYOUT_SCHEMA = {
+    "type": "object",
+    "properties": {"blocks": {"type": "array", "items": _LAYOUT_BLOCK_SCHEMA}},
+    "required": ["blocks"],
+    "additionalProperties": False,
+}
+CREATE_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "route": {
+            "type": "string",
+            "pattern": (
+                r"^/(?!api(?:/|$)|assets(?:/|$)|mcp(?:/|$))"
+                r"(?:[a-z0-9][a-z0-9-]{0,62})"
+                r"(?:/(?:[a-z0-9][a-z0-9-]{0,62})){0,7}$"
+            ),
+        },
+        "title": {"type": "string", "minLength": 1},
+        "layout": LAYOUT_SCHEMA,
+        "tools": {"type": "array", "items": TOOL_BUNDLE_SCHEMA},
+    },
+    "required": ["route", "title", "layout"],
+    "additionalProperties": False,
+}
 
 
 def validate_page_route(route: str) -> None:
-    if not isinstance(route, str) or not _PAGE_ROUTE.fullmatch(route):
-        raise ValueError("invalid page route")
-    if route.split("/")[1] in _RESERVED_ROUTES:
-        raise ValueError("reserved page route")
-
-
-def _validate_form(block: dict[str, Any], assigned_tools: set[str]) -> None:
-    if not isinstance(block["title"], str) or block["tool"] not in assigned_tools:
-        raise ValueError("unknown tool reference")
-
-
-def _validate_text(block: dict[str, Any]) -> None:
-    if not isinstance(block["text"], str):
-        raise ValueError("text must be a string")
-
-
-def _validate_metric(block: dict[str, Any]) -> None:
-    if not all(isinstance(block[key], str) for key in ("label", "value")):
-        raise ValueError("metric fields must be strings")
-
-
-def _validate_list(block: dict[str, Any]) -> None:
-    if not all(isinstance(block[key], str) for key in ("title", "collection")):
-        raise ValueError("list fields must be strings")
-
-
-def _validate_detail(block: dict[str, Any]) -> None:
-    if (
-        not isinstance(block["title"], str)
-        or not isinstance(block["fields"], list)
-        or not all(isinstance(x, str) for x in block["fields"])
-    ):
-        raise ValueError("detail fields must be strings")
-
-
-_BLOCK_VALIDATORS = {
-    "form": _validate_form,
-    "text": _validate_text,
-    "metric": _validate_metric,
-    "list": _validate_list,
-    "detail": _validate_detail,
-}
-
-
-def _validate_block(block: Any, assigned_tools: set[str]) -> None:
-    if not isinstance(block, dict) or not isinstance(block.get("type"), str):
-        raise ValueError("each block must have a type")
-    kind = block["type"]
-    if kind not in BLOCK_KEYS or set(block) != BLOCK_KEYS[kind]:
-        raise ValueError(
-            f"invalid keys for {kind} block"
-            if kind in BLOCK_KEYS
-            else f"unknown layout block: {kind}"
-        )
-    validator = _BLOCK_VALIDATORS.get(kind)
-    if validator:
-        validator(block, assigned_tools) if kind == "form" else validator(block)
+    validate_schema(route, CREATE_PAGE_SCHEMA["properties"]["route"], "/route")
 
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def validate_layout(layout: Any, assigned_tools: set[str] | None = None) -> dict[str, Any]:
-    if (
-        not isinstance(layout, dict)
-        or set(layout) != {"blocks"}
-        or not isinstance(layout["blocks"], list)
-    ):
-        raise ValueError("layout must contain only a blocks list")
+def validate_layout(
+    layout: Any,
+    assigned_tools: set[str] | None = None,
+    assigned_collections: set[str] | None = None,
+    prefix: str = "",
+) -> dict[str, Any]:
+    validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
-    for block in layout["blocks"]:
-        _validate_block(block, tools)
+    for index, block in enumerate(layout["blocks"]):
+        if block["type"] == "form" and block["tool"] not in tools:
+            raise ValidationError(f"{prefix}/blocks/{index}/tool", "assigned tool name")
+        if (
+            block["type"] == "list"
+            and assigned_collections is not None
+            and block["collection"] not in assigned_collections
+        ):
+            raise ValidationError(f"{prefix}/blocks/{index}/collection", "assigned collection")
     return layout
 
 
@@ -119,7 +135,8 @@ class PageStore:
           id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           zeta_session_id TEXT, active_layout_version INTEGER,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-          create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT
+          create_mode INTEGER NOT NULL DEFAULT 0, credential_hash TEXT,
+          created_by_page_id TEXT REFERENCES page(id)
         );
         CREATE TABLE IF NOT EXISTS layout_version (
           page_id TEXT NOT NULL REFERENCES page(id), version INTEGER NOT NULL,
@@ -162,6 +179,8 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN create_mode INTEGER NOT NULL DEFAULT 0")
         if "credential_hash" not in columns:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
+        if "created_by_page_id" not in columns:
+            db.execute("ALTER TABLE page ADD COLUMN created_by_page_id TEXT REFERENCES page(id)")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -259,6 +278,50 @@ class PageStore:
                 (page_id,),
             ).fetchone()
             return json.loads(row[0]) if row else {"blocks": []}
+
+    def inspect_page(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            layout = db.execute(
+                "SELECT version, digest, document FROM layout_version "
+                "WHERE page_id=? ORDER BY version DESC LIMIT 1",
+                (page_id,),
+            ).fetchone()
+            counts = db.execute(
+                "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
+                (page_id,),
+            ).fetchall()
+        row = self.page(page_id)
+        if row is None:
+            raise KeyError(page_id)
+        document = json.loads(layout[2]) if layout else {"blocks": []}
+        tools = self.page_tools(page_id)
+        return {
+            "route": row["route"],
+            "title": row["title"],
+            "create_mode": bool(row["create_mode"]),
+            "layout": {
+                "version": layout[0] if layout else None,
+                "digest": layout[1] if layout else None,
+                "blocks": [
+                    {
+                        key: block[key]
+                        for key in ("type", "title", "tool", "collection")
+                        if key in block
+                    }
+                    for block in document.get("blocks", [])
+                ],
+            },
+            "tools": [
+                {
+                    "name": tool["name"],
+                    "version": tool["version"],
+                    "operations": [tool["implementation"]["operation"]],
+                    "collection": tool["implementation"]["collection"],
+                }
+                for tool in tools
+            ],
+            "collections": {collection: count for collection, count in counts},
+        }
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -385,63 +448,162 @@ class PageStore:
             return updated == 1, row[0]
 
     def create_page(
-        self, route: str, title: str, layout: Any, principal_id: str = "home"
-    ) -> tuple[sqlite3.Row, str]:
-        validate_page_route(route)
-        if not title:
-            raise ValueError("invalid page title")
-        encoded = json.dumps(validate_layout(layout, set()), sort_keys=True, separators=(",", ":"))
+        self,
+        route: str,
+        title: str,
+        layout: Any,
+        principal_id: str = "home",
+        tools: Any = None,
+    ) -> tuple[sqlite3.Row, str, bool]:
+        bundles = [] if tools is None else tools
+        value = {"route": route, "title": title, "layout": layout, "tools": bundles}
+        validate_schema(value, CREATE_PAGE_SCHEMA)
+        bundles = [
+            validate_bundle(bundle, f"/tools/{index}") for index, bundle in enumerate(bundles)
+        ]
+        validate_layout(
+            layout,
+            {bundle["name"] for bundle in bundles},
+            {bundle["implementation"]["collection"] for bundle in bundles},
+            "/layout",
+        )
+        encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
-        with self.transaction() as db:
-            principal = db.execute(
-                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
-            ).fetchone()
-            if principal is None or not principal[0]:
-                raise PermissionError("forbidden: create mode is off")
-            hook = getattr(self, "before_create_commit", None)
-            if hook is not None:
-                hook()
-            principal = db.execute(
-                "SELECT create_mode FROM page WHERE id=?", (principal_id,)
-            ).fetchone()
-            if principal is None or not principal[0]:
-                raise PermissionError("forbidden: create mode is off")
-            path = self.root / "bundles" / f"{digest}.json"
-            if not path.exists():
-                self._atomic_private_write(path, (encoded + "\n").encode())
-            page_id = secrets.token_hex(12)
-            workspace = self.root / "pages" / page_id / "workspace"
-            workspace.mkdir(mode=0o700, parents=True)
-            workspace.chmod(0o700)
-            token = secrets.token_urlsafe(32)
-            self._atomic_private_write(self.root / "credentials" / page_id, token.encode())
-            stamp = now()
-            db.execute(
-                "INSERT INTO page(id,route,title,active_layout_version,created_at,"
-                "updated_at,credential_hash) VALUES(?,?,?,?,?,?,?)",
-                (
-                    page_id,
-                    route,
-                    title,
-                    1,
-                    stamp,
-                    stamp,
-                    hashlib.sha256(token.encode()).hexdigest(),
-                ),
-            )
-            db.execute(
-                "INSERT INTO layout_version VALUES(?,?,?,?,?)", (page_id, 1, digest, encoded, stamp)
-            )
-            db.execute(
-                "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-                (page_id, "create_page", digest, stamp),
-            )
-        row = self.page(page_id)
+        created_paths: set[Path] = set()
+        page_id: str | None = None
+        try:
+            with self.transaction() as db:
+                principal = db.execute(
+                    "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+                ).fetchone()
+                if principal is None or not principal[0]:
+                    raise PermissionError("forbidden: create mode is off")
+                existing = db.execute("SELECT * FROM page WHERE route=?", (route,)).fetchone()
+                if existing is not None:
+                    existing_layout = db.execute(
+                        "SELECT document FROM layout_version WHERE page_id=? "
+                        "ORDER BY version DESC LIMIT 1",
+                        (existing["id"],),
+                    ).fetchone()
+                    existing_tools = db.execute(
+                        "SELECT v.bundle FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
+                        "JOIN tool_version v ON v.tool_id=t.id AND v.version=pt.active_version "
+                        "WHERE pt.page_id=? ORDER BY t.name",
+                        (existing["id"],),
+                    ).fetchall()
+                    requested_tools = [
+                        canonical_bundle(bundle)
+                        for bundle in sorted(bundles, key=lambda item: item["name"])
+                    ]
+                    if (
+                        existing["title"] == title
+                        and existing_layout is not None
+                        and existing_layout[0] == encoded
+                        and [row[0] for row in existing_tools] == requested_tools
+                    ):
+                        return existing, digest, True
+                    raise ValidationError(
+                        "/route", "unused route or equivalent request", "conflict"
+                    )
+                hook = getattr(self, "before_create_commit", None)
+                if hook is not None:
+                    hook()
+                principal = db.execute(
+                    "SELECT create_mode FROM page WHERE id=?", (principal_id,)
+                ).fetchone()
+                if principal is None or not principal[0]:
+                    raise PermissionError("forbidden: create mode is off")
+                page_id = secrets.token_hex(12)
+                workspace = self.root / "pages" / page_id / "workspace"
+                workspace.mkdir(mode=0o700, parents=True)
+                workspace.chmod(0o700)
+                created_paths.add(workspace.parent)
+                files = [(self.root / "bundles" / f"{digest}.json", (encoded + "\n").encode())]
+                files.extend(
+                    (
+                        self.root / "bundles" / f"{bundle_digest(bundle)}.json",
+                        (canonical_bundle(bundle) + "\n").encode(),
+                    )
+                    for bundle in bundles
+                )
+                for path, content in files:
+                    existed = path.exists()
+                    try:
+                        self._atomic_private_write(path, content)
+                    finally:
+                        if not existed and path.exists():
+                            created_paths.add(path)
+                token = secrets.token_urlsafe(32)
+                credential = self.root / "credentials" / page_id
+                try:
+                    self._atomic_private_write(credential, token.encode())
+                finally:
+                    if credential.exists():
+                        created_paths.add(credential)
+                stamp = now()
+                db.execute(
+                    "INSERT INTO page(id,route,title,active_layout_version,created_at,"
+                    "updated_at,credential_hash,created_by_page_id) VALUES(?,?,?,?,?,?,?,?)",
+                    (
+                        page_id,
+                        route,
+                        title,
+                        1,
+                        stamp,
+                        stamp,
+                        hashlib.sha256(token.encode()).hexdigest(),
+                        principal_id,
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO layout_version VALUES(?,?,?,?,?)",
+                    (page_id, 1, digest, encoded, stamp),
+                )
+                db.execute(
+                    "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+                    (page_id, "create_page", digest, stamp),
+                )
+                for bundle in bundles:
+                    tool_id = secrets.token_hex(12)
+                    tool_digest = bundle_digest(bundle)
+                    db.execute(
+                        "INSERT INTO tool VALUES(?,?,?,?)",
+                        (tool_id, page_id, bundle["name"], stamp),
+                    )
+                    db.execute(
+                        "INSERT INTO tool_version VALUES(?,?,?,?,?)",
+                        (tool_id, 1, tool_digest, canonical_bundle(bundle), stamp),
+                    )
+                    db.execute(
+                        "INSERT INTO page_tool VALUES(?,?,?,?)", (page_id, tool_id, 1, stamp)
+                    )
+                    db.execute(
+                        "INSERT INTO audit(page_id,action,version_digest,created_at) "
+                        "VALUES(?,?,?,?)",
+                        (page_id, "create_tool", tool_digest, stamp),
+                    )
+        except (ValidationError, PermissionError):
+            self._cleanup_create_paths(created_paths)
+            raise
+        except Exception as exc:
+            self._cleanup_create_paths(created_paths)
+            raise ValidationError("", "atomic page creation", "create_failed") from exc
+        row = self.page(page_id or "")
         assert row is not None
-        return row, digest
+        return row, digest, False
 
-    def create_tool(self, page_id: str, bundle: Any) -> tuple[dict[str, Any], str]:
-        bundle = validate_bundle(bundle)
+    @staticmethod
+    def _cleanup_create_paths(paths: set[Path]) -> None:
+        for path in sorted(paths, key=lambda item: len(item.parts), reverse=True):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+
+    def create_tool(
+        self, page_id: str, bundle: Any, validation_prefix: str = ""
+    ) -> tuple[dict[str, Any], str]:
+        bundle = validate_bundle(bundle, validation_prefix)
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
         stamp = now()
