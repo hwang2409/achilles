@@ -32,6 +32,14 @@ function alive(pid: number): boolean {
   return result.exitCode === 0 && !result.stdout.toString().trim().startsWith("Z");
 }
 
+function processesContaining(text: string): number[] {
+  const result = Bun.spawnSync(["ps", "-axo", "pid=,args="]);
+  return result.stdout.toString().split("\n").flatMap((line) => {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/);
+    return match && match[2].includes(text) ? [Number(match[1])] : [];
+  });
+}
+
 async function stop(pid: number) {
   if (!alive(pid)) return;
   process.kill(pid, "SIGTERM");
@@ -79,6 +87,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   const devCache = resolve(root, ".cache/dev");
   const oldWebStamp = await Bun.file(webStamp).exists() ? await readFile(webStamp) : null;
   const managed: number[] = [];
+  const spawned: number[] = [];
   let zetaPid = 0;
   let foreignPid = 0;
   let crashedChildPid = 0;
@@ -118,7 +127,13 @@ if (args[0] === "serve") {
   const run = resolve(process.env.ZETA_HOME!, "run"); mkdirSync(run, { recursive: true });
   writeFileSync(resolve(run, "serve.ws.json"), JSON.stringify({ pid: process.pid, port: ws, origins }));
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => process.exit(0));
+  const parent = Number(process.env.FAKE_PARENT_PID);
+  const watchdog = setInterval(() => {
+    try { process.kill(parent, 0); } catch { process.exit(0); }
+    if (!existsSync(process.env.ZETA_HOME!)) process.exit(0);
+  }, 200);
   await new Promise(() => {});
+  clearInterval(watchdog);
 }
 if (args.includes("--help")) { console.log("add show remove --scope --json --url"); process.exit(0); }
 if (args[0] === "mcp" && args[1] === "show") {
@@ -138,9 +153,11 @@ process.exit(0);
     FAKE_MCP_URL: `http://127.0.0.1:${port}/mcp/`,
     FAKE_ZETA_CALLS: calls,
     FAKE_SERVER_PIDS: serverPids,
+    FAKE_PARENT_PID: String(process.pid),
   };
   const runDev = async (env = baseEnv) => {
     const child = Bun.spawn(["make", "--silent", "dev"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    spawned.push(child.pid);
     const exitCode = await child.exited;
     return { exitCode, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
   };
@@ -175,6 +192,7 @@ process.exit(0);
 
     const block = resolve(temp, "block");
     const held = Bun.spawn(["make", "--silent", "dev"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
+    spawned.push(held.pid);
     await waitFor(() => Bun.file(`${block}.ready`).exists(), "first make dev to hold its lock");
     const lockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     const concurrent = await runDev({ ...baseEnv, FAKE_ZETA_BLOCK: block });
@@ -187,6 +205,7 @@ process.exit(0);
     const waiterReady = resolve(temp, "waiter-ready");
     await writeFile(waiter, `import os\nimport signal\nfrom pathlib import Path\nPath(${JSON.stringify(waiterReady)}).write_text(str(os.getpid()))\nsignal.pause()\n`);
     const crashed = Bun.spawn(["python3", "scripts/locked.py", "python3", waiter], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    spawned.push(crashed.pid);
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
     crashedChildPid = Number(await readFile(waiterReady, "utf8"));
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
@@ -203,16 +222,30 @@ process.exit(0);
     await stop(thirdState.pid);
     await rm(resolve(devCache, "achilles.json"));
     const foreign = Bun.spawn(["bun", fakeServer, "--port", String(port)], { env: baseEnv, stdout: "ignore", stderr: "ignore" });
+    spawned.push(foreign.pid);
     foreignPid = foreign.pid;
     await waitFor(async () => { try { return (await fetch(`http://127.0.0.1:${port}/`)).ok; } catch { return false; } }, "foreign listener");
     const foreignRun = await runDev();
     expect(foreignRun.exitCode, foreignRun.stderr).toBe(0);
     expect(foreignRun.stdout).toContain(`kill ${foreign.pid} && make dev PORT=${port}`);
     expect(alive(foreign.pid)).toBe(true);
+
+    // Simulate the test process losing its temporary home before cleanup runs.
+    await rm(home, { recursive: true, force: true });
+    await waitFor(() => !alive(zetaPid), "fake zeta to stop after its home is removed");
   } finally {
     let started: number[] = [];
     try { started = (await readFile(serverPids, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line).pid); } catch {}
-    for (const pid of [crashedChildPid, foreignPid, ...started.reverse(), ...managed.reverse(), zetaPid]) await stop(pid);
+    let discovered: number[] = [];
+    try { discovered = [
+      JSON.parse(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).pid,
+      JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")).pid,
+      JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8")).pid,
+    ]; } catch {}
+    const owned = new Set([crashedChildPid, foreignPid, ...started, ...managed, ...spawned, zetaPid, ...discovered].filter((pid) => pid > 0));
+    for (const pid of processesContaining(temp)) owned.add(pid);
+    for (const pid of owned) { try { await stop(pid); } catch {} }
+    expect(processesContaining(temp), "fake dev processes survived cleanup").toEqual([]);
     await rm(devCache, { recursive: true, force: true });
     if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
     await rm(temp, { recursive: true, force: true });
