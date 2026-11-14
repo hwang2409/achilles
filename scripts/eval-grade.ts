@@ -12,6 +12,7 @@ export type TaskCheck = {
   text?: string;
   tool?: string;
   route?: string;
+  synonyms?: string[];
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
 export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect"; page: string; chat: string; prompt?: string };
@@ -101,6 +102,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
     if ([check.transition.before, check.transition.after].some(values => !Array.isArray(values) || !values.length || !values.every(value => typeof value === "string"))) throw new Error(`checks[${i}] transition sets need string values`);
   }
   if (["browser_text", "prompt"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
+  if (check.synonyms !== undefined && (!["browser_text", "schema_roundtrip"].includes(check.type) || !Array.isArray(check.synonyms) || !check.synonyms.length || !check.synonyms.every(value => typeof value === "string"))) throw new Error(`checks[${i}] has invalid synonyms`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
 }
 
@@ -108,7 +110,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -213,12 +215,14 @@ function scalarValues(value: unknown): string[] {
   if (value && typeof value === "object") return Object.values(value).flatMap(scalarValues);
   return typeof value === "string" ? [value] : [];
 }
-function matchingSchemaObjects(actual: unknown, version: Record<string, unknown>, values: string[], inheritedRecordId?: string): Array<Record<string, unknown>> {
+const normalizeToken = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, "");
+function matchingSchemaObjects(actual: unknown, version: Record<string, unknown>, values: string[], synonyms: string[] = [], inheritedRecordId?: string): Array<Record<string, unknown>> {
   if (!actual || typeof actual !== "object") return [];
-  if (Array.isArray(actual)) return actual.flatMap(value => matchingSchemaObjects(value, version, values, inheritedRecordId));
+  if (Array.isArray(actual)) return actual.flatMap(value => matchingSchemaObjects(value, version, values, synonyms, inheritedRecordId));
   const object = actual as Record<string, unknown>; const recordId = typeof object.record_id === "string" ? object.record_id : inheritedRecordId; const fields = schemaStringFields(version);
-  const match = values.every(value => [...fields].some(field => object[field] === value)); const found = match ? [{ ...object, ...(recordId && !("record_id" in object) ? { record_id: recordId } : {}) }] : [];
-  return [...found, ...Object.values(object).flatMap(value => matchingSchemaObjects(value, version, values, recordId))];
+  const match = values.every((value, index) => [...fields].some(field => index === values.length - 1 && synonyms.length && typeof object[field] === "string" ? [value, ...synonyms].some(expected => normalizeToken(object[field] as string) === normalizeToken(expected)) : object[field] === value));
+  const found = match ? [{ ...object, ...(recordId && !("record_id" in object) ? { record_id: recordId } : {}) }] : [];
+  return [...found, ...Object.values(object).flatMap(value => matchingSchemaObjects(value, version, values, synonyms, recordId))];
 }
 function valueRows(value: unknown): value is string[][] { return Array.isArray(value) && value.every(row => Array.isArray(row) && row.length > 0 && row.every(item => typeof item === "string")); }
 function matchValueRows(actual: unknown, expected: string[][]) {
@@ -301,7 +305,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   schema_roundtrip: ({ check, snapshot, page, owned }) => {
     const values = check.value as string[]; const results = rows(snapshot, "results").filter(row => row.page_id === page && successful(row)); const records = owned("records");
     return owned("tool_versions").some(version => {
-      const matches = (actual: unknown) => matchingSchemaObjects(actual, version, values).length > 0 || matchingSchemaObjects(actual, version, [values[0]]).some(row => [...schemaStringFields(version)].some(field => typeof row[field] === "string"));
+      const matches = (actual: unknown) => matchingSchemaObjects(actual, version, values, check.synonyms).length > 0;
       return records.some(record => record.collection === version.collection && matches(record.data ?? record)) && results.some(result => result.tool === `achilles__${version.name}` && matches(result.data ?? result.result));
     });
   },
@@ -345,7 +349,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const attempts = rows(snapshot, "results").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && row.tool === "achilles__update_layout");
     return attempts.length === 0 || (attempts.at(-1)?.success === true && attempts.every((attempt, index) => attempt.success !== false || attempts.slice(index + 1).some(later => later.success === true)));
   },
-  browser_text: ({ check, owned }) => owned("browser").some(row => String(row.text ?? "").includes(String(check.text))),
+  browser_text: ({ check, owned }) => owned("browser").some(row => check.synonyms ? String(row.text ?? "").split(/[\t\r\n]+/).some(cell => [check.text!, ...check.synonyms!].some(value => normalizeToken(cell.trim()) === normalizeToken(value))) : String(row.text ?? "").includes(String(check.text))),
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),
   same_page: ({ snapshot, page }) => (snapshot.related_page_ids?.length ?? 0) > 0 && snapshot.related_page_ids!.every(id => id === page),
   layout_contains: ({ check, owned }) => owned("layouts").some(row => structurallyContains(row.document, check.value)),
