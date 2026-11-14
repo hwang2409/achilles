@@ -26,4 +26,4 @@ use `make stop` to stop only processes started by `make dev`.
 
 use `make dev PORT=5297` for another port. use `ACHILLES_ZETA_DISCOVERY=/path/to/serve.json make dev` to attach to an existing zeta serve instead.
 
-`ZETA_HOME` defaults to `~/.zeta`. `make dev` backs up an existing mcp file once as `mcp.json.achilles-backup` and preserves other servers. its private discovery file defaults to `~/.local/share/achilles/run/serve.json`.
+`ZETA_HOME` defaults to `~/.zeta`. the private serve uses this zeta home and its settings; for oauth compatibility, set `oauth_compat = true` under `[anthropic]` in `settings.toml` or set `ZETA_ANTHROPIC_OAUTH_COMPAT=1`. `make dev` backs up an existing mcp file once as `mcp.json.achilles-backup` and preserves other servers. its private discovery file defaults to `~/.local/share/achilles/run/serve.json`.

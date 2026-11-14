@@ -13,7 +13,7 @@ stop:
 	@uv run --no-project python scripts/locked.py bun scripts/stop.ts
 
 eval:
-	@env TASK="$${TASK:-harness-smoke}" $${N:+N="$${N}"} $${MODEL:+MODEL="$${MODEL}"} $${ACHILLES_DIR:+ACHILLES_DIR="$${ACHILLES_DIR}"} $${KEEP_EVAL:+KEEP_EVAL="$${KEEP_EVAL}"} bun scripts/eval.ts --suite "$${TASK:-harness-smoke}"
+	@env $${TASK:+TASK="$${TASK}"} $${N:+N="$${N}"} $${MODEL:+MODEL="$${MODEL}"} $${ACHILLES_DIR:+ACHILLES_DIR="$${ACHILLES_DIR}"} $${ZETA_REV:+ZETA_REV="$${ZETA_REV}"} $${KEEP_EVAL:+KEEP_EVAL="$${KEEP_EVAL}"} bun scripts/eval.ts --suite "$${TASK}"
 
 eval-stack:
 	@EVAL_STACK_ONLY=1 KEEP_EVAL=1 bun scripts/eval.ts --suite harness-smoke

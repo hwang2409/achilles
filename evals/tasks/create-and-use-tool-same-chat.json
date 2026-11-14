@@ -33,18 +33,12 @@
       "name": "add_note"
     },
     {
-      "id": "use",
-      "type": "successful_result",
+      "id": "roundtrip",
+      "type": "schema_roundtrip",
       "page": "notes",
-      "tool": "achilles__add_note"
-    },
-    {
-      "id": "record",
-      "type": "record",
-      "page": "notes",
-      "value": {
-        "text": "synthetic note"
-      }
+      "value": [
+        "synthetic note"
+      ]
     },
     {
       "id": "same-page",

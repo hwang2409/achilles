@@ -1,9 +1,10 @@
-export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]>;
+export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" };
 export type EvalReport = {
   run_id: string;
   agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
   repeats: number;
   tasks: Array<TaskResult & { transcript?: string }>;
+  totals?: { turns: number; wall_ms: number };
 };
 
 export function makeReport(input: Omit<EvalReport, "tasks"> & { tasks: EvalReport["tasks"] }): EvalReport {
@@ -12,7 +13,7 @@ export function makeReport(input: Omit<EvalReport, "tasks"> & { tasks: EvalRepor
 
 export function aggregateTaskResults(results: Array<{ task_id: string; pass: boolean; score: number; turns: number; tool_calls: number; wall_ms: number }>) {
   const grouped = new Map<string, typeof results>();
-  for (const result of results) grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
+  for (const result of results) if ((result as { status?: string }).status !== "harness_error") grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
   return Object.fromEntries([...grouped].map(([task_id, rows]) => [task_id, {
     passes: rows.filter((row) => row.pass).length,
     total: rows.length,
@@ -37,6 +38,8 @@ export function reportMarkdown(report: EvalReport): string {
     `achilles: ${report.agent.achilles_sha ?? "unavailable"}`,
     `zeta: ${report.agent.zeta_sha ?? "unavailable"}`,
     `repeats: ${report.repeats}`,
+    `totals: ${report.totals?.turns ?? report.tasks.reduce((total, task) => total + task.turns, 0)} turns, ${report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0)} ms wall time`,
+    `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
     "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: |",
   ];

@@ -3,7 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { scanArtifactTree, scanSecrets, validateCatalog } from "./eval";
+import { scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog } from "./eval";
+
+test("suite selection validates every task and sums one command budget", async () => {
+  const tasks = await selectTasks();
+  expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
+  expect(reserveTurns(tasks, 1)).toBe(tasks.reduce((total, task) => total + task.agent_turns, 0));
+  expect(() => assertTurnBudget(reserveTurns(tasks, 50))).toThrow("command budget");
+});
 
 test("turn reservation is command-wide", () => {
   expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20 }], 2)).toBe(80);
@@ -35,6 +42,9 @@ test("artifact scan fails closed on nested known secrets", async () => {
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("secret-shaped values fail closed", () => {
-  expect(() => scanSecrets("Bearer abcdefghijklmnop", [])).toThrow();
+test("account and secret failures stop the suite", () => {
+  expect(stopsSuite(new Error("OAuth credentials are invalid; login required"))).toBe(true);
+  expect(stopsSuite(new Error('{"type":"usage_limit_reached"}'))).toBe(true);
+  try { scanSecrets("Bearer abcdefghijklmnop", []); } catch (error) { expect(stopsSuite(error)).toBe(true); }
+  expect(stopsSuite(new Error("task setup failed"))).toBe(false);
 });
