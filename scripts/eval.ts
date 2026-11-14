@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
-import { gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan } from "./eval-grade";
+import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup } from "./eval-grade";
 import { makeReport, reportJson, reportMarkdown } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 
@@ -83,7 +83,7 @@ export async function productCapabilities(stack: EvalStack) {
   if (process.exitCode !== 0) throw new Error(`capability preflight failed: ${process.stderr}`);
   return new Set(JSON.parse(process.stdout) as string[]);
 }
-const SETUP_SCRIPT = `
+export const SETUP_SCRIPT = `
 import hashlib, json, sys
 from pathlib import Path
 from achilles.pages import PageStore, now
@@ -95,17 +95,33 @@ with store.transaction() as db:
         document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(document.encode()).hexdigest()
         stamp = now()
-        db.execute("UPDATE layout_version SET digest=?, document=?, created_at=? WHERE page_id=? AND version=1", (digest, document, stamp, page_id))
+        updated = db.execute("UPDATE page SET active_layout_version=1, updated_at=? WHERE id=?", (stamp, page_id))
+        if updated.rowcount != 1: raise RuntimeError(f"setup page {page_id} is missing")
+        db.execute("INSERT INTO layout_version VALUES(?,?,?,?,?) ON CONFLICT(page_id,version) DO UPDATE SET digest=excluded.digest,document=excluded.document,created_at=excluded.created_at", (page_id,1,digest,document,stamp))
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
+layout = store.layout(page_id)
+if hasattr(store, "inspect_page"):
+    summary = store.inspect_page(page_id)
+else:
+    page = store.page(page_id); summary = {"layout": {"version": page["active_layout_version"] or 1}}
+tools = store.page_tools(page_id)
+summary["tools"] = [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"], "input_schema": tool["input_schema"]} for tool in tools]
+collections = {item["collection"] for item in setup.get("records", [])}
+print(json.dumps({"inspect": summary, "layout": layout, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
-async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
+export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
+  const failures = declaredSeedMismatches(setup, actual);
+  if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
+}
+export async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const plan = task.page_plan.find(page => page.source !== "created")!;
   if (task.setup) {
     const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
+    verifySetup(task.setup, JSON.parse(process.stdout));
   }
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal);
   if (!response.ok) throw new Error(`could not set create mode for ${plan.alias} (${response.status})`);
@@ -230,7 +246,7 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
 
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
-  await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack);
+  await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
@@ -273,13 +289,13 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await protocol.close(signal);
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
-    throw new TaskRunFailure(error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
+    throw new TaskRunFailure(error, { ...after, initial, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 
@@ -342,7 +358,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
   } catch (error) { const original = error instanceof TaskRunFailure ? error.original : error; if (error instanceof TaskRunFailure) snapshot = error.snapshot; else if (stack) snapshot = await databaseSnapshot(stack).catch(() => ({})); stopSuite = stopsSuite(original);
-    if (original instanceof TurnCapFailure) result = { ...gradeReference(task, snapshot ?? {}), pass: false, status: "agent_fail", cap_hit: true } as ReturnType<typeof gradeTask>;
+    if (original instanceof TurnCapFailure) { const graded = gradeReference(task, snapshot ?? {}); result = { ...graded, pass: false, ...(graded.status === "harness_error" ? {} : { status: "agent_fail" }), cap_hit: true } as ReturnType<typeof gradeTask>; }
     else { failed = true; result = failureResult(task, stopSuite ? new Error("suite stopped after an account, login, quota, or secret-scan failure") : original, options.hidden); }
     if (provider?.requests.length) { try { catalog = catalogProof(provider.requests, task); } catch (catalogError) { failed = true; result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }

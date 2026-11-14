@@ -30,7 +30,18 @@
         }
       }
     ],
-    "errors": []
+    "errors": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_note",
+          "operation": "insert",
+          "collection": "notes"
+        }
+      ],
+      "records": []
+    }
   },
   "bad": {
     "pages": [
@@ -67,6 +78,17 @@
         }
       }
     ],
-    "errors": []
+    "errors": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_note",
+          "operation": "insert",
+          "collection": "notes"
+        }
+      ],
+      "records": []
+    }
   }
 }

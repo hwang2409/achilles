@@ -40,7 +40,30 @@
           "name": "record-2"
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_record",
+          "operation": "insert",
+          "collection": "records"
+        },
+        {
+          "page_id": "home",
+          "name": "update_record",
+          "operation": "update",
+          "collection": "records"
+        },
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": []
+    }
   },
   "bad": {
     "pages": [
@@ -79,6 +102,29 @@
           "name": "record-2"
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_record",
+          "operation": "insert",
+          "collection": "records"
+        },
+        {
+          "page_id": "home",
+          "name": "update_record",
+          "operation": "update",
+          "collection": "records"
+        },
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": []
+    }
   }
 }
