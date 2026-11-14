@@ -36,14 +36,14 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
     if (scenario.name === "SIGINT" || scenario.name === "startup failure") { const uv = Bun.which("uv")!; const wrapper = join(marker, "uv"); const fault = scenario.name === "SIGINT" ? `[ "$1" = sync ] && { sleep 60 & wait; exit $?; }` : `seen_zeta=\nfor argument in "$@"; do [ "$argument" = zeta ] && seen_zeta=1; [ "$seen_zeta" ] && [ "$argument" = serve ] && exit 1; done`; await writeFile(wrapper, `#!/bin/sh\n${fault}\nexec ${JSON.stringify(uv)} "$@"\n`); await chmod(wrapper, 0o755); env.PATH = `${marker}:${env.PATH}`; }
     const child = spawn("make", [scenario.target], { cwd: new URL("..", import.meta.url).pathname, env, stdio: ["ignore", "pipe", "pipe"] });
     const output: Buffer[] = []; child.stdout!.on("data", chunk => output.push(Buffer.from(chunk))); child.stderr!.on("data", chunk => output.push(Buffer.from(chunk)));
-    const exited = new Promise<number>(resolve => child.once("exit", code => resolve(code ?? -1))); let sent = false; let code: number | undefined;
+    const exited = new Promise<number>(resolve => child.once("exit", code => resolve(code ?? -1))); let sent = false; let runnerPid: number | undefined; let code: number | undefined;
     try {
       for (let i = 0; i < (scenario.name === "SIGINT" ? 100 : 600) && code === undefined; i++) {
         const rows = processRows(); for (const row of descendants(child.pid!, rows)) { seen.set(row.pid, row); for (const match of row.command.matchAll(/(?:--port|--ws)\s+(\d+)/g)) ports.add(Number(match[1])); }
-        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => /(?:^|\/)bun scripts\/eval\.ts/.test(row.command) && !row.command.includes("/bin/sh -c")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const ready = scenario.name === "SIGINT" ? [...seen.values()].some(row => row.command.includes(`${marker}/uv sync`) || row.command.includes("sleep 60")) : servers.length >= 2; if (bun && ready) { process.kill(bun.pid, scenario.signal); sent = true; } }
+        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => /(?:^|\/)bun scripts\/eval\.ts/.test(row.command) && !row.command.includes("/bin/sh -c")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const ready = scenario.name === "SIGINT" ? [...seen.values()].some(row => row.command.includes(`${marker}/uv sync`) || row.command.includes("sleep 60")) : servers.length >= 2; if (bun && ready) { runnerPid = bun.pid; process.kill(bun.pid, scenario.signal); sent = true; } }
         code = await Promise.race([exited, Bun.sleep(50).then(() => undefined)]);
       }
-      if (code === undefined) { const runner = [...seen.values()].find(row => /(?:^|\/)bun scripts\/eval\.ts/.test(row.command) && !row.command.includes("/bin/sh -c")); if (runner) process.kill(runner.pid, "SIGKILL"); code = await Promise.race([exited, Bun.sleep(2000).then(() => undefined)]); }
+      if (code === undefined) { if (runnerPid) process.kill(runnerPid, "SIGKILL"); code = await Promise.race([exited, Bun.sleep(2000).then(() => undefined)]); }
       if (code === undefined) throw new Error(`${scenario.name} did not exit: ${Buffer.concat(output).toString()}`);
       if (scenario.signal) expect(sent, `${scenario.name} was not delivered`).toBe(true);
       await Bun.sleep(200); const survivors = processRows().filter(row => row.command.includes(marker));
