@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { expectationTokens, gradeCheck, gradeReference, gradeTask, structurallyContains, validateTask } from "./eval-grade";
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
+import metricTaskJson from "../evals/tasks/reading-metric-count.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -90,6 +91,50 @@ for (const testCase of [
   const result = gradeCheck(judgeDetailCheck, detailSnapshot(testCase.block, [...testCase.records]));
   expect(result.pass).toBe(testCase.pass);
   if ("reason" in testCase) expect(result.reason).toBe(testCase.reason);
+});
+
+const metricCheck = { id: "done-count", type: "metric_count" as const, page: "reading", value: { collection: "books", where: { field: "status", equals: "done" }, count: 2, position: "first" } };
+const metricSnapshot = ({ block = { type: "metric", label: "Done books", collection: "books", count: true, where: { field: "status", equals: "done" } }, value = 2, records = [{ status: "done" }, { status: "done" }, { status: "reading" }] }: { block?: Record<string, unknown>; value?: number; records?: Array<Record<string, unknown>> } = {}) => ({
+  pages: [{ id: "reading-page", alias: "reading" }],
+  layouts: [{ page_id: "reading-page", version: 2, document: { blocks: [block, { type: "list", collection: "books" }] } }],
+  records: records.map((data, index) => ({ page_id: "reading-page", id: `book-${index}`, collection: "books", data })),
+  results: [{ page_id: "reading-page", tool: "achilles__inspect_page", success: true, data: { metric_values: [{ block: 0, value }] } }],
+});
+
+for (const testCase of [
+  { name: "computed count with any label", snapshot: metricSnapshot(), pass: true },
+  { name: "stale inspect value", snapshot: metricSnapshot({ value: 1 }), pass: false },
+  { name: "static metric value", snapshot: metricSnapshot({ block: { type: "metric", label: "Done books", value: "2" } }), pass: false },
+  { name: "wrong filter", snapshot: metricSnapshot({ block: { type: "metric", label: "Done books", collection: "books", count: true, where: { field: "status", equals: "reading" } } }), pass: false },
+  { name: "wrong position", snapshot: { ...metricSnapshot(), layouts: [{ page_id: "reading-page", version: 2, document: { blocks: [{ type: "text", text: "Reading" }, { type: "metric", label: "Done books", collection: "books", count: true, where: { field: "status", equals: "done" } }] } }] }, pass: false },
+  { name: "stored count disagrees", snapshot: metricSnapshot({ records: [{ status: "done" }, { status: "reading" }] }), pass: false },
+] as const) test(`metric_count: ${testCase.name}`, () => {
+  expect(gradeCheck(metricCheck as never, testCase.snapshot).pass).toBe(testCase.pass);
+});
+
+test("metric_count follows the task's schema choices instead of fixed field names or labels", () => {
+  const check = { ...metricCheck, value: { collection: "books", where: { field: "state", equals: "finished" }, count: 2, position: "first" } };
+  const snapshot = metricSnapshot({
+    block: { type: "metric", label: "Completed reading", collection: "books", count: true, where: { field: "state", equals: "finished" } },
+    records: [{ state: "finished" }, { state: "finished" }, { state: "queued" }],
+  });
+  expect(gradeCheck(check as never, snapshot).pass).toBe(true);
+});
+
+test("reading metric seed defects are harness errors", () => {
+  const task = validateTask(metricTaskJson); const layout = { blocks: [{ type: "list", title: "Books", collection: "books" }] };
+  const tools = [{ page_id: "home", name: "list_books", operation: "list", collection: "books" }];
+  const records = [
+    { page_id: "home", id: "b1", collection: "books", data: { title: "A", status: "done" } },
+    { page_id: "home", id: "b2", collection: "books", data: { title: "B", status: "done" } },
+    { page_id: "home", id: "b3", collection: "books", data: { title: "C", status: "reading" } },
+  ];
+  const valid = { tool_versions: tools, records, layouts: [{ page_id: "home", version: 1, document: layout }] };
+  for (const [name, initial] of [
+    ["one done book", { ...valid, records: records.map(row => row.id === "b2" ? { ...row, data: { ...row.data, status: "reading" } } : row) }],
+    ["missing layout", { ...valid, layouts: [] }],
+    ["wrong collection", { ...valid, records: records.map(row => ({ ...row, collection: "reading_list" })) }],
+  ] as const) expect(gradeReference(task, { ...metricSnapshot(), initial }).status, name).toBe("harness_error");
 });
 
 test("detail_selects grades only the final stored layout", () => {
