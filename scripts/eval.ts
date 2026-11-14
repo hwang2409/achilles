@@ -190,7 +190,7 @@ async function databaseSnapshot(stack: EvalStack) {
 }
 const rowKey = (type: string, row: Record<string, unknown>) => type === "pages" || type === "tools" ? String(row.id) : type === "records" ? `${row.page_id}:${row.collection}:${row.id}` : `${row.page_id}:${row.tool_id ?? row.version}`;
 function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: Record<string, unknown>[]) {
-  const ids: string[] = calls.filter(call => !String(call.tool).endsWith("create_page")).map(call => String(call.page_id));
+  const ids: string[] = calls.filter(call => call.success === true && !String(call.tool).endsWith("create_page")).map(call => String(call.page_id));
   for (const type of ["pages", "tools", "assignments", "records", "layouts"] as const) {
     const old = new Set((before[type] ?? []).map(row => rowKey(type, row)));
     for (const row of after[type] ?? []) if (!old.has(rowKey(type, row)) && row.page_id) ids.push(String(row.page_id));

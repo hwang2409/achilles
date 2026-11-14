@@ -23,6 +23,26 @@
     ],
     "results": [
       {
+        "call_id": "failed-create",
+        "page_id": "home",
+        "tool": "achilles__create_page_with_tools",
+        "success": false,
+        "data": {
+          "error": "invalid layout"
+        }
+      },
+      {
+        "call_id": "create-review",
+        "page_id": "review",
+        "tool": "achilles__create_page_with_tools",
+        "success": true,
+        "data": {
+          "page_id": "review",
+          "route": "/run-review"
+        }
+      },
+      {
+        "call_id": "add-annotation",
         "page_id": "review",
         "tool": "achilles__add_annotation",
         "success": true,
@@ -57,6 +77,38 @@
           "run_id": "run-002",
           "verdict": "bad"
         }
+      }
+    ],
+    "calls": [
+      {
+        "id": "failed-create",
+        "page_id": "home",
+        "tool": "achilles__create_page_with_tools",
+        "success": false,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "create-review",
+        "page_id": "review",
+        "tool": "achilles__create_page_with_tools",
+        "success": true,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "add-annotation",
+        "page_id": "review",
+        "tool": "achilles__add_annotation",
+        "success": true
+      },
+      {
+        "id": "list-annotations",
+        "page_id": "review",
+        "tool": "achilles__list_annotations",
+        "success": true
       }
     ]
   },
@@ -84,7 +136,8 @@
     ],
     "results": [
       {
-        "page_id": "review",
+        "call_id": "wrong-page-add",
+        "page_id": "home",
         "tool": "achilles__add_annotation",
         "success": true,
         "data": {
@@ -109,15 +162,24 @@
       }
     ],
     "related_page_ids": [
+      "home",
       "review"
     ],
     "records": [
       {
         "page_id": "review",
         "data": {
-          "run_id": "run-003",
+          "run_id": "run-002",
           "verdict": "bad"
         }
+      }
+    ],
+    "calls": [
+      {
+        "id": "wrong-page-add",
+        "page_id": "home",
+        "tool": "achilles__add_annotation",
+        "success": true
       }
     ]
   }
