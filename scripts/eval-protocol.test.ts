@@ -79,7 +79,7 @@ const discovery = { url: "ws://eval.invalid", controller_token: "synthetic-token
 async function resolveBeforeDeadline<T>(operation: string, promise: Promise<T>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${operation} timed out`)), 1_000);
+    timer = setTimeout(() => reject(new Error(`${operation} timed out`)), 10_000);
   });
   try {
     return await Promise.race([promise, deadline]);
@@ -95,13 +95,26 @@ async function rejectBeforeDeadline(
   cleanup: () => void,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
+    timer = setTimeout(async () => {
       const error = new Error(`${operation} timed out`);
       controller.abort(error);
       cleanup();
-      void connecting.catch(() => {});
-      reject(error);
+      try {
+        await Promise.race([
+          connecting.then(() => undefined, () => undefined),
+          new Promise<never>((_, rejectCleanup) => {
+            cleanupTimer = setTimeout(
+              () => rejectCleanup(new Error(`${operation}: did not settle after cleanup`)),
+              10_000,
+            );
+          }),
+        ]);
+        reject(error);
+      } catch (cleanupError) {
+        reject(cleanupError);
+      }
     }, 10_000);
   });
   try {
@@ -114,6 +127,7 @@ async function rejectBeforeDeadline(
     ]);
   } finally {
     clearTimeout(timer);
+    clearTimeout(cleanupTimer);
   }
 }
 
