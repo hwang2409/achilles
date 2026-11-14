@@ -28,7 +28,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const group = useRef<HTMLDivElement>(null);
   const focusLost = useRef(false);
   const stopFocused = useRef(false);
-  const { model, edit, submit, stop } = useComposerDelivery(props);
+  const { model, edit, dismissError, submit, stop } = useComposerDelivery(props);
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const canSubmit =
@@ -138,7 +138,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       <div data-part="composer-bar">
         <p
           data-part="composer-status"
-          data-tone={model.error ? "danger" : message ? "busy" : undefined}
+          data-tone={model.error?.kind === "uncertain" ? "warning" : model.error ? "danger" : message ? "busy" : undefined}
           title={model.error?.text}
         >
           <span
@@ -148,9 +148,12 @@ export function PlainComposer(props: ComposerAdapterProps) {
           >
             {hint}
           </span>
-          <span data-part="composer-message" id={`${id}-message`} role="status">
+          <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>
+          {model.error?.kind === "uncertain" ? (
+            <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button>
+          ) : null}
         </p>
         {running && onStop ? (
           <button

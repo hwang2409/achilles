@@ -158,31 +158,100 @@ const NO_CREATION = { pending: null, error: null };
 
 type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" | "unknown"; outcome?: "queued" | "delivered" | "dropped" };
 
-async function waitForIdle(client: Pick<ZetaClient, "request">, sessionId: string, deadline: number) {
-  for (;;) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("turn did not become idle before resend");
-    const result = await client.request("status", { session_id: sessionId }, { timeoutMs: Math.min(1_000, remaining) });
-    if (result && typeof result === "object" && (result as { state?: string }).state === "idle") return;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
-  }
+type CreateModeToggleInput = {
+  client: Pick<ZetaClient, "features" | "request">;
+  pageId: string;
+  sessionId: string;
+  enabled: boolean;
+};
+type CreateModeToggleResult = { createMode: boolean | null; error: string | null; blocked: boolean; retryable: boolean };
+type CreateModeToggleRun = { generation: number; outcome: CreateModeToggleResult; cancelled: boolean };
+
+function refreshToolsError(caught: unknown): { message: string; blocked: boolean; retryable: boolean } {
+  const error = caught as { code?: unknown; message?: unknown; data?: { reason?: unknown } };
+  const reason = typeof error.data?.reason === "string" ? error.data.reason : "";
+  if (error.code === -32601) return { message: "", blocked: false, retryable: false };
+  if (error.code === -32005 && reason.includes("MCP HTTP 404: Session not found")) return { message: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false };
+  if (error.code === -32005) return { message: `zeta could not refresh page tools${reason ? `: ${reason}` : ""}. retry the refresh.`, blocked: true, retryable: true };
+  if (error.code === -32602) return { message: "zeta could not find the achilles page tools. retry the refresh.", blocked: true, retryable: true };
+  if (error.code === -32003) return { message: "zeta is attached to a different chat. retry the refresh.", blocked: true, retryable: true };
+  return { message: `could not refresh page tools: ${String(error.message ?? caught)}. retry the refresh.`, blocked: true, retryable: true };
 }
+
+export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
+  let generation = 0;
+  let pending: Promise<CreateModeToggleRun> | null = null;
+  let published: Promise<CreateModeToggleResult> | null = null;
+  let active: { generation: number; cancelled: boolean } | null = null;
+  let retry: { input: CreateModeToggleInput; refreshOnly: boolean } | null = null;
+  const refresh = async (input: CreateModeToggleInput, createMode: boolean, mine: number): Promise<CreateModeToggleResult> => {
+    if (!input.client.features.includes("mcp_refresh_tools")) return { createMode, error: null, blocked: false, retryable: false };
+    try {
+      await input.client.request("mcp_refresh_tools", { session_id: input.sessionId, server: "achilles" });
+      if (mine === generation) retry = null;
+      return { createMode, error: null, blocked: false, retryable: false };
+    } catch (caught) {
+      const failure = refreshToolsError(caught);
+      if (mine === generation) retry = failure.blocked ? { input: { ...input, enabled: createMode }, refreshOnly: true } : null;
+      return { createMode: failure.blocked ? null : createMode, error: failure.message || null, blocked: failure.blocked, retryable: failure.retryable };
+    }
+  };
+  return {
+    run(input: CreateModeToggleInput) {
+      if (published) return published;
+      const mine = generation;
+      const run = { generation: mine, cancelled: false };
+      active = run;
+      const target = retry?.input ?? input;
+      const task = (async () => {
+        if (retry?.refreshOnly) return refresh(target, target.enabled, mine);
+        const response = await fetchFn(`/api/pages/${target.pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: target.enabled }) });
+        if (!response.ok) throw new Error(`could not update create mode (${response.status})`);
+        const result = await response.json() as { create_mode: boolean };
+        return refresh(target, result.create_mode, mine);
+      })().catch((caught) => {
+        if (mine === generation) retry = { input: target, refreshOnly: false };
+        return { createMode: null, error: caught instanceof Error ? caught.message : String(caught), blocked: true, retryable: true };
+      });
+      pending = task.then((outcome) => ({ generation: run.generation, outcome, cancelled: run.cancelled })).finally(() => {
+        if (active === run) { active = null; pending = null; published = null; }
+      });
+      published = pending.then(({ outcome }) => outcome);
+      return published;
+    },
+    async beforeSend() {
+      const mine = generation;
+      const awaited = pending;
+      const blockedWithoutRun = !awaited && retry !== null;
+      const result = awaited ? await awaited : null;
+      if (blockedWithoutRun || (result && (result.generation !== mine || result.cancelled || result.outcome.blocked))) throw new Error("send is off until page tools refresh. retry create mode.");
+    },
+    reset() {
+      generation += 1;
+      if (active) active.cancelled = true;
+      active = null; pending = null; published = null; retry = null;
+    },
+  };
+}
+
+// Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
+const STUCK_STEER_WAIT_MS = 15_000;
+export class UncertainSteerDeliveryError extends Error {}
 
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
-  sessionId: string,
-  text: string,
+  _sessionId: string,
+  _text: string,
   deliveryId: string,
   track: (id: string) => void,
-  deadlineMs = 15_000,
+  deadlineMs = STUCK_STEER_WAIT_MS,
 ): Promise<string> {
   const deadline = Date.now() + deadlineMs;
-  let id = deliveryId;
+  const id = deliveryId;
   track(id);
-  let resent = false;
   for (;;) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("steer delivery confirmation timed out");
+    if (remaining <= 0) throw new UncertainSteerDeliveryError("this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.");
     let result: unknown;
     try {
       result = await client.request("delivery_status", { delivery_id: id }, { timeoutMs: Math.min(1_000, remaining) });
@@ -193,15 +262,7 @@ export async function confirmSteerDelivery(
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
     if (outcome === "delivered") return id;
-    if (outcome === "dropped") {
-      if (resent) throw new Error("steer delivery was dropped after resend");
-      resent = true;
-      await waitForIdle(client, sessionId, deadline);
-      id = crypto.randomUUID();
-      track(id);
-      await client.request("send", { session_id: sessionId, text, delivery_id: id }, { timeoutMs: Math.min(1_000, Math.max(1, deadline - Date.now())) });
-      continue;
-    }
+    if (outcome === "dropped") throw new Error("this message was not sent. your text is still here.");
     if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
       throw new Error(`steer delivery status: ${status.status}`);
     await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
@@ -215,6 +276,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const [listRefresh, setListRefresh] = useState(0);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
+  const [toggleBlocked, setToggleBlocked] = useState(false);
+  const [toggleRetryable, setToggleRetryable] = useState(false);
+  const modeToggle = useRef(createModeToggleOwner());
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
   const [routeRefresh, setRouteRefresh] = useState(0);
   const owner = useRef(createAttachmentOwner());
@@ -227,6 +291,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   useEffect(() => {
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
+    modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false);
     setCreationPageId(null);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token).then((next) => {
@@ -322,20 +387,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
 
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
     if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
+    await modeToggle.current.beforeSend();
     const current = state; const token = owner.current.token();
     let delivery_id: string = crypto.randomUUID();
     if (!intent.steer) track(delivery_id);
-    try {
-      await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
-      if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
-    } catch (error) {
-      // A stale turn view can race its server-side turn end. send queues the same draft instead of losing it.
-      if (!intent.steer || !(error instanceof Error) || !error.message.includes("no turn is running")) throw error;
-      await waitForIdle(client, current.sessionId, Date.now() + 15_000);
-      delivery_id = crypto.randomUUID(); track(delivery_id);
-      await client.request("send", { session_id: current.sessionId, text, delivery_id });
-      delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
-    }
+    await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+    if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {
@@ -345,17 +402,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, [client, state, updateReady]);
 
   const toggle = useCallback(async () => {
-    if (state.phase !== "ready") return;
+    if (!client || state.phase !== "ready" || (toggleBlocked && !toggleRetryable)) return;
     const current = state; const token = owner.current.token();
     setToggleError(null); setToggling(true);
-    try {
-      const response = await fetch(`/api/pages/${current.page.id}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !current.page.create_mode }) });
-      if (!response.ok) throw new Error(`could not update create mode (${response.status})`);
-      const result = await response.json() as { create_mode: boolean };
-      updateReady(token, (value) => ({ ...value, page: { ...value.page, create_mode: result.create_mode } }));
-    } catch (caught) { if (owner.current.current(token)) setToggleError(caught instanceof Error ? caught.message : String(caught)); }
-    finally { if (owner.current.current(token)) setToggling(false); }
-  }, [state, updateReady]);
+    const result = await modeToggle.current.run({ client, pageId: current.page.id, sessionId: current.sessionId, enabled: !current.page.create_mode });
+    if (!owner.current.current(token)) return;
+    if (result.createMode !== null) updateReady(token, (value) => ({ ...value, page: { ...value.page, create_mode: result.createMode! } }));
+    setToggleError(result.error); setToggleBlocked(result.blocked); setToggleRetryable(result.retryable); setToggling(false);
+  }, [client, state, toggleBlocked, toggleRetryable, updateReady]);
 
   const refreshPage = useCallback(async () => {
     if (state.phase !== "ready") return;
@@ -386,5 +440,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, selectedId, listRefresh, toggleError, toggling, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
+  return { state, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
 }

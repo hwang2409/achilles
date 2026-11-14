@@ -7,19 +7,35 @@ type Scenario = {
   state: "idle" | "steerable";
   statuses?: Array<{ status: string; outcome?: string }>;
   statusReads?: number;
-  failResend?: boolean;
   timeout?: boolean;
   remount?: boolean;
+  editAndRestore?: boolean;
   expectedDraft: string;
+  expectedError?: string;
 };
 
 const scenarios: Scenario[] = [
   { name: "send ok", state: "idle", expectedDraft: "" },
-  { name: "steer delivered", state: "steerable", statuses: [{ status: "delivered" }], expectedDraft: "" },
-  { name: "steer queued echo then dropped then resend ok", state: "steerable", statuses: [{ status: "queued" }, { status: "dropped" }, { status: "delivered" }], statusReads: 3, expectedDraft: "" },
-  { name: "steer queued echo then dropped then resend fails", state: "steerable", statuses: [{ status: "queued" }, { status: "dropped" }], statusReads: 2, failResend: true, expectedDraft: "keep this exact draft" },
-  { name: "steer queued echo then timeout", state: "steerable", statuses: [{ status: "queued" }], statusReads: 1, timeout: true, expectedDraft: "keep this exact draft" },
-  { name: "steer evicted with delivered outcome", state: "steerable", statuses: [{ status: "evicted", outcome: "delivered" }], expectedDraft: "" },
+  { name: "steer consumed", state: "steerable", statuses: [{ status: "delivered" }], statusReads: 1, expectedDraft: "" },
+  {
+    name: "steer dropped",
+    state: "steerable",
+    statuses: [{ status: "queued" }, { status: "dropped" }],
+    statusReads: 2,
+    expectedDraft: "keep this exact draft",
+    expectedError: "this message was not sent. your text is still here.",
+  },
+  {
+    name: "steer remains queued after bounded wait",
+    state: "steerable",
+    statuses: [{ status: "queued" }],
+    statusReads: 1,
+    timeout: true,
+    editAndRestore: true,
+    expectedDraft: "keep this exact draft",
+    expectedError: "this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.",
+  },
+  { name: "steer evicted after consumption", state: "steerable", statuses: [{ status: "evicted", outcome: "delivered" }], statusReads: 1, expectedDraft: "" },
   { name: "reload or remount during delivery", state: "idle", remount: true, expectedDraft: " plus new" },
   { name: "duplicate queued echo", state: "steerable", statuses: [{ status: "queued" }, { status: "delivered" }], statusReads: 2, expectedDraft: "" },
 ];
@@ -37,11 +53,9 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
   const client = {
     request: async (method: string) => {
       if (method === "send") {
-        if (scenario.failResend) throw new Error("resend failed");
         if (scenario.remount) await heldSend;
         return { accepted: true };
       }
-      if (method === "status") return { state: "idle" };
       if (method !== "delivery_status") throw new Error(`unexpected ${method}`);
       statusReads += 1;
       const status = statuses.shift() ?? { status: "queued" };
@@ -79,6 +93,16 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
 
     expect(owner.getModel().draft).toBe(scenario.remount ? "" : scenario.expectedDraft);
     expect(persisted).toBe(scenario.expectedDraft);
+    if (scenario.editAndRestore) {
+      owner.edit(`${scenario.expectedDraft}x`);
+      expect(owner.getModel().error).toBeUndefined();
+      owner.edit(scenario.expectedDraft);
+    }
+    expect(owner.getModel().error?.text).toBe(scenario.expectedError);
+    if (scenario.editAndRestore) {
+      owner.dismissError();
+      expect(owner.getModel().error).toBeUndefined();
+    }
     if (scenario.remount) expect(remounted?.getModel().draft).toBe(scenario.expectedDraft);
     if (scenario.statusReads) expect(statusReads).toBe(scenario.statusReads);
   } finally {

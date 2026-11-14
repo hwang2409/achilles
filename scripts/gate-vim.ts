@@ -4,7 +4,7 @@ import type { Page, Route } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
-type RequestFrame = { method?: string; params?: { text?: string } };
+type RequestFrame = { id?: number | string; method?: string; params?: { text?: string }; result?: { accepted?: boolean }; error?: { code?: number } };
 
 export async function gateVim(page: Page, control: string, waitFor: WaitFor, whileDisconnected: WhileDisconnected, requests: () => RequestFrame[]) {
   const screenshotDir = process.env.VIM_SCREENSHOT_DIR;
@@ -238,7 +238,15 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const delayedSteer = requests().slice(delayedBeforeSteer).find((request) => request.method === "steer");
   if (delayedSteer?.params?.text !== "steer while running")
     throw new Error(`delayed turn did not send a steer request: ${JSON.stringify(requests().slice(delayedBeforeSteer))}`);
-  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed steer to clear its draft");
+  await waitFor(async () => requests().some((frame) => frame.id === delayedSteer.id && (frame.result || frame.error)), "delayed steer response");
+  if (await confirmedStock.inputValue() !== "") {
+    await page.getByText("no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
+    if (await confirmedStock.inputValue() !== "steer while running") throw new Error("rejected delayed steer did not keep its draft");
+    await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+    await confirmedStock.fill("steer while running");
+    await confirmedStock.locator('xpath=ancestor::*[@data-part="composer"]').getByRole("button", { name: "send message" }).click();
+  }
+  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed message to clear its draft");
   await confirmedStock.fill("kept draft");
   if (await stopButton.isVisible().catch(() => false)) await stopButton.focus();
   else await confirmedStock.focus();
