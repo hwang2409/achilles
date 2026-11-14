@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "detail_selects" | "metric_count" | "layout_update" | "no_unrecovered_error";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "no_unrecovered_error";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -29,7 +29,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "detail_selects", "metric_count", "layout_update", "no_unrecovered_error"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "no_unrecovered_error"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -79,6 +79,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
   if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "metric_count", "layout_update"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (check.type === "list_shows" && ((check.collection !== undefined && !identifier(check.collection)) || (check.value !== undefined && typeof check.value !== "string") || (check.collection === undefined && check.value === undefined))) throw new Error(`checks[${i}] needs a collection or string value`);
   if (check.type === "detail_selects" && (typeof check.value !== "string" || !identifier(check.collection))) throw new Error(`checks[${i}] needs a collection and string value`);
   if (check.type === "metric_count") {
     const value = check.value as Record<string, unknown>; const where = value?.where as Record<string, unknown>;
@@ -115,7 +116,7 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "type", // fixed discriminator in every layout block
   "collection", // fixed data-source field in list and detail blocks
 ]);
-const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "detail_selects", "metric_count"]);
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count"]);
 function nestedTokens(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
@@ -223,15 +224,22 @@ function matchValueRows(actual: unknown, expected: string[][]) {
 
 type GradeContext = { check: TaskCheck; snapshot: EvalSnapshot; page: unknown; owned(type: keyof EvalSnapshot): Array<Record<string, unknown>> };
 type CheckFailure = { reason: string; field?: string; before?: unknown; after?: unknown };
-function equalitySelection(block: Record<string, unknown>, records: Array<Record<string, unknown>>) {
-  const key = ["filter", "where"].find(candidate => block[candidate] && typeof block[candidate] === "object" && !Array.isArray(block[candidate])) as "filter" | "where" | undefined;
-  if (!key) return undefined;
-  const value = block[key] as Record<string, unknown>; const field = value.field;
-  return { selector: `${key} ${JSON.stringify(value)}`, selected: typeof field === "string" && "equals" in value ? records.filter(record => (record.data as Record<string, unknown> | undefined)?.[field] === value.equals) : [] };
-}
 type TransitionFailure = CheckFailure & { field: string; before: unknown; after: unknown };
 const normalizeTransitionValue = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, "");
 const transitionFailure = (reason: string, field: string, before: unknown, after: unknown): TransitionFailure => ({ reason, field, before, after });
+function selectBlockRecords(block: Record<string, unknown>, records: Array<Record<string, unknown>>, defaultToAll: boolean) {
+  const equality = ["filter", "where"].find(key => block[key] && typeof block[key] === "object" && !Array.isArray(block[key])) as "filter" | "where" | undefined;
+  if (equality) {
+    const value = block[equality] as Record<string, unknown>; const field = value.field; const equals = value.equals;
+    return { records: typeof field === "string" && "equals" in value ? records.filter(record => (record.data as Record<string, unknown> | undefined)?.[field] === equals) : [], selector: `${equality} ${JSON.stringify(value)}` };
+  }
+  const key = ["record_id", "record"].find(candidate => typeof block[candidate] === "string");
+  if (key) {
+    const id = block[key] as string;
+    return { records: records.filter(record => record.id === id || record.record_id === id), selector: `${key}=${JSON.stringify(id)}` };
+  }
+  return defaultToAll ? { records, selector: "all records" } : undefined;
+}
 const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   page_exists: ({ check, snapshot, page }) => rows(snapshot, "pages").some(row => row.id === page && (!check.route || row.route === check.route)),
   count: ({ check, snapshot, page, owned }) => check.name === "pages" ? rows(snapshot, "pages").filter(row => row.id === page).length : owned(check.name as keyof EvalSnapshot).length,
@@ -310,6 +318,24 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),
   same_page: ({ snapshot, page }) => (snapshot.related_page_ids?.length ?? 0) > 0 && snapshot.related_page_ids!.every(id => id === page),
   layout_contains: ({ check, owned }) => owned("layouts").some(row => structurallyContains(row.document, check.value)),
+  list_shows: ({ check, owned }) => {
+    const layouts = owned("layouts").sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0));
+    const blocks = (layouts.at(-1)?.document as { blocks?: unknown[] } | undefined)?.blocks;
+    const lists = Array.isArray(blocks) ? blocks.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && !Array.isArray(block) && (block as Record<string, unknown>).type === "list")) : [];
+    if (!lists.length) return { reason: "no list block" } satisfies CheckFailure;
+    let failure: CheckFailure = { reason: "no matching list block" };
+    for (const list of lists) {
+      const recordCollections = [...new Set(owned("records").map(record => record.collection).filter((value): value is string => typeof value === "string"))];
+      const collection = typeof list.collection === "string" ? list.collection : recordCollections.length === 1 ? recordCollections[0] : undefined;
+      if (check.collection !== undefined && collection !== check.collection) { failure = { reason: `list on ${String(collection)}, expected ${check.collection}` }; continue; }
+      if (collection === undefined) { failure = { reason: "list has no collection" }; continue; }
+      if (check.value === undefined) return true;
+      const selected = selectBlockRecords(list, owned("records").filter(record => record.collection === collection), true)!;
+      if (selected.records.some(record => record.data && typeof record.data === "object" && !Array.isArray(record.data) && Object.values(record.data).some(value => value === check.value))) return true;
+      failure = { reason: `${selected.selector} on ${collection} has no record with ${JSON.stringify(check.value)}` };
+    }
+    return failure;
+  },
   detail_selects: ({ check, owned }) => {
     const layouts = owned("layouts").sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0));
     const blocks = (layouts.at(-1)?.document as { blocks?: unknown[] } | undefined)?.blocks;
@@ -318,20 +344,12 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     let failure: CheckFailure = { reason: "no supported detail selector" };
     for (const detail of details) {
       if (detail.collection !== check.collection) { failure = { reason: `detail collection ${JSON.stringify(detail.collection)} is not ${JSON.stringify(check.collection)}` }; continue; }
-      const records = owned("records").filter(record => record.collection === check.collection);
-      const equality = equalitySelection(detail, records);
-      let selected: Array<Record<string, unknown>>; let selector: string;
-      if (equality) ({ selected, selector } = equality);
-      else {
-        const key = ["record_id", "record"].find(candidate => typeof detail[candidate] === "string");
-        if (!key) continue;
-        const id = detail[key] as string; selector = `${key}=${JSON.stringify(id)}`;
-        selected = records.filter(record => record.id === id || record.record_id === id);
-      }
-      if (selected.length !== 1) { failure = { reason: `${selector} matches ${selected.length} records` }; continue; }
-      const data = selected[0].data;
+      const selected = selectBlockRecords(detail, owned("records").filter(record => record.collection === check.collection), false);
+      if (!selected) continue;
+      if (selected.records.length !== 1) { failure = { reason: `${selected.selector} matches ${selected.records.length} records` }; continue; }
+      const data = selected.records[0].data;
       if (data && typeof data === "object" && !Array.isArray(data) && Object.values(data).some(value => value === check.value)) return true;
-      failure = { reason: `${selector} selects a record without ${JSON.stringify(check.value)}` };
+      failure = { reason: `${selected.selector} selects a record without ${JSON.stringify(check.value)}` };
     }
     return failure;
   },
@@ -342,7 +360,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const metric = Array.isArray(blocks) && blocks[0] && typeof blocks[0] === "object" && !Array.isArray(blocks[0]) ? blocks[0] as Record<string, unknown> : undefined;
     if (!metric || metric.type !== "metric" || metric.collection !== expected.collection || metric.count !== true || !structurallyContains(metric.where, expected.where)) return false;
     const records = owned("records").filter(record => record.collection === expected.collection);
-    if (equalitySelection(metric, records)?.selected.length !== expected.count) return false;
+    if (selectBlockRecords(metric, records, false)?.records.length !== expected.count) return false;
     const inspect = rows(snapshot, "results").filter(row => row.page_id === page && row.tool === "achilles__inspect_page" && successful(row)).at(-1);
     return Boolean(inspect && structurallyContains(inspect.data ?? inspect.result, { metric_values: [{ block: 0, value: expected.count }] }));
   },

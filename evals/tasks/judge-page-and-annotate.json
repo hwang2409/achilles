@@ -72,11 +72,9 @@
     },
     {
       "id": "list-layout",
-      "type": "layout_contains",
+      "type": "list_shows",
       "page": "review",
-      "value": {
-        "type": "list"
-      }
+      "collection": "annotations"
     },
     {
       "id": "detail-layout",
