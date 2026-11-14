@@ -126,6 +126,21 @@ test("capability probe keeps an unrelated internal ImportError as a harness_erro
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("reading metric baseline without update_layout is unsupported, not agent_fail", async () => {
+  const task = { id: "reading-metric-count", requires: ["update_layout"] } as never;
+  const root = await mkdtemp(join(tmpdir(), "achilles-old-metric-target-"));
+  try {
+    await mkdir(join(root, "achilles"));
+    await Bun.write(join(root, "pyproject.toml"), '[project]\nname="old-metric-target"\nversion="0.0.0"\nrequires-python=">=3.11"\n');
+    await Bun.write(join(root, "achilles", "__init__.py"), "");
+    await Bun.write(join(root, "achilles", "tools.py"), 'BUILTIN_TOOL_NAMES = ("create_page", "create_tool")\n');
+    await Bun.write(join(root, "achilles", "pages.py"), "class PageStore:\n    def create_page(self, page_id): pass\n");
+    const result = await classifyTaskSupport({ run: targetRun(root), achillesDir: root } as never, task, []);
+    expect(result?.status).toBe("unsupported");
+    expect(result?.checks[0].evidence).toEqual({ missing: ["update_layout"] });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("reserved bundle validation uses the target revision's validator after changing only the name", async () => {
   const valid = { format_version: 1, kind: "data_operation", name: "create_tool", description: "synthetic tool", input_schema: { type: "object", additionalProperties: true }, output_schema: { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] }, implementation: { operation: "insert", collection: "records", data_schema: { type: "object", additionalProperties: true } } };
   const invalid = [
