@@ -660,7 +660,10 @@ try {
   await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await showMorePages.waitFor({ state: "visible", timeout: 20000 }).catch(() => { throw new Error("show more pages is not visible in the page section"); });
   await showMorePages.focus();
+  const pagesBeforeMore = Number(await page.locator(".page-list").getAttribute("data-loaded-count"));
+  const morePagesResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
   await page.keyboard.press("Enter");
+  await waitForListChange(".page-list", pagesBeforeMore, morePagesResponse, "show more pages keyboard continuation");
   const secondBatchPage = page.locator('.page-list a[href^="/gate-page-27"]');
   await secondBatchPage.waitFor({ state: "visible", timeout: 20000 });
   await waitFor(async () => await secondBatchPage.evaluate((element) => document.activeElement === element), "focused first new page link");
