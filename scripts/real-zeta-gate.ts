@@ -1098,7 +1098,7 @@ try {
   await waitFor(async () => (await observerPage.locator(".run-state").innerText()).includes("idle"), "takeover retry idle");
   await takeoverField.fill("takeover retry message");
   await takeoverField.press("Enter");
-  await observerPage.getByText("takeover retry message", { exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover controller could not send: ${await observerPage.locator("body").innerText()}`); });
+  await observerPage.locator(".transcript").getByText("takeover retry message", { exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover controller could not send: ${await observerPage.locator("body").innerText()}`); });
   page = observerPage;
 
   if (screenshotDir) {
