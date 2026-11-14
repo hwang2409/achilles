@@ -236,6 +236,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
 
 // Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
 const STUCK_STEER_WAIT_MS = 15_000;
+export class UncertainSteerDeliveryError extends Error {}
 
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
@@ -250,7 +251,7 @@ export async function confirmSteerDelivery(
   track(id);
   for (;;) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("this message may not have been sent yet. it may still arrive with your next message.");
+    if (remaining <= 0) throw new UncertainSteerDeliveryError("this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.");
     let result: unknown;
     try {
       result = await client.request("delivery_status", { delivery_id: id }, { timeoutMs: Math.min(1_000, remaining) });
@@ -261,7 +262,7 @@ export async function confirmSteerDelivery(
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
     if (outcome === "delivered") return id;
-    if (outcome === "dropped") throw new Error("message was not sent");
+    if (outcome === "dropped") throw new Error("this message was not sent. your text is still here.");
     if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
       throw new Error(`steer delivery status: ${status.status}`);
     await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));

@@ -125,7 +125,7 @@ export async function gateTranscript(
   const control = JSON.parse(await Bun.file(controlPath).text());
   await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
   await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
-  await page.getByText("could not steer: no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByText("no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
   if (await field.inputValue() !== "prompt during denied tool turn ending") throw new Error("dropped steer did not keep its draft");
   await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
   await field.press("Enter");
