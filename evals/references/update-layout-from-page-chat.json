@@ -137,7 +137,8 @@
             ]
           },
           "layout_version": 1,
-          "layout_digest": "456bc10578fd62703d7225bf39b1307e1e611cd64b3c9d83da9f87f9f714bb10"
+          "layout_digest": "456bc10578fd62703d7225bf39b1307e1e611cd64b3c9d83da9f87f9f714bb10",
+          "metric_values": []
         }
       },
       {

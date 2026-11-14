@@ -71,10 +71,13 @@ const bundle = (name: string, operation: string, collection: string) => {
   return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, output_schema, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } };
 };
 const CAPABILITIES_SCRIPT = `
-import json
+import inspect, json
 from achilles import tools
-names = getattr(tools, "BUILTIN_TOOL_NAMES", ("create_page", "create_tool"))
-print(json.dumps(list(names)))`;
+from achilles.pages import PageStore
+names = list(getattr(tools, "BUILTIN_TOOL_NAMES", ("create_page", "create_tool")))
+if "tools" in inspect.signature(PageStore.create_page).parameters:
+    names.append("create_page_with_tools")
+print(json.dumps(names))`;
 export async function productCapabilities(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);
   if (process.exitCode !== 0) throw new Error(`capability preflight failed: ${process.stderr}`);

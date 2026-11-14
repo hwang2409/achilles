@@ -93,6 +93,6 @@
     }
   ],
   "goal_capabilities": [
-    "update_layout"
+    "create_page_with_tools"
   ]
 }
