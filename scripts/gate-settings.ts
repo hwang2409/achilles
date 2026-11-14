@@ -42,12 +42,18 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
+  await page.keyboard.press("Control+Comma");
+  const desktopDialog = page.getByRole("dialog", { name: "settings" });
+  await desktopDialog.waitFor({ state: "visible" });
+  if (await desktopDialog.count() !== 1) throw new Error("open while settings was closing created multiple dialogs");
+  await page.keyboard.press("Escape");
+  await desktopDialog.waitFor({ state: "hidden" });
 
   const composer = page.getByRole("textbox", { name: "message" });
   await composer.focus();
   await openSettings(page);
   await page.keyboard.press("Escape");
-  if (!await composer.evaluate((node) => node === document.activeElement)) throw new Error("desktop settings escape did not restore opener focus");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("desktop settings escape did not restore opener focus"); });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
@@ -71,10 +77,10 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.keyboard.press("Escape");
   if (await narrowDialog.isVisible()) throw new Error("narrow settings escape did not close the dialog");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") === "true") throw new Error("settings escape closed the drawer before the dialog");
-  if (!await settingsButton.evaluate((node) => node === document.activeElement)) throw new Error("narrow settings escape did not restore opener focus");
+  await page.waitForFunction(() => document.activeElement?.classList.contains("settings-button")).catch(() => { throw new Error("narrow settings escape did not restore opener focus"); });
   await page.keyboard.press("Escape");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
-  if (!await menuButton.evaluate((node) => node === document.activeElement)) throw new Error("drawer escape did not restore menu focus");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
   await page.setViewportSize({ width: 1440, height: 900 });
   console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, and focus return");
 }

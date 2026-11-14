@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import {
   AUTO_THEME,
   defaultSettings,
@@ -74,7 +74,7 @@ function Row({ title, description, children }: { title: string; description: str
 export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { open: boolean; onClose(): void; serverForcesAsk?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = dialog.current;
     if (!node) return;
     if (open && !node.open) node.showModal();
