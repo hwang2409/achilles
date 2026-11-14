@@ -15,9 +15,10 @@ dir, and verifies every pid, process group, and port is gone on close. it never
 touches your live achilles or zeta instance. the child gets only a fixed env
 allowlist (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`, `SSL_CERT_FILE`,
 `SSL_CERT_DIR`, `NO_PROXY`), so no api-key variable is ever forwarded. the model
-runs on henry's subscription account: provider credentials are read from the
-configured account home (`ZETA_ACCOUNT_HOME`, default your zeta home), with oauth
-compat on. isolation covers run state, not the external account.
+runs on your configured zeta account (subscription login, no API keys): provider
+credentials are read from the configured account home (`ZETA_ACCOUNT_HOME`,
+default your zeta home), with oauth compat on. isolation covers run state, not
+the external account.
 
 ci does not call a real model. it runs with `EVAL_BACKEND=scripted`, which swaps
 in a local offline model (`ollama/qwen3:4b`) so the grading and harness logic are
