@@ -481,13 +481,6 @@ try {
     if (request.method() === "GET" && url.pathname === "/api/pages") pageIndexRequests.push(request.url());
   });
   const modeToggle = page.getByRole("button", { name: "create mode off", exact: true });
-  const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
-  await modeToggle.click();
-  const toggleResult = await toggleResponse;
-  if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
-  if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
-    throw new Error("create mode toggle did not show on");
   await homeMcp(1, "initialize", {
     protocolVersion: "2025-03-26",
     capabilities: {},
@@ -498,7 +491,29 @@ try {
   const catalogRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
   const pageRequestsBeforeStreamingTurn = pageIndexRequests.length;
   await field.fill("catalog refresh");
-  await field.press("Enter");
+  let releaseToggle!: () => void;
+  let toggleReached = false;
+  const toggleRelease = new Promise<void>((resolve) => { releaseToggle = resolve; });
+  const holdToggle = async (route: Route) => { toggleReached = true; await toggleRelease; await route.continue(); };
+  await page.route("**/api/pages/home/create-mode", holdToggle);
+  const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
+  const toggleClick = modeToggle.click();
+  try {
+    await waitFor(async () => toggleReached, "create mode toggle request");
+    const pendingMode = page.getByRole("button", { name: "turning on create mode…", exact: true });
+    await pendingMode.waitFor({ state: "visible" });
+    if (!(await pendingMode.isDisabled())) throw new Error("create mode toggle pending state was not disabled");
+    await field.press("Enter");
+  } finally {
+    releaseToggle();
+    try { await toggleClick; }
+    finally { await page.unroute("**/api/pages/home/create-mode", holdToggle); }
+  }
+  const toggleResult = await toggleResponse;
+  if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
+    throw new Error("create mode toggle did not show on");
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
   if (pageIndexRequests.length !== pageRequestsBeforeStreamingTurn)
     throw new Error(`streaming turn made ${pageIndexRequests.length - pageRequestsBeforeStreamingTurn} extra /api/pages requests`);
@@ -945,6 +960,26 @@ try {
   await page.locator('[data-part="message"]').first().waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
   if (!(await homeIdleWrite).ok()) throw new Error("home idle state write failed before achilles restart");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
+  let failedToggleFinished = false;
+  const failToggle = async (route: Route) => {
+    await route.fulfill({ status: 503, body: "unavailable" });
+    failedToggleFinished = true;
+  };
+  await page.route("**/api/pages/home/create-mode", failToggle);
+  const failedToggleClick = page.getByRole("button", { name: "create mode on", exact: true }).click();
+  try { await waitFor(async () => failedToggleFinished, "failed create mode toggle request"); }
+  finally {
+    try { await failedToggleClick; }
+    finally { await page.unroute("**/api/pages/home/create-mode", failToggle); }
+  }
+  const toggleAlert = page.getByRole("alert").filter({ hasText: "could not update create mode" });
+  await toggleAlert.waitFor({ state: "visible" });
+  const retryToggle = toggleAlert.getByRole("button", { name: "retry", exact: true });
+  if (!(await retryToggle.isVisible())) throw new Error("create mode error retry was not visible above the transcript");
+  await retryToggle.click();
+  await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
