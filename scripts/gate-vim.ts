@@ -254,6 +254,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const restoredStock = page.locator('textarea[aria-label="message"]');
   await restoredStock.waitFor({ state: "visible", timeout: 20_000 });
   if (await restoredStock.inputValue() !== "kept draft") throw new Error("plain reconnect changed the kept draft");
+  const pendingApproval = page.locator('[data-part="approval"][data-state="pending"]');
+  if (await pendingApproval.count()) await pendingApproval.last().getByRole("button", { name: "deny", exact: true }).click();
   await setVim(true);
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "kept draft") throw new Error("switching to vim changed the reconnected draft");
