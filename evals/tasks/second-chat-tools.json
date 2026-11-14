@@ -1,0 +1,85 @@
+{
+  "id": "second-chat-tools",
+  "page_plan": [
+    {
+      "alias": "shared",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "chat-a",
+      "kind": "prompt",
+      "page": "shared",
+      "chat": "chat-a",
+      "prompt": "use list_notes to read the seeded note"
+    },
+    {
+      "id": "chat-b",
+      "kind": "prompt",
+      "page": "shared",
+      "chat": "chat-b",
+      "prompt": "use list_notes to read the seeded note"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_notes",
+        "operation": "list",
+        "collection": "notes"
+      }
+    ],
+    "records": [
+      {
+        "id": "seeded-note",
+        "collection": "notes",
+        "data": {
+          "text": "seeded note"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "chat-a",
+      "type": "successful_result",
+      "page": "shared",
+      "chat": "chat-a",
+      "tool": "achilles__list_notes",
+      "value": {
+        "text": "seeded note"
+      }
+    },
+    {
+      "id": "chat-b",
+      "type": "successful_result",
+      "page": "shared",
+      "chat": "chat-b",
+      "tool": "achilles__list_notes",
+      "value": {
+        "text": "seeded note"
+      }
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "shared"
+    },
+    {
+      "id": "mcp-available",
+      "type": "history_absent",
+      "chat": "chat-a",
+      "text": "MCP server achilles is unavailable"
+    },
+    {
+      "id": "mcp-available-second",
+      "type": "history_absent",
+      "chat": "chat-b",
+      "text": "MCP server achilles is unavailable"
+    }
+  ]
+}
