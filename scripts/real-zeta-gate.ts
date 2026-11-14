@@ -371,6 +371,34 @@ try {
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
   const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
+  if (createdPage.route !== "/reading") throw new Error("create_page did not create /reading");
+  await field.waitFor({ timeout: 20_000 });
+  const chatOne = await homeSessionId();
+  if (!chatOne || chatOne !== first) throw new Error("create_page did not run in the first home chat");
+  await page.keyboard.press("Meta+Shift+O");
+  await waitFor(async () => {
+    const current = await homeSessionId();
+    return Boolean(current && current !== chatOne);
+  }, "new home chat after create_page");
+  const chatTwo = await homeSessionId();
+  if (!chatTwo) throw new Error("second home chat session id missing");
+  const transcriptBeforeDiscovery = await page.locator('[data-part="message"]').count();
+  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await field.fill("list achilles resources, then inspect /reading");
+  await field.press("Enter");
+  const inspectApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "inspect_page" });
+  await inspectApproval.waitFor({ timeout: 20_000 });
+  await inspectApproval.getByRole("button", { name: "approve", exact: true }).click();
+  await page.getByText("new chat tools complete", { exact: true }).waitFor({ timeout: 20_000 });
+  const newChatTranscript = await page.locator('[data-part="message"]').nth(transcriptBeforeDiscovery).innerText();
+  if (newChatTranscript.includes("MCP server achilles is unavailable") || (await page.locator("body").innerText()).includes("MCP server achilles is unavailable"))
+    throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
+  const discoveryControl = JSON.parse(await Bun.file(control).text());
+  if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "discover-resources" && !result.is_error))
+    throw new Error(`mcp_discover resources call did not succeed: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+  if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "inspect-after-discovery" && !result.is_error))
+    throw new Error(`achilles inspect_page call did not succeed after resources discovery: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+  console.log(`two-chat page tools asserted: ${chatOne} created /reading; ${chatTwo} discovered resources and inspected it`);
   const homeInspect = await homeMcp(11, "tools/call", {
     name: "inspect_page",
     arguments: { route: "/reading" },
