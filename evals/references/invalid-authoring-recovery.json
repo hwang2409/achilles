@@ -33,7 +33,7 @@
         "data": {
           "code": "invalid_input",
           "path": "/bundle/name",
-          "expected": "not one of: create_page,create_tool"
+          "expected": "not one of: inspect_page,create_page,create_tool"
         }
       },
       {
@@ -84,7 +84,7 @@
         "success": false,
         "data": {
           "code": "invalid_input",
-          "path": "/bundle/name",
+          "path": "/bundle/input_schema",
           "expected": "not one of: create_page,create_tool"
         }
       },

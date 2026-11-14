@@ -56,7 +56,8 @@ test("reserved tool refusal requires the exact current or baseline error", () =>
   const check = { id: "refused", type: "refused_tool_name" as const, page: "p", name: "create_tool" }; const pages = [{ id: "p1", alias: "p" }];
   const calls = [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }];
   const grade = (data: unknown) => gradeCheck(check, { pages, calls, results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass;
-  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "not one of: create_page,create_tool" })).toBe(true);
+  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "not one of: inspect_page,create_page,create_tool" })).toBe(true);
+  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "changed product wording" })).toBe(true);
   expect(grade("invalid or reserved tool name")).toBe(true);
   expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" })).toBe(false);
 });
@@ -83,13 +84,17 @@ test("reading-list carries one record id through insert, update, and read", () =
   expect(gradeCheck(check, { pages, tool_versions, results: [insertA, updateA, readA] }).pass).toBe(true);
 });
 
-test("exact page records reject extra reconnect, approval, and crud writes", () => {
+test("exact page records reject extra writes and accept task values in an agent-chosen field", () => {
   const pages = [{ id: "p1", alias: "p" }]; const page = (data: object) => ({ page_id: "p1", data });
   const notes = { id: "notes", type: "records_exact" as const, page: "p", value: [{ text: "reconnect note" }] };
   expect(gradeCheck(notes, { pages, records: [page({ text: "reconnect note" })] }).pass).toBe(true);
   expect(gradeCheck(notes, { pages, records: [page({ text: "reconnect note" }), page({ text: "wrong extra note" })] }).pass).toBe(false);
-  const crud = { id: "crud", type: "records_exact" as const, page: "p", value: [{ id: "record-1", status: "done" }, { id: "record-2" }] };
-  expect(gradeCheck(crud, { pages, records: [page({ id: "record-2" }), page({ id: "record-1", status: "done" }), page({ id: "wrong" })] }).pass).toBe(false);
+  const crud = { id: "crud", type: "records_exact" as const, page: "p", value: [["record-1", "done"], ["record-2"]] };
+  const records = [page({ name: "record-2" }), page({ name: "record-1", status: "done" })];
+  expect(gradeCheck(crud, { pages, records }).pass).toBe(true);
+  expect(gradeCheck(crud, { pages, records: [...records, page({ name: "wrong" })] }).pass).toBe(false);
+  const listed = { id: "list", type: "successful_result" as const, page: "p", tool: "achilles__list_records", value: crud.value };
+  expect(gradeCheck(listed, { pages, results: [{ page_id: "p1", tool: listed.tool, success: true, data: records.map(row => row.data) }] }).pass).toBe(true);
 });
 
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {

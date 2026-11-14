@@ -8,7 +8,7 @@
       "create_mode": false
     }
   ],
-  "agent_turns": 12,
+  "agent_turns": 6,
   "steps": [
     {
       "id": "crud",
@@ -44,13 +44,13 @@
       "type": "records_exact",
       "page": "records",
       "value": [
-        {
-          "id": "record-1",
-          "status": "done"
-        },
-        {
-          "id": "record-2"
-        }
+        [
+          "record-1",
+          "done"
+        ],
+        [
+          "record-2"
+        ]
       ]
     },
     {
@@ -59,13 +59,13 @@
       "page": "records",
       "tool": "achilles__list_records",
       "value": [
-        {
-          "id": "record-1",
-          "status": "done"
-        },
-        {
-          "id": "record-2"
-        }
+        [
+          "record-1",
+          "done"
+        ],
+        [
+          "record-2"
+        ]
       ]
     }
   ]
