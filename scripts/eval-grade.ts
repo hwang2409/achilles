@@ -33,6 +33,11 @@ export type EvalSnapshot = {
   turns?: number;
   wall_ms?: number;
   usage?: Record<string, unknown>;
+  tool_policy?: string;
+  observed_catalog?: string[];
+  api_state?: unknown;
+  db_state?: unknown;
+  session_history?: unknown[];
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown };
 
@@ -113,9 +118,26 @@ export function hostToolsGap(snapshot: EvalSnapshot): boolean {
     rows(snapshot, "errors").some((error) => /unknown[- ]?tool|tool not available|disallowed tool/i.test(String(error.code ?? error.message ?? error.error ?? "")));
 }
 
+export type EvalDiagnostics = {
+  first_call_validity: Record<string, boolean>;
+  structured_tool_errors: Array<{ code: unknown; path: unknown; expected: unknown }>;
+  unstructured_tool_errors: number;
+};
+
+export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
+  const first_call_validity: Record<string, boolean> = {};
+  for (const name of ["create_page", "create_tool"]) {
+    const call = rows(snapshot, "calls").find((row) => String(row.tool ?? row.name ?? row.tool_name ?? "").endsWith(name));
+    if (call) first_call_validity[name] = call.error == null && call.is_error !== true && call.success !== false;
+  }
+  const errors = rows(snapshot, "errors");
+  const structured_tool_errors = errors.filter((row) => "code" in row && "path" in row && "expected" in row).map((row) => ({ code: row.code, path: row.path, expected: row.expected }));
+  return { first_call_validity, structured_tool_errors, unstructured_tool_errors: errors.length - structured_tool_errors.length };
+}
+
 export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
   const checks = task.checks.map((check) => gradeCheck(check, snapshot));
   const required = checks.filter((result, i) => task.checks[i].required !== false);
   const score = checks.length ? Math.round((checks.filter((r) => r.pass).length / checks.length) * 100) : 0;
-  return { task_id: task.id, pass: required.every((r) => r.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot) };
+  return { task_id: task.id, pass: required.every((r) => r.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
 }

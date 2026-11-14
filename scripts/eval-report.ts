@@ -35,9 +35,12 @@ export function reportMarkdown(report: EvalReport): string {
     `agent: \`${report.agent.provider}/${report.agent.model}\``,
     `tool policy: \`${report.agent.tool_policy}\``,
     `observed catalog: ${report.agent.observed_catalog.length ? report.agent.observed_catalog.map((name) => `\`${name}\``).join(", ") : "none"}`,
-    `repeats: ${report.repeats}`, "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+    `repeats: ${report.repeats}`, "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: |",
   ];
-  for (const task of report.tasks) lines.push(`| ${task.task_id} | ${task.pass ? "pass" : "fail"} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${typeof task.usage === "string" ? task.usage : "available"} | ${task.host_tools_gap ? "yes" : "no"} |`);
+  for (const task of report.tasks) {
+    const first = task.diagnostics?.first_call_validity ?? {};
+    lines.push(`| ${task.task_id} | ${task.pass ? "pass" : "fail"} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${typeof task.usage === "string" ? task.usage : "available"} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} |`);
+  }
   lines.push("", "## pass rate per task", "", "| task | passes | repeats | pass rate |", "| --- | ---: | ---: | ---: |");
   for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% |`);
   return lines.join("\n") + "\n";

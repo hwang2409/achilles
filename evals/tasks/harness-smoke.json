@@ -1,1 +1,1 @@
-{"id":"harness-smoke","agent_turns":3,"judge_turns":0,"steps":["bound mcp write","approval","paged history"],"checks":["tool policy","turn budget","teardown"]}
+{"id":"harness-smoke","page_plan":[{"alias":"smoke","source":"fixture","bind_chat":true}],"agent_turns":3,"judge":null,"steps":[{"id":"bound-mcp","kind":"prompt","page":"smoke","prompt":"list the notes"}],"checks":[{"id":"tool-policy","type":"no_error","page":"smoke"}]}
