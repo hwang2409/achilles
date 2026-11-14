@@ -27,7 +27,7 @@ export async function applyApprovalMode(client: ZetaClient, sessionId: string, m
   }
 }
 
-export function creationApprovalMode(serverMode: string | null | undefined, autoApproveDefault = true) {
+export function creationApprovalMode(serverMode: string | null | undefined, autoApproveDefault = true): "ask" | "allow" {
   return serverMode === "ask" || !autoApproveDefault ? "ask" : "allow";
 }
 

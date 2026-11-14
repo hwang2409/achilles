@@ -1,119 +1,156 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionLease } from "@fulcrum/zeta";
-import { createAttachmentOwner, createRegisteredSession } from "./useActiveChat";
+import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
+import { attachPage, createAttachmentOwner } from "./useActiveChat";
 
-const lease = (name: string) => ({ name }) as unknown as SessionLease;
+class MemoryStorage {
+  value: string | null = null;
+  getItem() { return this.value; }
+  setItem(_key: string, value: string) { this.value = value; }
+  removeItem() { this.value = null; }
+}
 
-describe("attachment ownership", () => {
-  test.each([
-    { name: "success", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const token = owner.begin("chat-a"); owner.accept(token, lease("a")); owner.clear(); }, releases: 1 },
-    { name: "switch during load", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const old = owner.begin("chat-a"); const next = owner.begin("chat-b"); owner.accept(old, lease("a")); owner.accept(next, lease("b")); owner.clear(); }, releases: 2 },
-    { name: "reconnect during load", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const old = owner.begin("chat-a"); const next = owner.begin("chat-a", true); owner.accept(old, lease("old")); owner.accept(next, lease("new")); owner.clear(); }, releases: 2 },
-    { name: "failure after session settings before acquire", run: (owner: ReturnType<typeof createAttachmentOwner>) => { owner.begin("chat-a"); owner.clear(); }, releases: 0 },
-    { name: "stale after session settings before acquire", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const token = owner.begin("chat-a"); owner.begin("chat-b"); owner.release(token); }, releases: 0 },
-    { name: "failure after acquire during mapping or title", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const token = owner.begin("chat-a"); owner.accept(token, lease("a")); owner.release(token); owner.clear(); }, releases: 1 },
-    { name: "stale after acquire during mapping or title", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const token = owner.begin("chat-a"); owner.accept(token, lease("a")); owner.begin("chat-b"); owner.release(token); }, releases: 1 },
-    { name: "mapping conflict replaces acquire", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const token = owner.begin("chat-a"); owner.accept(token, lease("old")); owner.accept(token, lease("actual")); owner.clear(); }, releases: 2 },
-    { name: "duplicate select", run: (owner: ReturnType<typeof createAttachmentOwner>) => { const first = owner.begin("chat-a"); owner.accept(first, lease("a")); expect(owner.begin("chat-a")).toBe(first); owner.clear(); }, releases: 1 },
-  ])("releases the owned lease exactly once after $name", ({ run, releases }) => {
-    const released: SessionLease[] = [];
-    const owner = createAttachmentOwner((value) => released.push(value));
-    run(owner);
-    expect(released).toHaveLength(releases);
-    expect(new Set(released).size).toBe(releases);
+const input = (client: object): ChatCreationInput => ({ client: client as never, pageId: "home", credential: "synthetic", cwd: "/tmp", mode: "allow" });
+const record = (storage: MemoryStorage) => storage.value && JSON.parse(storage.value)[0] as { sessionId: string; stage: string };
+
+describe("active chat attachment", () => {
+  test.each(["stale after load", "mapping failure after acquire"])("releases its acquired lease exactly once on %s", async (scenario) => {
+    const originalFetch = globalThis.fetch;
+    let releases = 0; let statusRequests = 0; let releaseStatus!: () => void; let finalStatusReached!: () => void;
+    const finalStatus = new Promise<void>((resolve) => { finalStatusReached = resolve; });
+    const statusGate = new Promise<void>((resolve) => { releaseStatus = resolve; });
+    globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json({ id: "home", route: "/", title: "home", zeta_session_id: "s", workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } });
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/session" && init?.method === "PUT") return new Response(null, { status: scenario === "mapping failure after acquire" ? 503 : 200 });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = {
+      features: ["session_mcp_bindings"],
+      request: async (method: string) => {
+        if (method === "resume") return { session: { name: "" } };
+        if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "status") {
+          statusRequests += 1;
+          if (scenario === "stale after load" && statusRequests === 2) { finalStatusReached(); await statusGate; }
+          return { session: { session_id: "s" }, state: "idle" };
+        }
+        throw new Error(`unexpected ${method}`);
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() { releases += 1; } }; },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
+    const owner = createAttachmentOwner();
+    const token = owner.begin("home");
+    const creation = createChatCreationOwner(new MemoryStorage());
+    try {
+      const attachment = attachPage(client as never, "home", null, owner, creation, token);
+      if (scenario === "stale after load") { await finalStatus; owner.begin("other"); releaseStatus(); }
+      await expect(attachment).rejects.toThrow();
+      expect(releases).toBe(1);
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 });
 
-describe("new chat registration", () => {
-  test("registers a committed session even when its caller becomes stale", async () => {
-    const originalFetch = globalThis.fetch;
-    const registered: string[] = [];
-    let current = true;
-    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
-      registered.push(JSON.parse(String(init?.body)).session_id);
+describe("chat creation lifecycle", () => {
+  test.each([
+    { name: "registration fails", fail: "register", retained: "created" },
+    { name: "session settings fail after registration", fail: "session_settings", retained: "registered" },
+    { name: "status fails after registration", fail: "status", retained: "registered" },
+    { name: "settings publish fails after registration", fail: "set_settings", retained: "registered" },
+  ])("retains and resumes the exact session when $name", async ({ fail, retained }) => {
+    const storage = new MemoryStorage();
+    let sessions = 0; let registrations = 0; let mode = "ask"; let failed = false;
+    const client = { request: async (method: string) => {
+      if (method === "new_session") { sessions += 1; return { session: { session_id: "created-on-zeta" } }; }
+      if (method === "session_settings") { if (fail === method && !failed) { failed = true; throw new Error("forced session settings failure"); } return { model: "offline", approval_mode: mode }; }
+      if (method === "status") { if (fail === method && !failed) { failed = true; throw new Error("forced status failure"); } return { state: "idle" }; }
+      if (method === "set_settings") { if (fail === method && !failed) { failed = true; throw new Error("forced settings publish failure"); } mode = "allow"; return { model: "offline", approval_mode: mode }; }
+      throw new Error(`unexpected ${method}`);
+    } };
+    const fetcher = (async () => {
+      registrations += 1;
+      if (fail === "register" && !failed) { failed = true; return new Response(null, { status: 503 }); }
       return new Response(null, { status: 200 });
     }) as typeof fetch;
+
+    await expect(createChatCreationOwner(storage, fetcher).create(input(client))).rejects.toThrow();
+    expect(record(storage)).toEqual({ sessionId: "created-on-zeta", pageId: "home", mode: "allow", stage: retained });
+
+    const restarted = createChatCreationOwner(storage, fetcher);
+    await restarted.resume(input(client));
+    expect(sessions).toBe(1);
+    expect(registrations).toBe(fail === "register" ? 2 : 1);
+    expect(mode).toBe("allow");
+    expect(storage.value).toBeNull();
+  });
+
+  test.each(["new_session", "register", "session_settings", "status", "set_settings"])("a stale caller cannot cancel creation while waiting for %s", async (heldStep) => {
+    const storage = new MemoryStorage();
+    let sessions = 0; let registrations = 0; let mode = "ask"; let reached!: () => void; let release!: () => void;
+    const reachedStep = new Promise<void>((resolve) => { reached = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const hold = async (step: string) => { if (heldStep === step) { reached(); await gate; } };
     const client = { request: async (method: string) => {
-      if (method === "new_session") { current = false; return { session: { session_id: "created-on-zeta" } }; }
+      await hold(method);
+      if (method === "new_session") { sessions += 1; return { session: { session_id: "durable-session" } }; }
+      if (method === "session_settings") return { model: "offline", approval_mode: mode };
+      if (method === "status") return { state: "idle" };
+      if (method === "set_settings") { mode = "allow"; return { model: "offline", approval_mode: mode }; }
+      throw new Error(`unexpected ${method}`);
+    } };
+    const fetcher = (async () => { await hold("register"); registrations += 1; return new Response(null, { status: 200 }); }) as typeof fetch;
+    const owner = createChatCreationOwner(storage, fetcher);
+
+    const operation = owner.create(input(client));
+    await reachedStep;
+    const staleRetry = owner.resume(input(client));
+    expect(staleRetry).toBe(operation);
+    release();
+    await operation;
+    expect(sessions).toBe(1);
+    expect(registrations).toBe(1);
+    expect(mode).toBe("allow");
+    expect(storage.value).toBeNull();
+  });
+
+  test("finishes success and deduplicates double create and double retry", async () => {
+    const storage = new MemoryStorage();
+    let sessions = 0; let registrations = 0; let releaseRegistration!: () => void;
+    const registrationGate = new Promise<void>((resolve) => { releaseRegistration = resolve; });
+    const client = { request: async (method: string) => {
+      if (method === "new_session") { sessions += 1; return { session: { session_id: "only-session" } }; }
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       throw new Error(`unexpected ${method}`);
     } };
-    try {
-      const retained: Array<string | null> = [];
-      const result = await createRegisteredSession(client as never, {
-        credential: "synthetic",
-        page: { id: "home", route: "/", workspace: "/tmp" } as never,
-        serverApprovalMode: "allow",
-      }, (orphan) => retained.push(orphan?.sessionId ?? null));
-      expect(current).toBeFalse();
-      expect(result.created.id).toBe("created-on-zeta");
-      expect(registered).toEqual(["created-on-zeta"]);
-      expect(retained).toEqual(["created-on-zeta", null]);
-    } finally { globalThis.fetch = originalFetch; }
+    const fetcher = (async () => { registrations += 1; await registrationGate; return new Response(null, { status: 200 }); }) as typeof fetch;
+    const owner = createChatCreationOwner(storage, fetcher);
+
+    const first = owner.create(input(client));
+    const duplicate = owner.create(input(client));
+    await Promise.resolve(); await Promise.resolve();
+    expect(sessions).toBe(1);
+    expect(record(storage)?.stage).toBe("created");
+    expect(owner.resume(input(client))).toBe(first);
+    releaseRegistration();
+    const [created, repeated] = await Promise.all([first, duplicate]);
+    expect(created.sessionId).toBe("only-session");
+    expect(repeated.sessionId).toBe("only-session");
+    expect(registrations).toBe(1);
+    expect(storage.value).toBeNull();
   });
 
-  test("finishes registration when the caller becomes stale during register", async () => {
-    const originalFetch = globalThis.fetch;
-    let current = true;
-    globalThis.fetch = (async () => { current = false; return new Response(null, { status: 200 }); }) as typeof fetch;
-    const client = { request: async (method: string) => {
-      if (method === "new_session") return { session: { session_id: "stale-during-register" } };
-      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      throw new Error(`unexpected ${method}`);
-    } };
-    try {
-      const retained: Array<string | null> = [];
-      const result = await createRegisteredSession(client as never, {
-        credential: "synthetic",
-        page: { id: "home", route: "/", workspace: "/tmp" } as never,
-        serverApprovalMode: "allow",
-      }, (orphan) => retained.push(orphan?.sessionId ?? null));
-      expect(current).toBeFalse();
-      expect(result.created.id).toBe("stale-during-register");
-      expect(retained).toEqual(["stale-during-register", null]);
-    } finally { globalThis.fetch = originalFetch; }
-  });
-
-  test("keeps the session registered when settings fail after creation", async () => {
-    const originalFetch = globalThis.fetch;
-    const registered: string[] = [];
-    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
-      registered.push(JSON.parse(String(init?.body)).session_id);
-      return new Response(null, { status: 200 });
-    }) as typeof fetch;
-    const client = { request: async (method: string) => {
-      if (method === "new_session") return { session: { session_id: "registered-before-settings" } };
-      throw new Error("settings failed");
-    } };
-    try {
-      const retained: Array<string | null> = [];
-      await expect(createRegisteredSession(client as never, {
-        credential: "synthetic",
-        page: { id: "home", route: "/", workspace: "/tmp" } as never,
-        serverApprovalMode: "allow",
-      }, (orphan) => retained.push(orphan?.sessionId ?? null))).rejects.toThrow("settings failed");
-      expect(registered).toEqual(["registered-before-settings"]);
-      expect(retained).toEqual(["registered-before-settings", null]);
-    } finally { globalThis.fetch = originalFetch; }
-  });
-
-  test("retains the exact session after both registration attempts fail", async () => {
-    const originalFetch = globalThis.fetch;
-    let registrations = 0;
-    globalThis.fetch = (async () => { registrations += 1; return new Response(null, { status: 503 }); }) as typeof fetch;
-    const client = { request: async (method: string) => {
-      if (method === "new_session") return { session: { session_id: "kept-on-zeta" } };
-      throw new Error(`unexpected ${method}`);
-    } };
-    try {
-      const retained: Array<string | null> = [];
-      await expect(createRegisteredSession(client as never, {
-        credential: "synthetic",
-        page: { id: "home", route: "/", workspace: "/tmp" } as never,
-        serverApprovalMode: "allow",
-      }, (orphan) => retained.push(orphan?.sessionId ?? null))).rejects.toThrow("could not save chat (503)");
-      expect(registrations).toBe(2);
-      expect(retained).toEqual(["kept-on-zeta"]);
-    } finally { globalThis.fetch = originalFetch; }
+  test("ignores invalid durable records field by field", () => {
+    const storage = new MemoryStorage();
+    storage.value = JSON.stringify([
+      { sessionId: "", pageId: "home", mode: "allow", stage: "created" },
+      { sessionId: "s", pageId: 4, mode: "allow", stage: "created" },
+      { sessionId: "s", pageId: "home", mode: "unsafe", stage: "created" },
+      { sessionId: "s", pageId: "home", mode: "allow", stage: "unknown" },
+    ]);
+    expect(createChatCreationOwner(storage).pending("home")).toBeNull();
   });
 });

@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
-import { applyApprovalMode, loadSession, openHomeSession } from "./zeta/session";
+import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
+import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession } from "./zeta/session";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type Attachment = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null; title: string };
 type ReadyState = Attachment & { phase: "ready" };
 type State = { phase: "loading" } | { phase: "error"; error: string } | ReadyState;
-type Orphan = { sessionId: string; pageId: string; route: string };
+type RetryCreation = { input: ChatCreationInput; route: string; pending: PendingChat };
 
 export function createAttachmentOwner(release: (lease: SessionLease) => void = (lease) => lease.release()) {
   let attempt = 0;
@@ -71,7 +72,7 @@ type AttachmentOwner = ReturnType<typeof createAttachmentOwner>;
 class StaleAttachment extends Error {}
 const requireCurrent = (owner: AttachmentOwner, token: number) => { if (!owner.current(token)) throw new StaleAttachment(); };
 
-async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, token: number): Promise<Attachment> {
+export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number): Promise<Attachment> {
   let ownsLease = false;
   try {
     const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); requireCurrent(owner, token);
@@ -81,6 +82,10 @@ async function attachPage(client: ZetaClient, key: string, selectedId: string | 
     const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
     if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
     const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
+    const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode) };
+    try { await creation.resume(creationInput); }
+    catch (caught) { throw new PendingCreationError(caught, creationInput, page.route === "/" ? "/" : page.route, creation.pending(page.id)); }
+    requireCurrent(owner, token);
     const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
     if (selectedId && selectedChat?.page_id !== page.id) throw new Error("chat not found on this page");
     const serverApprovalMode = page.approval_mode ?? null;
@@ -120,44 +125,37 @@ const routeWithChat = (route: string, sessionId: string) => {
   return `${url.pathname}${url.search}`;
 };
 
-async function registerChat(orphan: Orphan) {
-  const response = await fetch(`/api/pages/${orphan.pageId}/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: orphan.sessionId }) });
-  if (!response.ok) throw new Error(`could not save chat (${response.status})`);
-}
-
-type NewChatSource = Pick<Attachment, "credential" | "page" | "serverApprovalMode">;
-export async function createRegisteredSession(client: ZetaClient, current: NewChatSource, retain: (orphan: Orphan | null) => void) {
-  const held: { pending: Orphan | null } = { pending: null };
-  const created = await openHomeSession(client, null, current.credential, current.page.workspace, current.serverApprovalMode, true, async (sessionId) => {
-    const pending = { sessionId, pageId: current.page.id, route: current.page.route === "/" ? "/" : current.page.route };
-    held.pending = pending;
-    retain(pending);
-    try { await registerChat(pending); } catch { await registerChat(pending); }
-    retain(null);
-  });
-  if (!held.pending) throw new Error("zeta did not retain the created session id");
-  return { created, pending: held.pending };
+class PendingCreationError extends Error {
+  constructor(caught: unknown, readonly input: ChatCreationInput, readonly route: string, readonly pending: PendingChat | null) {
+    super(attachmentError(caught));
+  }
 }
 
 export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
   const [state, setState] = useState<State>({ phase: "loading" });
-  const [orphan, setOrphan] = useState<Orphan | null>(null);
   const [orphanError, setOrphanError] = useState<string | null>(null);
   const [listRefresh, setListRefresh] = useState(0);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
   const owner = useRef(createAttachmentOwner());
+  const creation = useRef(createChatCreationOwner());
+  const retryCreation = useRef<RetryCreation | null>(null);
 
   useEffect(() => {
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
-    void attachPage(client, keyFromPath(), selectedId, owner.current, token).then((next) => {
+    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token).then((next) => {
       if (!owner.current.current(token)) return;
       setState({ phase: "ready", ...next });
-    }).catch((caught) => { if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) }); });
+    }).catch((caught) => {
+      if (caught instanceof PendingCreationError && caught.pending && owner.current.current(token)) {
+        retryCreation.current = { input: caught.input, route: caught.route, pending: caught.pending };
+        setOrphanError(`${caught.message}. the zeta session was kept.`);
+      } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
+    });
     return () => owner.current.clear(token);
   }, [client, connected, selectedId]);
 
@@ -185,46 +183,39 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (waiting) selectChat(waiting);
   }, [selectChat]);
 
-  const finishRegistration = useCallback(async (pending: Orphan) => {
-    try {
-      await registerChat(pending);
-      setOrphan(null); setOrphanError(null);
-      owner.current.clear(); setState({ phase: "loading" });
-      history.pushState({}, "", routeWithChat(pending.route, pending.sessionId));
-      setFocusSessionId(pending.sessionId); setSelectedId(pending.sessionId); setListRefresh((value) => value + 1);
-    } catch (caught) { setOrphanError(`${attachmentError(caught)}. the zeta session was kept.`); }
-  }, []);
-
   const newChat = useCallback(async () => {
     if (!client || state.phase !== "ready") return;
     const token = owner.current.begin(`new:${state.page.id}`, true);
     const current = state;
     setState({ phase: "loading" });
-    await (async () => {
-      let pending: Orphan | null = null;
-      let registered = false;
-      try {
-        const result = await createRegisteredSession(client, current, (retained) => {
-          pending = retained ?? pending;
-          registered = !retained;
-          setOrphan((value) => retained ?? (value?.sessionId === pending?.sessionId ? null : value));
-          if (!retained) { setOrphanError(null); setListRefresh((value) => value + 1); }
-        });
-        const created = result.created;
-        pending = result.pending;
-        if (!owner.current.current(token)) return;
-        history.pushState({}, "", routeWithChat(pending.route, pending.sessionId));
-        setFocusSessionId(pending.sessionId); setSelectedId(pending.sessionId);
-        return;
-      } catch (caught) {
-        if (pending && !registered) setOrphanError(`${attachmentError(caught)}. the zeta session was kept.`);
-        else if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
-        return;
-      }
-    })();
+    const route = current.page.route === "/" ? "/" : current.page.route;
+    const input = { client, pageId: current.page.id, credential: current.credential, cwd: current.page.workspace, mode: creationApprovalMode(current.serverApprovalMode) };
+    try {
+      const pending = await creation.current.create(input);
+      retryCreation.current = null; setOrphanError(null); setListRefresh((value) => value + 1);
+      if (!owner.current.current(token)) return;
+      history.pushState({}, "", routeWithChat(route, pending.sessionId));
+      setFocusSessionId(pending.sessionId); setSelectedId(pending.sessionId);
+    } catch (caught) {
+      const pending = creation.current.pending(current.page.id);
+      if (pending) {
+        retryCreation.current = { input, route, pending };
+        setOrphanError(`${attachmentError(caught)}. the zeta session was kept.`);
+      } else if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
+    }
   }, [client, state]);
 
-  const retryOrphan = useCallback(() => { if (orphan) void finishRegistration(orphan); }, [finishRegistration, orphan]);
+  const retryOrphan = useCallback(() => {
+    const retry = retryCreation.current;
+    if (!retry) return;
+    void creation.current.resume(retry.input)?.then((pending) => {
+      if (!pending) return;
+      retryCreation.current = null; setOrphanError(null); setListRefresh((value) => value + 1);
+      owner.current.clear(); setState({ phase: "loading" });
+      history.pushState({}, "", routeWithChat(retry.route, pending.sessionId));
+      setFocusSessionId(pending.sessionId); setSelectedId(pending.sessionId);
+    }).catch((caught) => setOrphanError(`${attachmentError(caught)}. the zeta session was kept.`));
+  }, []);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     if (!owner.current.current(token)) return;
