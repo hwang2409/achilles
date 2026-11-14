@@ -44,8 +44,22 @@ test("page counts use the resolved id while other collections stay page-owned", 
   expect(gradeCheck({ id: "tools", type: "count", page: "p", name: "tools", count: 1 }, { pages, tools: [{ id: "t1", page_id: "p2" }] }).pass).toBe(false);
 });
 
-test("reserved tool refusal accepts structured and baseline text errors", () => {
+test("reserved tool refusal requires the exact current or baseline error", () => {
   const check = { id: "refused", type: "refused_tool_name" as const, page: "p", name: "create_tool" }; const pages = [{ id: "p1", alias: "p" }];
   const calls = [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }];
-  for (const data of [{ code: "invalid", path: "bundle.name", expected: "non-reserved" }, "invalid or reserved tool name"]) expect(gradeCheck(check, { pages, calls, results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass).toBe(true);
+  const grade = (data: unknown) => gradeCheck(check, { pages, calls, results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass;
+  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "not one of: create_page,create_tool" })).toBe(true);
+  expect(grade("invalid or reserved tool name")).toBe(true);
+  expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" })).toBe(false);
+});
+
+test("workflow, approval, and reconnect checks use page-local structured evidence", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  expect(gradeCheck({ id: "ops", type: "operations", page: "p", value: ["insert", "update"] }, { pages, tool_versions: [{ page_id: "p1", collection: "books", operation: "insert" }, { page_id: "p1", collection: "books", operation: "update" }] }).pass).toBe(true);
+  expect(gradeCheck({ id: "ops", type: "operations", page: "p", value: ["insert", "update"] }, { pages, tool_versions: [{ page_id: "p1", collection: "a", operation: "insert" }, { page_id: "p1", collection: "b", operation: "update" }] }).pass).toBe(false);
+  const approval = { id: "approval", type: "approval" as const, page: "p", tool: "achilles__add_note", count: 1 };
+  expect(gradeCheck(approval, { pages, approvals: [{ page_id: "p1", tool: "achilles__other" }] }).pass).toBe(false);
+  expect(gradeCheck(approval, { pages, approvals: [{ page_id: "p1", tool: "achilles__add_note" }] }).pass).toBe(true);
+  expect(gradeCheck(approval, { pages, approvals: [{ page_id: "p1", tool: "achilles__add_note" }, { page_id: "p1", tool: "achilles__add_note" }] }).pass).toBe(false);
+  expect(gradeCheck({ id: "resume", type: "reconnect", page: "p" }, { pages, reconnects: [{ page_id: "p1", original_session_id: "s", resumed_session_id: "s", history_continuity: true }] }).pass).toBe(true);
 });

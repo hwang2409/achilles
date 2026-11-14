@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "record" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "history_absent" | "layout_contains";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "approval" | "reconnect" | "record" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "history_absent" | "layout_contains";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -19,14 +19,15 @@ export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>; tools?: Array<Record<string, unknown>>; assignments?: Array<Record<string, unknown>>;
   records?: Array<Record<string, unknown>>; layouts?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
   calls?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; approvals?: Array<Record<string, unknown>>;
-  errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; related_page_ids?: string[];
+  errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
+  reconnects?: Array<Record<string, unknown>>; related_page_ids?: string[];
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "record", "successful_result", "no_error", "browser_text", "prompt", "same_page", "history_absent", "layout_contains"]);
-const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "errors", "browser"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "approval", "reconnect", "record", "successful_result", "no_error", "browser_text", "prompt", "same_page", "history_absent", "layout_contains"]);
+const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
 
@@ -53,13 +54,15 @@ function validatePages(value: unknown): PagePlan[] {
 }
 
 function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string): TaskStep[] {
-  if (!Array.isArray(value) || !value.length) throw new Error("steps must not be empty"); const inheritsPrompt = value.length === 1 && typeof taskPrompt === "string";
+  if (!Array.isArray(value) || !value.length) throw new Error("steps must not be empty");
+  const missingPrompts = value.filter(item => item && typeof item === "object" && ["prompt", "annotate"].includes((item as TaskStep).kind) && !(item as TaskStep).prompt).length;
+  if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
     own(item, ["id", "page", "chat", "prompt", "kind"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
     const needsPrompt = step.kind === "prompt" || step.kind === "annotate"; const hasPrompt = typeof step.prompt === "string" && step.prompt.length > 0;
-    if ((!needsPrompt && hasPrompt) || (needsPrompt && !hasPrompt && !inheritsPrompt) || (hasPrompt && inheritsPrompt)) throw new Error(`steps[${i}] has invalid prompt source`);
+    if (!needsPrompt && hasPrompt) throw new Error(`steps[${i}] has invalid prompt source`);
     return step;
   });
 }
@@ -69,6 +72,8 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (needsPage && typeof check.page !== "string") throw new Error(`checks[${i}] needs page`);
   if (check.type === "count" && (!identifier(check.name) || !SNAPSHOT_COLLECTIONS.has(check.name!) || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs a known collection and count`);
   if (["tool", "tool_absent", "refused_tool_name"].includes(check.type) && !identifier(check.name)) throw new Error(`checks[${i}] needs tool name`);
+  if (check.type === "operations" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => ["insert", "update", "list", "get"].includes(String(value))))) throw new Error(`checks[${i}] needs operation kinds`);
+  if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
   if (["record", "layout_contains"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
   if (["browser_text", "prompt", "history_absent"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
@@ -117,8 +122,15 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   tool_absent: ({ check, snapshot }) => !rows(snapshot, "tools").some(row => row.name === check.name),
   refused_tool_name: ({ check, snapshot, page }) => {
     const call = rows(snapshot, "calls").find(row => row.page_id === page && row.tool === "achilles__create_tool" && structurallyContains(row.arguments, { bundle: { name: check.name } }));
-    return Boolean(call && rows(snapshot, "results").some(row => row.page_id === page && row.call_id === call.id && row.success === false));
+    const refusal = rows(snapshot, "results").find(row => row.page_id === page && row.call_id === call?.id && row.success === false)?.data;
+    return refusal === "invalid or reserved tool name" || structurallyContains(refusal, { code: "invalid_input", path: "/bundle/name", expected: "not one of: create_page,create_tool" });
   },
+  operations: ({ check, owned }) => {
+    const versions = owned("tool_versions"); const required = check.value as string[];
+    return [...new Set(versions.map(row => row.collection))].some(collection => required.every(operation => versions.some(row => row.collection === collection && row.operation === operation)));
+  },
+  approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
+  reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
   record: ({ check, owned }) => owned("records").some(row => structurallyContains(row.data ?? row, check.value)),
   successful_result: ({ check, snapshot, page }) => rows(snapshot, "results").some(row => row.page_id === page && successful(row) && row.tool === check.tool && (!check.chat || row.chat_id === check.chat) && (check.value === undefined || structurallyContains(row.data ?? row.result, check.value))),
   no_error: ({ check, snapshot, page }) => rows(snapshot, "errors").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat)).length === 0,
@@ -130,7 +142,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
 };
 export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResult {
   const expected = check.value ?? check.count ?? check.text ?? true; const page = expectedPageId(snapshot, check.page); const owned = (type: keyof EvalSnapshot) => rows(snapshot, type).filter(row => row.page_id === page || row.pageId === page);
-  const actual = CHECK_GRADERS[check.type]({ check, snapshot, page, owned }); const pass = check.type === "count" ? actual === expected : Boolean(actual);
+  const actual = CHECK_GRADERS[check.type]({ check, snapshot, page, owned }); const pass = ["count", "approval"].includes(check.type) ? actual === expected : Boolean(actual);
   return { id: check.id, pass, expected, actual, evidence: { type: check.type, page } };
 }
 

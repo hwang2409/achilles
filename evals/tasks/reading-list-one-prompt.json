@@ -22,6 +22,13 @@
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat"
+    },
+    {
+      "id": "use-reading-list",
+      "kind": "prompt",
+      "page": "reading",
+      "chat": "reading-chat",
+      "prompt": "use this page's tools to add a book titled Synthetic Book with status unread, update its status to read, then list the books"
     }
   ],
   "checks": [
@@ -31,25 +38,25 @@
       "page": "reading"
     },
     {
-      "id": "add_book",
-      "type": "tool",
+      "id": "workflow",
+      "type": "operations",
       "page": "reading",
-      "name": "add_book"
+      "value": [
+        "insert",
+        "update"
+      ]
     },
     {
-      "id": "update_book",
-      "type": "tool",
+      "id": "record",
+      "type": "record",
       "page": "reading",
-      "name": "update_book"
+      "value": {
+        "title": "Synthetic Book",
+        "status": "read"
+      }
     },
     {
-      "id": "list_books",
-      "type": "tool",
-      "page": "reading",
-      "name": "list_books"
-    },
-    {
-      "id": "list-layout",
+      "id": "layout",
       "type": "layout_contains",
       "page": "reading",
       "value": {
@@ -57,10 +64,16 @@
       }
     },
     {
-      "id": "visible-title",
+      "id": "visible-book",
       "type": "browser_text",
       "page": "reading",
-      "text": "Reading List"
+      "text": "Synthetic Book"
+    },
+    {
+      "id": "visible-status",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "read"
     },
     {
       "id": "same-page",

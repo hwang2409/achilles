@@ -48,17 +48,26 @@
   },
   "checks": [
     {
-      "id": "mutation",
-      "type": "count",
+      "id": "record",
+      "type": "record",
       "page": "reconnect",
-      "name": "records",
-      "count": 1
+      "value": {
+        "text": "reconnect note"
+      }
     },
     {
       "id": "result",
       "type": "successful_result",
       "page": "reconnect",
-      "tool": "achilles__list_notes"
+      "tool": "achilles__list_notes",
+      "value": {
+        "text": "reconnect note"
+      }
+    },
+    {
+      "id": "continuity",
+      "type": "reconnect",
+      "page": "reconnect"
     },
     {
       "id": "no-errors",

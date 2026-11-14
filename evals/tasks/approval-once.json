@@ -32,17 +32,27 @@
   "checks": [
     {
       "id": "approval",
-      "type": "count",
+      "type": "approval",
       "page": "approval",
-      "name": "approvals",
+      "tool": "achilles__add_note",
       "count": 1
     },
     {
-      "id": "record",
-      "type": "count",
+      "id": "result",
+      "type": "successful_result",
       "page": "approval",
-      "name": "records",
-      "count": 1
+      "tool": "achilles__add_note",
+      "value": {
+        "text": "approved note"
+      }
+    },
+    {
+      "id": "record",
+      "type": "record",
+      "page": "approval",
+      "value": {
+        "text": "approved note"
+      }
     },
     {
       "id": "no-errors",
