@@ -55,16 +55,29 @@ test("schema roundtrip accepts an agent-designed title field", () => {
   expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
 });
 
-test("schema-relative updates infer the changed field and keep identity stable", () => {
-  const check = { id: "update", type: "updated_record" as const, page: "p", chat: "c", value: { before: ["Synthetic Book", "queued"], after: ["Synthetic Book", "done"] } };
+const readingTransition = { id: "update", type: "updated_record" as const, page: "p", chat: "c", value: "Synthetic Book", transition: { before: ["unread", "want_to_read"], after: ["read", "finished"] } };
+const readingSnapshot = (inserted: Record<string, string>, final: Record<string, string>) => {
   const pages = [{ id: "p1", alias: "p" }];
-  const schema = { type: "object", properties: { title: { type: "string" }, progress: { type: "string", enum: ["queued", "done"] }, format: { type: "string", enum: ["paperback", "ebook"] } } };
+  const properties = Object.fromEntries(Object.keys(inserted).filter(field => field !== "record_id").map(field => [field, { type: "string" }]));
+  const schema = { type: "object", properties };
   const tool_versions = ["insert", "update", "list"].map(operation => ({ page_id: "p1", name: `${operation}_book`, collection: "books", operation, data_schema: schema }));
-  const result = (tool: string, title: string, progress: string, list = false) => ({ page_id: "p1", chat_id: "c", tool: `achilles__${tool}_book`, success: true, data: list ? { records: [{ record_id: "book-1", title, progress, format: "paperback" }] } : { record_id: "book-1", title, progress, format: "paperback" } });
-  const inserted = result("insert", "Synthetic Book", "queued");
-  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Synthetic Book", "done"), result("list", "Synthetic Book", "done", true)] }).pass).toBe(true);
-  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Other", "done"), result("list", "Other", "done", true)] }).pass).toBe(false);
-  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Synthetic Book", "queued"), result("list", "Synthetic Book", "queued", true)] }).pass).toBe(false);
+  const result = (operation: string, data: object) => ({ page_id: "p1", chat_id: "c", tool: `achilles__${operation}_book`, success: true, data });
+  return { pages, tool_versions, results: [result("insert", inserted), result("update", final), result("list", { records: [final] })] };
+};
+
+test("reading transition accepts schema-shaped want_to_read to finished and unread to read", () => {
+  expect(gradeCheck(readingTransition, readingSnapshot({ record_id: "book-1", title: "Synthetic Book", progress: "want_to_read" }, { record_id: "book-1", title: "Synthetic Book", progress: "finished" })).pass).toBe(true);
+  expect(gradeCheck(readingTransition, readingSnapshot({ record_id: "book-1", title: "Synthetic Book", state: "unread" }, { record_id: "book-1", title: "Synthetic Book", state: "read" })).pass).toBe(true);
+});
+
+test("reading transition rejects unrelated, unmapped, identity, and split field changes", () => {
+  const grade = (inserted: Record<string, string>, final: Record<string, string>) => gradeCheck(readingTransition, readingSnapshot(inserted, final));
+  expect(grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread", format: "paper" }, { record_id: "book-1", title: "Synthetic Book", progress: "unread", format: "ebook" }).pass, "an unrelated format change is not the requested transition").toBe(false);
+  const unmapped = grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread" }, { record_id: "book-1", title: "Synthetic Book", progress: "bogus" });
+  expect(unmapped.pass, "an unmapped final value is not the requested transition").toBe(false);
+  expect(unmapped.reason).toBe("unmapped_after_value: progress=unread->bogus");
+  expect(grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread" }, { record_id: "book-1", title: "Other", progress: "read" }).pass, "changing the identity cannot satisfy the transition").toBe(false);
+  expect(grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread", completion: "pending" }, { record_id: "book-1", title: "Synthetic Book", progress: "unread", completion: "read" }).pass, "before and after values must use one field").toBe(false);
 });
 
 test("page-aware approvals and strict route checks do not accept other pages", () => {
@@ -99,7 +112,7 @@ test("record-crud list matching is order-independent, distinct, and complete", (
 
 test("reading-list carries one record id through insert, update, and read", () => {
   const pages = [{ id: "p1", alias: "p" }]; const final = { title: "Synthetic Book", status: "read" };
-  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: { before: ["Synthetic Book", "unread"], after: ["Synthetic Book", "read"] } };
+  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: "Synthetic Book", transition: { before: ["unread"], after: ["read"] } };
   const data_schema = { type: "object", properties: { title: { type: "string" }, status: { type: "string" } } };
   const tool_versions = [{ page_id: "p1", name: "add_book", collection: "books", operation: "insert", data_schema }, { page_id: "p1", name: "update_book", collection: "books", operation: "update", data_schema }, { page_id: "p1", name: "list_books", collection: "books", operation: "list", data_schema }];
   const result = (tool: string, record_id: string, data: object) => ({ page_id: "p1", chat_id: "reading-chat", tool, success: true, data: { ...data, record_id } });

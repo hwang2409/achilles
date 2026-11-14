@@ -6,6 +6,7 @@ export type TaskCheck = {
   chat?: string;
   name?: string;
   value?: unknown;
+  transition?: { before: string[]; after: string[] };
   count?: number;
   text?: string;
   tool?: string;
@@ -23,7 +24,7 @@ export type EvalSnapshot = {
   reconnects?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
 };
-export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown };
+export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
 const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "layout_update", "no_unrecovered_error"]);
@@ -79,10 +80,9 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "records_exact" && !Array.isArray(check.value)) throw new Error(`checks[${i}] needs a record array`);
   if (check.type === "schema_roundtrip" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string"))) throw new Error(`checks[${i}] needs string values`);
   if (check.type === "updated_record") {
-    if (typeof check.chat !== "string" || !check.value || typeof check.value !== "object" || Array.isArray(check.value)) throw new Error(`checks[${i}] needs chat and transition`);
-    own(check.value as object, ["before", "after"], `checks[${i}].value`); const transition = check.value as Record<string, unknown>;
-    if (transition.before === undefined || transition.after === undefined) throw new Error(`checks[${i}] needs before and after`);
-    if ([transition.before, transition.after].some(value => Array.isArray(value) && (!(value as unknown[]).length || !(value as unknown[]).every(item => typeof item === "string")))) throw new Error(`checks[${i}] transition arrays need string values`);
+    if (typeof check.chat !== "string" || typeof check.value !== "string" || !check.transition) throw new Error(`checks[${i}] needs chat, identity value, and transition`);
+    own(check.transition, ["before", "after"], `checks[${i}].transition`);
+    if ([check.transition.before, check.transition.after].some(values => !Array.isArray(values) || !values.length || !values.every(value => typeof value === "string"))) throw new Error(`checks[${i}] transition sets need string values`);
   }
   if (["browser_text", "prompt"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
@@ -92,7 +92,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "transition", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -214,6 +214,9 @@ function matchValueRows(actual: unknown, expected: string[][]) {
 }
 
 type GradeContext = { check: TaskCheck; snapshot: EvalSnapshot; page: unknown; owned(type: keyof EvalSnapshot): Array<Record<string, unknown>> };
+type TransitionFailure = { reason: string; field: string; before: unknown; after: unknown };
+const normalizeTransitionValue = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, "");
+const transitionFailure = (reason: string, field: string, before: unknown, after: unknown): TransitionFailure => ({ reason, field, before, after });
 const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   page_exists: ({ check, snapshot, page }) => rows(snapshot, "pages").some(row => row.id === page && (!check.route || row.route === check.route)),
   count: ({ check, snapshot, page, owned }) => check.name === "pages" ? rows(snapshot, "pages").filter(row => row.id === page).length : owned(check.name as keyof EvalSnapshot).length,
@@ -233,25 +236,37 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   },
   updated_record: ({ check, snapshot, page, owned }) => {
     const versions = owned("tool_versions"); const results = rows(snapshot, "results").filter(row => row.page_id === page && row.chat_id === check.chat && successful(row));
-    const transition = check.value as { before: unknown; after: unknown };
-    const afterValues = scalarValues(transition.after);
-    const identity = scalarValues(transition.before).find(value => afterValues.includes(value));
-    if (!identity) return false;
-    return [...new Set(versions.map(row => row.collection))].some(collection => {
+    const identity = check.value as string; const before = new Set(check.transition!.before.map(normalizeTransitionValue)); const after = new Set(check.transition!.after.map(normalizeTransitionValue));
+    let failure: TransitionFailure | undefined;
+    for (const collection of new Set(versions.map(row => row.collection))) {
       const collectionVersions = versions.filter(version => version.collection === collection);
       const fields = [...new Set(collectionVersions.flatMap(version => [...schemaStringFields(version)]))];
       const toolResults = (operation: string) => collectionVersions.filter(version => version.operation === operation).flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => matchingObjects(row.data ?? row.result, {})));
-      return toolResults("insert").some(inserted => {
+      for (const inserted of toolResults("insert")) {
         const identityField = fields.find(field => inserted[field] === identity);
-        if (!identityField || typeof inserted.record_id !== "string" || !inserted.record_id.length) return false;
+        if (!identityField || typeof inserted.record_id !== "string" || !inserted.record_id.length) continue;
         const updates = toolResults("update").filter(row => row.record_id === inserted.record_id && (!(identityField in row) || row[identityField] === identity));
-        const reads = toolResults("list").filter(row => row.record_id === inserted.record_id && row[identityField] === identity);
-        return reads.some(read => {
-          const changed = fields.filter(field => field !== identityField && field in inserted && field in read && !Object.is(inserted[field], read[field]));
-          return changed.length > 0 && updates.length > 0;
-        });
-      });
-    });
+        const reads = toolResults("list").filter(row => row.record_id === inserted.record_id);
+        for (const read of reads) {
+          if (read[identityField] !== identity) {
+            failure ??= transitionFailure(`identity_changed: ${identityField}=${String(inserted[identityField])}->${String(read[identityField])}`, identityField, inserted[identityField], read[identityField]);
+            continue;
+          }
+          if (!updates.length) continue;
+          const transitionFields = fields.filter(field => field !== identityField && typeof inserted[field] === "string" && before.has(normalizeTransitionValue(inserted[field] as string)));
+          for (const field of transitionFields) {
+            const finalValue = read[field];
+            if (typeof finalValue === "string" && after.has(normalizeTransitionValue(finalValue))) return true;
+            failure ??= transitionFailure(`unmapped_after_value: ${field}=${String(inserted[field])}->${String(finalValue)}`, field, inserted[field], finalValue);
+          }
+          if (!transitionFields.length) {
+            const field = fields.find(candidate => candidate !== identityField && candidate in inserted && candidate in read && !Object.is(inserted[candidate], read[candidate]));
+            if (field) failure ??= transitionFailure(`transition_mismatch: ${field}=${String(inserted[field])}->${String(read[field])}`, field, inserted[field], read[field]);
+          }
+        }
+      }
+    }
+    return failure ?? false;
   },
   schema_roundtrip: ({ check, snapshot, page, owned }) => {
     const values = check.value as string[]; const results = rows(snapshot, "results").filter(row => row.page_id === page && successful(row)); const records = owned("records");
@@ -292,8 +307,10 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
 };
 export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResult {
   const expected = check.value ?? check.count ?? check.text ?? true; const page = expectedPageId(snapshot, check.page); const owned = (type: keyof EvalSnapshot) => rows(snapshot, type).filter(row => row.page_id === page || row.pageId === page);
-  const actual = CHECK_GRADERS[check.type]({ check, snapshot, page, owned }); const pass = ["count", "approval"].includes(check.type) ? actual === expected : Boolean(actual);
-  return { id: check.id, pass, expected, actual, evidence: { type: check.type, page } };
+  const result = CHECK_GRADERS[check.type]({ check, snapshot, page, owned });
+  const failure = result && typeof result === "object" && "reason" in result ? result as TransitionFailure : undefined;
+  const pass = failure ? false : ["count", "approval"].includes(check.type) ? result === expected : Boolean(result);
+  return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...(failure ? { transition: { field: failure.field, before: failure.before, after: failure.after } } : {}) }, ...(failure ? { reason: failure.reason } : {}) };
 }
 
 export function hostToolsGap(snapshot: EvalSnapshot): boolean {
