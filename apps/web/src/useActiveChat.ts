@@ -3,6 +3,7 @@ import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
+import { draftStore } from "./draftStore";
 import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./zeta/session";
 
@@ -272,6 +273,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
       const result = awaited ? await awaited : null;
       if (blockedWithoutRun || (result && (result.generation !== mine || result.cancelled || result.outcome.blocked))) throw new Error("send is off until page tools refresh. retry create mode.");
     },
+    staleSession() { return retry?.input.sessionId ?? null; },
     reset() {
       generation += 1;
       if (active) active.cancelled = true;
@@ -370,8 +372,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const applyPendingCreateMode = useCallback(async (ready: ReadyState, enabled: boolean) => {
     if (!client) throw new Error("zeta is not connected");
     const result = await modeToggle.current.run({ client, pageId: ready.page.id, sessionId: ready.sessionId, enabled });
-    if (result.createMode === null) throw new Error(result.error ?? "could not apply create mode");
-    return { ...ready, page: { ...ready.page, create_mode: result.createMode } };
+    // A failed tool refresh keeps the new chat: the inline notice offers retry instead of a full-page error.
+    if (result.blocked && modeToggle.current.staleSession() === ready.sessionId) { setToggleError(result.error); setToggleBlocked(true); setToggleRetryable(result.retryable); }
+    return { ...ready, page: { ...ready.page, create_mode: result.createMode ?? !enabled } };
   }, [client]);
 
   const publishReady = useCallback((ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
@@ -486,12 +489,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setState((current) => current.phase === "ready" ? update(current) : current);
   }, []);
 
-  const createFirstChat = useCallback(async (empty: EmptyState, token: number) => {
+  const createFirstChat = useCallback(async (empty: EmptyState, token: number, text: string) => {
     if (!client) throw new Error("zeta is not connected");
     const focusClaim = claimComposerFocus();
     setCreationPageId(empty.page.id);
     try {
-      let handedOff: ReadyState | null = null;
+      let handedOff = null as ReadyState | null;
       const attached = await attachPage(
         client,
         keyFromPath(),
@@ -504,6 +507,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         async (ready) => { handedOff = ready; },
       );
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
+      if (modeToggle.current.staleSession() === attached.sessionId) { draftStore.set(attached.sessionId, text); draftStore.set(`new:${empty.page.id}`, ""); }
       publishReady(attached, token, true, focusClaim.owns(), false);
       return attached;
     } finally {
@@ -516,7 +520,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     await modeToggle.current.beforeSend();
     const token = owner.current.token();
     const steer = pageDeliverySteer(state.phase, intent);
-    const current = state.phase === "ready" ? state : await createFirstChat(state, token);
+    const current = state.phase === "ready" ? state : await createFirstChat(state, token, text);
+    if (state.phase === "empty") await modeToggle.current.beforeSend();
     const delivery_id = crypto.randomUUID();
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
     try {
