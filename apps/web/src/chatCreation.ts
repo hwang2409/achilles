@@ -2,12 +2,14 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { applyApprovalMode } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
-const stages = ["created", "registered", "approvalApplied", "mapped"] as const;
+const MODE_STORAGE_KEY = "achilles-pending-create-modes";
+const stages = ["created", "registered", "approvalApplied", "mapped", "attached", "modeApplied"] as const;
 type Stage = typeof stages[number];
 
 export type PendingChat = { sessionId: string; pageId: string; mode: "ask" | "allow"; stage: Stage; expectedSessionId?: string | null; mappedSessionId?: string; lastError?: string };
 export type ChatCreationInput = { client: ZetaClient; pageId: string; credential: string; cwd: string; mode: "ask" | "allow"; mapExpectedSessionId?: string | null };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem"> & Partial<Pick<globalThis.Storage, "removeItem">>;
+type AttachedChat = { sessionId: string };
 type Fetch = typeof fetch;
 
 function isPendingChat(value: unknown): value is PendingChat {
@@ -21,7 +23,7 @@ function isPendingChat(value: unknown): value is PendingChat {
     && stages.includes(record.stage as Stage)
     && (!Object.hasOwn(record, "expectedSessionId") || hasMapping)
     && (!Object.hasOwn(record, "lastError") || typeof record.lastError === "string")
-    && (record.stage !== "mapped" || (hasMapping && typeof record.mappedSessionId === "string" && record.mappedSessionId.length > 0));
+    && (!(record.stage === "mapped" || (Object.hasOwn(record, "expectedSessionId") && (["attached", "modeApplied"] as Stage[]).includes(record.stage as Stage))) || (hasMapping && typeof record.mappedSessionId === "string" && record.mappedSessionId.length > 0));
 }
 
 function readRecords(storage: Storage): PendingChat[] {
@@ -36,24 +38,42 @@ function writeRecords(storage: Storage, records: PendingChat[]) {
   else storage.removeItem?.(STORAGE_KEY);
 }
 
+function readModes(storage: Storage): Record<string, boolean> {
+  try {
+    const parsed = JSON.parse(storage.getItem(MODE_STORAGE_KEY) ?? "{}") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"));
+  } catch { return {}; }
+}
+
+function writeModes(storage: Storage, modes: Record<string, boolean>) {
+  if (Object.keys(modes).length) storage.setItem(MODE_STORAGE_KEY, JSON.stringify(modes));
+  else storage.removeItem?.(MODE_STORAGE_KEY);
+}
+
 export function createChatCreationOwner(storage: Storage = localStorage, request: Fetch = fetch) {
-  const running = new Map<string, Promise<PendingChat>>();
+  const running = new Map<string, Promise<AttachedChat>>();
   const contexts = new Map<string, ChatCreationInput>();
   const listeners = new Set<() => void>();
-  const snapshots = new Map<string, { pending: PendingChat | null; error: string | null }>();
-  const pending = (pageId: string) => readRecords(storage).find((record) => record.pageId === pageId) ?? null;
+  const snapshots = new Map<string, { pending: PendingChat | null; error: string | null; createMode: boolean | undefined }>();
+  const volatile = new Map<string, PendingChat>();
+  const pending = (pageId: string) => volatile.get(pageId) ?? readRecords(storage).find((record) => record.pageId === pageId) ?? null;
   const publish = (pageId: string, record: PendingChat | null) => {
-    snapshots.set(pageId, { pending: record, error: record?.lastError ?? null });
+    snapshots.set(pageId, { pending: record, error: record?.lastError ?? null, createMode: readModes(storage)[pageId] });
     listeners.forEach((listener) => listener());
   };
   const save = (record: PendingChat) => {
+    volatile.set(record.pageId, record);
     const records = readRecords(storage).filter((item) => item.pageId !== record.pageId);
     records.push(record);
     writeRecords(storage, records);
     publish(record.pageId, record);
   };
-  const clear = (pageId: string) => {
+  const clearDurable = (pageId: string) => {
     writeRecords(storage, readRecords(storage).filter((record) => record.pageId !== pageId));
+  };
+  const complete = (pageId: string) => {
+    volatile.delete(pageId);
     contexts.delete(pageId);
     publish(pageId, null);
   };
@@ -85,7 +105,6 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         const mappedSessionId = response.status === 409 ? ((await response.json()) as { session_id: string }).session_id : record.sessionId;
         record = advance(record, { stage: "mapped", mappedSessionId }); save(record);
       }
-      clear(record.pageId);
       return record;
     } catch (caught) {
       const retained = pending(record.pageId);
@@ -94,10 +113,16 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     }
   };
 
-  const run = (input: ChatCreationInput, create: boolean): Promise<PendingChat> | null => {
+  const ensure = <T extends AttachedChat>(
+    input: ChatCreationInput,
+    attach: (sessionId: string) => Promise<T>,
+    applyCreateMode?: (attached: T, enabled: boolean) => Promise<T>,
+    publishReady: (attached: T) => Promise<void> | void = () => {},
+    create = true,
+  ): Promise<T> | null => {
     contexts.set(input.pageId, input);
     const active = running.get(input.pageId);
-    if (active) return active;
+    if (active) return active as Promise<T>;
     const existing = pending(input.pageId);
     if (!create && !existing) return null;
     const operation = (async () => {
@@ -109,27 +134,43 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         if (!sessionId) throw new Error("zeta did not return a session id");
         record = { sessionId, pageId: input.pageId, mode: input.mode, stage: "created", ...(Object.hasOwn(input, "mapExpectedSessionId") ? { expectedSessionId: input.mapExpectedSessionId } : {}) }; save(record);
       }
-      return finish(input, record);
-    })();
+      let prepared = await finish(input, record);
+      let attached = await attach(prepared.mappedSessionId ?? prepared.sessionId);
+      prepared = advance(prepared, { stage: "attached" }); save(prepared);
+      const createMode = readModes(storage)[input.pageId];
+      if (createMode !== undefined && applyCreateMode) {
+        attached = await applyCreateMode(attached, createMode);
+        prepared = advance(prepared, { stage: "modeApplied" }); save(prepared);
+      }
+      if (createMode !== undefined) {
+        const modes = readModes(storage); delete modes[input.pageId]; writeModes(storage, modes);
+      }
+      clearDurable(input.pageId);
+      await publishReady(attached);
+      complete(input.pageId);
+      return attached;
+    })().catch((caught) => {
+      const retained = pending(input.pageId);
+      if (retained) save({ ...retained, lastError: caught instanceof Error ? caught.message : String(caught) });
+      throw caught;
+    });
     running.set(input.pageId, operation);
     void operation.finally(() => { if (running.get(input.pageId) === operation) running.delete(input.pageId); }).catch(() => {});
     return operation;
   };
 
-  const resume = (inputOrPageId: ChatCreationInput | string) => {
-    const input = typeof inputOrPageId === "string" ? contexts.get(inputOrPageId) : inputOrPageId;
-    return input ? run(input, false) : null;
-  };
-
   return {
     status(pageId: string) {
       let snapshot = snapshots.get(pageId);
-      if (!snapshot) { const record = pending(pageId); snapshot = { pending: record, error: record?.lastError ?? null }; snapshots.set(pageId, snapshot); }
+      if (!snapshot) { const record = pending(pageId); snapshot = { pending: record, error: record?.lastError ?? null, createMode: readModes(storage)[pageId] }; snapshots.set(pageId, snapshot); }
       return snapshot;
     },
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
-    create: (input: ChatCreationInput) => run(input, true)!,
-    resume,
+    setCreateMode(pageId: string, enabled: boolean) {
+      writeModes(storage, { ...readModes(storage), [pageId]: enabled });
+      publish(pageId, pending(pageId));
+    },
+    ensure,
   };
 }
 
