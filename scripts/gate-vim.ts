@@ -187,6 +187,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await composer.waitFor({ state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "remove\nkeep") throw new Error(`vim did not inherit the exact stock draft before dd: ${JSON.stringify(await vimDraft())}`);
   await field.focus();
+  // keep the editor target active before switching from insert to normal mode.
   await field.press("Escape");
   await field.press("d");
   await field.press("d");
