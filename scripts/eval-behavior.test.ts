@@ -7,6 +7,16 @@ const root = resolve(new URL("..", import.meta.url).pathname);
 const fixtureRoot = Bun.env.ACHILLES_TEST_FIXTURE_SOURCE ?? root;
 const uv = Bun.which("uv")!;
 
+async function fixtureZeta(revision: string) {
+  for (const path of [join(fixtureRoot, ".cache", `zeta-${revision}`), join(fixtureRoot, ".cache", "zeta")]) {
+    if (await Bun.file(join(path, ".git", "HEAD")).exists()) return path;
+  }
+}
+async function fixturesReady() {
+  const revision = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
+  return Boolean(uv && await fixtureZeta(revision) && await Bun.file(join(fixtureRoot, "apps", "web", "node_modules", "playwright", "index.mjs")).exists());
+}
+
 async function checkout() {
   const parent = await mkdtemp(join(tmpdir(), "achilles-eval-behavior-"));
   const target = join(parent, "target");
@@ -18,7 +28,7 @@ async function checkout() {
   await mkdir(join(target, ".cache"), { recursive: true });
   const zetaRev = (await readFile(join(target, "zeta.rev"), "utf8")).trim();
   await symlink(join(fixtureRoot, ".cache", "fulcrum"), join(target, ".cache", "fulcrum"));
-  await symlink(join(fixtureRoot, ".cache", `zeta-${zetaRev}`), join(target, ".cache", `zeta-${zetaRev}`));
+  await symlink((await fixtureZeta(zetaRev))!, join(target, ".cache", `zeta-${zetaRev}`));
   await mkdir(join(target, "vendor"), { recursive: true });
   await symlink(join(fixtureRoot, "vendor", "fulcrum"), join(target, "vendor", "fulcrum"));
   await symlink(join(fixtureRoot, "apps", "web", "node_modules"), join(target, "apps", "web", "node_modules"));
@@ -53,6 +63,7 @@ async function installUvWrapper(target: string, body = "") {
 }
 
 test("the scripted eval repairs missing target web assets before zeta starts", async () => {
+  if (!await fixturesReady()) return;
   const { parent, target } = await checkout();
   try {
     await rm(join(target, "apps", "web", "dist"), { recursive: true, force: true });
@@ -76,6 +87,7 @@ test("the scripted eval repairs missing target web assets before zeta starts", a
 }, 55_000);
 
 test("a queued accepted delivery becomes a structured harness error at the task deadline", async () => {
+  if (!await fixturesReady()) return;
   const { parent, target } = await checkout();
   try {
     const evalPath = join(target, "scripts", "eval.ts");
