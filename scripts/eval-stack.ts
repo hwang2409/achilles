@@ -95,6 +95,34 @@ function childEnvironment(root: string, accountHome: string, ollamaBaseUrl?: str
   for (const key of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "NO_PROXY"]) if (Bun.env[key]) env[key] = Bun.env[key];
   return { ...env, ACHILLES_HOME: join(root, "achilles-home"), ACHILLES_ZETA_DISCOVERY: join(root, "zeta-home/run/serve.ws.json"), ZETA_HOME: join(root, "zeta-home"), ZETA_ACCOUNT_HOME: accountHome, ZETA_ANTHROPIC_OAUTH_COMPAT: "1", ...(ollamaBaseUrl ? { ZETA_OLLAMA_BASE_URL: ollamaBaseUrl } : {}) };
 }
+async function prepareTargetWeb(owner: ProcessOwner, achillesDir: string) {
+  const cache = join(achillesDir, ".cache", "fulcrum");
+  if (!await readFile(join(cache, ".git/HEAD"), "utf8").then(() => true, () => false)) {
+    const clone = await owner.run("git", ["clone", "https://github.com/hwang2409/fulcrum", cache], achillesDir, 120_000);
+    if (clone.exitCode) throw new Error(`target web setup failed; run: make eval (${clone.stderr.trim()})`);
+    const checkout = await owner.run("git", ["-C", cache, "checkout", "--detach", (await readFile(join(achillesDir, "fulcrum.rev"), "utf8")).trim()], achillesDir, 120_000);
+    if (checkout.exitCode) throw new Error(`target web setup failed; run: make eval (${checkout.stderr.trim()})`);
+  }
+  if (!await Bun.file(join(cache, "node_modules/.bin/tsc")).exists()) {
+    const install = await owner.run("bun", ["install", "--frozen-lockfile"], cache, 120_000);
+    if (install.exitCode) throw new Error(`target web setup failed; run: cd ${cache} && bun install --frozen-lockfile`);
+  }
+  const setup = await owner.run("env", [`FULCRUM_DIR=${cache}`, "bun", "scripts/fulcrum.ts", "--prepare-web"], achillesDir, 120_000);
+  if (setup.exitCode) throw new Error(`target web setup failed; run: FULCRUM_DIR=${cache} bun scripts/fulcrum.ts --prepare-web`);
+  const build = await owner.run("bun", ["run", "build"], join(achillesDir, "apps/web"), 120_000);
+  if (build.exitCode) throw new Error(`target web setup failed; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
+}
+
+export function targetWebNeedsRepair(ok: boolean, body: string) { return !ok || /static file not found/i.test(body); }
+async function ensureTargetWeb(owner: ProcessOwner, achillesDir: string, origin: string) {
+  const response = await fetchDeadline(`${origin}/`);
+  const body = await response.text();
+  if (!targetWebNeedsRepair(response.ok, body)) return;
+  await prepareTargetWeb(owner, achillesDir);
+  const retry = await fetchDeadline(`${origin}/`); const retryBody = await retry.text();
+  if (targetWebNeedsRepair(retry.ok, retryBody)) throw new Error(`target web is unavailable; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
+}
+
 async function startupFailure(root: string, label: string) {
   const text = (await Promise.all(["achilles-home/serve.log", "zeta-home/serve.log"].map(path => readFile(join(root, path), "utf8").catch(() => "")))).join("\n");
   throw new Error(`${label}${/EADDRINUSE|address already in use/i.test(text) ? ": EADDRINUSE" : ""}`);
@@ -135,7 +163,7 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
   try {
     config.signal?.throwIfAborted();
     const achillesLog = openSync(join(root, "achilles-home/serve.log"), "a"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
-    await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
+    await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
     const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const zetaProcess = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? 20), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, "--tools", TOOL_POLICY, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog);
     const discovery = await waitForDiscovery(root, zetaProcess, config.signal); const preflight = await connectEvalProtocol(discovery); await preflight.close();
     stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), close };
