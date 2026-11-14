@@ -81,7 +81,12 @@ _LAYOUT_BLOCK_SCHEMA = {
                             "type": "string",
                             "pattern": _COLLECTION_KEY_PATTERN,
                         },
-                        "equals": {"type": ["string", "number", "boolean", "null"]},
+                        "equals": {
+                            "type": ["string", "number", "boolean", "null"],
+                            "description": (
+                                "Exact JSON scalar match. Null also matches a missing field."
+                            ),
+                        },
                     },
                     "required": ["field", "equals"],
                     "additionalProperties": False,
@@ -348,14 +353,31 @@ class PageStore:
                     (page_id, block["collection"]),
                 ).fetchone()[0]
             else:
+                path = f'$."{where["field"]}"'
+                value = where["equals"]
+                if value is None:
+                    value_type = "null"
+                elif isinstance(value, bool):
+                    value_type = "boolean"
+                elif isinstance(value, (int, float)):
+                    value_type = "number"
+                else:
+                    value_type = "text"
                 count = db.execute(
                     "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? "
-                    "AND json_extract(document, ?) IS json_extract(?, '$')",
+                    "AND json_extract(document, ?) IS json_extract(?, '$') "
+                    "AND CASE COALESCE(json_type(document, ?), 'null') "
+                    "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' "
+                    "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' "
+                    "ELSE COALESCE(json_type(document, ?), 'null') END = ?",
                     (
                         page_id,
                         block["collection"],
-                        f'$."{where["field"]}"',
-                        json.dumps(where["equals"]),
+                        path,
+                        json.dumps(value),
+                        path,
+                        path,
+                        value_type,
                     ),
                 ).fetchone()[0]
             block["value"] = count

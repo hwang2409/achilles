@@ -191,6 +191,53 @@ def test_computed_metrics_count_records_at_read_time(tmp_path):
     }
 
 
+def test_computed_metric_equals_preserves_json_scalar_types(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    equals_values = [True, False, "1", 1, None]
+    layout = {
+        "blocks": [
+            {
+                "type": "metric",
+                "label": str(value),
+                "collection": "items",
+                "count": True,
+                "where": {"field": "value", "equals": value},
+            }
+            for value in equals_values
+        ]
+    }
+    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    with store.transaction() as db:
+        for index, document in enumerate(
+            (
+                {},
+                {"value": None},
+                {"value": True},
+                {"value": 1},
+                {"value": 1.0},
+                {"value": "true"},
+                {"value": False},
+                {"value": 0},
+                {"value": ""},
+                {"value": "1"},
+            )
+        ):
+            db.execute(
+                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (page["id"], "items", str(index), 1, json.dumps(document), "now", "now"),
+            )
+
+    assert [block["value"] for block in store.layout(page["id"])["blocks"]] == [
+        1,
+        1,
+        1,
+        2,
+        2,
+    ]
+
+
 def test_create_page_schema_rejects_reserved_route_through_store(tmp_path):
     value = {"route": "/api/report", "title": "report", "layout": {"blocks": []}}
     assert not Draft202012Validator(CREATE_PAGE_SCHEMA).is_valid(value)
