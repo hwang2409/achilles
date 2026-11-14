@@ -200,6 +200,9 @@ try {
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const firstZetaPid = zetaProcess.pid;
+  expectingDiscoveryFailure = true;
+  discoveryFailureResponse = false;
+  discoveryFailureConsoleError = false;
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) {
     zetaProcess.kill("SIGKILL");
@@ -226,6 +229,7 @@ try {
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
+  expectingDiscoveryFailure = false;
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
