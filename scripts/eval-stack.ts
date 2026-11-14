@@ -121,12 +121,12 @@ export async function retryAddressInUse<T>(start: (attempt: number) => Promise<T
 }
 async function zetaCheckout(achillesDir: string, requested?: string) {
   const harnessRoot = resolve(new URL("..", import.meta.url).pathname); const pin = (await readFile(join(achillesDir, "zeta.rev"), "utf8")).trim(); const revision = requested ?? pin;
-  const zeta = requested ? join(harnessRoot, ".cache", `zeta-${requested}`) : join(harnessRoot, ".cache", "zeta");
-  if (requested && !await readFile(join(zeta, ".git/HEAD"), "utf8").then(() => true, () => false)) {
+  const zeta = join(harnessRoot, ".cache", `zeta-${revision}`);
+  if (!await readFile(join(zeta, ".git/HEAD"), "utf8").then(() => true, () => false)) {
     const clone = Bun.spawnSync(["git", "clone", "https://github.com/hwang2409/zeta", zeta], { stdout: "pipe", stderr: "pipe" }); if (clone.exitCode) throw new Error(`could not clone zeta override: ${clone.stderr.toString().trim()}`);
     const checkout = Bun.spawnSync(["git", "-C", zeta, "checkout", "--detach", revision], { stdout: "pipe", stderr: "pipe" }); if (checkout.exitCode) throw new Error(`could not checkout zeta override: ${checkout.stderr.toString().trim()}`);
   }
-  if (requested) { const sync = Bun.spawnSync(["uv", "sync", "--project", zeta, "--frozen"], { stdout: "pipe", stderr: "pipe" }); if (sync.exitCode) throw new Error(`could not sync zeta override: ${sync.stderr.toString().trim()}`); }
+  { const sync = Bun.spawnSync(["uv", "sync", "--project", zeta, "--frozen"], { stdout: "pipe", stderr: "pipe" }); if (sync.exitCode) throw new Error(`could not sync zeta override: ${sync.stderr.toString().trim()}`); }
   const expected = Bun.spawnSync(["git", "-C", zeta, "rev-parse", revision], { stdout: "pipe", stderr: "pipe" }).stdout.toString().trim(); const actual = await gitSha(zeta);
   if (!expected || actual !== expected) throw new Error(`zeta checkout mismatch: requested ${revision}, got ${actual}`); return { zeta, sha: actual };
 }

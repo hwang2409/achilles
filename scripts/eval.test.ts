@@ -3,7 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { scanArtifactTree, scanSecrets, validateCatalog } from "./eval";
+import { scanArtifactTree, scanSecrets, selectTasks, validateCatalog } from "./eval";
+
+test("suite selection validates every task and sums one command budget", async () => {
+  const tasks = await selectTasks();
+  expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
+  expect(reserveTurns(tasks, 1)).toBe(tasks.reduce((total, task) => total + task.agent_turns, 0));
+  expect(() => assertTurnBudget(reserveTurns(tasks, 50))).toThrow("command budget");
+});
 
 test("turn reservation is command-wide", () => {
   expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20 }], 2)).toBe(80);

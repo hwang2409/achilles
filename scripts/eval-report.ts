@@ -4,6 +4,7 @@ export type EvalReport = {
   agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
   repeats: number;
   tasks: Array<TaskResult & { transcript?: string }>;
+  totals?: { turns: number; wall_ms: number };
 };
 
 export function makeReport(input: Omit<EvalReport, "tasks"> & { tasks: EvalReport["tasks"] }): EvalReport {
@@ -37,6 +38,7 @@ export function reportMarkdown(report: EvalReport): string {
     `achilles: ${report.agent.achilles_sha ?? "unavailable"}`,
     `zeta: ${report.agent.zeta_sha ?? "unavailable"}`,
     `repeats: ${report.repeats}`,
+    `totals: ${report.totals?.turns ?? report.tasks.reduce((total, task) => total + task.turns, 0)} turns, ${report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0)} ms wall time`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
     "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: |",
   ];

@@ -46,6 +46,12 @@ export async function loadTask(id: string, dir = new URL("../evals/tasks/", impo
   if (task.id !== id) throw new Error(`task id ${task.id} does not match ${id}`); return task;
 }
 
+export async function selectTasks(selection?: string, dir = new URL("../evals/tasks/", import.meta.url).pathname) {
+  const ids = selection?.trim() ? selection.split(",").map(id => id.trim()).filter(Boolean) : (await readdir(dir)).filter(name => name.endsWith(".json")).map(name => name.slice(0, -5)).sort();
+  if (!ids.length || new Set(ids).size !== ids.length) throw new Error("TASK must select at least one unique task");
+  return Promise.all(ids.map(id => loadTask(id, dir)));
+}
+
 const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : { type: "object", additionalProperties: true }, output_schema: {}, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
 const SETUP_SCRIPT = `
 import json, sys
@@ -230,21 +236,21 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
 
 async function writeReportArtifacts(staging: string, report: ReturnType<typeof makeReport>, repeats: RepeatResult[]) {
   await Bun.write(join(staging, "report.json"), reportJson(report)); await Bun.write(join(staging, "report.md"), reportMarkdown(report)); await Bun.write(join(staging, "cleanup.json"), JSON.stringify(repeats.map(repeat => repeat.cleanup ?? null), null, 2));
-  await mkdir(join(staging, "snapshots")); for (const [index, repeat] of repeats.entries()) await Bun.write(join(staging, "snapshots", `${index + 1}.json`), JSON.stringify(repeat.snapshot ?? null, null, 2));
+  await mkdir(join(staging, "snapshots")); const seen = new Map<string, number>(); for (const repeat of repeats) { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); await Bun.write(join(staging, "snapshots", `${repeat.result.task_id}-${number}.json`), JSON.stringify(repeat.snapshot ?? null, null, 2)); }
 }
-async function publishReport(task: EvalTask, repeats: RepeatResult[], output: string, runId: string, hidden: string[]) {
-  const first = repeats[0]; let publicationFailed = false; let report = makeReport({ run_id: runId, repeats: repeats.length, agent: { provider: Bun.env.EVAL_BACKEND === "scripted" ? "scripted" : "configured", model: Bun.env.EVAL_BACKEND === "scripted" ? "offline" : Bun.env.MODEL ?? "configured", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, tasks: repeats.map(repeat => repeat.result) });
+async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, hidden: string[]) {
+  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); let publicationFailed = false; let report = makeReport({ run_id: runId, repeats: repeats.length / tasks.length, agent: { provider: Bun.env.EVAL_BACKEND === "scripted" ? "scripted" : "configured", model: Bun.env.EVAL_BACKEND === "scripted" ? "offline" : Bun.env.MODEL ?? "configured", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
   const staging = await mkdtemp(join(Bun.env.TMPDIR ?? "/tmp", "achilles-eval-report-"));
   try {
     await writeReportArtifacts(staging, report, repeats);
     try { await scanArtifactTree(staging, hidden); }
     catch {
       publicationFailed = true; await rm(staging, { recursive: true, force: true }); await mkdir(staging);
-      report = makeReport({ ...report, tasks: repeats.map(() => failureResult(task, new Error("artifact secret scan failed"), [])) }); await writeReportArtifacts(staging, report, repeats.map(repeat => ({ ...repeat, snapshot: undefined }))); await scanArtifactTree(staging, hidden);
+      report = makeReport({ ...report, tasks: repeats.map(repeat => failureResult(tasks.find(task => task.id === repeat.result.task_id)!, new Error("artifact secret scan failed"), [])) }); await writeReportArtifacts(staging, report, repeats.map(repeat => ({ ...repeat, snapshot: undefined }))); await scanArtifactTree(staging, hidden);
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.every(repeat => repeat.result.pass && !repeat.failed); console.log(JSON.stringify({ task: task.id, pass, repeats: repeats.length, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
+  const pass = !publicationFailed && repeats.every(repeat => repeat.result.pass && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: repeats.length / tasks.length, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {
@@ -255,16 +261,19 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 }
 
 async function main() {
-  const taskId = Bun.env.TASK ?? Bun.argv[Bun.argv.indexOf("--suite") + 1] ?? "harness-smoke"; const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const task = await loadTask(taskId); assertTurnBudget(reserveTurns([{ agent_turns: task.agent_turns }], repeats));
+  const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1");
+  const tasks = await selectTasks(selection); assertTurnBudget(reserveTurns(tasks, repeats));
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {
-    if (Bun.env.EVAL_STACK_ONLY === "1") await runStackOnly(task, controller, hidden);
-    else {
+    if (Bun.env.EVAL_STACK_ONLY === "1") {
+      if (tasks.length !== 1) throw new Error("EVAL_STACK_ONLY requires one task");
+      await runStackOnly(tasks[0], controller, hidden);
+    } else {
       const runId = `${Date.now()}-${process.pid}`; const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("../evals/reports/", import.meta.url).pathname, runId)); const results: RepeatResult[] = [];
-      for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break; results.push(await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId, signal: controller.signal, hidden })); }
-      if (!await publishReport(task, results, output, runId, hidden)) process.exitCode = 1;
+      for (const task of tasks) for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break; results.push(await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId: `${runId}-${task.id}`, signal: controller.signal, hidden })); }
+      if (!await publishReport(tasks, results, output, runId, hidden)) process.exitCode = 1;
     }
   } finally { process.off("SIGINT", onSigint); process.off("SIGTERM", onSigterm); if (signalCode) process.exitCode = signalCode; }
 }
