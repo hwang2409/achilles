@@ -22,9 +22,9 @@ function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; foc
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
     (listener) => {
-      const unsubscribeLocal = draftStore.subscribe(sessionId, listener);
+      const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
       const unsubscribeRemote = draftStore.subscribeRemote(sessionId, listener);
-      return () => { unsubscribeLocal(); unsubscribeRemote(); };
+      return () => { unsubscribeConfirm(); unsubscribeRemote(); };
     },
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),

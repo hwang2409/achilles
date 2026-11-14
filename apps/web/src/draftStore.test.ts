@@ -15,13 +15,17 @@ describe("draft store", () => {
 
   test("keeps sessions separate and publishes changes", () => {
     const values: string[] = [];
+    const confirmations: string[] = [];
     const unsubscribe = draftStore.subscribe("one", () => values.push(draftStore.get("one")));
+    const unsubscribeConfirm = draftStore.subscribeConfirm("one", () => confirmations.push(draftStore.get("one")));
     draftStore.set("one", "alpha");
     draftStore.set("two", "beta");
-    draftStore.set("one", "");
+    draftStore.confirm("one", "alpha");
     unsubscribe();
+    unsubscribeConfirm();
     expect(draftStore.get("two")).toBe("beta");
     expect(values).toEqual(["alpha", ""]);
+    expect(confirmations).toEqual([""]);
     draftStore.set("two", "");
   });
 

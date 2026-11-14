@@ -6,6 +6,7 @@ type DraftStore = {
   set(sessionId: string, text: string): void;
   confirm(sessionId: string, sent: string): void;
   subscribe(sessionId: string, listener: Listener): () => void;
+  subscribeConfirm(sessionId: string, listener: Listener): () => void;
   subscribeRemote(sessionId: string, listener: Listener): () => void;
 };
 
@@ -36,11 +37,15 @@ export function createDraftStore(): DraftStore {
   const drafts = new Map<string, StoredDraft>();
   const dirty = new Set<string>();
   const listeners = new Map<string, Set<Listener>>();
+  const confirmListeners = new Map<string, Set<Listener>>();
   const remoteListeners = new Map<string, Set<Listener>>();
   let loaded = false;
 
   const notify = (sessionId: string) => {
     for (const listener of listeners.get(sessionId) ?? []) listener();
+  };
+  const notifyConfirm = (sessionId: string) => {
+    for (const listener of confirmListeners.get(sessionId) ?? []) listener();
   };
   const notifyRemote = (sessionId: string) => {
     for (const listener of remoteListeners.get(sessionId) ?? []) listener();
@@ -135,6 +140,7 @@ export function createDraftStore(): DraftStore {
       const remaining = current.startsWith(sent) ? current.slice(sent.length) : current;
       if (remaining) store.set(sessionId, remaining);
       else clear(sessionId);
+      notifyConfirm(sessionId);
     },
     subscribe(sessionId, listener) {
       const sessionListeners = listeners.get(sessionId) ?? new Set<Listener>();
@@ -143,6 +149,15 @@ export function createDraftStore(): DraftStore {
       return () => {
         sessionListeners.delete(listener);
         if (!sessionListeners.size) listeners.delete(sessionId);
+      };
+    },
+    subscribeConfirm(sessionId, listener) {
+      const sessionListeners = confirmListeners.get(sessionId) ?? new Set<Listener>();
+      sessionListeners.add(listener);
+      confirmListeners.set(sessionId, sessionListeners);
+      return () => {
+        sessionListeners.delete(listener);
+        if (!sessionListeners.size) confirmListeners.delete(sessionId);
       };
     },
     subscribeRemote(sessionId, listener) {
