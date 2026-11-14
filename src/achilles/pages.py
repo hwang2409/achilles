@@ -267,36 +267,49 @@ def validate_layout(
                     '"object","properties":{}}}}. A simple inferred input_schema is fine.'
                 ),
             )
-        filter_name = (
-            "filter"
-            if block["type"] == "detail" and "filter" in block
-            else "where"
-            if block["type"] == "metric" and "where" in block
-            else None
-        )
-        if filter_name is not None and collection_fields is not None:
-            field_filter = block[filter_name]
-            fields = collection_fields.get(block["collection"], set())
-            field = field_filter["field"]
-            if field not in fields:
-                listed = ", ".join(sorted(fields)) or "(none)"
-                hint = (
-                    f"Use a field from the {block['collection']} collection schema. "
-                    f"Unknown field: {field}. Collection fields: {listed}."
-                )
-                suggestion = (
-                    suggest_field(block["collection"], field, field_filter["equals"], fields)
-                    if suggest_field is not None
-                    else None
-                )
-                if suggestion is not None:
-                    hint += f" Did you mean {suggestion}?"
-                raise ValidationError(
-                    f"{prefix}/blocks/{index}/{filter_name}/field",
-                    "field in collection schema",
-                    hint=hint,
-                )
+        _validate_layout_filter(block, index, prefix, collection_fields, suggest_field)
     return layout
+
+
+def _validate_layout_filter(
+    block: dict[str, Any],
+    index: int,
+    prefix: str,
+    collection_fields: dict[str, set[str]] | None,
+    suggest_field: Callable[[str, str, Any, set[str]], str | None] | None,
+) -> None:
+    if block["type"] == "detail" and "filter" in block:
+        filter_name = "filter"
+    elif block["type"] == "metric" and "where" in block:
+        filter_name = "where"
+    else:
+        return
+    if collection_fields is None:
+        return
+
+    field_filter = block[filter_name]
+    fields = collection_fields.get(block["collection"], set())
+    field = field_filter["field"]
+    if field in fields:
+        return
+
+    listed = ", ".join(sorted(fields)) or "(none)"
+    hint = (
+        f"Use a field from the {block['collection']} collection schema. "
+        f"Unknown field: {field}. Collection fields: {listed}."
+    )
+    suggestion = (
+        suggest_field(block["collection"], field, field_filter["equals"], fields)
+        if suggest_field is not None
+        else None
+    )
+    if suggestion is not None:
+        hint += f" Did you mean {suggestion}?"
+    raise ValidationError(
+        f"{prefix}/blocks/{index}/{filter_name}/field",
+        "field in collection schema",
+        hint=hint,
+    )
 
 
 def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
