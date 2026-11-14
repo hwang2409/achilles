@@ -3,7 +3,13 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { retryAddressInUse } from "./eval-stack";
+import { retryAddressInUse, targetWebNeedsRepair } from "./eval-stack";
+
+test("target web preflight repairs static-file responses before grading", () => {
+  expect(targetWebNeedsRepair(true, "static file not found")).toBe(true);
+  expect(targetWebNeedsRepair(true, "<!doctype html><title>achilles</title>")).toBe(false);
+  expect(targetWebNeedsRepair(false, "error")).toBe(true);
+});
 
 type ProcessRow = { pid: number; ppid: number; pgid: number; executable: string; command: string };
 function processRows() {

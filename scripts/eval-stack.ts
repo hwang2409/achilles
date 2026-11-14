@@ -113,13 +113,14 @@ async function prepareTargetWeb(owner: ProcessOwner, achillesDir: string) {
   if (build.exitCode) throw new Error(`target web setup failed; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
 }
 
+export function targetWebNeedsRepair(ok: boolean, body: string) { return !ok || /static file not found/i.test(body); }
 async function ensureTargetWeb(owner: ProcessOwner, achillesDir: string, origin: string) {
   const response = await fetchDeadline(`${origin}/`);
   const body = await response.text();
-  if (response.ok && !/static file not found/i.test(body)) return;
+  if (!targetWebNeedsRepair(response.ok, body)) return;
   await prepareTargetWeb(owner, achillesDir);
   const retry = await fetchDeadline(`${origin}/`); const retryBody = await retry.text();
-  if (!retry.ok || /static file not found/i.test(retryBody)) throw new Error(`target web is unavailable; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
+  if (targetWebNeedsRepair(retry.ok, retryBody)) throw new Error(`target web is unavailable; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
 }
 
 async function startupFailure(root: string, label: string) {

@@ -40,9 +40,17 @@ async function installedPackageMatches(app: string, name: string) {
   }
 }
 
-export async function prepareWebDependencies() {
+async function archiveDigest() {
+  const hasher = new Bun.CryptoHasher("sha256");
+  for (const name of packages) hasher.update(await Bun.file(resolve(vendor, `fulcrum-${name}.tgz`)).arrayBuffer());
+  return hasher.digest("hex");
+}
+
+export async function prepareWebDependencies(force = false) {
   const app = resolve(root, "apps/web");
-  if (await Promise.all(packages.map(name => installedPackageMatches(app, name))).then(results => results.every(Boolean))) return;
+  const digest = await archiveDigest();
+  const marker = resolve(app, "node_modules/@fulcrum/.achilles-digest");
+  if (!force && await Bun.file(marker).text().then(value => value.trim() === digest, () => false)) return;
 
   const packageFile = resolve(app, "package.json");
   const original = await readFile(packageFile, "utf8");
@@ -62,6 +70,7 @@ export async function prepareWebDependencies() {
     await mkdir(target, { recursive: true });
     run(["tar", "-xzf", resolve(vendor, `fulcrum-${name}.tgz`), "--strip-components=1", "-C", target], app);
   }
+  await writeFile(marker, `${digest}\n`);
 }
 
 if (process.argv.includes("--prepare-web")) {
@@ -69,5 +78,5 @@ if (process.argv.includes("--prepare-web")) {
   await prepareWebDependencies();
 } else {
   await buildVendor();
-  await prepareWebDependencies();
+  await prepareWebDependencies(true);
 }

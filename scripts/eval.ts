@@ -19,11 +19,10 @@ class TaskRunFailure extends Error {
   constructor(readonly original: unknown, readonly snapshot: EvalSnapshot) { super(original instanceof Error ? original.message : String(original)); }
 }
 class TurnCapFailure extends Error {}
-export function unresolvedDeliveryError(events: Record<string, any>[], aborted: boolean) {
+export function unresolvedDeliveryError(statuses: Array<{ delivery_id?: string; status?: string }>, aborted: boolean) {
   if (!aborted) return undefined;
-  const event = events.find(item => String(item.event ?? item.method ?? "") === "delivery_status" && String(item.data?.status ?? item.params?.status ?? "") === "queued");
-  const deliveryId = event?.data?.delivery_id ?? event?.params?.delivery_id;
-  return deliveryId ? Object.assign(new Error(`zeta: delivery ${deliveryId} never resolved`), { delivery_id: deliveryId, delivery_status: "queued" }) : undefined;
+  const status = statuses.find(item => item.status === "queued" && item.delivery_id);
+  return status ? Object.assign(new Error(`zeta: delivery ${status.delivery_id} never resolved`), { delivery_id: status.delivery_id, delivery_status: status.status }) : undefined;
 }
 export function stopsSuite(error: unknown) { return error instanceof SecretScanFailure || fatalAccountFailure.test(error instanceof Error ? error.message : String(error)); }
 const redact = (value: string, hidden: string[]) => hidden.reduce((text, secret) => secret ? text.replaceAll(secret, "[REDACTED]") : text, value);
@@ -223,7 +222,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
-  const reconnects: Array<Record<string, any>> = [];
+  const reconnects: Array<Record<string, any>> = []; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   for (const plan of task.page_plan.filter(page => page.source !== "created")) pages.set(plan.alias, "home");
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol;
   const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
@@ -252,7 +251,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const step of task.steps) {
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new TurnCapFailure("task model turn limit has no remaining turn");
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
-      const session = await getSession(step.chat, step.page); if (!session) break; try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
+      const session = await getSession(step.chat, step.page); if (!session) break; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
@@ -267,7 +266,8 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
-    throw new TaskRunFailure(unresolvedDeliveryError(events, signal.aborted) ?? error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
+    for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }
+    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 

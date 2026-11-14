@@ -23,7 +23,7 @@ eval:
 	setup='$(FULCRUM_SETUP)'; \
 	if ! env FULCRUM_DIR="$(FULCRUM_CACHE)" bun scripts/fulcrum.ts --prepare-web; then echo "eval setup failed; rerun: $$setup" >&2; exit 1; fi; \
 	if [ "$${EVAL_SKIP_BROWSER_INSTALL}" != 1 ]; then (cd apps/web && bun node_modules/playwright/cli.js install chromium) || { echo "browser setup failed; rerun: cd apps/web && bun node_modules/playwright/cli.js install chromium" >&2; exit 1; }; fi
-	@env $${TASK:+TASK="$${TASK}"} $${N:+N="$${N}"} $${MODEL:+MODEL="$${MODEL}"} $${ACHILLES_DIR:+ACHILLES_DIR="$${ACHILLES_DIR}"} $${ZETA_REV:+ZETA_REV="$${ZETA_REV}"} $${KEEP_EVAL:+KEEP_EVAL="$${KEEP_EVAL}"} bun scripts/eval.ts --suite "$${TASK}"
+	@if [ "$${EVAL_SETUP_ONLY}" != 1 ]; then env $${TASK:+TASK="$${TASK}"} $${N:+N="$${N}"} $${MODEL:+MODEL="$${MODEL}"} $${ACHILLES_DIR:+ACHILLES_DIR="$${ACHILLES_DIR}"} $${ZETA_REV:+ZETA_REV="$${ZETA_REV}"} $${KEEP_EVAL:+KEEP_EVAL="$${KEEP_EVAL}"} bun scripts/eval.ts --suite "$${TASK}"; fi
 
 eval-selfcheck-real:
 	@test -n "$${DIR}" || { echo "usage: make eval-selfcheck-real DIR=/path/to/eval-run"; exit 1; }

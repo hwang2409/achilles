@@ -40,7 +40,8 @@ class Client implements EvalProtocol {
   }
   hello(features: string[]) { return this.request("hello", { protocol_version: "1.1", client_version: "1.1", features, role: "controller" }); }
   newSession(params: Record<string, unknown>) { return this.request("new_session", params); }
-  async send(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { await this.request("send", { session_id: sessionId, text, delivery_id: deliveryId }); }
+  async send(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { const accepted = await this.request("send", { session_id: sessionId, text, delivery_id: deliveryId }); return { delivery_id: deliveryId, ...(accepted ?? {}) }; }
+  deliveryStatus(deliveryId: string, timeoutMs = RPC_TIMEOUT_MS) { return this.request("delivery_status", { delivery_id: deliveryId }, timeoutMs); }
   async approve(sessionId: string, requestId: string) { await this.request("approve", { session_id: sessionId, request_id: requestId, scope: "once" }); }
   async abort(sessionId: string) { await this.request("abort", { session_id: sessionId }); }
   async resume(sessionId: string, binding: Record<string, unknown>) { return this.request("resume", { session_id: sessionId, ...binding }); }
@@ -57,7 +58,8 @@ class Client implements EvalProtocol {
 
 export type EvalProtocol = {
   newSession(params: Record<string, unknown>): Promise<Record<string, any>>;
-  send(sessionId: string, text: string, deliveryId?: string): Promise<void>;
+  send(sessionId: string, text: string, deliveryId?: string): Promise<{ delivery_id: string; status?: string }>;
+  deliveryStatus(deliveryId: string, timeoutMs?: number): Promise<{ delivery_id?: string; status?: string }>;
   approve(sessionId: string, requestId: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
   resume(sessionId: string, binding: Record<string, unknown>): Promise<{ session?: { session_id?: string }; session_id?: string }>;

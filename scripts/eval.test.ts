@@ -12,11 +12,11 @@ const targetRun = (target: string) => async (command: string, args: string[], cw
 };
 
 test("queued delivery timeout becomes a harness error with structured evidence", () => {
-  const error = unresolvedDeliveryError([{ event: "delivery_status", data: { delivery_id: "delivery-7", status: "queued" } }], true);
+  const error = unresolvedDeliveryError([{ delivery_id: "delivery-7", status: "queued" }], true);
   expect(error?.message).toBe("zeta: delivery delivery-7 never resolved");
   expect(error?.delivery_id).toBe("delivery-7");
   expect(error?.delivery_status).toBe("queued");
-  expect(unresolvedDeliveryError([{ event: "delivery_status", data: { delivery_id: "delivery-7", status: "queued" } }], false)).toBeUndefined();
+  expect(unresolvedDeliveryError([{ delivery_id: "delivery-7", status: "queued" }], false)).toBeUndefined();
 });
 
 test("suite selection validates every task and sums one command budget", async () => {
