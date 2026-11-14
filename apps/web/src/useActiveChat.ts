@@ -169,11 +169,16 @@ type CreateModeToggleInput = {
 type CreateModeToggleResult = { createMode: boolean | null; error: string | null; blocked: boolean; retryable: boolean };
 type CreateModeToggleRun = { generation: number; outcome: CreateModeToggleResult; cancelled: boolean };
 
+function expiredMcpSession(caught: unknown): boolean {
+  const error = caught as { code?: unknown; data?: { reason?: unknown } };
+  return error.code === -32005 && typeof error.data?.reason === "string" && error.data.reason.includes("MCP HTTP 404: Session not found");
+}
+
 function refreshToolsError(caught: unknown): { message: string; blocked: boolean; retryable: boolean } {
   const error = caught as { code?: unknown; message?: unknown; data?: { reason?: unknown } };
   const reason = typeof error.data?.reason === "string" ? error.data.reason : "";
   if (error.code === -32601) return { message: "", blocked: false, retryable: false };
-  if (error.code === -32005 && reason.includes("MCP HTTP 404: Session not found")) return { message: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false };
+  if (expiredMcpSession(caught)) return { message: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false };
   if (error.code === -32005) return { message: `zeta could not refresh page tools${reason ? `: ${reason}` : ""}. retry the refresh.`, blocked: true, retryable: true };
   if (error.code === -32602) return { message: "zeta could not find the achilles page tools. retry the refresh.", blocked: true, retryable: true };
   if (error.code === -32003) return { message: "zeta is attached to a different chat. retry the refresh.", blocked: true, retryable: true };
@@ -189,7 +194,12 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   const refresh = async (input: CreateModeToggleInput, createMode: boolean, mine: number): Promise<CreateModeToggleResult> => {
     if (!input.client.features.includes("mcp_refresh_tools")) return { createMode, error: null, blocked: false, retryable: false };
     try {
-      await input.client.request("mcp_refresh_tools", { session_id: input.sessionId, server: "achilles" });
+      try {
+        await input.client.request("mcp_refresh_tools", { session_id: input.sessionId, server: "achilles" });
+      } catch (caught) {
+        if (!expiredMcpSession(caught)) throw caught;
+        await input.client.request("mcp_refresh_tools", { session_id: input.sessionId, server: "achilles" });
+      }
       if (mine === generation) retry = null;
       return { createMode, error: null, blocked: false, retryable: false };
     } catch (caught) {
@@ -239,6 +249,7 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
 // Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
 const STUCK_STEER_WAIT_MS = 15_000;
 export class UncertainSteerDeliveryError extends Error {}
+export class DroppedSteerDeliveryError extends Error {}
 
 const TURN_RUNNING = -32004;
 const NO_TURN = -32005;
@@ -290,7 +301,7 @@ export async function confirmSteerDelivery(
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
     if (outcome === "delivered") return id;
-    if (outcome === "dropped") throw new Error("this message was not sent. your text is still here.");
+    if (outcome === "dropped") throw new DroppedSteerDeliveryError("this message was not sent. your text is still here; press send to try again.");
     if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
       throw new Error(`steer delivery status: ${status.status}`);
     await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));

@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
-from zeta.core.store import ConversationStore
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
 from zeta.providers.completion import owned_completion
 from zeta.server.delivery import DeliveryRequests
@@ -20,12 +19,22 @@ from zeta.storage_format import advance
 class BarrierBackend(FakeBackend):
     def __init__(self, turns, request_serializer, control):
         super().__init__(turns, request_serializer=request_serializer)
+        self.page_open = FakeBackend(
+            [ScriptedTurn(content=[TextContent("new page ready")])],
+            request_serializer=request_serializer,
+        )
         self.control = control
 
     @owned_completion
     async def complete(self, messages, tool_schemas):
+        page_open = any(
+            message.role is MessageRole.USER
+            and any(isinstance(block, TextContent) and block.text == "open created page" for block in message.content)
+            for message in messages
+        )
+        backend = self.page_open if page_open else self
         turn_index = len(self.calls)
-        stream = FakeBackend.complete.__wrapped__(self, messages, tool_schemas)
+        stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
             if turn_index == 4 and event.type.name == "MESSAGE_END":
                 await self._hold("turn_barrier")
@@ -232,7 +241,6 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ]
         ),
         ScriptedTurn(content=[TextContent("annotation complete")]),
-        ScriptedTurn(content=[TextContent("new page ready")]),
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
@@ -379,6 +387,15 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
+        page_open = any(
+            message.role is MessageRole.USER
+            and any(isinstance(block, TextContent) and block.text == "open created page" for block in message.content)
+            for message in messages
+        )
+        if page_open:
+            document["page_open_request"] = True
+            write_control(control, document)
+            return json.dumps({"messages": len(messages), "schemas": []}).encode()
         request_count = document.get("request_count", 0) + 1
         document["request_count"] = request_count
         document["last_message"] = str(messages[-1]) if messages else ""
@@ -461,34 +478,6 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
         await original_event(event, *args, **kwargs)
 
     server.control._event = held_event
-    original_append_delivery = ConversationStore.append_client_delivery_async
-
-    async def held_append_delivery(instance, delivery_id, method, status, outcome, **kwargs):
-        delivery = await original_append_delivery(
-            instance, delivery_id, method, status, outcome, **kwargs
-        )
-        accepted_message = kwargs.get("accepted_message")
-        if (
-            method == "steer"
-            and accepted_message is not None
-            and any(
-                isinstance(block, TextContent)
-                and block.text == "repeat that layout update with the old version"
-                for block in accepted_message.content
-            )
-        ):
-            document = json.loads(control.read_text())
-            document["late_steer_commit"] = "held"
-            write_control(control, document)
-            for _ in range(300):
-                document = json.loads(control.read_text())
-                if document.get("release_late_steer_commit"):
-                    break
-                await asyncio.sleep(0.05)
-            else:
-                raise RuntimeError("late steer commit release timed out after 15 seconds")
-        return delivery
-
     original_send = DeliveryRequests.send
 
     async def held_send(instance, params, features):
@@ -510,7 +499,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
 
     async def held_finalize_turn(instance, *args, **kwargs):
         document = json.loads(control.read_text())
-        if document.get("request_count") == 18 and not document.get("late_turn_released"):
+        if document.get("request_count") == 17 and not document.get("late_turn_released"):
             document["late_turn_barrier"] = "held"
             write_control(control, document)
             for _ in range(300):
@@ -524,7 +513,6 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 raise RuntimeError("late turn barrier release timed out after 15 seconds")
         await original_finalize_turn(instance, *args, **kwargs)
 
-    ConversationStore.append_client_delivery_async = held_append_delivery
     DeliveryRequests.send = held_send
     DeliveryRequests.finalize_turn = held_finalize_turn
     await server.start()

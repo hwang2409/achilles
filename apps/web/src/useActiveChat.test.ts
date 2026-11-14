@@ -78,12 +78,22 @@ describe("create mode tool refresh", () => {
     expect(requests).toBe(2);
   });
 
-  test("explains how to recover an expired MCP session without offering a dead retry", async () => {
-    const client = { features: ["mcp_refresh_tools"], request: async () => { throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "achilles: MCP HTTP 404: Session not found" } }); } };
+  test.each([
+    { name: "retry succeeds", failures: 1, expected: { createMode: true, error: null, blocked: false, retryable: false } },
+    { name: "retry also fails", failures: 2, expected: { createMode: null, error: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false } },
+  ])("retries an expired MCP session once when $name", async ({ failures, expected }) => {
+    let requests = 0;
+    const client = { features: ["mcp_refresh_tools"], request: async () => {
+      requests += 1;
+      if (requests <= failures) throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "achilles: MCP HTTP 404: Session not found" } });
+      return { session_id: "session", servers: ["achilles"] };
+    } };
     const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
     const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
-    expect(result).toEqual({ createMode: null, error: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false });
-    await expect(owner.beforeSend()).rejects.toThrow("send is off");
+    expect(result).toEqual(expected);
+    expect(requests).toBe(2);
+    if (result.blocked) await expect(owner.beforeSend()).rejects.toThrow("send is off");
+    else await owner.beforeSend();
   });
 
   test.each([
