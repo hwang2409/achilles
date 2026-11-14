@@ -28,9 +28,10 @@ test("every task passes the expectation lint and its known-good and known-bad re
 
 test("tool-version references use product-valid bundles and version evidence", async () => {
   const references = JSON.parse(await readFile(join(referencesDir, "tool-version-fresh-chat.json"), "utf8")) as { good: EvalSnapshot; bad: EvalSnapshot };
-  for (const [name, snapshot] of Object.entries(references)) {
+  const uv = Bun.which("uv");
+  if (uv) for (const [name, snapshot] of Object.entries(references)) {
     const bundles = (snapshot.calls ?? []).filter(call => call.tool === "achilles__create_tool" && call.success === true).map(call => (call.arguments as { bundle?: unknown } | undefined)?.bundle).filter(Boolean);
-    const validation = Bun.spawn(["uv", "run", "python", "-c", "import json,sys; from achilles.tools import validate_bundle; [validate_bundle(bundle, reject_conflicting_output=True) for bundle in json.loads(sys.argv[1])]", JSON.stringify(bundles)], { cwd: new URL("..", import.meta.url).pathname, stdout: "pipe", stderr: "pipe" });
+    const validation = Bun.spawn([uv, "run", "python", "-c", "import json,sys; from achilles.tools import validate_bundle; [validate_bundle(bundle, reject_conflicting_output=True) for bundle in json.loads(sys.argv[1])]", JSON.stringify(bundles)], { cwd: new URL("..", import.meta.url).pathname, stdout: "pipe", stderr: "pipe" });
     const stderr = await new Response(validation.stderr).text();
     expect(await validation.exited, `${name}: ${stderr}`).toBe(0);
   }
