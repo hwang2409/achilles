@@ -320,7 +320,7 @@ try {
       `missing achilles__create_tool catalog assertion: ${JSON.stringify(names)}`,
     );
   const createToolSchema = catalog.result?.tools?.find(
-    (tool: { name: string }) => tool.name === "achilles__create_tool",
+    (tool: { name: string }) => tool.name === "create_tool",
   )?.inputSchema;
   const bundleSchema = createToolSchema?.properties?.bundle;
   const implementationSchema = bundleSchema?.properties?.implementation;
