@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { chromium, type Route } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
-import { gateTranscript } from "./gate-transcript";
+import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -454,6 +454,7 @@ try {
     throw new Error(
       `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
+  await waitForIdleTurn(page, waitFor);
   const createdPageId = createdPage.id;
   const secondCredential = (
     await Bun.file(join(achillesHome, `credentials/${createdPageId}`)).text()

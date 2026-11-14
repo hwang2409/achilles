@@ -243,6 +243,7 @@ process.exit(0);
     expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
     expect(crashedLockIdentity).not.toBeNull();
     await stop(crashedLockIdentity!, "SIGKILL");
+    expect(await crashed.exited).toBe(128 + 9);
     const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(await recovered.exited, await new Response(recovered.stderr).text()).toBe(0);
     await stop(crashedChildIdentity!);
