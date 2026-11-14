@@ -29,7 +29,7 @@ test.each([
     expect(await gateWait(async () => "ready")).toBe("ready");
     return;
   }
-  expect(gateWait(async () => { throw new Error("Timeout 30ms exceeded"); })).rejects.toThrow(
+  await expect(gateWait(async () => { throw new Error("Timeout 30ms exceeded"); })).rejects.toThrow(
     'Timeout 30ms exceeded; websocket frames=[{"direction":"sent","method":"send","delivery_id":"delivery-7"},{"direction":"received","method":"event","event":"agent_start"}]; backend catalog={"request_count":7,"turn_barrier":"held"}',
   );
 });
