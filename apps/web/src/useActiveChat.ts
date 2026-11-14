@@ -368,6 +368,18 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     return { ...ready, page: { ...ready.page, create_mode: result.createMode } };
   }, [client]);
 
+  const publishReady = useCallback((ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
+    requireCurrent(owner.current, token);
+    missingCreation.current = null;
+    setCreationPageId(ready.page.id);
+    setListRefresh((value) => value + 1);
+    const route = routeWithChat(ready.page.route === "/" ? "/" : ready.page.route, ready.sessionId);
+    if (replace) history.replaceState({}, "", route); else history.pushState({}, "", route);
+    if (focus) setFocusSessionId(ready.sessionId);
+    if (select) setSelectedId(ready.sessionId);
+    setState(ready);
+  }, []);
+
   useEffect(() => {
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
@@ -376,7 +388,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, false, applyPendingCreateMode, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
-      setState(next);
+      if (creation.current.status(next.page.id).pending) publishReady(next, token);
+      else setState(next);
     }).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
@@ -390,7 +403,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
     });
     return () => owner.current.clear(token);
-  }, [applyPendingCreateMode, client, connected, routeRefresh, selectedId]);
+  }, [applyPendingCreateMode, client, connected, publishReady, routeRefresh, selectedId]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
@@ -415,18 +428,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const waiting = await findWaitingChat();
     if (waiting) selectChat(waiting);
   }, [selectChat]);
-
-  const publishReady = useCallback((ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
-    requireCurrent(owner.current, token);
-    missingCreation.current = null;
-    setCreationPageId(ready.page.id);
-    setListRefresh((value) => value + 1);
-    const route = routeWithChat(ready.page.route === "/" ? "/" : ready.page.route, ready.sessionId);
-    if (replace) history.replaceState({}, "", route); else history.pushState({}, "", route);
-    if (focus) setFocusSessionId(ready.sessionId);
-    if (select) setSelectedId(ready.sessionId);
-    setState(ready);
-  }, []);
 
   const newChat = useCallback(async () => {
     if (!client) return;
