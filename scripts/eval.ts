@@ -13,6 +13,9 @@ export type { EvalStackConfig, EvalStack } from "./eval-stack";
 const TASK_TIMEOUT_MS = 180_000;
 const MCP_UNAVAILABLE = "MCP server achilles is unavailable";
 const sensitiveNames = /(?:TOKEN|KEY|SECRET|PASSWORD|AUTH|COOKIE|CREDENTIAL)/i;
+const fatalAccountFailure = /(?:oauth credentials.*login required|login[_ -]?required|log in required|not logged in|account (?:no longer exists|unavailable|disabled|expired)|authentication (?:failed|required)|unauthorized|quota|usage[_ -]?limit|insufficient (?:credits|quota)|billing limit)/i;
+class SecretScanFailure extends Error {}
+export function stopsSuite(error: unknown) { return error instanceof SecretScanFailure || fatalAccountFailure.test(error instanceof Error ? error.message : String(error)); }
 const redact = (value: string, hidden: string[]) => hidden.reduce((text, secret) => secret ? text.replaceAll(secret, "[REDACTED]") : text, value);
 export function hiddenValues(accountHome?: string) {
   const values = Object.entries(Bun.env).filter(([name, value]) => value && sensitiveNames.test(name)).map(([, value]) => value!);
@@ -20,8 +23,8 @@ export function hiddenValues(accountHome?: string) {
   return [...new Set(values.filter(value => value.length >= 4))];
 }
 export function scanSecrets(value: string, hidden: string[] = []): void {
-  if (hidden.some(secret => value.includes(secret))) throw new Error("artifact contains a known secret");
-  if (/\b(?:sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,}|gh[pousr]_[A-Za-z0-9_]{20,})\b/i.test(value)) throw new Error("artifact contains a secret-shaped value");
+  if (hidden.some(secret => value.includes(secret))) throw new SecretScanFailure("artifact contains a known secret");
+  if (/\b(?:sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,}|gh[pousr]_[A-Za-z0-9_]{20,})\b/i.test(value)) throw new SecretScanFailure("artifact contains a secret-shaped value");
 }
 export async function scanArtifactTree(root: string, hidden: string[] = []): Promise<void> {
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -68,9 +71,8 @@ async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal
   const plan = task.page_plan.find(page => page.source !== "created")!;
   if (task.setup) {
     const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records };
-    const process = Bun.spawn(["uv", "run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], { cwd: stack.achillesDir, stdout: "pipe", stderr: "pipe" });
-    const exit = await Promise.race([process.exited, Bun.sleep(15_000).then(() => -1)]); if (exit === -1) process.kill();
-    if (exit !== 0) throw new Error(`task setup failed: ${await new Response(process.stderr).text()}`);
+    const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
+    if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
   }
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal);
   if (!response.ok) throw new Error(`could not set create mode for ${plan.alias} (${response.status})`);
@@ -129,9 +131,8 @@ for r in out["tool_versions"]:
  b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]
 print(json.dumps(out))`;
 async function databaseSnapshot(stack: EvalStack) {
-  const process = Bun.spawn(["uv", "run", "python", "-c", SNAPSHOT_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3")], { stdout: "pipe", stderr: "pipe" });
-  const exit = await Promise.race([process.exited, Bun.sleep(15_000).then(() => -1)]); if (exit === -1) process.kill();
-  if (exit !== 0) throw new Error(`snapshot failed: ${await new Response(process.stderr).text()}`); return JSON.parse(await new Response(process.stdout).text()) as EvalSnapshot;
+  const process = await stack.run("uv", ["run", "python", "-c", SNAPSHOT_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3")]);
+  if (process.exitCode !== 0) throw new Error(`snapshot failed: ${process.stderr}`); return JSON.parse(process.stdout) as EvalSnapshot;
 }
 const rowKey = (type: string, row: Record<string, unknown>) => type === "pages" || type === "tools" ? String(row.id) : type === "records" ? `${row.page_id}:${row.collection}:${row.id}` : `${row.page_id}:${row.tool_id ?? row.version}`;
 function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: Record<string, unknown>[]) {
@@ -169,6 +170,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
   const onEvent = (event: Record<string, any>) => {
     events.push(event);
+    const eventFailure = new Error(JSON.stringify(event)); if (!fatal && stopsSuite(eventFailure)) { fatal = eventFailure; void abortAll(); return; }
     if (event.event === "turn_start" && ++turns > task.agent_turns && !fatal) { fatal = new Error("task model turn limit exceeded"); void abortAll(); }
     if (event.event !== "approval_request") return;
     const session = [...sessions.entries()].find(([, value]) => value.id === event.session_id); const requestId = event.data?.request_id ?? event.request_id;
@@ -190,7 +192,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   try {
     for (const step of task.steps) {
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new Error("task model turn limit has no remaining turn");
-      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
+      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); const resumed = await protocol.resume(session.id); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       const session = await getSession(step.chat, step.page); try { await protocol.send(session.id, step.prompt ?? task.prompt!); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
@@ -201,7 +203,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: { status: "unavailable" }, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
-  } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); protocol.close(); }
+  } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 
 export function validateCatalog(names: string[], required?: string) {
@@ -231,25 +233,27 @@ function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
   return { task_id: task.id, status: "harness_error", pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
 }
 
-type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean };
+type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean; stop_suite?: boolean };
 async function runRepeat(task: EvalTask, index: number, options: { scripted: boolean; achillesDir?: string; keep: boolean; runId: string; signal: AbortSignal; hidden: string[] }): Promise<RepeatResult> {
-  const provider = options.scripted ? scriptedProvider() : undefined; let stack: EvalStack | undefined; let result: ReturnType<typeof gradeTask> | undefined; let snapshot: EvalSnapshot | undefined; let failed = false; let catalog: string[] = [];
+  const provider = options.scripted ? scriptedProvider() : undefined; let stack: EvalStack | undefined; let result: ReturnType<typeof gradeTask> | undefined; let snapshot: EvalSnapshot | undefined; let failed = false; let stopSuite = false; let catalog: string[] = [];
   const retainedRoot = options.keep ? resolve(new URL(`../.cache/evals/${options.runId}/repeat-${index + 1}`, import.meta.url).pathname) : undefined;
   try {
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
     options.hidden.push(...hiddenValues(stack.accountHome));
     if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>; }
     else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider?.requests.length) catalog = catalogProof(provider.requests); result.status = result.pass ? "pass" : "agent_fail"; result.diagnostics.observed_catalog = catalog;
-  } catch (error) { failed = true; result = failureResult(task, error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
+  } catch (error) { failed = true; stopSuite = stopsSuite(error); result = failureResult(task, stopSuite ? new Error("suite stopped after an account, login, quota, or secret-scan failure") : error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
-  if (!stack) return { result: result!, catalog, failed: true };
+  if (!stack) return { result: result!, catalog, failed: true, stop_suite: stopSuite };
   let cleanup: CleanupProof | undefined;
   try {
-    await Bun.write(join(stack.root, "result.json"), JSON.stringify(result, null, 2)); await Bun.write(join(stack.root, "snapshot.json"), JSON.stringify(snapshot ?? null, null, 2)); await collectSensitiveFiles(stack.root, options.hidden); cleanup = await stack.close(); await Bun.write(join(stack.root, "cleanup.json"), JSON.stringify(cleanup, null, 2)); await sanitizeAndScanRoot(stack.root, options.hidden);
+    try { await Bun.write(join(stack.root, "result.json"), JSON.stringify(result, null, 2)); await Bun.write(join(stack.root, "snapshot.json"), JSON.stringify(snapshot ?? null, null, 2)); await collectSensitiveFiles(stack.root, options.hidden); }
+    finally { cleanup = await stack.close(); }
+    await Bun.write(join(stack.root, "cleanup.json"), JSON.stringify(cleanup, null, 2)); await sanitizeAndScanRoot(stack.root, options.hidden);
     if (retainedRoot) { await mkdir(join(retainedRoot, ".."), { recursive: true }); await cp(stack.root, retainedRoot, { recursive: true, force: true }); await scanArtifactTree(retainedRoot, options.hidden); }
-  } catch { failed = true; result = failureResult(task, new Error("artifact finalization failed"), options.hidden); snapshot = undefined; if (retainedRoot) await rm(retainedRoot, { recursive: true, force: true }); }
-  finally { await rm(stack.root, { recursive: true, force: true }); }
-  return { result: result!, snapshot, cleanup, catalog, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, failed };
+  } catch (error) { failed = true; stopSuite ||= stopsSuite(error); result = failureResult(task, new Error(stopSuite ? "suite stopped after a secret-scan failure" : "artifact finalization failed"), options.hidden); snapshot = undefined; if (retainedRoot) await rm(retainedRoot, { recursive: true, force: true }); }
+  finally { await stack.close().catch(() => undefined); await rm(stack.root, { recursive: true, force: true }); }
+  return { result: result!, snapshot, cleanup, catalog, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, failed, stop_suite: stopSuite };
 }
 
 async function writeReportArtifacts(staging: string, report: ReturnType<typeof makeReport>, repeats: RepeatResult[]) {
@@ -257,7 +261,7 @@ async function writeReportArtifacts(staging: string, report: ReturnType<typeof m
   await mkdir(join(staging, "snapshots")); const seen = new Map<string, number>(); for (const repeat of repeats) { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); await Bun.write(join(staging, "snapshots", `${repeat.result.task_id}-${number}.json`), JSON.stringify(repeat.snapshot ?? null, null, 2)); }
 }
 async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, hidden: string[]) {
-  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); let publicationFailed = false; let report = makeReport({ run_id: runId, repeats: repeats.length / tasks.length, agent: { provider: Bun.env.EVAL_BACKEND === "scripted" ? "scripted" : "configured", model: Bun.env.EVAL_BACKEND === "scripted" ? "offline" : Bun.env.MODEL ?? "configured", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
+  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); const completedRepeats = Math.max(0, ...seen.values()); let publicationFailed = false; let report = makeReport({ run_id: runId, repeats: completedRepeats, agent: { provider: Bun.env.EVAL_BACKEND === "scripted" ? "scripted" : "configured", model: Bun.env.EVAL_BACKEND === "scripted" ? "offline" : Bun.env.MODEL ?? "configured", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
   const staging = await mkdtemp(join(Bun.env.TMPDIR ?? "/tmp", "achilles-eval-report-"));
   try {
     await writeReportArtifacts(staging, report, repeats);
@@ -268,14 +272,14 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.every(repeat => repeat.result.pass && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: repeats.length / tasks.length, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && repeats.every(repeat => repeat.result.pass && !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {
   const retained = resolve(new URL(`../.cache/evals/${Date.now()}-${process.pid}/stack`, import.meta.url).pathname); const stack = await startEvalStack({ achillesDir: Bun.env.ACHILLES_DIR, zetaRev: Bun.env.ZETA_REV, model: Bun.env.MODEL, maxTurns: task.agent_turns, signal: controller.signal, beforeDelete: root => sanitizeAndScanRoot(root, hidden) }); hidden.push(...hiddenValues(stack.accountHome));
   console.log(JSON.stringify({ achilles: stack.achillesOrigin, zeta: stack.zetaOrigin, model: `${stack.provider}/${stack.model}`, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, retained_state: retained }));
   try { await new Promise<void>(resolveWait => controller.signal.addEventListener("abort", () => resolveWait(), { once: true })); }
-  finally { await collectSensitiveFiles(stack.root, hidden); const cleanup = await stack.close(); await Bun.write(join(stack.root, "cleanup.json"), JSON.stringify(cleanup, null, 2)); await sanitizeAndScanRoot(stack.root, hidden); await mkdir(join(retained, ".."), { recursive: true }); await cp(stack.root, retained, { recursive: true, force: true }); await scanArtifactTree(retained, hidden); await rm(stack.root, { recursive: true, force: true }); }
+  finally { let cleanup: CleanupProof; try { await collectSensitiveFiles(stack.root, hidden); } finally { cleanup = await stack.close(); } await Bun.write(join(stack.root, "cleanup.json"), JSON.stringify(cleanup, null, 2)); await sanitizeAndScanRoot(stack.root, hidden); await mkdir(join(retained, ".."), { recursive: true }); await cp(stack.root, retained, { recursive: true, force: true }); await scanArtifactTree(retained, hidden); await rm(stack.root, { recursive: true, force: true }); }
 }
 
 async function main() {
@@ -287,9 +291,9 @@ async function main() {
     if (Bun.env.EVAL_STACK_ONLY === "1") { if (tasks.length !== 1) throw new Error("EVAL_STACK_ONLY requires one task"); await runStackOnly(tasks[0], controller, hidden); }
     else {
       const runId = `${Date.now()}-${process.pid}`; const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("../evals/reports/", import.meta.url).pathname, runId)); const results: RepeatResult[] = [];
-      for (const task of tasks) for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break; results.push(await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId: `${runId}-${task.id}`, signal: controller.signal, hidden })); }
+      suite: for (const task of tasks) for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break suite; const repeat = await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId: `${runId}-${task.id}`, signal: controller.signal, hidden }); results.push(repeat); if (repeat.stop_suite) break suite; }
       if (!await publishReport(tasks, results, output, runId, hidden)) process.exitCode = 1;
     }
   } finally { process.off("SIGINT", onSigint); process.off("SIGTERM", onSigterm); if (signalCode) process.exitCode = signalCode; }
 }
-if (import.meta.main) { await main(); process.exit(process.exitCode ?? 0); }
+if (import.meta.main) { await main(); if (Bun.env.EVAL_SKIP_EXPLICIT_EXIT !== "1") process.exit(process.exitCode ?? 0); }

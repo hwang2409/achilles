@@ -7,7 +7,9 @@ type Rpc = { id?: number; result?: any; error?: { message?: string; code?: numbe
 class Client implements EvalProtocol {
   private nextId = 1;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; method: string }>();
+  private closed: Promise<void>;
   constructor(private socket: WebSocket, private onEvent?: EventHandler) {
+    this.closed = new Promise(resolve => socket.addEventListener("close", () => resolve(), { once: true }));
     socket.onmessage = (message) => {
       let value: Rpc;
       try { value = JSON.parse(String(message.data)); } catch { return; }
@@ -43,7 +45,11 @@ class Client implements EvalProtocol {
     const rows: unknown[] = []; let offset = 0;
     for (;;) { const page = await this.request("session_history", { session_id: sessionId, offset }); rows.push(...(page?.messages ?? [])); if (page?.next_offset == null) return rows; offset = page.next_offset; }
   }
-  close() { this.socket.close(); this.rejectAll(new Error("protocol closed")); }
+  async close() {
+    if (this.socket.readyState === WebSocket.CLOSED) return;
+    if (this.socket.readyState < WebSocket.CLOSING) this.socket.close();
+    await this.closed;
+  }
 }
 
 export type EvalProtocol = {
@@ -53,7 +59,7 @@ export type EvalProtocol = {
   abort(sessionId: string): Promise<void>;
   resume(sessionId: string): Promise<{ session?: { session_id?: string }; session_id?: string }>;
   sessionHistory(sessionId: string): Promise<unknown[]>;
-  close(): void;
+  close(): Promise<void>;
 };
 
 function withDeadline<T>(work: Promise<T>, label: string, timeoutMs = RPC_TIMEOUT_MS): Promise<T> {
@@ -72,7 +78,7 @@ export async function connectEvalProtocol(discovery: { url: string; controller_t
     const missing = REQUIRED_FEATURES.filter(feature => !accepted.includes(feature));
     if (missing.length) throw new Error(`zeta lacks required features: ${missing.join(", ")}`);
     return client;
-  } catch (error) { client.close(); throw error; }
+  } catch (error) { await client.close(); throw error; }
 }
 
 export function reserveTurns(tasks: Array<{ agent_turns: number }>, repeats: number) { return repeats * tasks.reduce((total, task) => total + task.agent_turns, 0); }

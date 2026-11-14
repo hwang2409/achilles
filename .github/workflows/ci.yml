@@ -61,12 +61,20 @@ jobs:
           python-version: "3.12"
       - run: uv sync --project .cache/zeta --frozen
       - run: bun test ./scripts/eval*.test.ts
-      - run: EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 TASK=agent-data-access,create-and-use-tool-same-chat,harness-smoke,judge-page-and-annotate,second-chat-tools REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
+      - run: |
+          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected = sorted(path.stem for path in Path('evals/tasks').glob('*.json'))
+          actual = sorted(task['task_id'] for task in json.loads(Path('.cache/eval-ci-setup/report.json').read_text())['tasks'])
+          assert actual == expected, (actual, expected)
+          PY
       - run: |
           python - <<'PY'
           import json, os, subprocess
           from pathlib import Path
-          env = {**os.environ, 'EVAL_BACKEND': 'scripted', 'REPORT_DIR': '.cache/eval-ci-success'}
+          env = {**os.environ, 'EVAL_BACKEND': 'scripted', 'EVAL_SKIP_EXPLICIT_EXIT': '1', 'REPORT_DIR': '.cache/eval-ci-success'}
           result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'judge-page-and-annotate'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-success') / 'report.json').read_text())
           if any(check['id'] == 'harness' for task in report['tasks'] for check in task['checks']):
@@ -87,7 +95,7 @@ jobs:
           report = json.loads((root / 'report.json').read_text())
           assert report['tasks'] and not report['tasks'][0]['pass']
           proofs = json.loads((root / 'cleanup.json').read_text())
-          assert proofs and all(p['pids_dead'] and p['ports_closed'] and p['discovery_pid_dead'] and p['discovery_cleaned'] for p in proofs)
+          assert proofs and all(p['pids_dead'] and p['pgids_dead'] and p['ports_closed'] and p['discovery_pid_dead'] and p['discovery_cleaned'] for p in proofs)
           for proof in proofs:
               for pid in proof['pids']:
                   try: os.kill(pid, 0)
