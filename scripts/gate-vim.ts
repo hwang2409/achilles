@@ -263,6 +263,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await field.press("Escape");
   await field.press("i");
   await field.fill("start cursor stream");
+  if (await vimDraft() !== "start cursor stream") throw new Error(`vim cursor setup failed: ${JSON.stringify(await vimDraft())}`);
   const cursorDraft = "cursor-stays-here";
   await field.press("Enter");
   await waitFor(async () => {
