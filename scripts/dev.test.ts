@@ -244,7 +244,14 @@ process.exit(0);
     expect(crashedLockIdentity).not.toBeNull();
     await stop(crashedLockIdentity!, "SIGKILL");
     const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    expect(await recovered.exited, await new Response(recovered.stderr).text()).toBe(0);
+    const recoveredExit = await recovered.exited;
+    const recoveredStderr = await new Response(recovered.stderr).text();
+    if (recoveredExit !== 0) {
+      const lsof = Bun.spawnSync(["lsof", resolve(devCache, "lock")]);
+      const ps = Bun.spawnSync(["ps", "-o", "pid,ppid,stat,command", "-p", `${crashedLockPid},${crashedChildPid}`]);
+      console.error(recoveredStderr, lsof.stdout.toString(), lsof.stderr.toString(), ps.stdout.toString(), ps.stderr.toString());
+    }
+    expect(recoveredExit, recoveredStderr).toBe(0);
     await stop(crashedChildIdentity!);
     crashedChildPid = 0;
 

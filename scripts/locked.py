@@ -8,18 +8,18 @@ import time
 from pathlib import Path
 
 
-def holder_alive(value: str) -> bool:
+def holder_status(value: str) -> str:
     try:
         pid = int(value)
     except ValueError:
-        return True
+        return "invalid"
     status = subprocess.run(
         ["ps", "-p", str(pid), "-o", "stat="],
         check=False,
         capture_output=True,
         text=True,
     )
-    return status.returncode == 0 and not status.stdout.strip().startswith("Z")
+    return status.stdout.strip() if status.returncode == 0 else "missing"
 
 
 # dead holder: macOS CI can delay kernel flock release; this grace is bounded.
@@ -44,13 +44,18 @@ def main() -> int:
         except BlockingIOError:
             lock.seek(0)
             holder = lock.read().strip()
-            if holder_alive(holder):
+            status = holder_status(holder)
+            if status not in {"missing"} and not status.startswith("Z"):
                 suffix = f" (pid {holder})" if holder else ""
-                print(f"make dev is already running{suffix}", file=sys.stderr)
+                print(
+                    f"make dev is already running{suffix} (live holder, ps state {status})",
+                    file=sys.stderr,
+                )
                 return 1
             if not wait_for_dead_holder_release(lock, holder):
                 print(
-                    f"make dev is already running (pid {holder})",
+                    f"make dev is already running (pid {holder}) "
+                    f"(dead-holder grace exhausted, ps state {status})",
                     file=sys.stderr,
                 )
                 return 1
