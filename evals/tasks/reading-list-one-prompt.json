@@ -90,11 +90,9 @@
     },
     {
       "id": "layout",
-      "type": "layout_contains",
+      "type": "list_shows",
       "page": "reading",
-      "value": {
-        "type": "list"
-      }
+      "value": "Synthetic Book"
     },
     {
       "id": "visible-book",
