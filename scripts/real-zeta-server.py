@@ -16,18 +16,18 @@ from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 
-def is_page_open(messages) -> bool:
-    return bool(
-        messages
-        and messages[-1].role is MessageRole.USER
-        and any(
-            isinstance(block, TextContent) and block.text == "open created page"
-            for block in messages[-1].content
-        )
-    )
-
-
 class BarrierBackend(FakeBackend):
+    @staticmethod
+    def is_page_open(messages) -> bool:
+        return bool(
+            messages
+            and messages[-1].role is MessageRole.USER
+            and any(
+                isinstance(block, TextContent) and block.text == "open created page"
+                for block in messages[-1].content
+            )
+        )
+
     def __init__(self, turns, request_serializer, control):
         super().__init__(turns, request_serializer=request_serializer)
         self.page_open = FakeBackend(
@@ -38,7 +38,7 @@ class BarrierBackend(FakeBackend):
 
     @owned_completion
     async def complete(self, messages, tool_schemas):
-        backend = self.page_open if is_page_open(messages) else self
+        backend = self.page_open if self.is_page_open(messages) else self
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
@@ -393,7 +393,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
-        if is_page_open(messages):
+        if BarrierBackend.is_page_open(messages):
             document["page_open_request"] = True
             write_control(control, document)
             return json.dumps({"messages": len(messages), "schemas": []}).encode()
