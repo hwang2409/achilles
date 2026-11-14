@@ -15,7 +15,7 @@
       "kind": "prompt",
       "page": "notes",
       "chat": "notes-chat",
-      "prompt": "create a page-local add_note insert tool for a notes collection with one required string field named `text`"
+      "prompt": "create a page-local add_note insert tool for a notes collection"
     },
     {
       "id": "use",
@@ -33,18 +33,12 @@
       "name": "add_note"
     },
     {
-      "id": "use",
-      "type": "successful_result",
+      "id": "roundtrip",
+      "type": "schema_roundtrip",
       "page": "notes",
-      "tool": "achilles__add_note"
-    },
-    {
-      "id": "record",
-      "type": "record",
-      "page": "notes",
-      "value": {
-        "text": "synthetic note"
-      }
+      "value": [
+        "synthetic note"
+      ]
     },
     {
       "id": "same-page",

@@ -128,7 +128,7 @@ out={"pages":q("select id,route,title from page"),"tools":q("select id,owner_pag
 for k in ("records","layouts"):
  for r in out[k]: r["data" if k=="records" else "document"]=json.loads(r["data" if k=="records" else "document"])
 for r in out["tool_versions"]:
- b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]
+ b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]; r["input_schema"]=b["input_schema"]; r["data_schema"]=b["implementation"]["data_schema"]
 print(json.dumps(out))`;
 async function databaseSnapshot(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "python", "-c", SNAPSHOT_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3")]);

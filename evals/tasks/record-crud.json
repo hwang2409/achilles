@@ -15,7 +15,7 @@
       "kind": "prompt",
       "page": "records",
       "chat": "records-chat",
-      "prompt": "use the tools to add one record with id record-1 and one with id record-2, update record-1 status to done, then list all records"
+      "prompt": "use the tools to add record-1 and record-2, update record-1 status to done, then list all records"
     }
   ],
   "setup": {
