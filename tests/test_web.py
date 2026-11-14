@@ -405,6 +405,7 @@ def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
     second = client.get(f"/api/chats?limit=2&before={cursor}").json()
     second_rows = second["chats"] if isinstance(second, dict) else second
     assert [row["session_id"] for row in second_rows] == ["b", "a"]
+    assert second["next"] is None
     assert first_rows[0]["page_route"] == "/notes"
     assert first_rows[0]["page_title"] == "notes"
     client.patch("/api/chats/a", json={"last_state": "approval"})

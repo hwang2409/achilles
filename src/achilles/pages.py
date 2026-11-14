@@ -387,7 +387,7 @@ class PageStore:
                 "c.title,c.created_at,c.updated_at,c.last_state FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
-                (*parameters, limit),
+                (*parameters, limit + 1),
             ).fetchall()
         return [dict(row) for row in rows]
 
