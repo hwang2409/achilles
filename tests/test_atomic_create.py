@@ -109,6 +109,144 @@ def state(root):
     return counts, files
 
 
+def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
+    _, store, client, home_headers = creation_client
+    tools = []
+    blocks = []
+    for index in range(32):
+        name = f"tool_{index}_{'x' * 54}"
+        collection = f"collection_{index}_{'y' * 49}"
+        schema = {"type": "object", "properties": {"value": {"type": "string"}}}
+        tools.append(
+            {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": name,
+                "description": "x" * 2_000,
+                "input_schema": schema,
+                "output_schema": {"type": "object"},
+                "implementation": {
+                    "operation": "insert",
+                    "collection": collection,
+                    "data_schema": schema,
+                },
+            }
+        )
+        blocks.append({"type": "list", "title": "b" * 256, "collection": collection})
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(tools=tools, layout={"blocks": blocks}),
+        },
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    with store.transaction() as db:
+        for index in range(32):
+            db.execute(
+                "INSERT INTO page_record("
+                "page_id,collection,record_id,version,document,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    page_id,
+                    f"collection_{index}_{'y' * 49}",
+                    f"record-{index}",
+                    1,
+                    "{}",
+                    "now",
+                    "now",
+                ),
+            )
+    summary = mcp(
+        client,
+        home_headers,
+        40,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    text = summary["content"][0]["text"]
+    value = json.loads(text)
+    assert len(text.encode()) <= 8 * 1024
+    assert value["truncated"] is True
+    assert set(value["omitted"]) == {"blocks", "tools", "collections"}
+    assert sum(value["omitted"].values()) > 0
+
+
+def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_client):
+    root, store, client, home_headers = creation_client
+    created = mcp(
+        client, home_headers, 2, "tools/call", {"name": "create_page", "arguments": request()}
+    )
+    reading_id = json.loads(created["content"][0]["text"])["page_id"]
+    summary = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    value = json.loads(summary["content"][0]["text"])
+    assert value["route"] == "/reading"
+    assert value["layout"]["version"] == 1
+    assert value["tools"][0]["name"] == "add_book"
+    assert value["collections"] == {}
+    serialized = json.dumps(value)
+    assert len(serialized.encode()) <= 8 * 1024
+    assert "credentials" not in serialized and str(root) not in serialized
+    secret = (root / "credentials" / reading_id).read_text()
+    with store.transaction() as db:
+        credential_hash = db.execute(
+            "SELECT credential_hash FROM page WHERE id=?", (reading_id,)
+        ).fetchone()[0]
+    assert secret not in serialized and credential_hash not in serialized
+
+    third = mcp(
+        client,
+        home_headers,
+        4,
+        "tools/call",
+        {"name": "create_page", "arguments": {**request(), "route": "/third", "title": "third"}},
+    )
+    third_id = json.loads(third["content"][0]["text"])["page_id"]
+    store.set_create_mode(third_id, True)
+    third_headers = initialize(client, store.ensure_credential(third_id), 5)
+    forbidden = mcp(
+        client,
+        third_headers,
+        6,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/reading"}},
+    )
+    assert forbidden["isError"]
+    expected = {"code": "forbidden", "expected": "authorized page", "path": ""}
+    assert json.loads(forbidden["content"][0]["text"]) == expected
+
+    store.set_create_mode(reading_id, True)
+    reading_headers = initialize(client, store.ensure_credential(reading_id), 7)
+    cross_forbidden = mcp(
+        client,
+        reading_headers,
+        8,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/"}},
+    )
+    missing = mcp(
+        client,
+        reading_headers,
+        9,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"route": "/missing"}},
+    )
+    assert json.loads(cross_forbidden["content"][0]["text"]) == expected
+    assert json.loads(missing["content"][0]["text"]) == expected
+    store.set_create_mode("home", False)
+    off = mcp(client, home_headers, 10, "tools/call", {"name": "inspect_page", "arguments": {}})
+    assert off["isError"]
+
+
 def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):
     root, store, client, headers = creation_client
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})

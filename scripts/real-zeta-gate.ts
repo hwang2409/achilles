@@ -311,6 +311,21 @@ try {
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
+  const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
+  const homeInspect = await homeMcp(11, "tools/call", {
+    name: "inspect_page",
+    arguments: { route: "/reading" },
+  });
+  const homeInspectValue = JSON.parse(homeInspect.result?.content?.[0]?.text ?? "{}");
+  if (
+    homeInspect.result?.isError ||
+    homeInspectValue.route !== "/reading" ||
+    homeInspectValue.layout?.version !== 1 ||
+    homeInspectValue.tools?.[0]?.name !== "add_book" ||
+    JSON.stringify(homeInspectValue).includes("credentials") ||
+    JSON.stringify(homeInspectValue).includes(achillesHome)
+  )
+    throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
   await page.goto(`${origin}/reading`);
   await field.waitFor({ timeout: 20000 });
   const readingSessionId = await homeSessionId();
@@ -441,7 +456,6 @@ try {
     throw new Error(
       `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
-  const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   const createdPageId = createdPage.id;
   const secondCredential = (
     await Bun.file(join(achillesHome, `credentials/${createdPageId}`)).text()
@@ -464,6 +478,8 @@ try {
   ).json();
   if (secondRecords.length !== 1 || secondRecords[0]?.title !== "Synthetic Book")
     throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
+
+  if (createdPage.route !== "/reading") throw new Error("created page route changed");
   const versionTwo = {
     ...toolBundle,
     input_schema: {
