@@ -209,6 +209,8 @@ try {
         }
       })
       .filter(Boolean);
+  const zetaSessionCount = () => requests().filter((frame) => frame.method === "new_session").length;
+  const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`)).json()) as { chats: unknown[] }).chats.length;
   const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
     const messages = requests();
     let requestIndex = messages.length - 1;
@@ -636,8 +638,21 @@ try {
   await page.goto(origin);
   const readingLink = page.locator('.page-list a[href^="/reading"]');
   await readingLink.waitFor({ timeout: 20000 });
+  const chatsBeforeReading = await chatCount();
+  const sessionsBeforeReading = zetaSessionCount();
   await readingLink.click();
   await page.waitForURL((url) => new URL(url).pathname === "/reading");
+  await page.getByText("reading list layout", { exact: true }).waitFor({ state: "visible", timeout: 20_000 }).catch(async (error) => {
+    throw new Error(`${error}\ncreated page layout did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
+  });
+  if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
+    throw new Error("created page layout did not appear before chat creation");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true });
+  await field.fill("open created page");
+  await field.press("Enter");
+  await page.getByText("new page ready", { exact: true }).waitFor({ timeout: 20_000 });
+  if (await chatCount() !== chatsBeforeReading + 1) throw new Error("first created-page send did not create exactly one chat");
+  if (zetaSessionCount() !== sessionsBeforeReading + 1) throw new Error("first created-page send did not create exactly one zeta session");
   await page.goto(origin);
   await field.waitFor({ timeout: 20000 });
   const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
@@ -828,7 +843,7 @@ try {
   await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
   await field.fill("continue after queued steer");
   await field.press("Enter");
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "next request after stuck steer");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 19, "next request after stuck steer");
   const afterQueuedSteer = JSON.parse(await Bun.file(control).text());
   if (afterQueuedSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length !== 1)
     throw new Error(`next request did not consume the stale steer exactly once: ${JSON.stringify(afterQueuedSteer.user_messages)}`);

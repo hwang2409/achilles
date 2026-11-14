@@ -270,7 +270,7 @@ describe("active chat attachment", () => {
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(storage);
     try {
-      await attachPage(client as never, "home", null, owner, creation, owner.begin("first", true)).catch(() => {});
+      await creation.create(input(client, true)).catch(() => {});
       await attachPage(client as never, "home", null, owner, creation, owner.begin("retry", true));
       expect(sessions).toBe(1);
       expect(mappingAttempts).toBe(2);
@@ -294,7 +294,7 @@ describe("active chat attachment", () => {
     const creation = createChatCreationOwner(storage);
     const client = attachmentClient((method) => { if (method === "resume") throw new Error("forced later attachment failure"); });
     try {
-      await attachPage(client as never, "home", null, owner, creation, owner.begin("first", true)).catch(() => {});
+      await creation.create(input(client, true)).catch(() => {});
       expect(creation.status("home").error).toContain("could not save session mapping");
 
       await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true)).catch(() => {});

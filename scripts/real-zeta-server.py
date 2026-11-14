@@ -203,6 +203,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "title": "reading list",
                         "layout": {
                             "blocks": [
+                                {"type": "text", "text": "reading list layout"},
                                 {"type": "form", "title": "add book", "tool": "add_book"},
                                 {
                                     "type": "metric",
@@ -231,6 +232,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ]
         ),
         ScriptedTurn(content=[TextContent("annotation complete")]),
+        ScriptedTurn(content=[TextContent("new page ready")]),
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
@@ -508,7 +510,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
 
     async def held_finalize_turn(instance, *args, **kwargs):
         document = json.loads(control.read_text())
-        if document.get("request_count") == 17 and not document.get("late_turn_released"):
+        if document.get("request_count") == 18 and not document.get("late_turn_released"):
             document["late_turn_barrier"] = "held"
             write_control(control, document)
             for _ in range(300):
