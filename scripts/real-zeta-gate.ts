@@ -168,7 +168,7 @@ try {
   });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
-  await setupAlert.waitFor({ timeout: 20000 });
+  await gateWait.playwright(setupAlert, "waitFor", { timeout: 20000 });
   if (!(await setupAlert.innerText()).includes("add it to $ZETA_HOME/mcp.json"))
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
@@ -192,13 +192,13 @@ try {
     }
   }, "restarted zeta");
   const field = page.getByRole("textbox", { name: "message" });
-  await field.waitFor({ timeout: 20000 }).catch(async () => {
+  await gateWait.playwright(field, "waitFor", { timeout: 20000 }).catch(async () => {
     throw new Error(
       `composer missing: ${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
     );
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
-  await page.locator(".transcript").waitFor({ state: "visible" });
+  await gateWait.playwright(page.locator(".transcript"), "waitFor", { state: "visible" });
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 }).catch(async (error) => {
       throw new Error(`${error}\nhome session id missing at ${page.url()}: ${redact(await page.locator("body").innerText({ timeout: 10_000 }))}`);
@@ -243,15 +243,15 @@ try {
   await assertServerAskWins(page, first, requests(), approvalModeResponse);
   await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
     await page.goto(`${origin}/not-a-real-page`);
-  await page.getByRole("alert").filter({ hasText: "page not found" }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("alert").filter({ hasText: "page not found" }), "waitFor", { timeout: 20_000 });
   await page.getByRole("button", { name: "new chat", exact: true }).click();
-  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message", exact: true }), "waitFor", { timeout: 20_000 });
   });
   const unknownRouteSession = await homeSessionId();
   if (!unknownRouteSession || unknownRouteSession === first) throw new Error("unknown-route new chat did not create a new session");
   if (!(await page.locator(".empty-chat").count())) throw new Error("unknown-route new chat did not show an empty chat");
   await page.goto(`${origin}/?chat=${first}`);
-  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message", exact: true }), "waitFor", { timeout: 20_000 });
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
@@ -266,13 +266,13 @@ try {
   if (!(await waitForExit(paginationSeed, 10_000)) || paginationSeed.exitCode !== 0)
     throw new Error(`pagination seed exited ${paginationSeed.exitCode}`);
   const paginationSearch = page.locator(".chat-search input");
-  const searchedPagination = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.get("q") === "older chat");
+  const searchedPagination = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.get("q") === "older chat");
   await paginationSearch.fill("older chat");
   await searchedPagination;
-  const resetPagination = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && !new URL(response.url()).searchParams.has("q"));
+  const resetPagination = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && !new URL(response.url()).searchParams.has("q"));
   await paginationSearch.fill("");
   await resetPagination;
-  await page.locator(".chat-row").nth(49).waitFor();
+  await gateWait.playwright(page.locator(".chat-row").nth(49), "waitFor");
   let olderHeld = false;
   let releaseOlder!: () => void;
   const olderReleased = new Promise<void>((resolve) => { releaseOlder = resolve; });
@@ -286,7 +286,7 @@ try {
   try {
     await page.getByRole("button", { name: "load 50 older" }).click();
     await waitFor(async () => olderHeld, "held older-chats response");
-    const olderRefresh = page.waitForResponse((response) => {
+    const olderRefresh = gateWait.playwright(page, "waitForResponse", (response) => {
       const url = new URL(response.url());
       return url.pathname === "/api/chats" && Number(url.searchParams.get("limit")) > 50;
     }, { timeout: 20_000 }).catch(() => { throw new Error("timed out waiting for older chats response after turn-completion refresh"); });
@@ -294,7 +294,7 @@ try {
     await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
     releaseOlder();
     await olderRefresh;
-    await page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])').waitFor({ timeout: 20_000 });
+    await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])'), "waitFor", { timeout: 20_000 });
     if (await page.locator(".chat-row").count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
   } finally {
     releaseOlder();
@@ -304,20 +304,20 @@ try {
   const trimPagination = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.execute(\"DELETE FROM chat WHERE session_id LIKE 'older-%'\"); db.commit(); db.close()"], env);
   if (!(await waitForExit(trimPagination, 10_000)) || trimPagination.exitCode !== 0)
     throw new Error(`pagination trim exited ${trimPagination.exitCode}`);
-  const trimSearch = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.get("q") === "trim pagination");
+  const trimSearch = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.get("q") === "trim pagination");
   await paginationSearch.fill("trim pagination");
   await trimSearch;
-  const trimmedPagination = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && !new URL(response.url()).searchParams.has("q"));
+  const trimmedPagination = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && !new URL(response.url()).searchParams.has("q"));
   await paginationSearch.fill("");
   await trimmedPagination;
-  await page.locator(`.chat-list[data-list-state="ready"]:not([data-loaded-count="${beforeTrim}"])`).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"]:not([data-loaded-count="${beforeTrim}"])`), "waitFor", { timeout: 20_000 });
   const own = JSON.parse(await Bun.file(ownDiscovery).text());
   const connected = await fetch(discoveryUrl).then((response) => response.json()) as { url: string };
   if (sharedProcess.exitCode !== null || zetaProcess.exitCode !== null) throw new Error("one of the unrelated zeta serves exited during chat");
   if (shared.pid === own.pid || shared.port === own.port) throw new Error("shared and achilles zeta serves did not remain distinct");
   if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
-  const second = await gateShell(page, first, waitFor);
+  const second = await gateShell(page, first, waitFor, gateWait);
   const focusPaginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
   if (!(await waitForExit(focusPaginationSeed, 10_000)) || focusPaginationSeed.exitCode !== 0)
     throw new Error(`focus pagination seed exited ${focusPaginationSeed.exitCode}`);
@@ -331,11 +331,11 @@ try {
   };
   const reloadShell = async () => {
     await page.reload();
-    await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+    await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   };
   const waitForListChange = async (selector: ".chat-list" | ".page-list", before: number, response: Promise<unknown>, label: string) => {
     await response;
-    await page.locator(`${selector}[data-list-state="ready"]:not([data-loaded-count="${before}"])`).waitFor({ timeout: 20_000 }).catch(() => {
+    await gateWait.playwright(page.locator(`${selector}[data-list-state="ready"]:not([data-loaded-count="${before}"])`), "waitFor", { timeout: 20_000 }).catch(() => {
       throw new Error(`${label} response completed without a new ready list state`);
     });
   };
@@ -345,7 +345,7 @@ try {
       run: async () => {
         await reloadShell();
         const rows = page.locator(".chat-row");
-        await rows.nth(49).waitFor();
+        await gateWait.playwright(rows.nth(49), "waitFor");
         if (await rows.count() !== 50) throw new Error("chat pagination did not show its first 50 rows");
         await rows.last().focus();
         await page.keyboard.press("Tab");
@@ -353,11 +353,11 @@ try {
         await assertActive("chat load-older button", loadOlder);
         const boundaryChat = await rows.last().getAttribute("data-chat-id");
         if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
-        const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
+        const continuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await loadOlder.click();
         await waitForListChange(".chat-list", 50, continuation, "older chats");
         const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
-        await firstNewlyLoaded.waitFor({ state: "attached" });
+        await gateWait.playwright(firstNewlyLoaded, "waitFor", { state: "attached" });
         await assertActive("chat load-older success", firstNewlyLoaded);
       },
     },
@@ -366,7 +366,7 @@ try {
       run: async () => {
         await reloadShell();
         const search = page.locator(".chat-search input");
-        await search.waitFor();
+        await gateWait.playwright(search, "waitFor");
         const emptyOlder = async (route: Route) => {
           const url = new URL(route.request().url());
           if (url.searchParams.has("before")) await route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
@@ -374,16 +374,16 @@ try {
         };
         await page.route("**/api/chats?**", emptyOlder);
         const before = Number(await page.locator(".chat-list").getAttribute("data-loaded-count"));
-        const emptyResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
+        const emptyResponse = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await page.getByRole("button", { name: "load 50 older" }).click();
         await emptyResponse;
-        await page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`).waitFor({ timeout: 20_000 });
-        await page.getByRole("button", { name: "load 50 older" }).waitFor({ state: "detached" });
+        await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`), "waitFor", { timeout: 20_000 });
+        await gateWait.playwright(page.getByRole("button", { name: "load 50 older" }), "waitFor", { state: "detached" });
         await page.unroute("**/api/chats?**", emptyOlder);
-        const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("q"));
+        const refreshed = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("q"));
         await search.fill("older chat 54");
         await refreshed;
-        await page.locator(".chat-group h2", { hasText: "1 results" }).waitFor();
+        await gateWait.playwright(page.locator(".chat-group h2", { hasText: "1 results" }), "waitFor");
         await assertActive("empty older batch later refresh", search);
       },
     },
@@ -393,9 +393,9 @@ try {
         await reloadShell();
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
-        await showMore.waitFor();
+        await gateWait.playwright(showMore, "waitFor");
         const before = await links.count();
-        const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+        const continuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
         await waitForListChange(".page-list", before, continuation, "non-final page continuation");
         await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "non-final page continuation focus");
@@ -409,13 +409,13 @@ try {
         await reloadShell();
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
-        await showMore.waitFor();
+        await gateWait.playwright(showMore, "waitFor");
         const beforeFirst = await links.count();
-        const firstContinuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+        const firstContinuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
         await waitForListChange(".page-list", beforeFirst, firstContinuation, "first page continuation before final");
         const beforeFinal = await links.count();
-        const finalContinuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+        const finalContinuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
         await waitForListChange(".page-list", beforeFinal, finalContinuation, "final page continuation");
         await waitFor(async () => await links.nth(beforeFinal).evaluate((link) => document.activeElement === link), "final page continuation focus");
@@ -429,7 +429,7 @@ try {
         await reloadShell();
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
-        await showMore.waitFor();
+        await gateWait.playwright(showMore, "waitFor");
         const before = await links.count();
         let fail = true;
         const failContinuation = async (route: Route) => {
@@ -441,12 +441,12 @@ try {
         await page.route("**/api/pages?**", failContinuation);
         await expectBrowserErrors(page, [{ method: "GET", url: `${origin}/api/pages`, status: 503 }], async () => {
           await showMore.click();
-          await page.getByText("could not load pages", { exact: true }).waitFor();
+          await gateWait.playwright(page.getByText("could not load pages", { exact: true }), "waitFor");
         });
         await page.unroute("**/api/pages?**", failContinuation);
         await page.getByRole("button", { name: "retry", exact: true }).click();
-        await showMore.waitFor();
-        const retryContinuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+        await gateWait.playwright(showMore, "waitFor");
+        const retryContinuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
         await waitForListChange(".page-list", before, retryContinuation, "page continuation after retry");
         await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "page continuation retry focus");
@@ -474,7 +474,7 @@ try {
           await page.getByRole("button", { name: "show more pages" }).click();
           await waitFor(async () => seen, "held continuation before moving focus");
           await search.focus();
-          const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+          const continuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
           release();
           await waitForListChange(".page-list", before, continuation, "held continuation rows published");
           await assertActive("focus moved before commit", search);
@@ -499,17 +499,17 @@ try {
         };
         await page.route("**/api/pages?**", holdContinuation);
         const showMore = page.getByRole("button", { name: "show more pages" });
-        await showMore.waitFor();
+        await gateWait.playwright(showMore, "waitFor");
         await showMore.click();
         await waitFor(async () => seen, "continuation request was not made");
         const heading = page.locator(".page-list > .list-head");
         await heading.focus();
         await page.keyboard.press("Enter");
-        const continued = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+        const continued = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         release();
         await continued;
         await page.unroute("**/api/pages?**", holdContinuation);
-        await page.locator('.page-list[data-list-state="ready"]:not([data-loaded-count="20"])').waitFor({ timeout: 20_000 });
+        await gateWait.playwright(page.locator('.page-list[data-list-state="ready"]:not([data-loaded-count="20"])'), "waitFor", { timeout: 20_000 });
         await page.keyboard.press("Enter");
         await assertActive("target removed before commit", heading);
       },
@@ -599,12 +599,12 @@ try {
   const toggleRelease = new Promise<void>((resolve) => { releaseToggle = resolve; });
   const holdToggle = async (route: Route) => { toggleReached = true; await toggleRelease; await route.continue(); };
   await page.route("**/api/pages/home/create-mode", holdToggle);
-  const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
+  const toggleResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith("/api/pages/home/create-mode"));
   const toggleClick = modeToggle.click();
   try {
     await waitFor(async () => toggleReached, "create mode toggle request");
     const pendingMode = page.getByRole("button", { name: "turning on create mode…", exact: true });
-    await pendingMode.waitFor({ state: "visible" });
+    await gateWait.playwright(pendingMode, "waitFor", { state: "visible" });
     if (!(await pendingMode.isDisabled())) throw new Error("create mode toggle pending state was not disabled");
     await field.press("Enter");
   } finally {
@@ -614,7 +614,7 @@ try {
   }
   const toggleResult = await toggleResponse;
   if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode on", exact: true }), "waitFor");
   if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
     throw new Error("create mode toggle did not show on");
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
@@ -640,7 +640,7 @@ try {
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
-  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
   if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
     throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   if (screenshotDir) {
@@ -662,14 +662,14 @@ try {
   if ((await pageCount.textContent()) !== "20+") throw new Error(`page count should show 20+ while continuation exists: ${await pageCount.textContent()}`);
   const showMorePages = page.getByRole("button", { name: "show more pages" });
   await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await showMorePages.waitFor({ state: "visible", timeout: 20000 }).catch(() => { throw new Error("show more pages is not visible in the page section"); });
+  await gateWait.playwright(showMorePages, "waitFor", { state: "visible", timeout: 20000 }).catch(() => { throw new Error("show more pages is not visible in the page section"); });
   await showMorePages.focus();
   const pagesBeforeMore = Number(await page.locator(".page-list").getAttribute("data-loaded-count"));
-  const morePagesResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+  const morePagesResponse = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
   await page.keyboard.press("Enter");
   await waitForListChange(".page-list", pagesBeforeMore, morePagesResponse, "show more pages keyboard continuation");
   const secondBatchPage = page.locator('.page-list a[href^="/gate-page-27"]');
-  await secondBatchPage.waitFor({ state: "visible", timeout: 20000 });
+  await gateWait.playwright(secondBatchPage, "waitFor", { state: "visible", timeout: 20000 });
   await waitFor(async () => await secondBatchPage.evaluate((element) => document.activeElement === element), "focused first new page link");
   await pageHeading.focus();
   await page.keyboard.press("Enter");
@@ -680,15 +680,15 @@ try {
   await page.keyboard.press("Enter");
   await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await secondBatchPage.click();
-  await page.waitForURL((url) => new URL(url).pathname === "/gate-page-27");
+  await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/gate-page-27");
   await page.goto(origin);
   const readingLink = page.locator('.page-list a[href^="/reading"]');
-  await readingLink.waitFor({ timeout: 20000 });
+  await gateWait.playwright(readingLink, "waitFor", { timeout: 20000 });
   const chatsBeforeReading = await chatCount();
   const sessionsBeforeReading = zetaSessionCount();
   await readingLink.click({ timeout: 20_000 });
-  await page.waitForURL((url) => new URL(url).pathname === "/reading", { timeout: 20_000 });
-  await page.getByText("reading list layout", { exact: true }).waitFor({ state: "visible", timeout: 20_000 }).catch(async (error) => {
+  await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/reading", { timeout: 20_000 });
+  await gateWait.playwright(page.getByText("reading list layout", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\ncreated page layout did not appear before chat creation: ${redact(await page.locator("body").innerText())}; errors=${redact(errors.join(" | "))}; console=${redact(consoleErrors.join(" | "))}`);
   });
   if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
@@ -696,15 +696,15 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true, timeout: 20_000 });
   await field.fill("open created page", { timeout: 20_000 });
   await field.press("Enter", { timeout: 20_000 });
-  await page.getByText("new page ready", { exact: true }).waitFor({ timeout: 20_000 });
-  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
   if (await chatCount() !== chatsBeforeReading + 1) throw new Error("first created-page send did not create exactly one chat");
   if (zetaSessionCount() !== sessionsBeforeReading + 1) throw new Error("first created-page send did not create exactly one zeta session");
   await page.goto(origin);
-  await field.waitFor({ timeout: 20000 });
+  await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (createdPage.route !== "/reading") throw new Error("create_page did not create /reading");
-  await field.waitFor({ timeout: 20_000 });
+  await gateWait.playwright(field, "waitFor", { timeout: 20_000 });
   const chatOne = await homeSessionId();
   if (!chatOne || chatOne !== first) throw new Error("create_page did not run in the first home chat");
   await page.keyboard.press("Meta+Shift+O");
@@ -715,7 +715,7 @@ try {
   const chatTwo = await homeSessionId();
   if (!chatTwo) throw new Error("second home chat session id missing");
   const transcriptBeforeDiscovery = await page.locator('[data-part="message"]').count();
-  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
   const discoveryPrompt = "list achilles resources, then inspect /reading";
   await field.fill(discoveryPrompt);
   await field.press("Enter");
@@ -727,8 +727,8 @@ try {
   const inspectApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "inspect_page" });
   await waitFor(async () => (await inspectApproval.count()) > 0, "inspect_page approval after scripted turn");
   await inspectApproval.getByRole("button", { name: "approve", exact: true }).click();
-  await page.getByText("new chat tools complete", { exact: true }).waitFor({ timeout: 20_000 });
-  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByText("new chat tools complete", { exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
   const newChatTranscript = await page.locator('[data-part="message"]').nth(transcriptBeforeDiscovery).innerText();
   if (newChatTranscript.includes("MCP server achilles is unavailable") || (await page.locator("body").innerText()).includes("MCP server achilles is unavailable"))
     throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
@@ -755,9 +755,9 @@ try {
   const legacyMetricText =
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
   await page.goto(`${origin}/reading`);
-  await field.waitFor({ timeout: 20000 });
-  await page.getByText(legacyMetricText, { exact: true }).waitFor();
-  await page.getByText("reading: 0", { exact: true }).waitFor();
+  await gateWait.playwright(field, "waitFor", { timeout: 20000 });
+  await gateWait.playwright(page.getByText(legacyMetricText, { exact: true }), "waitFor");
+  await gateWait.playwright(page.getByText("reading: 0", { exact: true }), "waitFor");
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   const metricBoxes = await page.locator(".layout-metric").evaluateAll((elements) =>
@@ -789,22 +789,22 @@ try {
   const bookAdded = page.getByText("book added", { exact: true });
   await field.fill("add Synthetic Book");
   await field.press("Enter");
-  await addBookApproval.waitFor({ timeout: 20000 }).catch(async (error) => {
+  await gateWait.playwright(addBookApproval, "waitFor", { timeout: 20000 }).catch(async (error) => {
     throw new Error(
       `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
     );
   });
-  const filteredDetailResponse = page.waitForResponse((response) => {
+  const filteredDetailResponse = gateWait.playwright(page, "waitForResponse", (response) => {
     const url = new URL(response.url());
     return url.pathname === `/api/pages/${createdPage.id}/records/books`
       && url.searchParams.get("field") === "status"
       && url.searchParams.get("equals") === '"reading"';
   }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
-  await bookAdded.waitFor({ timeout: 20000 });
-  await page.getByText("reading: 1", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(bookAdded, "waitFor", { timeout: 20000 });
+  await gateWait.playwright(page.getByText("reading: 1", { exact: true }), "waitFor", { timeout: 20000 });
   const detailResponse = await filteredDetailResponse;
-  await page.waitForFunction(() => {
+  await gateWait.playwright(page, "waitForFunction", () => {
     const text = document.querySelector(".record-detail")?.textContent ?? "";
     return text.includes("Synthetic Book") || text.includes("could not load record");
   }, undefined, { timeout: 20000 });
@@ -813,10 +813,10 @@ try {
     throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
   if (filteredDetailText.includes("could not load record"))
     throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
-  const readingModeResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
+  const readingModeResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode on", exact: true }), "waitFor");
 
   const readingCredential = (
     await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()
@@ -861,7 +861,7 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await page.getByText("layout updated", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("layout updated", { exact: true }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
     return blocks[0] === "layout updated without reload" && blocks[1] === legacyMetricText && blocks[2] === "reading: 1" && blocks[3]?.includes("books");
@@ -891,11 +891,11 @@ try {
   if (lateStatuses.at(-1) !== "dropped")
     throw new Error(`late steer terminal status was not dropped: ${JSON.stringify(lateStatuses)}`);
   const droppedNotice = page.getByText("this message was not sent. your text is still here; press send to try again.", { exact: true });
-  await droppedNotice.waitFor({ timeout: 20_000 });
+  await gateWait.playwright(droppedNotice, "waitFor", { timeout: 20_000 });
   const droppedPanel = droppedNotice.locator("..");
   const droppedPanelText = await droppedPanel.innerText();
   if (droppedPanelText !== droppedPanelText.toLowerCase()) throw new Error(`dropped notice labels were not lowercase: ${droppedPanelText}`);
-  await droppedPanel.getByRole("button", { name: "dismiss delivery warning", exact: true }).waitFor();
+  await gateWait.playwright(droppedPanel.getByRole("button", { name: "dismiss delivery warning", exact: true }), "waitFor");
   if (screenshotDir) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
@@ -903,7 +903,7 @@ try {
     await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
     await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-1440.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: "open menu", exact: true }).waitFor();
+    await gateWait.playwright(page.getByRole("button", { name: "open menu", exact: true }), "waitFor");
     const closeMenu = page.getByRole("button", { name: "close menu", exact: true });
     if (await closeMenu.isVisible()) await closeMenu.evaluate((button) => button.click());
     await waitFor(async () => await page.locator('[aria-label="sidebar"]').getAttribute("aria-hidden") === "true", "narrow sidebar close");
@@ -919,7 +919,7 @@ try {
   if (lateSteerRequests.length !== 1)
     throw new Error(`achilles sent the dropped steer ${lateSteerRequests.length} times`);
 
-  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
   await page.getByRole("button", { name: "send message", exact: true }).click();
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "new request after dropped steer");
   const afterDroppedSteer = JSON.parse(await Bun.file(control).text());
@@ -932,21 +932,17 @@ try {
   await waitFor(async () => await field.inputValue() === "", "draft clear after confirmed retry delivery");
   await waitFor(async () => (await updateLayoutApproval.count()) > staleLayoutApprovalBefore, "stale layout approval");
   await updateLayoutApproval.nth(staleLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("layout version conflict: inspect the page and retry with its current version.", { exact: true }), "waitFor", { timeout: 20000 });
   const afterStaleLayout = JSON.parse(await Bun.file(control).text());
   const staleLayoutResult = afterStaleLayout.tool_results?.find((result: { call_id: string }) => result.call_id === "stale-reading-layout");
   if (!staleLayoutResult?.is_error)
     throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
   console.log("stale chat update_layout showed a readable version conflict");
 
-  await page.waitForFunction(
-    () =>
+  await gateWait.playwright(page, "waitForFunction", () =>
       (document.querySelector(".record-detail")?.textContent ?? "").includes(
         "Synthetic Book",
-      ),
-    undefined,
-    { timeout: 20000 },
-  );
+      ), undefined, { timeout: 20000 });
   const storedReadingLayout = async () => {
     const response = await fetch(`${origin}/api/pages/${createdPage.id}`, {
       signal: AbortSignal.timeout(20000),
@@ -986,12 +982,11 @@ try {
     .nth(invalidLayoutApprovalBefore)
     .getByRole("button", { name: "approve", exact: true })
     .click();
-  await page
+  await gateWait.playwright(page
     .getByText(
       "metric update rejected: /layout/blocks/0 must match one valid schema variant.",
       { exact: true },
-    )
-    .waitFor({ timeout: 20000 });
+    ), "waitFor", { timeout: 20000 });
   const afterInvalidMetric = JSON.parse(await Bun.file(control).text());
   const invalidMetricResult = afterInvalidMetric.tool_results?.find(
     (result: { call_id: string }) => result.call_id === "invalid-metric-layout",
@@ -1001,7 +996,7 @@ try {
       `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
     );
   await waitFor(async () => heldInvalidMetricDetail !== undefined, "held invalid metric detail refresh");
-  await page.getByText("loading record…", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("loading record…", { exact: true }), "waitFor", { timeout: 20000 });
   const layoutAfterInvalidMetric = await storedReadingLayout();
   if (
     layoutAfterInvalidMetric.version !== layoutBeforeInvalidMetric.version
@@ -1010,24 +1005,20 @@ try {
     throw new Error(`invalid metric update changed the stored page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
   holdInvalidMetricDetail = false;
   await heldInvalidMetricDetail!.continue();
-  await page.waitForFunction(
-    () =>
+  await gateWait.playwright(page, "waitForFunction", () =>
       (document.querySelector(".record-detail")?.textContent ?? "").includes(
         "Synthetic Book",
-      ),
-    undefined,
-    { timeout: 20000 },
-  );
+      ), undefined, { timeout: 20000 });
   await page.unroute(filteredDetailPattern);
   console.log("invalid metric chat update showed a readable error and kept the stored layout");
 
-  const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
+  const readingModeOffResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode on", exact: true }).click();
   if (!(await readingModeOffResponse).ok()) throw new Error("reading page create mode reset failed");
-  await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
 
   await page.goto(origin);
-  await field.waitFor({ timeout: 20000 });
+  await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const catalog = await homeMcp(2, "tools/list", {});
   const names =
     catalog.result?.tools?.map(
@@ -1100,7 +1091,7 @@ try {
   if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
   const emptyRecords = page.getByText("no records yet", { exact: true });
-  await emptyRecords.waitFor({ state: "visible" });
+  await gateWait.playwright(emptyRecords, "waitFor", { state: "visible" });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(
       `${error}\nannotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
@@ -1185,7 +1176,7 @@ try {
     throw new Error(`tool version update failed: ${JSON.stringify(updated)}`);
   await field.fill("observe version two");
   await field.press("Enter");
-  await page.getByText("v2 turn", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("v2 turn", { exact: true }), "waitFor", { timeout: 20000 });
   const v2Control = JSON.parse(await Bun.file(control).text());
   const v2Schemas = v2Control.schemas ?? [];
   if (!v2Schemas.some((name: string) => name === "achilles__annotate_trace"))
@@ -1209,7 +1200,7 @@ try {
   await Bun.sleep(500);
   await field.fill("observe rollback");
   await field.press("Enter");
-  await page.getByText("rollback turn", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("rollback turn", { exact: true }), "waitFor", { timeout: 20000 });
   const rollbackControl = JSON.parse(await Bun.file(control).text());
   const rollbackSchemas = rollbackControl.schemas ?? [];
   if (
@@ -1254,7 +1245,7 @@ try {
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   let reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId || readingSessionId === homeAfterCreate) throw new Error("reading page session changed before reopen");
-  await page.goto(`${origin}/reading`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  await page.goto(`${origin}/reading`); await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
   await waitFor(async () => {
@@ -1262,14 +1253,14 @@ try {
     return reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list")
       && (await page.locator("body").innerText()).includes("Synthetic Book");
   }, "reading page inserted book render");
-  const homeIdleWrite = page.waitForResponse((response) => {
+  const homeIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
     if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
   }).catch(() => { throw new Error("missing home idle state write before achilles restart"); });
   await page.goto(origin);
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
-  await page.locator('[data-part="message"]').first().waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
+  await gateWait.playwright(page.locator('[data-part="message"]').first(), "waitFor", { timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
   if (!(await homeIdleWrite).ok()) throw new Error("home idle state write failed before achilles restart");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   let failedToggleFinished = false;
@@ -1285,11 +1276,11 @@ try {
     finally { await page.unroute("**/api/pages/home/create-mode", failToggle); }
   }
   const toggleAlert = page.getByRole("alert").filter({ hasText: "could not update create mode" });
-  await toggleAlert.waitFor({ state: "visible" });
+  await gateWait.playwright(toggleAlert, "waitFor", { state: "visible" });
   const retryToggle = toggleAlert.getByRole("button", { name: "retry", exact: true });
   if (!(await retryToggle.isVisible())) throw new Error("create mode error retry was not visible above the transcript");
   await retryToggle.click();
-  await page.getByRole("button", { name: "create mode off", exact: true }).waitFor();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
@@ -1297,12 +1288,12 @@ try {
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   if (await homeSessionId() !== homeAfterRestart) throw new Error("achilles restart changed home session id");
   if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
   const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
-  const restartedToggleResponse = page.waitForResponse((response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
+  const restartedToggleResponse = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await restartedToggleResponse).ok()) throw new Error("post-restart create mode toggle request failed");
   await waitFor(async () => requests().filter((frame) => frame.method === "mcp_refresh_tools").length > refreshCountBeforeRestartToggle, "post-restart tool refresh request");
@@ -1311,12 +1302,12 @@ try {
   await waitFor(async () => requests().slice(restartedRefreshIndex + 1).some((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error)), "post-restart tool refresh result");
   const restartedRefreshResult = requests().slice(restartedRefreshIndex + 1).find((frame) => frame.id === restartedRefresh?.id && (frame.result || frame.error));
   if (restartedRefreshResult?.error) throw new Error(`post-restart tool refresh did not enable create mode without a zeta restart: ${JSON.stringify(restartedRefreshResult.error)}`);
-  await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode on", exact: true }), "waitFor");
   if (await page.getByText("restart zeta serve, then reload", { exact: false }).count()) throw new Error("automatic post-restart tool refresh showed the manual restart message");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
-  const reconnectIdleWrite = page.waitForResponse((response) => {
+  const reconnectIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
     if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterRestart)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
   }).catch(() => { throw new Error("missing reconnect idle state write before achilles restart"); });
@@ -1327,7 +1318,7 @@ try {
   }, "post-reconnect backend request");
   await waitFor(async () => (await restartAnnotationApproval.count()) > restartApprovalBefore, "post-restart generated tool approval");
   await restartAnnotationApproval.nth(restartApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await page.getByText("post-reconnect complete", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("post-reconnect complete", { exact: true }), "waitFor", { timeout: 20000 });
   if (!(await reconnectIdleWrite).ok()) throw new Error("reconnect idle state write failed before achilles restart");
   const postReconnect = JSON.parse(await Bun.file(control).text());
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
@@ -1359,19 +1350,19 @@ try {
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "allow-mode achilles restart");
   await page.goto(`${origin}/allow`);
   const allowField = page.getByRole("textbox", { name: "message" });
-  await allowField.waitFor({ timeout: 20000 });
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20000 });
   await allowField.fill("start allow-mode chat", { timeout: 20_000 });
   await allowField.press("Enter", { timeout: 20_000 });
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).allow_open_request === true, "allow-mode opening request");
-  await page.getByText("allow page ready", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByText("allow page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
+  await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
   if (approvalModeResponse("set_settings", allowSession) !== "allow")
     throw new Error("allow-mode session settings were not applied");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
-  await allowField.waitFor({ timeout: 20000 });
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20000 });
   if (approvalModeResponse("session_settings", allowSession) !== "allow")
     throw new Error("reloaded allow-mode session did not report allow settings");
   const allowSetSettingsAfterReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
@@ -1381,15 +1372,15 @@ try {
   const beforeAllowTurn = JSON.parse(await Bun.file(control).text());
   await allowField.fill("run the allow-mode tool");
   await allowField.press("Enter");
-  await page.getByText("allow complete", { exact: true }).waitFor({ timeout: 20000 });
+  await gateWait.playwright(page.getByText("allow complete", { exact: true }), "waitFor", { timeout: 20000 });
   const afterAllowTurn = JSON.parse(await Bun.file(control).text());
   if ((afterAllowTurn.request_count ?? 0) < (beforeAllowTurn.request_count ?? 0) + 2)
     throw new Error("allow-mode tool did not complete in this turn");
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
-  await gateSettings(page, origin);
-  await gateCreationApprovalDefaults(page, requests, approvalModeResponse);
+  await gateSettings(page, origin, gateWait);
+  await gateCreationApprovalDefaults(page, requests, approvalModeResponse, gateWait);
 
   await gateVim(page, control, waitFor, async (check) => {
     const previousPid = JSON.parse(await Bun.file(control).text()).pid;
@@ -1403,18 +1394,18 @@ try {
       zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
       await waitFor(async () => JSON.parse(await Bun.file(control).text()).pid !== previousPid, "zeta restart after vim read-only gate");
     }
-  }, requests);
+  }, requests, gateWait);
 
   const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   await page.goto(`${origin}/?chat=${first}`);
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("user ask chat reopened under allow showed auto-approve");
   const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
     throw new Error("reopening a user ask chat under an allow server sent set_settings");
 
   await page.goto(`${origin}/allow?chat=${allowSession}`);
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   let registerFailures = 0;
   const allowPageId = (await (await fetch(`${origin}/api/pages/allow`)).json()).id;
   const registrationFailureUrl = `${origin}/api/pages/${allowPageId}/chats`;
@@ -1433,14 +1424,14 @@ try {
   const retryRegistration = page.getByRole("button", { name: "retry creating chat" });
   const registrationFailure = (response: { request(): { method(): string }; url(): string; status(): number }) => response.request().method() === "POST" && response.url() === registrationFailureUrl && response.status() === 503;
   await expectBrowserErrors(page, registrationExpected, async () => {
-    const firstFailure = page.waitForResponse(registrationFailure);
+    const firstFailure = gateWait.playwright(page, "waitForResponse", registrationFailure);
     await page.getByRole("button", { name: "new chat" }).click();
     await firstFailure;
-    await retryRegistration.waitFor({ timeout: 20_000 });
-    const secondFailure = page.waitForResponse(registrationFailure);
+    await gateWait.playwright(retryRegistration, "waitFor", { timeout: 20_000 });
+    const secondFailure = gateWait.playwright(page, "waitForResponse", registrationFailure);
     await retryRegistration.click();
     await secondFailure;
-    await retryRegistration.waitFor({ timeout: 20_000 });
+    await gateWait.playwright(retryRegistration, "waitFor", { timeout: 20_000 });
   });
   const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
   if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)
@@ -1465,10 +1456,10 @@ try {
   await page.keyboard.press("Meta+b");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
-    const discoveryFailure = page.waitForResponse((response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
+    const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
-    await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+    await gateWait.playwright(page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }), "waitFor", { timeout: 20_000 });
     await discoveryFailure;
   });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
@@ -1487,7 +1478,7 @@ try {
   }, "zeta reconnect after dropped connection");
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
-  await recoveredField.waitFor({ timeout: 20_000 });
+  await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
@@ -1499,10 +1490,10 @@ try {
     await page.route("**/api/pages**", hold);
     await page.route("**/api/chats**", hold);
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.locator(".sidebar-skeleton").first().waitFor({ timeout: 20_000 });
-    await page.getByRole("alert").filter({ hasText: "zeta serve is not running" }).waitFor({ timeout: 20_000 });
+    await gateWait.playwright(page.locator(".sidebar-skeleton").first(), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.getByRole("alert").filter({ hasText: "zeta serve is not running" }), "waitFor", { timeout: 20_000 });
     await page.screenshot({ path: join(screenshotDir, "07-first-paint-not-running-review-1440x900.png"), fullPage: true });
-    const failedRequests = heldRequests.map((route) => page.waitForEvent("requestfailed", (request) => request === route.request())
+    const failedRequests = heldRequests.map((route) => gateWait.playwright(page, "waitForEvent", "requestfailed", (request) => request === route.request())
       .catch(() => { throw new Error(`missing request failure for held route ${route.request().method()} ${requestPath(route.request().url())}`); }));
     await Promise.all(heldRequests.map((route) => route.abort()));
     await Promise.all(failedRequests);

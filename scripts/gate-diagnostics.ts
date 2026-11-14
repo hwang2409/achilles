@@ -2,19 +2,32 @@ const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential/i;
 
 type FrameSummary = { direction: "received" | "sent"; method?: string; event?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
 
-export type GateWait = <T>(operation: () => Promise<T>) => Promise<T>;
+type AsyncMethod = (...args: never[]) => Promise<unknown>;
+
+export type GateWait = {
+  <T>(operation: () => Promise<T>): Promise<T>;
+  playwright<T extends object, K extends keyof T>(
+    owner: T,
+    method: K,
+    ...args: T[K] extends (...args: infer A) => Promise<unknown> ? A : never
+  ): T[K] extends (...args: never[]) => Promise<infer R> ? Promise<R> : never;
+};
 
 export function createGateWait(
   frames: () => readonly FrameSummary[],
   control: () => Promise<string>,
 ): GateWait {
-  return async <T>(operation: () => Promise<T>) => {
+  const wait = async <T>(operation: () => Promise<T>) => {
     try {
       return await operation();
     } catch (error) {
       throw new Error(`${error}; websocket frames=${JSON.stringify(frames())}; backend catalog=${await control()}`);
     }
   };
+  return Object.assign(wait, {
+    playwright: (owner: object, method: PropertyKey, ...args: never[]) =>
+      wait(() => (owner[method as keyof typeof owner] as AsyncMethod).apply(owner, args)),
+  }) as GateWait;
 }
 
 export function createFrameRing(limit = 20) {

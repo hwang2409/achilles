@@ -25,11 +25,15 @@ test.each([
   ring.record(0, "sent", JSON.stringify({ id: 7, method: "send", params: { delivery_id: "delivery-7", text: fake } }));
   ring.record(0, "received", JSON.stringify({ method: "event", params: { event: "agent_start" } }));
   const gateWait = createGateWait(ring.snapshot, async () => '{"request_count":7,"turn_barrier":"held"}');
+  const playwright = { ready: async () => {
+    if (fail) throw new Error("Timeout 30ms exceeded");
+    return "ready";
+  } };
   if (!fail) {
-    expect(await gateWait(async () => "ready")).toBe("ready");
+    expect(await gateWait.playwright(playwright, "ready")).toBe("ready");
     return;
   }
-  await expect(gateWait(async () => { throw new Error("Timeout 30ms exceeded"); })).rejects.toThrow(
+  await expect(gateWait.playwright(playwright, "ready")).rejects.toThrow(
     'Timeout 30ms exceeded; websocket frames=[{"direction":"sent","method":"send","delivery_id":"delivery-7"},{"direction":"received","method":"event","event":"agent_start"}]; backend catalog={"request_count":7,"turn_barrier":"held"}',
   );
 });

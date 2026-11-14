@@ -1,9 +1,11 @@
 import type { Page } from "playwright";
+import type { GateWait } from "./gate-diagnostics";
 
 export async function gateShell(
   page: Page,
   firstSessionId: string,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
+  gateWait: GateWait,
 ) {
   const capture = async (name: string) => { if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${name}`, fullPage: true }); };
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -27,7 +29,7 @@ export async function gateShell(
     throw new Error("new chat was not current in the sidebar");
 
   await page.reload();
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== secondSessionId)
     throw new Error("reload did not keep the selected chat query");
   await page.keyboard.press("Meta+Shift+O");
@@ -37,7 +39,7 @@ export async function gateShell(
   }, "shortcut new chat composer focus");
 
   const search = page.getByRole("combobox", { name: "search chats and pages" });
-  await search.waitFor({ timeout: 20_000 });
+  await gateWait.playwright(search, "waitFor", { timeout: 20_000 });
   await search.fill("prove chat");
   await waitFor(async () => await page.locator(".chat-row").count() === 1, "chat title search");
   if (!(await page.locator(".chat-row").innerText()).includes("prove chat"))
@@ -46,7 +48,7 @@ export async function gateShell(
   if (!(await page.locator(".chat-row").first().evaluate((row) => row.classList.contains("active-result"))))
     throw new Error("search arrow key did not activate a result");
   await search.press("Enter");
-  await page.getByText("assistant ready", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByText("assistant ready", { exact: true }), "waitFor", { timeout: 20_000 });
   if (await page.locator("[data-session-id]").getAttribute("data-session-id") !== firstSessionId)
     throw new Error("search enter did not open the active result");
   await search.press("Escape");
@@ -55,12 +57,12 @@ export async function gateShell(
     throw new Error("chat selection discarded the theme query");
 
   await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=foreign-session`);
-  await page.getByRole("alert").filter({ hasText: "this chat no longer exists" }).waitFor({ timeout: 20_000 });
-  await page.getByRole("button", { name: "new chat", exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("alert").filter({ hasText: "this chat no longer exists" }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("button", { name: "new chat", exact: true }), "waitFor", { timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== "foreign-session")
     throw new Error("missing chat state discarded the selected chat query");
   await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=${firstSessionId}`);
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
 
   await page.setViewportSize({ width: 390, height: 844 });
   const sidebar = page.locator("aside.sidebar");
