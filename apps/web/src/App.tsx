@@ -180,7 +180,7 @@ export function App() {
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
-      : !activePage || !activeStore ? <div className="full-state"><p role="status">loading chat…</p></div>
+      : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         {activePage.layout.blocks.length > 0 && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
         <section ref={ready ? transcriptRef : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat page={activePage} send={send} continueWaiting={active.continueWaitingChat} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
