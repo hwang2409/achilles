@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { retryAddressInUse } from "./eval-stack";
 
-type ProcessRow = { pid: number; ppid: number; pgid: number; command: string };
+type ProcessRow = { pid: number; ppid: number; pgid: number; executable: string; command: string };
 function processRows() {
-  const result = Bun.spawnSync(["ps", "eww", "-axo", "pid=,ppid=,pgid=,command="], { stdout: "pipe" });
+  const result = Bun.spawnSync(["ps", "eww", "-axo", "pid=,ppid=,pgid=,comm=,command="], { stdout: "pipe" });
   return result.stdout.toString().split("\n").flatMap(line => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/); return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), command: match[4] }] : [];
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/); return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), executable: match[4], command: match[5] }] : [];
   });
 }
 function descendants(root: number, rows: ProcessRow[]) {
@@ -40,7 +40,7 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
     try {
       for (let i = 0; i < (scenario.name === "SIGINT" ? 300 : 600) && code === undefined; i++) {
         const rows = processRows(); for (const row of descendants(child.pid!, rows)) { seen.set(row.pid, row); for (const match of row.command.matchAll(/(?:--port|--ws)\s+(\d+)/g)) ports.add(Number(match[1])); }
-        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => row.command.includes("bun scripts/eval.ts") && !row.command.includes("sh -c")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const ready = scenario.name === "SIGINT" ? [...seen.values()].some(row => row.command.includes(`${marker}/uv sync`) || row.command.includes("sleep 60")) : servers.length >= 2; if (bun && ready) { runnerPid = bun.pid; process.kill(bun.pid, scenario.signal); sent = true; } }
+        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => /(?:^|\/)bun$/.test(row.executable) && row.command.includes("scripts/eval.ts")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const ready = scenario.name === "SIGINT" ? [...seen.values()].some(row => row.command.includes(`${marker}/uv sync`) || row.command.includes("sleep 60")) : servers.length >= 2; if (bun && ready) { runnerPid = bun.pid; process.kill(bun.pid, scenario.signal); sent = true; } }
         code = await Promise.race([exited, Bun.sleep(50).then(() => undefined)]);
       }
       if (code === undefined) { timedOut = true; if (runnerPid) process.kill(runnerPid, "SIGKILL"); process.kill(child.pid!, "SIGKILL"); code = await Promise.race([exited, Bun.sleep(2000).then(() => undefined)]); }
