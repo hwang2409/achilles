@@ -12,6 +12,8 @@ class FakeWebSocket {
   static socketConstructions = 0;
   static closeCalls = 0;
   static holdOpen = false;
+  static holdClose = false;
+  static terminated = false;
   static lastSocket: FakeWebSocket | undefined;
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -49,10 +51,12 @@ class FakeWebSocket {
 
   close() {
     FakeWebSocket.closeCalls += 1;
-    if (this.readyState === FakeWebSocket.CLOSED) return;
+    if (this.readyState === FakeWebSocket.CLOSED || FakeWebSocket.holdClose) return;
     this.readyState = FakeWebSocket.CLOSED;
     this.emit("close", new Event("close"));
   }
+
+  terminate() { FakeWebSocket.terminated = true; FakeWebSocket.holdClose = false; this.close(); }
 
   private emit(type: string, event: Event | MessageEvent) {
     for (const listener of this.listeners.get(type) ?? []) listener(event);
@@ -68,6 +72,8 @@ function installFakeWebSocket(errorCode = -32001) {
   FakeWebSocket.socketConstructions = 0;
   FakeWebSocket.closeCalls = 0;
   FakeWebSocket.holdOpen = false;
+  FakeWebSocket.holdClose = false;
+  FakeWebSocket.terminated = false;
   FakeWebSocket.lastSocket = undefined;
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
 }
@@ -201,6 +207,22 @@ test("reconnect aborts during a pending capacity backoff without another connect
   await new Promise<void>(resolve => queueMicrotask(resolve));
   expect(FakeWebSocket.socketConstructions).toBe(1);
 });
+
+test("close force-terminates a websocket that never closes", async () => {
+  installFakeWebSocket();
+  FakeWebSocket.controllerClaimed = false;
+  const protocol = await connectEvalProtocol(discovery);
+  FakeWebSocket.holdClose = true;
+  try {
+    const result = await Promise.race([
+      Promise.resolve(protocol.close()).then(() => undefined, error => error),
+      new Promise(resolve => setTimeout(() => resolve(new Error("public close did not finish")), 6_000)),
+    ]);
+    expect(FakeWebSocket.terminated, "close must terminate the stuck transport").toBe(true);
+    expect(FakeWebSocket.lastSocket?.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(result).toMatchObject({ message: "zeta websocket close timed out" });
+  } finally { FakeWebSocket.holdClose = false; FakeWebSocket.lastSocket?.close(); }
+}, 7_000);
 
 test("reconnect aborts while the socket is opening and closes it", async () => {
   installFakeWebSocket();
