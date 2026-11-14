@@ -499,7 +499,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     }
     const delivery_id = crypto.randomUUID();
     await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
-    setSelectedId(current.sessionId);
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {
