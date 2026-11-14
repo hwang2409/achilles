@@ -1,0 +1,210 @@
+import json
+import sqlite3
+
+import pytest
+from starlette.testclient import TestClient
+
+import achilles.web as web
+from achilles.pages import PageStore
+
+
+def bundle(name="add_book", operation="insert"):
+    data_schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+    return {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": name,
+        "description": f"{operation} books",
+        "input_schema": data_schema,
+        "output_schema": {"type": "object"},
+        "implementation": {
+            "operation": operation,
+            "collection": "books",
+            "data_schema": data_schema,
+        },
+    }
+
+
+def request(tools=None, layout=None):
+    return {
+        "route": "/reading",
+        "title": "reading list",
+        "layout": layout
+        or {
+            "blocks": [
+                {"type": "form", "title": "add a book", "tool": "add_book"},
+                {"type": "list", "title": "books", "collection": "books"},
+            ]
+        },
+        "tools": tools or [bundle()],
+    }
+
+
+def initialize(client, token, request_id=1):
+    headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+    response = client.post(
+        "/mcp/",
+        headers=headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    headers["mcp-session-id"] = response.headers["mcp-session-id"]
+    return headers
+
+
+def mcp(client, headers, request_id, method, params):
+    response = client.post(
+        "/mcp/",
+        headers=headers,
+        json={"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
+    )
+    assert response.status_code == 200
+    return response.json()["result"]
+
+
+@pytest.fixture
+def creation_client(monkeypatch, tmp_path):
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    app = web.create_app()
+    with TestClient(app, client=("127.0.0.1", 1234)) as client:
+        yield root, store, client, initialize(client, store.ensure_credential("home"))
+
+
+def state(root):
+    with sqlite3.connect(root / "achilles.sqlite3") as db:
+        counts = {
+            table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("page", "layout_version", "tool", "tool_version", "page_tool", "audit")
+        }
+    files = {
+        path.relative_to(root).as_posix()
+        for directory in (root / "bundles", root / "credentials", root / "pages")
+        for path in directory.rglob("*")
+        if path.is_file()
+    }
+    return counts, files
+
+
+def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):
+    root, store, client, headers = creation_client
+    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    created = json.loads(result["content"][0]["text"])
+    assert created["existing"] is False
+    page_id = created["page_id"]
+    assert [tool["name"] for tool in store.page_tools(page_id)] == ["add_book"]
+    assert store.layout(page_id) == request()["layout"]
+    assert not store.page(page_id)["create_mode"]
+    with store.transaction() as db:
+        actions = db.execute("SELECT action FROM audit WHERE page_id=?", (page_id,))
+        assert [row[0] for row in actions] == ["create_page", "create_tool"]
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    assert [tool["name"] for tool in catalog["tools"]] == ["add_book"]
+    inserted = mcp(
+        client,
+        page_headers,
+        5,
+        "tools/call",
+        {"name": "add_book", "arguments": {"title": "Synthetic Book"}},
+    )
+    assert json.loads(inserted["content"][0]["text"])["title"] == "Synthetic Book"
+    assert store.records(page_id, "books")[1] == 1
+    assert len(list((root / "bundles").glob("*.json"))) == 2
+
+
+@pytest.mark.parametrize(
+    "arguments,code,path",
+    [
+        (
+            request(tools=[bundle(operation="delete")]),
+            "invalid_input",
+            "/tools/0/implementation/operation",
+        ),
+        (
+            request(layout={"blocks": [{"type": "form", "title": "add", "tool": "missing"}]}),
+            "invalid_input",
+            "/layout/blocks/0/tool",
+        ),
+        (
+            request(layout={"blocks": [{"type": "list", "title": "other", "collection": "other"}]}),
+            "invalid_input",
+            "/layout/blocks/0/collection",
+        ),
+        (request(tools=[bundle(), bundle()]), "create_failed", ""),
+    ],
+)
+def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments, code, path):
+    root, _store, client, headers = creation_client
+    before = state(root)
+    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": arguments})
+    error = json.loads(result["content"][0]["text"])
+    assert result["isError"] is True
+    assert error == {"code": code, "expected": error["expected"], "path": path}
+    assert state(root) == before
+
+
+def test_create_page_file_failure_leaves_no_rows_or_files(creation_client, monkeypatch):
+    root, _store, client, headers = creation_client
+    before = state(root)
+
+    def fail_write(_self, path, content):
+        path.write_bytes(content)
+        raise OSError("synthetic write failure")
+
+    monkeypatch.setattr(PageStore, "_atomic_private_write", fail_write)
+    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    error = json.loads(result["content"][0]["text"])
+    assert result["isError"] is True
+    assert error == {"code": "create_failed", "expected": "atomic page creation", "path": ""}
+    assert state(root) == before
+
+
+def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_client):
+    root, _store, client, headers = creation_client
+    first = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    first_value = json.loads(first["content"][0]["text"])
+    before = state(root)
+    duplicate = mcp(
+        client, headers, 3, "tools/call", {"name": "create_page", "arguments": request()}
+    )
+    duplicate_value = json.loads(duplicate["content"][0]["text"])
+    assert duplicate_value == {**first_value, "existing": True}
+    assert state(root) == before
+    conflict = mcp(
+        client,
+        headers,
+        4,
+        "tools/call",
+        {"name": "create_page", "arguments": {**request(), "title": "other"}},
+    )
+    error = json.loads(conflict["content"][0]["text"])
+    assert conflict["isError"] is True
+    assert error == {
+        "code": "conflict",
+        "expected": "unused route or equivalent request",
+        "path": "/route",
+    }
+    assert state(root) == before

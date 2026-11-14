@@ -157,8 +157,7 @@ def test_generated_tool_versions_and_page_scope(tmp_path):
     store.rollback_tool("home", "annotate_trace", 1)
     assert store.page_tools("home")[0]["version"] == 1
     store.set_create_mode("home", False)
-    with pytest.raises(PermissionError):
-        call_record(store, "home", "annotate_trace", {"text": "late"})
+    assert call_record(store, "home", "annotate_trace", {"text": "late"})["text"] == "late"
 
 
 def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
@@ -194,10 +193,9 @@ def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
         assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 20
 
     store.set_create_mode("home", False)
-    with pytest.raises(PermissionError):
-        call_record(store, "home", "annotate_trace", {"text": "late"})
+    assert call_record(store, "home", "annotate_trace", {"text": "late"})["text"] == "late"
     with store._connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 20
+        assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 21
 
 
 def test_reserved_bundle_names_are_rejected(tmp_path):

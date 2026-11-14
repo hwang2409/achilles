@@ -307,6 +307,20 @@ try {
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
+  await page.goto(`${origin}/reading`);
+  await field.waitFor({ timeout: 20000 });
+  const readingSessionId = await homeSessionId();
+  if (!readingSessionId || readingSessionId === first)
+    throw new Error("reading page did not get its own zeta session");
+  const addBookApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "add_book" });
+  const bookAdded = page.getByText("book added", { exact: true });
+  await field.fill("add Synthetic Book");
+  await field.press("Enter");
+  await addBookApproval.waitFor({ timeout: 20000 });
+  await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
+  await bookAdded.waitFor({ timeout: 20000 });
+  await page.goto(origin);
+  await field.waitFor({ timeout: 20000 });
   const catalog = await homeMcp(2, "tools/list", {});
   const names =
     catalog.result?.tools?.map(
@@ -423,7 +437,7 @@ try {
     throw new Error(
       `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
-  const createdPage = await (await fetch(`${origin}/api/pages/created`)).json();
+  const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   const createdPageId = createdPage.id;
   const secondCredential = (
     await Bun.file(join(achillesHome, `credentials/${createdPageId}`)).text()
@@ -437,21 +451,15 @@ try {
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
-  if (secondNames.includes("annotate_trace"))
-    throw new Error(`second page received annotate_trace: ${JSON.stringify(secondNames)}`);
-  const crossPage = await mcp(secondCredential, 11, "tools/call", {
-    name: "annotate_trace",
-    arguments: { text: "must reject" },
-  });
-  if (!crossPage.result?.isError)
-    throw new Error("second page annotate_trace call was accepted");
+  if (JSON.stringify(secondNames) !== JSON.stringify(["add_book", "list_books", "update_book"]))
+    throw new Error(`reading page tools were not created atomically: ${JSON.stringify(secondNames)}`);
   const secondRecords = await (
-    await fetch(`${origin}/api/pages/${createdPageId}/records/trace_annotations`, {
+    await fetch(`${origin}/api/pages/${createdPageId}/records/books`, {
       headers: { Authorization: `Bearer ${secondCredential}` },
     })
   ).json();
-  if (!Array.isArray(secondRecords) || secondRecords.length !== 0)
-    throw new Error(`second page was mutated: ${JSON.stringify(secondRecords)}`);
+  if (secondRecords.length !== 1 || secondRecords[0]?.title !== "Synthetic Book")
+    throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
   const versionTwo = {
     ...toolBundle,
     input_schema: {
@@ -536,12 +544,13 @@ try {
   const reconnectOn = await fetch(`${origin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
   if (!reconnectOn.ok) throw new Error(`reconnect create mode on failed: ${reconnectOn.status}`);
   const homeAfterCreate = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
-  let reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (reconnectPage.zeta_session_id) throw new Error("created page got a session before navigation");
-  await page.goto(`${origin}/created`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
-  reconnectPage = await (await fetch(`${origin}/api/pages/created`)).json();
-  if (!reconnectPage.zeta_session_id || reconnectPage.zeta_session_id === homeAfterCreate) throw new Error("created page did not get its own zeta session after navigation");
-  if (reconnectPage.layout?.blocks?.[0]?.type !== "list" || !(await page.locator("body").innerText()).includes("created list")) throw new Error("created page list layout did not render");
+  let reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
+  if (reconnectPage.zeta_session_id !== readingSessionId || readingSessionId === homeAfterCreate) throw new Error("reading page session changed before reopen");
+  await page.goto(`${origin}/reading`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
+  reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
+  if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
+  const readingBody = await page.locator("body").innerText();
+  if (reconnectPage.layout?.blocks?.[1]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   if ((await page.getByText("approval complete", { exact: true }).count()) === 0)
@@ -552,7 +561,7 @@ try {
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "achilles restart");
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
-  const createdAfterRestart = await (await fetch(`${origin}/api/pages/created`)).json();
+  const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   const newSessionsBeforeReload = requests().filter((frame) => frame.method === "new_session").length;
   await page.reload();
@@ -703,7 +712,7 @@ try {
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
   if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
-  console.log(`real-zeta gate passed: session ${first}, created /created, late call rejected`);
+  console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 
 } finally {
   await browser?.close().catch(() => {});
