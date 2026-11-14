@@ -6,7 +6,7 @@ import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protoc
 import { failureResult, productCapabilities, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unsupportedResult, validateCatalog, validateReservedBundles } from "./eval";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
-  const python = command === "uv" && args[0] === "run" ? args.slice(args.indexOf("python")) : [command, ...args];
+  const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
   const process = Bun.spawn(python, { cwd, env: { ...Bun.env, PYTHONPATH: [join(target, "src"), target].join(delimiter) }, stdout: "pipe", stderr: "pipe" });
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
