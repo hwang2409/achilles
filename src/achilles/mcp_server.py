@@ -142,8 +142,11 @@ def build_mcp(store: PageStore):
                     Tool(
                         name="inspect_page",
                         description=(
-                            "inspect safe summaries of this page and pages it created; "
-                            "legacy pages can inspect only themselves"
+                            "inspect this page and pages it created; before "
+                            "achilles__update_layout, start from layout only when it is "
+                            "the complete stored document that round-trips unchanged, "
+                            "and use the returned layout version; legacy pages can inspect "
+                            "only themselves"
                         ),
                         inputSchema=INSPECT_PAGE_SCHEMA,
                     ),
@@ -166,8 +169,13 @@ def build_mcp(store: PageStore):
                     Tool(
                         name="update_layout",
                         description=(
-                            "replace this page's layout at the expected active version; "
-                            "open another page's chat to change that page"
+                            "REPLACES the whole layout; any block not included is removed. "
+                            "First call achilles__inspect_page and start from its layout "
+                            "only when it is the complete stored document that round-trips "
+                            "unchanged. Insert, reorder, or remove blocks, then pass the full "
+                            "layout with the returned layout version as expected_version. "
+                            "On a version conflict, inspect again and retry; open another "
+                            "page's chat to change that page."
                         ),
                         inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),

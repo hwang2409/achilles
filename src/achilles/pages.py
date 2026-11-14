@@ -74,8 +74,30 @@ LAYOUT_SCHEMA = {
 UPDATE_LAYOUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "layout": LAYOUT_SCHEMA,
-        "expected_version": {"type": "integer", "minimum": 1},
+        "layout": {
+            **LAYOUT_SCHEMA,
+            "description": (
+                "The complete replacement layout from achilles__inspect_page; "
+                "any block not included is removed."
+            ),
+            "properties": {
+                "blocks": {
+                    **LAYOUT_SCHEMA["properties"]["blocks"],
+                    "description": (
+                        "The full ordered block list; insert, reorder, or remove blocks "
+                        "from the inspected list."
+                    ),
+                }
+            },
+        },
+        "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": (
+                "The layout version from achilles__inspect_page; on a conflict, inspect "
+                "again and retry."
+            ),
+        },
     },
     "required": ["layout", "expected_version"],
     "additionalProperties": False,

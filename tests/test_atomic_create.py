@@ -6,7 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import achilles.web as web
-from achilles.pages import PageStore
+from achilles.pages import UPDATE_LAYOUT_SCHEMA, PageStore
 from achilles.tools import derived_output_schema
 
 
@@ -767,16 +767,20 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     store.set_create_mode(page_id, True)
     catalog = mcp(client, page_headers, 5, "tools/list", {})
     update_tool = next(tool for tool in catalog["tools"] if tool["name"] == "update_layout")
-    assert update_tool["inputSchema"] == {
-        "type": "object",
-        "properties": {
-            "layout": update_tool["inputSchema"]["properties"]["layout"],
-            "expected_version": {"type": "integer", "minimum": 1},
-        },
-        "required": ["layout", "expected_version"],
-        "additionalProperties": False,
-    }
-    assert "open another page's chat" in update_tool["description"]
+    assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
+    assert "any block not included is removed" in update_tool["description"]
+    assert "First call achilles__inspect_page" in update_tool["description"]
+    assert (
+        update_tool["inputSchema"]["properties"]["layout"]["description"]
+        == "The complete replacement layout from achilles__inspect_page; "
+        "any block not included is removed."
+    )
+    assert (
+        "full ordered block list"
+        in update_tool["inputSchema"]["properties"]["layout"]["properties"]["blocks"]["description"]
+    )
+    inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "complete stored document that round-trips unchanged" in inspect_tool["description"]
 
     layout = {"blocks": [{"type": "text", "text": "changed"}]}
     updated = mcp(
