@@ -474,7 +474,8 @@ class PageStore:
         value = {"route": route, "title": title, "layout": layout, "tools": bundles}
         validate_schema(value, CREATE_PAGE_SCHEMA)
         bundles = [
-            validate_bundle(bundle, f"/tools/{index}") for index, bundle in enumerate(bundles)
+            validate_bundle(bundle, f"/tools/{index}", reject_conflicting_output=True)
+            for index, bundle in enumerate(bundles)
         ]
         validate_layout(
             layout,
@@ -618,7 +619,7 @@ class PageStore:
     def create_tool(
         self, page_id: str, bundle: Any, validation_prefix: str = ""
     ) -> tuple[dict[str, Any], str]:
-        bundle = validate_bundle(bundle, validation_prefix)
+        bundle = validate_bundle(bundle, validation_prefix, reject_conflicting_output=True)
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
         stamp = now()
@@ -676,7 +677,7 @@ class PageStore:
                 WHERE pt.page_id=? ORDER BY t.name""",
                 (page_id,),
             ).fetchall()
-        return [{"name": r[0], **json.loads(r[1]), "version": r[2]} for r in rows]
+        return [{"name": r[0], **validate_bundle(json.loads(r[1])), "version": r[2]} for r in rows]
 
     def rollback_tool(self, page_id: str, name: str, version: int) -> None:
         with self.transaction() as db:
@@ -702,4 +703,4 @@ class PageStore:
                 WHERE pt.page_id=? AND t.name=?""",
                 (page_id, name),
             ).fetchone()
-        return json.loads(row[0]) if row else None
+        return validate_bundle(json.loads(row[0])) if row else None
