@@ -17,6 +17,7 @@ function aggregateUsage(tasks: EvalReport["tasks"]): TranscriptUsage | "unavaila
     turns_with_usage: rows.reduce((total, row) => total + row.turns_with_usage, 0),
     input_tokens: sum("input_tokens"),
     output_tokens: rows.every(row => typeof row.output_tokens === "number") ? rows.reduce((total, row) => total + (row.output_tokens as number), 0) : PINNED_OUTPUT_UNAVAILABLE,
+    reasoning_output_tokens: rows.every(row => typeof row.reasoning_output_tokens === "number") ? rows.reduce((total, row) => total + (row.reasoning_output_tokens as number), 0) : PINNED_OUTPUT_UNAVAILABLE,
     cache_read_input_tokens: sum("cache_read_input_tokens"),
     cache_creation_input_tokens: sum("cache_creation_input_tokens"),
   };
@@ -47,7 +48,7 @@ export function reportJson(report: EvalReport): string { return JSON.stringify(r
 const usageText = (usage: unknown) => {
   if (!usage || typeof usage !== "object") return "unavailable";
   const value = usage as TranscriptUsage;
-  return `input ${value.input_tokens}; output ${value.output_tokens}; cache read ${value.cache_read_input_tokens}; cache write ${value.cache_creation_input_tokens}`;
+  return `input ${value.input_tokens}; output ${value.output_tokens}; reasoning ${value.reasoning_output_tokens}; cache read ${value.cache_read_input_tokens}; cache write ${value.cache_creation_input_tokens}`;
 };
 export function reportMarkdown(report: EvalReport): string {
   const grouped = aggregateTaskResults(report.tasks);

@@ -6,6 +6,7 @@ export type TranscriptUsage = {
   turns_with_usage: number;
   input_tokens: number | "unavailable";
   output_tokens: number | typeof PINNED_OUTPUT_UNAVAILABLE;
+  reasoning_output_tokens: number | typeof PINNED_OUTPUT_UNAVAILABLE;
   cache_read_input_tokens: number | "unavailable";
   cache_creation_input_tokens: number | "unavailable";
 };
@@ -25,10 +26,12 @@ export function transcriptUsage(contents: string[]): TranscriptUsage | "unavaila
     return values.length === usageRows.length ? values.reduce((sum, value) => sum + value, 0) : "unavailable";
   };
   const output = total("output_tokens");
+  const reasoning = total("reasoning_output_tokens");
   return {
     turns_with_usage: usageRows.length,
     input_tokens: total("input_tokens", "prompt_tokens"),
     output_tokens: output === "unavailable" ? PINNED_OUTPUT_UNAVAILABLE : output,
+    reasoning_output_tokens: reasoning === "unavailable" ? PINNED_OUTPUT_UNAVAILABLE : reasoning,
     cache_read_input_tokens: total("cache_read_input_tokens"),
     cache_creation_input_tokens: total("cache_creation_input_tokens"),
   };

@@ -8,9 +8,9 @@ const row = (usage?: Record<string, number>) => JSON.stringify({
 
 test("transcript usage sums every persisted token field across sessions", () => {
   expect(transcriptUsage([
-    `${row({ input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 })}\n${row()}\n`,
-    `${row({ prompt_tokens: 5, output_tokens: 1, cache_read_input_tokens: 2, cache_creation_input_tokens: 0 })}\n`,
-  ])).toEqual({ turns_with_usage: 2, input_tokens: 15, output_tokens: 3, cache_read_input_tokens: 5, cache_creation_input_tokens: 4 });
+    `${row({ input_tokens: 10, output_tokens: 2, reasoning_output_tokens: 1, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 })}\n${row()}\n`,
+    `${row({ prompt_tokens: 5, output_tokens: 1, reasoning_output_tokens: 2, cache_read_input_tokens: 2, cache_creation_input_tokens: 0 })}\n`,
+  ])).toEqual({ turns_with_usage: 2, input_tokens: 15, output_tokens: 3, reasoning_output_tokens: 3, cache_read_input_tokens: 5, cache_creation_input_tokens: 4 });
 });
 
 test("transcript usage distinguishes a missing metric from no usage", () => {
@@ -18,6 +18,7 @@ test("transcript usage distinguishes a missing metric from no usage", () => {
     turns_with_usage: 1,
     input_tokens: 10,
     output_tokens: PINNED_OUTPUT_UNAVAILABLE,
+    reasoning_output_tokens: PINNED_OUTPUT_UNAVAILABLE,
     cache_read_input_tokens: 0,
     cache_creation_input_tokens: 0,
   });

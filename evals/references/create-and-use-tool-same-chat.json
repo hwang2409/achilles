@@ -18,7 +18,7 @@
         "tool": "achilles__add_note",
         "success": true,
         "data": {
-          "text": "synthetic note"
+          "title": "synthetic note"
         }
       }
     ],
@@ -26,12 +26,32 @@
       {
         "page_id": "p",
         "data": {
-          "text": "synthetic note"
-        }
+          "title": "synthetic note"
+        },
+        "collection": "notes"
       }
     ],
     "related_page_ids": [
       "p"
+    ],
+    "tool_versions": [
+      {
+        "page_id": "p",
+        "name": "add_note",
+        "collection": "notes",
+        "operation": "insert",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ]
+        }
+      }
     ]
   },
   "bad": {
@@ -53,7 +73,7 @@
         "tool": "achilles__add_note",
         "success": true,
         "data": {
-          "text": "near miss note"
+          "title": "wrong note"
         }
       }
     ],
@@ -61,12 +81,32 @@
       {
         "page_id": "p",
         "data": {
-          "text": "near miss note"
-        }
+          "title": "wrong note"
+        },
+        "collection": "notes"
       }
     ],
     "related_page_ids": [
       "p"
+    ],
+    "tool_versions": [
+      {
+        "page_id": "p",
+        "name": "add_note",
+        "collection": "notes",
+        "operation": "insert",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ]
+        }
+      }
     ]
   }
 }

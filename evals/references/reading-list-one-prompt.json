@@ -15,19 +15,64 @@
         "page_id": "reading",
         "name": "add_book",
         "collection": "books",
-        "operation": "insert"
+        "operation": "insert",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
       },
       {
         "page_id": "reading",
         "name": "update_book",
         "collection": "books",
-        "operation": "update"
+        "operation": "update",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
       },
       {
         "page_id": "reading",
         "name": "list_books",
         "collection": "books",
-        "operation": "list"
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
       }
     ],
     "records": [
@@ -36,7 +81,8 @@
         "data": {
           "title": "Synthetic Book",
           "status": "read"
-        }
+        },
+        "collection": "books"
       }
     ],
     "layouts": [
@@ -116,19 +162,64 @@
         "page_id": "reading",
         "name": "add_book",
         "collection": "books",
-        "operation": "insert"
+        "operation": "insert",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
       },
       {
         "page_id": "reading",
         "name": "update_book",
         "collection": "books",
-        "operation": "update"
+        "operation": "update",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
       },
       {
         "page_id": "reading",
         "name": "list_books",
         "collection": "books",
-        "operation": "list"
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "status"
+          ]
+        }
       }
     ],
     "records": [
@@ -137,7 +228,8 @@
         "data": {
           "title": "Synthetic Book",
           "status": "read"
-        }
+        },
+        "collection": "books"
       }
     ],
     "layouts": [
