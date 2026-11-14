@@ -17,14 +17,17 @@ test("diagnostics redact all secret-shaped values", () => {
   expect(output).not.toContain(fake);
 });
 
-test("websocket diagnostics keep only the last safe delivery fields", () => {
+test("websocket diagnostics keep and collapse safe delivery status fields", () => {
   const ring = createFrameRing(2);
   ring.record(0, "sent", JSON.stringify({ id: 7, method: "steer", params: { delivery_id: "delivery-7", text: fake, token: fake } }));
   ring.record(0, "received", JSON.stringify({ id: 7, error: { code: -32009, message: fake }, result: { token: fake } }));
-  ring.record(1, "received", JSON.stringify({ method: "delivery_status", params: { delivery_id: "delivery-8", text: fake, token: fake } }));
+  for (const id of [8, 9]) {
+    ring.record(1, "sent", JSON.stringify({ id, method: "delivery_status", params: { delivery_id: "delivery-8", token: fake } }));
+    ring.record(1, "received", JSON.stringify({ id, result: { delivery_id: "delivery-8", status: "queued", token: fake } }));
+  }
   expect(ring.snapshot()).toEqual([
     { direction: "received", method: "steer", delivery_id: "delivery-7", error_code: -32009 },
-    { direction: "received", method: "delivery_status", delivery_id: "delivery-8" },
+    { direction: "received", method: "delivery_status", delivery_id: "delivery-8", status: "queued", count: 2 },
   ]);
   expect(JSON.stringify(ring.snapshot())).not.toContain(fake);
 });
