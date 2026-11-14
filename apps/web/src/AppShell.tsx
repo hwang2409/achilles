@@ -120,11 +120,9 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useLayoutEffect(() => {
     const index = pendingFocusIndex.current;
     if (index === null) return;
+    pendingFocusIndex.current = null;
     const row = chatList.current?.querySelectorAll<HTMLElement>(".chat-row")[index];
-    if (row) {
-      row.focus();
-      pendingFocusIndex.current = null;
-    }
+    row?.focus();
   }, [chats]);
   useEffect(() => {
     let live = true;
