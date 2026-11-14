@@ -858,7 +858,8 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
         "Otherwise, copy its `layout` exactly, change only what the user asked (insert, "
         "reorder, edit, or remove blocks), and pass the full layout with "
         "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
-        "To change another page, open that page's chat."
+        "To change another page, open that page's chat. A detail block shows field labels only "
+        "and cannot pin one record; use a list block to show records."
     )
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]
