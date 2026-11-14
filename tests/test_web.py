@@ -99,7 +99,13 @@ def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None
         for index in range(199):
             db.execute(
                 "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
-                (f"page-{index}", f"/page-{index}", f"page {index}", "2025-02-01", "2099-03-01" if index == 198 else "2025-02-01"),
+                (
+                    f"page-{index}",
+                    f"/page-{index}",
+                    f"page {index}",
+                    "2025-02-01",
+                    "2099-03-01" if index == 198 else "2025-02-01",
+                ),
             )
     capped = client.get("/api/pages?limit=200").json()
     assert len(capped["pages"]) == 200
