@@ -194,6 +194,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     setPages((current) => [...(current ?? []), ...result.pages]);
     setPageNext(result.next);
     setPagesLoading(false);
+    if (!result.next && result.pages[0]) requestAnimationFrame(() => document.querySelector<HTMLAnchorElement>(`[data-page-id=\"${result.pages[0].id}\"]`)?.focus());
   };
   const loadOlderChats = async () => {
     if (!next) return;
@@ -214,9 +215,11 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       <button className="new-chat" disabled={loading} onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
-      <section className="page-list">
+      <section className={`page-list ${pageRows.length >= 3 ? "has-pages" : ""}`}>
         <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pagesError ? "!" : pages === null ? "" : pageRows.length}</b></button>
-        {pagesError ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => { setPagesError(false); setPagesRetry((value) => value + 1); }}>retry</button></div> : pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}{pageNext && <button className="load-older" onClick={() => void loadOlder()}>show more pages</button>}</>}
+        <div className="page-list-scroll">
+          {pagesError ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => { setPagesError(false); setPagesRetry((value) => value + 1); }}>retry</button></div> : pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}{pageNext && <button className="load-older" onClick={() => void loadOlder()}>show more pages</button>}</>}
+        </div>
       </section>
       <section className="chat-list" id="chat-search-results">
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>

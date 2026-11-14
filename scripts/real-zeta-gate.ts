@@ -331,6 +331,10 @@ try {
   console.log("page links at create completion", await page.locator(".page-list a").evaluateAll((links) => links.map((link) => ({ href: (link as HTMLAnchorElement).href, text: link.textContent }))));
   console.log("tool call names", await page.locator('[data-part="timeline-frame"]').evaluateAll((frames) => [...new Set(frames.flatMap((frame) => frame.textContent?.match(/(?:achilles__)?create_page/g) ?? []))]));
   const pageSection = page.locator(".page-list");
+  const pageHeading = pageSection.locator(":scope > .list-head");
+  const pageRowHeight = await page.locator(".page-list a").first().evaluate((element) => element.getBoundingClientRect().height);
+  const pageSectionHeight = await pageSection.evaluate((element) => element.clientHeight);
+  if (pageSectionHeight < pageRowHeight * 3 || !(await pageHeading.isVisible())) throw new Error(`page section is too short or heading is hidden: ${pageSectionHeight}px for ${pageRowHeight}px rows`);
   const showMorePages = page.getByRole("button", { name: "show more pages" });
   await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await showMorePages.waitFor({ state: "visible", timeout: 20000 }).catch(() => { throw new Error("show more pages is not visible in the page section"); });
