@@ -6,6 +6,7 @@ export type TaskCheck = {
   chat?: string;
   name?: string;
   value?: unknown;
+  collection?: string;
   transition?: { before: string[]; after: string[] };
   count?: number;
   text?: string;
@@ -77,7 +78,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
   if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "layout_update"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
-  if (check.type === "detail_selects" && typeof check.value !== "string") throw new Error(`checks[${i}] needs a string value`);
+  if (check.type === "detail_selects" && (typeof check.value !== "string" || !identifier(check.collection))) throw new Error(`checks[${i}] needs a collection and string value`);
   if (check.type === "records_exact" && !Array.isArray(check.value)) throw new Error(`checks[${i}] needs a record array`);
   if (check.type === "schema_roundtrip" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string"))) throw new Error(`checks[${i}] needs string values`);
   if (check.type === "updated_record") {
@@ -93,7 +94,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "transition", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -304,8 +305,8 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (!details.length) return { reason: "no detail block" } satisfies CheckFailure;
     let failure: CheckFailure = { reason: "no supported detail selector" };
     for (const detail of details) {
-      const collection = detail.collection;
-      const records = owned("records").filter(record => record.collection === collection);
+      if (detail.collection !== check.collection) { failure = { reason: `detail collection ${JSON.stringify(detail.collection)} is not ${JSON.stringify(check.collection)}` }; continue; }
+      const records = owned("records").filter(record => record.collection === check.collection);
       const equality = ["filter", "where"].find(key => detail[key] && typeof detail[key] === "object" && !Array.isArray(detail[key])) as "filter" | "where" | undefined;
       let selected: Array<Record<string, unknown>>; let selector: string;
       if (equality) {

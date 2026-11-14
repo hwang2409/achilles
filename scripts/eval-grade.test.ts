@@ -8,6 +8,7 @@ test("task schema is closed and count checks name real collections", () => {
   expect(validateTask(task).id).toBe("x-task");
   expect(() => validateTask({ ...task, extra: true })).toThrow("unknown key");
   expect(() => validateTask({ ...task, checks: [{ id: "missing", type: "count", page: "p", name: "invalid_tool_versions", count: 0 }] })).toThrow("known collection");
+  expect(() => validateTask({ ...task, checks: [{ id: "detail", type: "detail_selects", page: "p", value: "run-002" }] })).toThrow("collection");
   expect(validateTask({ ...task, prompt: "one source", steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a" }] }).prompt).toBe("one source");
   expect(() => validateTask({ ...task, prompt: "duplicate" })).toThrow("prompt source");
 });
@@ -49,9 +50,9 @@ test("structured outcomes cannot pass on unrelated text", () => {
 });
 
 const judgeDetailCheck = validateTask(judgeTaskJson).checks.find(check => check.id === "detail-layout")!;
-const detailSnapshot = (block: Record<string, unknown>, records: Array<{ id?: string; collection: string; data: Record<string, unknown> }>) => ({
+const detailSnapshot = (block: Record<string, unknown> | Array<Record<string, unknown>>, records: Array<{ id?: string; collection: string; data: Record<string, unknown> }>) => ({
   pages: [{ id: "review-page", alias: "review" }],
-  layouts: [{ page_id: "review-page", version: 1, document: { blocks: [block] } }],
+  layouts: [{ page_id: "review-page", version: 1, document: { blocks: Array.isArray(block) ? block : [block] } }],
   records: records.map(record => ({ page_id: "review-page", ...record })),
 });
 const annotation = (data: Record<string, unknown>, id = "annotation-1", collection = "annotations") => ({ id, collection, data });
@@ -63,6 +64,8 @@ for (const testCase of [
   { name: "filter matches 2 records", block: { type: "detail", collection: "annotations", filter: { field: "run", equals: "run-002" } }, records: [annotation({ run: "run-002" }), annotation({ run: "run-002" }, "annotation-2")], pass: false },
   { name: "filter matches 1 record without run-002", block: { type: "detail", collection: "annotations", filter: { field: "status", equals: "bad" } }, records: [annotation({ status: "bad" })], pass: false },
   { name: "detail block on a different collection", block: { type: "detail", collection: "other", filter: { field: "run", equals: "run-002" } }, records: [annotation({ run: "run-002" })], pass: false },
+  { name: "different collection with its own matching record", block: { type: "detail", collection: "other", filter: { field: "run", equals: "run-002" } }, records: [annotation({ run: "run-002" }, "other-1", "other")], pass: false },
+  { name: "one wrong and one correct detail block", block: [{ type: "detail", collection: "other", filter: { field: "run", equals: "run-002" } }, { type: "detail", collection: "annotations", filter: { field: "run", equals: "run-002" } }], records: [annotation({ run: "run-002" }), annotation({ run: "run-002" }, "other-1", "other")], pass: true },
   { name: "no detail block", block: { type: "text", text: "run-002" }, records: [annotation({ run: "run-002" })], pass: false },
   { name: "where alias shape", block: { type: "detail", collection: "annotations", where: { field: "run", equals: "run-002" } }, records: [annotation({ run: "run-002" })], pass: true },
   { name: "old record-id selector naming the run-002 record", block: { type: "detail", collection: "annotations", record_id: "annotation-1" }, records: [annotation({ run: "run-002" })], pass: true },

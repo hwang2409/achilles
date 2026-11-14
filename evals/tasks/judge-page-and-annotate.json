@@ -82,6 +82,7 @@
       "id": "detail-layout",
       "type": "detail_selects",
       "page": "review",
+      "collection": "annotations",
       "value": "run-002"
     },
     {
