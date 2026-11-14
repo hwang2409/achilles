@@ -121,6 +121,13 @@ describe("create mode tool refresh", () => {
   });
 });
 
+async function withFetch<T>(fetcher: typeof fetch, operation: () => Promise<T>): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetcher;
+  try { return await operation(); }
+  finally { globalThis.fetch = originalFetch; }
+}
+
 async function waitBounded<T>(wait: Promise<T>, cancel: () => void, drain: () => Promise<unknown>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -381,9 +388,12 @@ describe("chat creation lifecycle", () => {
     { name: "duplicate input joins one operation", duplicate: true },
     { name: "double Enter creates and delivers once", doubleEnter: true },
     { name: "pending create mode is applied before ready", pendingMode: true },
-  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, doubleEnter, pendingMode, pendingModeWriteFailure }) => {
+    { name: "pending create mode is visible after reopen", pendingMode: true, reopen: true },
+    { name: "pending create mode can be turned off after reopen", pendingMode: true, reopen: true, turnOff: true },
+  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, doubleEnter, pendingMode, pendingModeWriteFailure, reopen, turnOff }) => {
     const storage = new MemoryStorage();
     let sessions = 0; let registrations = 0; let mappings = 0; let attaches = 0; let modes = 0; let publishes = 0; let deliveries = 0; let approval = "ask";
+    const appliedModes: boolean[] = [];
     let failed = false;
     const reached = deferred<void>();
     const gate = deferred<void>();
@@ -391,17 +401,29 @@ describe("chat creation lifecycle", () => {
       if (cancel === name) { reached.resolve(); await gate.promise; }
       if (fail === name && !failed) { failed = true; throw new Error(`forced ${name} failure`); }
     };
-    const client = { request: async (method: string) => {
-      await step(method);
-      if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }
-      if (method === "session_settings") return { model: "offline", approval_mode: approval };
-      if (method === "status") return { state: "idle" };
-      if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
-      if (method === "send") { deliveries += 1; return {}; }
-      throw new Error(`unexpected ${method}`);
-    } };
+    const client = {
+      features: ["session_mcp_bindings"],
+      request: async (method: string) => {
+        await step(method);
+        if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }
+        if (method === "resume") { await step("attach"); attaches += 1; return { session: { name: "" } }; }
+        if (method === "session_settings") return { model: "offline", approval_mode: approval };
+        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "status") return { session: { session_id: "owned-session" }, state: "idle" };
+        if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
+        if (method === "send") { deliveries += 1; return {}; }
+        throw new Error(`unexpected ${method}`);
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
     const fetcher = (async (resource: string | URL | Request) => {
-      const name = String(resource).endsWith("/chats") ? "register" : "map";
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page(null));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      const name = url.endsWith("/chats") ? "register" : "map";
       await step(name);
       if (name === "register") registrations += 1; else mappings += 1;
       return new Response(null, { status: 200 });
@@ -417,12 +439,24 @@ describe("chat creation lifecycle", () => {
     }
     storage.failWrite = failWrite ?? 0;
     let owner = createChatCreationOwner(storage, fetcher);
-    const run = () => owner.ensure(
-      input(client, true),
-      async (sessionId) => { await step("attach"); attaches += 1; return { sessionId }; },
-      async (attached, enabled) => { await step("mode"); modes += 1; expect(enabled).toBe(true); return attached; },
-      async () => { await step("publish"); publishes += 1; },
-    )!;
+    const attachmentOwner = createAttachmentOwner();
+    const applyMode = async <T,>(attached: T, enabled: boolean) => {
+      await step("mode"); modes += 1; appliedModes.push(enabled); return attached;
+    };
+    const publish = async () => { await step("publish"); publishes += 1; };
+    const run = () => reopen
+      ? withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish))
+      : owner.ensure(
+        input(client, true),
+        async (sessionId) => { await step("attach"); attaches += 1; return { sessionId }; },
+        applyMode,
+        publish,
+      )!;
+    if (reopen) {
+      const reopened = await withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true)));
+      expect(reopened.page.create_mode).toBe(true);
+      if (turnOff) owner.setCreateMode("home", false);
+    }
     if (doubleEnter) {
       const delivery = createComposerDelivery({
         state: "idle",
@@ -462,7 +496,9 @@ describe("chat creation lifecycle", () => {
     expect(attaches).toBe(fail === "mode" || fail === "publish" || (failWrite !== undefined && failWrite >= 5) ? 2 : 1);
     expect(publishes).toBe(1);
     expect(modes).toBe(pendingMode ? (failWrite === 8 ? 2 : 1) : 0);
+    expect(appliedModes.at(-1)).toBe(pendingMode ? !turnOff : undefined);
     expect(deliveries).toBe(doubleEnter ? 1 : 0);
     expect(owner.status("home")).toMatchObject({ pending: null, error: null, createMode: undefined });
+    attachmentOwner.clear();
   }, CONTROLLED_TIMEOUT_MS + 5_000);
 });
