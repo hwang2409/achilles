@@ -56,6 +56,10 @@ export function useComposerDelivery({
   useLayoutEffect(() => {
     apply({ type: "state", state });
   }, [apply, state]);
+  useLayoutEffect(() => {
+    if (defaultValue !== undefined && defaultValue !== modelRef.current.draft)
+      apply({ type: "edit", draft: defaultValue });
+  }, [apply, defaultValue]);
 
   const deliveryId = model.send?.deliveryId;
   const hasMessageDelivered = useCallback(

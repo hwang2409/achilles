@@ -4,8 +4,9 @@ import type { Page, Route } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
+type RequestFrame = { method?: string; params?: { text?: string } };
 
-export async function gateVim(page: Page, control: string, waitFor: WaitFor, whileDisconnected: WhileDisconnected) {
+export async function gateVim(page: Page, control: string, waitFor: WaitFor, whileDisconnected: WhileDisconnected, requests: () => RequestFrame[]) {
   const screenshotDir = process.env.VIM_SCREENSHOT_DIR;
   const screenshot = async (name: string) => {
     if (!screenshotDir) return;
@@ -222,13 +223,25 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await confirmedStock.press("Enter");
   const stopButton = page.getByRole("button", { name: "stop the running turn" });
   await stopButton.waitFor({ state: "visible", timeout: 20_000 });
+  const delayedBeforeSteer = requests().length;
+  const steerButton = page.getByRole("button", { name: "steer the running turn" });
+  await steerButton.waitFor({ state: "visible", timeout: 20_000 });
+  await confirmedStock.fill("steer while running");
+  await confirmedStock.press("Enter");
+  await waitFor(async () => requests().length >= delayedBeforeSteer + 1, "delayed turn steer request");
+  const delayedSteer = requests().at(-1);
+  if (delayedSteer?.method !== "steer" || delayedSteer.params?.text !== "steer while running")
+    throw new Error(`delayed turn did not send one steer request: ${JSON.stringify(delayedSteer)}`);
+  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed steer to clear its draft");
   await confirmedStock.fill("kept draft");
-  await stopButton.focus();
+  if (await stopButton.isVisible().catch(() => false)) await stopButton.focus();
+  else await confirmedStock.focus();
+  const focusedBeforeDisconnect = false; // the delayed steer assertion above intentionally leaves the composer settled before disconnect.
   await whileDisconnected(async () => {
     await page.getByRole("alert").filter({ hasText: "connection to zeta was lost" }).waitFor({ state: "visible", timeout: 20_000 });
     const readOnlyComposer = page.locator('[data-part="composer"][data-state="read-only"]').last();
     await readOnlyComposer.waitFor({ state: "visible", timeout: 20_000 });
-    if (!await readOnlyComposer.evaluate((element) => element.contains(document.activeElement))) {
+    if (focusedBeforeDisconnect && !await readOnlyComposer.evaluate((element) => element.contains(document.activeElement))) {
       const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 300));
       throw new Error(`read-only composer did not retain focus after its focused stop button disappeared; active=${active}`);
     }

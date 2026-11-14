@@ -241,7 +241,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
     const delivery_id = crypto.randomUUID(); track(delivery_id);
-    await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+    try {
+      await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+    } catch (error) {
+      // A stale turn view can race its server-side turn end. send queues the same draft instead of losing it.
+      if (!intent.steer || !(error instanceof Error) || !error.message.includes("no turn is running")) throw error;
+      await client.request("send", { session_id: current.sessionId, text, delivery_id });
+    }
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     const response = await fetch(`/api/chats/${encodeURIComponent(current.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: nextTitle }) });
