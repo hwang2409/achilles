@@ -98,6 +98,48 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   });
 }
 
+const EXPECTATION_TOKEN_KEYS = new Set(["value", "name", "tool", "text", "route"]);
+const HARNESS_STRUCTURAL_TOKENS = new Set([
+  "original", // layout_update wrapper for the setup layout
+  "added", // layout_update wrapper for the requested block
+  "version", // harness-owned layout revision field
+  "blocks", // fixed root field in every layout document
+  "type", // fixed discriminator in every layout block
+  "collection", // fixed data-source field in list and detail blocks
+]);
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip"]);
+function nestedTokens(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(nestedTokens);
+  if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
+  return typeof value === "string" ? [value] : [];
+}
+export function expectationTokens(check: TaskCheck): string[] {
+  if (SCHEMA_RELATIVE_CHECKS.has(check.type)) return [];
+  return [...new Set(Object.entries(check).filter(([key]) => EXPECTATION_TOKEN_KEYS.has(key)).flatMap(([, value]) => nestedTokens(value)).map(token => token.replace(/^achilles__/, "")))];
+}
+function validateExpectations(checks: TaskCheck[], promptText: string, setup?: TaskSetup) {
+  const declared = new Set<string>();
+  for (const tool of setup?.tools ?? []) {
+    declared.add(tool.name); declared.add(tool.collection); const properties = tool.input_schema?.properties;
+    if (properties && typeof properties === "object" && !Array.isArray(properties)) for (const [name, schema] of Object.entries(properties)) {
+      declared.add(name);
+      if (schema && typeof schema === "object" && !Array.isArray(schema)) {
+        for (const key of ["const", "default"] as const) if (typeof schema[key] === "string") declared.add(schema[key]);
+        for (const value of (schema as Record<string, unknown>).enum as unknown[] ?? []) if (typeof value === "string") declared.add(value);
+      }
+    }
+  }
+  for (const record of setup?.records ?? []) {
+    declared.add(record.collection);
+    for (const [key, value] of Object.entries(record.data)) { declared.add(key); if (typeof value === "string") declared.add(value); }
+  }
+  for (const token of nestedTokens(setup?.initial_layout)) declared.add(token);
+  for (const check of checks) for (const token of expectationTokens(check)) {
+    // count names select a closed snapshot collection; they are not agent-authored content.
+    if (check.type !== "count" && !HARNESS_STRUCTURAL_TOKENS.has(token) && !promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
+  }
+}
+
 export function validateTask(value: unknown): EvalTask {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("task must be an object");
   own(value, ["id", "prompt", "page_plan", "agent_turns", "steps", "checks", "setup", "approval_mode", "requires", "goal_capabilities"], "task"); const task = value as Record<string, unknown>;
@@ -110,15 +152,7 @@ export function validateTask(value: unknown): EvalTask {
   const page_plan = validatePages(task.page_plan); const aliases = new Set(page_plan.map(page => page.alias));
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt); const checks = validateChecks(task.checks, aliases);
-  const promptText = [prompt, ...steps.flatMap(step => step.prompt ?? [])].join(" ");
-  const declared = new Set<string>();
-  for (const tool of setup?.tools ?? []) {
-    declared.add(tool.name); const properties = tool.input_schema?.properties;
-    if (properties && typeof properties === "object" && !Array.isArray(properties)) for (const [name, schema] of Object.entries(properties)) { declared.add(name); if (schema && typeof schema === "object" && !Array.isArray(schema)) for (const key of ["const", "default"] as const) if (typeof schema[key] === "string") declared.add(schema[key]); for (const value of (schema as Record<string, unknown>)?.enum as unknown[] ?? []) if (typeof value === "string") declared.add(value); }
-  }
-  for (const record of setup?.records ?? []) { declared.add(record.collection); for (const [key, value] of Object.entries(record.data)) { declared.add(key); if (typeof value === "string") declared.add(value); } }
-  const collect = (value: unknown): string[] => Array.isArray(value) ? value.flatMap(collect) : value && typeof value === "object" ? Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => ["before", "after"].includes(key) ? collect(nested) : [key, ...collect(nested)]) : typeof value === "string" ? [value] : [];
-  for (const check of checks.filter(check => ["record", "records_exact", "successful_result", "updated_record", "schema_roundtrip"].includes(check.type))) for (const token of collect(check.value)) if (!promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
+  validateExpectations(checks, [prompt, ...steps.flatMap(step => step.prompt ?? [])].join(" "), setup);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks };
 }
 
@@ -156,6 +190,22 @@ function schemaStringFields(version: Record<string, unknown>) {
     for (const [name, value] of Object.entries(properties)) if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).type === "string") fields.add(name);
   }
   return fields;
+}
+function categoricalField(versions: Record<string, unknown>[]) {
+  const fields = new Set<string>(); const enumFields = new Set<string>();
+  for (const version of versions) for (const schema of [version.data_schema, version.input_schema]) {
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) continue;
+    const properties = (schema as Record<string, unknown>).properties;
+    if (!properties || typeof properties !== "object" || Array.isArray(properties)) continue;
+    for (const [name, value] of Object.entries(properties)) if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).type === "string") {
+      fields.add(name); if (Array.isArray((value as Record<string, unknown>).enum)) enumFields.add(name);
+    }
+  }
+  const statusLike = (field: string) => /^(?:status|state|stage|verdict)$/.test(field);
+  return [...enumFields].find(statusLike) ?? (enumFields.size === 1 ? [...enumFields][0] : undefined) ?? [...fields].find(statusLike);
+}
+function stableIdentity(inserted: Record<string, unknown>, later: Record<string, unknown>, categorical: string, fields: string[], requirePresent = false) {
+  return fields.filter(field => field !== categorical && inserted[field] !== undefined).every(field => (!requirePresent && later[field] === undefined) || later[field] === inserted[field]);
 }
 function matchingSchemaObjects(actual: unknown, version: Record<string, unknown>, values: string[], inheritedRecordId?: string): Array<Record<string, unknown>> {
   if (!actual || typeof actual !== "object") return [];
@@ -205,11 +255,10 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
         const updateRows = results.filter(row => collectionVersions.some(version => version.operation === "update" && row.tool === `achilles__${version.name}`)).map(row => row.data ?? row.result).filter(value => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).record_id === inserted.record_id) as Array<Record<string, unknown>>;
         const readRows = results.filter(row => collectionVersions.some(version => ["list", "get"].includes(String(version.operation)) && row.tool === `achilles__${version.name}`)).flatMap(row => matchingObjects(row.data ?? row.result, { record_id: inserted.record_id }));
         const reads = matches(["list", "get"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id });
-        const literal = matches(["update"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id }).some(updated => updated.record_id === inserted.record_id) && reads.some(read => read.record_id === inserted.record_id);
+        const categorical = categoricalField(collectionVersions); if (!categorical || typeof inserted[categorical] !== "string") return false;
         const fields = collectionVersions.flatMap(version => [...schemaStringFields(version)]);
-        const changed = updateRows.some(update => fields.some(field => typeof inserted[field] === "string" && typeof update[field] === "string" && inserted[field] !== update[field]));
-        const final = [...reads, ...readRows].some(read => fields.some(field => updateRows.some(update => update[field] === read[field] && typeof read[field] === "string")));
-        return literal || (changed && final);
+        return updateRows.some(update => typeof update[categorical] === "string" && update[categorical] !== inserted[categorical] && stableIdentity(inserted, update, categorical, fields)
+          && [...reads, ...readRows].some(read => read[categorical] === update[categorical] && stableIdentity(inserted, read, categorical, fields, true)));
       });
     });
   },

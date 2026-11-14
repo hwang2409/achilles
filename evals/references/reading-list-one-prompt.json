@@ -182,7 +182,11 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "want_to_read",
+                "finished"
+              ]
             }
           },
           "required": [
@@ -203,7 +207,11 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "want_to_read",
+                "finished"
+              ]
             }
           },
           "required": [
@@ -224,7 +232,11 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "want_to_read",
+                "finished"
+              ]
             }
           },
           "required": [
@@ -274,7 +286,7 @@
         "data": {
           "record_id": "book-1",
           "title": "Synthetic Book",
-          "status": "unread"
+          "status": "want_to_read"
         }
       },
       {
@@ -283,9 +295,9 @@
         "tool": "achilles__update_book",
         "success": true,
         "data": {
-          "record_id": "book-2",
-          "title": "Synthetic Book",
-          "status": "read"
+          "record_id": "book-1",
+          "title": "Other",
+          "status": "want_to_read"
         }
       },
       {
@@ -297,8 +309,8 @@
           "records": [
             {
               "record_id": "book-1",
-              "title": "Synthetic Book",
-              "status": "read"
+              "title": "Other",
+              "status": "want_to_read"
             }
           ]
         }

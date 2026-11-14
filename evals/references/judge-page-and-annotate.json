@@ -1,4 +1,16 @@
 {
+  "initial": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      }
+    ],
+    "tools": [],
+    "assignments": [],
+    "records": [],
+    "layouts": []
+  },
   "good": {
     "pages": [
       {
@@ -25,7 +37,7 @@
       {
         "call_id": "failed-create",
         "page_id": "home",
-        "tool": "achilles__create_page_with_tools",
+        "tool": "achilles__create_page",
         "success": false,
         "data": {
           "error": "invalid layout"
@@ -33,8 +45,8 @@
       },
       {
         "call_id": "create-review",
-        "page_id": "review",
-        "tool": "achilles__create_page_with_tools",
+        "page_id": "home",
+        "tool": "achilles__create_page",
         "success": true,
         "data": {
           "page_id": "review",
@@ -67,9 +79,6 @@
         }
       }
     ],
-    "related_page_ids": [
-      "review"
-    ],
     "records": [
       {
         "page_id": "review",
@@ -83,20 +92,55 @@
       {
         "id": "failed-create",
         "page_id": "home",
-        "tool": "achilles__create_page_with_tools",
+        "tool": "achilles__create_page",
         "success": false,
         "arguments": {
           "route": "/run-review"
         }
       },
       {
+        "id": "inspect-home",
+        "page_id": "home",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "arguments": {}
+      },
+      {
         "id": "create-review",
-        "page_id": "review",
-        "tool": "achilles__create_page_with_tools",
+        "page_id": "home",
+        "tool": "achilles__create_page",
         "success": true,
         "arguments": {
           "route": "/run-review"
         }
+      },
+      {
+        "id": "inspect-review-from-home",
+        "page_id": "home",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "inspect-review",
+        "page_id": "review",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "create-add-tool",
+        "page_id": "review",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "discover-add-tool",
+        "page_id": "review",
+        "tool": "mcp_discover",
+        "success": true
       },
       {
         "id": "add-annotation",

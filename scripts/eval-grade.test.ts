@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { gradeCheck, gradeTask, structurallyContains, validateTask } from "./eval-grade";
+import { expectationTokens, gradeCheck, gradeTask, structurallyContains, validateTask } from "./eval-grade";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -14,6 +14,20 @@ test("task schema is closed and count checks name real collections", () => {
 test("task expectation lint rejects undeclared check literals", () => {
   const task = { id: "lint-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "do", kind: "prompt", page: "p", chat: "c", prompt: "do work" }], setup: { tools: [{ name: "add_note", operation: "insert", collection: "notes" }], records: [] }, checks: [{ id: "record", type: "records_exact", page: "p", value: [{ text: "undocumented literal" }] }] };
   expect(() => validateTask(task)).toThrow("without a prompt quote or declared schema");
+});
+
+test("expectation tokens cover each literal-bearing check shape", () => {
+  const cases = [
+    [{ id: "page", type: "page_exists", page: "p", route: "/wanted" }, ["/wanted"]],
+    [{ id: "count", type: "count", page: "p", name: "records", count: 1 }, ["records"]],
+    [{ id: "tool", type: "tool", page: "p", name: "add_note" }, ["add_note"]],
+    [{ id: "approval", type: "approval", page: "p", tool: "achilles__add_note", count: 1 }, ["add_note"]],
+    [{ id: "record", type: "record", page: "p", value: { text: "wanted" } }, ["text", "wanted"]],
+    [{ id: "browser", type: "browser_text", page: "p", text: "visible" }, ["visible"]],
+    [{ id: "layout", type: "layout_contains", page: "p", value: { type: "list" } }, ["type", "list"]],
+    [{ id: "layout-update", type: "layout_update", page: "p", value: { original: { blocks: [] }, added: { type: "list" }, version: 2 } }, ["original", "blocks", "added", "type", "list", "version"]],
+  ] as const;
+  for (const [check, expected] of cases) expect(expectationTokens(check as never), check.type).toEqual(expected);
 });
 
 test("same-page grading rejects empty and wrong-page evidence", () => {
@@ -40,8 +54,19 @@ test("schema roundtrip accepts an agent-designed title field", () => {
   expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
 });
 
+test("schema-relative updates change the declared categorical field and keep identity stable", () => {
+  const check = { id: "update", type: "updated_record" as const, page: "p", chat: "c", value: { before: ["Synthetic Book", "unread"], after: ["Synthetic Book", "read"] } };
+  const pages = [{ id: "p1", alias: "p" }];
+  const schema = { type: "object", properties: { title: { type: "string" }, status: { type: "string", enum: ["want_to_read", "finished"] } } };
+  const tool_versions = ["insert", "update", "list"].map(operation => ({ page_id: "p1", name: `${operation}_book`, collection: "books", operation, data_schema: schema }));
+  const result = (tool: string, title: string, status: string, list = false) => ({ page_id: "p1", chat_id: "c", tool: `achilles__${tool}_book`, success: true, data: list ? { records: [{ record_id: "book-1", title, status }] } : { record_id: "book-1", title, status } });
+  const inserted = result("insert", "Synthetic Book", "want_to_read");
+  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Synthetic Book", "finished"), result("list", "Synthetic Book", "finished", true)] }).pass).toBe(true);
+  expect(gradeCheck(check, { pages, tool_versions, results: [inserted, result("update", "Other", "want_to_read"), result("list", "Other", "want_to_read", true)] }).pass).toBe(false);
+});
+
 test("page-aware approvals and strict route checks do not accept other pages", () => {
-  const t = validateTask({ ...task, checks: [{ id: "approval", type: "count", page: "p", name: "approvals", count: 1 }, { id: "route", type: "page_exists", page: "p", route: "/wanted" }] });
+  const t = validateTask({ ...task, steps: [{ ...task.steps[0], prompt: "work on /wanted" }], checks: [{ id: "approval", type: "count", page: "p", name: "approvals", count: 1 }, { id: "route", type: "page_exists", page: "p", route: "/wanted" }] });
   const failed = gradeTask(t, { pages: [{ id: "p1", alias: "p", route: "/wrong" }], approvals: [{ page_id: "other" }] });
   expect(failed.checks.every(check => !check.pass)).toBe(true);
 });

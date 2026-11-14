@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
+import { classifyTaskSupport, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
@@ -61,6 +61,19 @@ test("reserved bundle validation uses the target revision's validator after chan
   const target = Bun.env.ACHILLES_DIR ?? resolve(new URL("..", import.meta.url).pathname);
   const validations = await validateReservedBundles({ run: targetRun(target), achillesDir: target } as never, calls, results);
   expect(validations.map(row => row.valid)).toEqual([true, false, false, false, false]);
+});
+
+test("related pages ignore built-ins and include page-owned tools and durable changes", () => {
+  const before = { pages: [{ id: "home" }], tools: [], records: [], layouts: [], assignments: [] };
+  const after = { pages: [{ id: "home" }, { id: "review" }], tools: [{ id: "tool-1", page_id: "review", name: "add_annotation" }], records: [], layouts: [], assignments: [] };
+  const calls = [
+    { page_id: "home", tool: "achilles__inspect_page", success: true },
+    { page_id: "home", tool: "achilles__create_page", success: true },
+    { page_id: "review", tool: "achilles__create_tool", success: true },
+    { page_id: "review", tool: "mcp_discover", success: true },
+    { page_id: "review", tool: "achilles__add_annotation", success: true },
+  ];
+  expect(relatedPages(before, after, calls)).toEqual(["review", "review", "review"]);
 });
 
 test("provider catalog is allow-only", () => {
