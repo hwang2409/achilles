@@ -32,12 +32,41 @@ function alive(pid: number): boolean {
   return result.exitCode === 0 && !result.stdout.toString().trim().startsWith("Z");
 }
 
-function processesContaining(text: string): number[] {
+function processesContaining(text: string): string[] {
   const result = Bun.spawnSync(["ps", "-axo", "pid=,args="]);
   return result.stdout.toString().split("\n").flatMap((line) => {
     const match = line.trim().match(/^(\d+)\s+(.*)$/);
-    return match && match[2].includes(text) ? [Number(match[1])] : [];
+    return match && match[2].includes(text) ? [`pid ${match[1]} ${match[2]}`] : [];
   });
+}
+
+async function diagnostic(args: string[]): Promise<string> {
+  const child = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+    .then(([stdout, stderr]) => stdout + stderr);
+  let timedOut = false;
+  const result = await Promise.race([
+    output,
+    Bun.sleep(5_000).then(() => { timedOut = true; return ""; }),
+  ]);
+  if (timedOut) {
+    try { child.kill("SIGKILL"); } catch {}
+    await Promise.race([
+      child.exited,
+      Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping diagnostic pid ${child.pid}`); }),
+    ]);
+    return `[diagnostic timeout: ${args.join(" ")}]`;
+  }
+  await child.exited;
+  return result;
+}
+
+async function killAndReap(child: Bun.Subprocess): Promise<void> {
+  try { child.kill("SIGKILL"); } catch {}
+  await Promise.race([
+    child.exited,
+    Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping pid ${child.pid}`); }),
+  ]);
 }
 
 async function spawnTracked(args: string[], options: Parameters<typeof Bun.spawn>[1]) {
@@ -108,7 +137,8 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
   const devCache = resolve(root, ".cache/dev");
   const oldWebStamp = await Bun.file(webStamp).exists() ? await readFile(webStamp) : null;
   const managed: ProcessIdentity[] = [];
-  const spawned: ProcessIdentity[] = [];
+  const spawned: Bun.Subprocess[] = [];
+  const discovered: ProcessIdentity[] = [];
   let zetaPid = 0;
   let foreignPid = 0;
   let crashedChildPid = 0;
@@ -181,7 +211,7 @@ process.exit(0);
   };
   const track = async (args: string[], options: Parameters<typeof Bun.spawn>[1]) => {
     const tracked = await spawnTracked(args, options);
-    spawned.push(tracked.identity);
+    spawned.push(tracked.child);
     return tracked;
   };
   const runDev = async (env = baseEnv) => {
@@ -231,20 +261,35 @@ process.exit(0);
     const waiter = resolve(temp, "waiter.py");
     const waiterReady = resolve(temp, "waiter-ready");
     await writeFile(waiter, `import os\nimport signal\nfrom pathlib import Path\nPath(${JSON.stringify(waiterReady)}).write_text(str(os.getpid()))\nsignal.pause()\n`);
-    const { child: crashed, identity: crashedIdentity } = await track(["python3", "scripts/locked.py", "python3", waiter], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const launcher = resolve(temp, "launcher.py");
+    const launcherReady = resolve(temp, "launcher-ready");
+    const launcherRelease = resolve(temp, "launcher-release");
+    await writeFile(launcher, `import os\nimport time\nfrom pathlib import Path\nPath(${JSON.stringify(launcherReady)}).write_text(str(os.getpid()))\nwhile not Path(${JSON.stringify(launcherRelease)}).exists(): time.sleep(0.01)\nos.execvp("python3", ["python3", "scripts/locked.py", "python3", ${JSON.stringify(waiter)}])\n`);
+    const { child: crashed, identity: crashedIdentity } = await track(["python3", launcher], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    await waitFor(() => Bun.file(launcherReady).exists(), "launcher identity to be captured");
+    await writeFile(launcherRelease, "release");
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
     crashedChildPid = Number(await readFile(waiterReady, "utf8"));
     const crashedChildIdentity = await processIdentity(crashedChildPid);
-    if (crashedChildIdentity) spawned.push(crashedChildIdentity);
+    if (crashedChildIdentity) discovered.push(crashedChildIdentity);
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     crashedLockIdentity = crashedIdentity.pid === crashedLockPid ? crashedIdentity : null;
     const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(await rejected.exited).toBe(1);
     expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
     expect(crashedLockIdentity).not.toBeNull();
-    await stop(crashedLockIdentity!, "SIGKILL");
+    expect(ownedProcessMatches(crashedIdentity, await processIdentity(crashed.pid))).toBe(false);
+    crashed.kill("SIGKILL");
+    await crashed.exited;
     const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    expect(await recovered.exited, await new Response(recovered.stderr).text()).toBe(0);
+    const recoveredExit = await recovered.exited;
+    const recoveredStderr = await new Response(recovered.stderr).text();
+    if (recoveredExit !== 0) {
+      const lsof = await diagnostic(["lsof", resolve(devCache, "lock")]);
+      const ps = await diagnostic(["ps", "-o", "pid,ppid,stat,command", "-p", `${crashedLockPid},${crashedChildPid}`]);
+      console.error(recoveredStderr, lsof, ps);
+    }
+    expect(recoveredExit, recoveredStderr).toBe(0);
     await stop(crashedChildIdentity!);
     crashedChildPid = 0;
 
@@ -262,7 +307,23 @@ process.exit(0);
     await rm(home, { recursive: true, force: true });
     await waitFor(() => !alive(zetaPid), "fake zeta to stop after its home is removed");
   } finally {
-    const owned: ProcessIdentity[] = [...managed, ...spawned];
+    const cleanupErrors: string[] = [];
+    const survivors = new Map<number, string>();
+    const rememberSurvivor = async (pid: number, fallbackCommand: string) => {
+      const current = await processIdentity(pid);
+      if (current) survivors.set(pid, current.command);
+      else survivors.set(pid, fallbackCommand);
+    };
+    for (const child of spawned) {
+      const before = await processIdentity(child.pid);
+      try {
+        await killAndReap(child);
+      } catch (error) {
+        await rememberSurvivor(child.pid, before?.command ?? "direct child");
+        cleanupErrors.push(String(error));
+      }
+    }
+    const owned: ProcessIdentity[] = [...managed, ...discovered];
     const addStoredIdentity = async (path: string) => {
       try {
         const value = JSON.parse(await readFile(path, "utf8"));
@@ -272,10 +333,26 @@ process.exit(0);
     await addStoredIdentity(resolve(home, "run/serve.ws.json"));
     await addStoredIdentity(resolve(devCache, "zeta-serve.json"));
     await addStoredIdentity(resolve(devCache, "achilles.json"));
-    for (const saved of owned) { try { await stop(saved); } catch {} }
-    expect(processesContaining(temp), "fake dev processes survived cleanup").toEqual([]);
-    await rm(devCache, { recursive: true, force: true });
-    if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
-    await rm(temp, { recursive: true, force: true });
+    for (const saved of owned) {
+      try {
+        await stop(saved);
+      } catch (error) {
+        await rememberSurvivor(saved.pid, saved.command);
+        cleanupErrors.push(String(error));
+      }
+    }
+    for (const survivor of processesContaining(temp)) {
+      const match = survivor.match(/^pid (\d+) (.*)$/);
+      if (match) survivors.set(Number(match[1]), match[2]);
+    }
+    try { await rm(devCache, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
+    try {
+      if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
+    } catch (error) { cleanupErrors.push(String(error)); }
+    try { await rm(temp, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
+    if (cleanupErrors.length || survivors.size) {
+      const details = [...survivors].map(([pid, command]) => `pid ${pid} ${command}`);
+      throw new Error([...cleanupErrors, ...details].join("\n"));
+    }
   }
 }, 60_000);

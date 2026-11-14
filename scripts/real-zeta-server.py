@@ -69,8 +69,12 @@ def book_tool(name: str, operation: str, description: str) -> dict:
     elif operation == "update":
         input_schema = {
             "type": "object",
-            "properties": {"record_id": {"type": "string"}, **properties},
-            "required": ["record_id"],
+            "properties": {
+                "record_id": {"type": "string"},
+                "revision": {"type": "integer"},
+                **properties,
+            },
+            "required": ["record_id", "revision"],
             "additionalProperties": False,
         }
     else:
@@ -200,6 +204,15 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(content=[TextContent("annotation complete")]),
         ScriptedTurn(content=[TextContent("v2 turn")]),
         ScriptedTurn(content=[TextContent("rollback turn")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "annotate-after-restart",
+                    "achilles__annotate_trace",
+                    {"text": "after achilles restart"},
+                )
+            ]
+        ),
         ScriptedTurn(content=[TextContent("post-reconnect complete")]),
         ScriptedTurn(
             content=[TextContent("allow tool ready")],
