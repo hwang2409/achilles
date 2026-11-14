@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { SettingsControl } from "./SettingsDialog";
+import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 
 export type Chat = {
   session_id: string;
@@ -71,6 +71,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [next, setNext] = useState<string | null>(null);
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 759px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
@@ -94,6 +95,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); setSettingsOpen(true); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (event.key === "Escape" && drawer) { event.preventDefault(); setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); }
       if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
@@ -149,12 +151,13 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
         {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
         {next && <button className="load-older" onClick={loadOlder}>load 50 older</button>}
       </section>
-      <footer><SettingsControl serverForcesAsk={serverForcesAsk} className="settings-button" /><kbd>⌘K</kbd></footer>
+      <footer><SettingsControl onOpen={() => setSettingsOpen(true)} className="settings-button" /><kbd>⌘K</kbd></footer>
     </aside>
     <main className="main-pane" aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
       {children}
     </main>
+    <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} serverForcesAsk={serverForcesAsk} />
   </div>;
 }
 

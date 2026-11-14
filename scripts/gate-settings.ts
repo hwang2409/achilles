@@ -42,7 +42,23 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
-  console.log("settings gate passed: live theme, persistence, query override, and reset");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
+  await page.keyboard.press("Control+Comma");
+  const narrowDialog = page.getByRole("dialog", { name: "settings" });
+  if (await narrowDialog.count() !== 1) throw new Error("narrow settings shortcut did not expose a named dialog");
+  const enabledControls = narrowDialog.locator("button:not(:disabled):not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
+  const firstControl = enabledControls.first();
+  const lastControl = enabledControls.last();
+  await firstControl.focus();
+  await page.keyboard.press("Shift+Tab");
+  if (!await lastControl.evaluate((node) => node === document.activeElement)) throw new Error("settings focus did not wrap backward to the last enabled control");
+  await page.keyboard.press("Tab");
+  if (!await firstControl.evaluate((node) => node === document.activeElement && document.activeElement !== document.body)) throw new Error("settings focus did not wrap forward to the first enabled control");
+  await page.getByRole("button", { name: "esc" }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  console.log("settings gate passed: live theme, persistence, query override, reset, narrow shortcut, and focus wrap");
 }
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };

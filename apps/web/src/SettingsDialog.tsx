@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import {
   AUTO_THEME,
   defaultSettings,
@@ -87,6 +87,14 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
     onCancel={(event) => { event.preventDefault(); onClose(); }}
     onClose={onClose}
     onClick={(event) => { if (event.target === dialog.current) onClose(); }}
+    onKeyDown={(event) => {
+      if (event.key !== "Tab") return;
+      const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled):not([tabindex='-1']), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])")];
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }}
   >
     <div className="settings-panel">
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="settings-title">settings</h2></div><div><span>saved in this browser</span><button type="button" onClick={onClose}>esc</button></div></div>
@@ -102,14 +110,6 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
   </dialog>;
 }
 
-export function SettingsControl({ serverForcesAsk = false, className = "settings-entry" }: { serverForcesAsk?: boolean; className?: string }) {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    const shortcut = (event: globalThis.KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); setOpen(true); }
-    };
-    window.addEventListener("keydown", shortcut);
-    return () => window.removeEventListener("keydown", shortcut);
-  }, []);
-  return <><button className={className} type="button" onClick={() => setOpen(true)}><span aria-hidden="true">☼</span><span className="settings-label">settings</span><kbd>{navigator.platform.includes("Mac") ? "⌘," : "ctrl+,"}</kbd></button><SettingsDialog open={open} onClose={() => setOpen(false)} serverForcesAsk={serverForcesAsk} /></>;
+export function SettingsControl({ onOpen, className = "settings-entry" }: { onOpen(): void; className?: string }) {
+  return <button className={className} type="button" onClick={onOpen}><span aria-hidden="true">☼</span><span className="settings-label">settings</span><kbd>{navigator.platform.includes("Mac") ? "⌘," : "ctrl+,"}</kbd></button>;
 }
