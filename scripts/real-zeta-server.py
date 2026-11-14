@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import tempfile
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from zeta.providers.completion import owned_completion
 from zeta.server.delivery import DeliveryRequests
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
+
+inspect_turn_release = asyncio.Event()
 
 
 class BarrierBackend(FakeBackend):
@@ -55,8 +58,15 @@ class BarrierBackend(FakeBackend):
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
-            if turn_index == 4 and event.type.name == "MESSAGE_END":
-                await self._hold("turn_barrier")
+            if event.type.name == "MESSAGE_END":
+                document = json.loads(self.control.read_text())
+                returned = document.get("returned_tool_calls", [])
+                if any(call.get("id") == "inspect-after-discovery" for call in returned):
+                    document["inspect_turn_barrier"] = "held"
+                    write_control(self.control, document)
+                    await asyncio.wait_for(inspect_turn_release.wait(), 30)
+                elif turn_index == 4:
+                    await self._hold("turn_barrier")
             yield event
 
     async def _hold(self, barrier):
@@ -487,6 +497,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
 
 async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
+    asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, inspect_turn_release.set)
     original_event = server.control._event
 
     async def held_event(event, *args, **kwargs):
