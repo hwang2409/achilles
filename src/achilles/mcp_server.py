@@ -303,7 +303,7 @@ def build_mcp(store: PageStore):
             try:
                 _validate_create(params.name, args)
                 if params.name == "create_page":
-                    created, digest, existing = await anyio.to_thread.run_sync(
+                    created, digest, existing, detail_summary = await anyio.to_thread.run_sync(
                         store.create_page,
                         args["route"],
                         args["title"],
@@ -316,25 +316,25 @@ def build_mcp(store: PageStore):
                         "route": created["route"],
                         "digest": digest,
                         "existing": existing,
+                        "detail_filter_matches": detail_summary,
                     }
                 elif params.name == "update_layout":
-                    version, digest = await anyio.to_thread.run_sync(
+                    version, digest, detail_summary = await anyio.to_thread.run_sync(
                         store.update_layout,
                         page["id"],
                         args["layout"],
                         args["expected_version"],
                     )
-                    result = {"version": version, "digest": digest}
+                    result = {
+                        "version": version,
+                        "digest": digest,
+                        "detail_filter_matches": detail_summary,
+                    }
                 else:
                     created, digest = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
                     result = {**created, "digest": digest}
-                if params.name in {"create_page", "update_layout"}:
-                    result_page_id = result.get("page_id", page["id"])
-                    summary = await anyio.to_thread.run_sync(store.inspect_page, result_page_id)
-                    if summary["detail_filter_matches"]:
-                        result["detail_filter_matches"] = summary["detail_filter_matches"]
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:

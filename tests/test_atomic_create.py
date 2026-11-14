@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from starlette.testclient import TestClient
@@ -713,7 +714,7 @@ def test_create_page_is_idempotent_and_route_conflicts_are_structured(creation_c
             "SELECT credential_hash FROM page WHERE id=?", (first_value["page_id"],)
         ).fetchone()[0]
     first_serialized = json.dumps(first_value)
-    assert set(first_value) == {"page_id", "route", "digest", "existing"}
+    assert set(first_value) == {"page_id", "route", "digest", "existing", "detail_filter_matches"}
     assert credential.decode() not in first_serialized
     assert credential_hash not in first_serialized
 
@@ -861,26 +862,30 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
 
 
 @pytest.mark.parametrize("writer", ["create_page", "update_layout"])
-@pytest.mark.parametrize(
-    "field_filter",
-    [
-        {"field": "title", "equals": "the book"},
-        {"field": "missing", "equals": "the book"},
-        {"field": "run_id", "equals": "run-002"},
-        None,
-    ],
-)
-def test_detail_filter_validation_through_public_tools(creation_client, writer, field_filter):
+@pytest.mark.parametrize("block_type", ["detail", "metric"])
+def test_unknown_filter_field_is_actionable_through_public_tools(
+    creation_client, writer, block_type
+):
     _, store, client, home_headers = creation_client
-    detail = {
-        "type": "detail",
-        "title": "book",
-        "collection": "books",
-        "fields": ["title"],
-    }
-    if field_filter is not None:
-        detail["filter"] = field_filter
-    layout = {"blocks": [detail]}
+    field_filter = {"field": "missing", "equals": "the book"}
+    block = (
+        {
+            "type": "detail",
+            "title": "book",
+            "collection": "books",
+            "fields": ["title"],
+            "filter": field_filter,
+        }
+        if block_type == "detail"
+        else {
+            "type": "metric",
+            "label": "books",
+            "collection": "books",
+            "count": True,
+            "where": field_filter,
+        }
+    )
+    layout = {"blocks": [block]}
     created = mcp(
         client,
         home_headers,
@@ -896,9 +901,14 @@ def test_detail_filter_validation_through_public_tools(creation_client, writer, 
         },
     )
     result = created
-    page_id = None
     if writer == "update_layout":
         page_id = json.loads(created["content"][0]["text"])["page_id"]
+        with store.transaction() as db:
+            db.execute(
+                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (page_id, "books", "book-1", 1, json.dumps({"title": "the book"}), "1", "1"),
+            )
         store.set_create_mode(page_id, True)
         page_headers = initialize(client, store.ensure_credential(page_id), 3)
         result = mcp(
@@ -912,17 +922,18 @@ def test_detail_filter_validation_through_public_tools(creation_client, writer, 
             },
         )
 
-    assert not result.get("isError")
-    page_id = page_id or json.loads(created["content"][0]["text"])["page_id"]
-    inspected = mcp(
-        client,
-        home_headers,
-        5,
-        "tools/call",
-        {"name": "inspect_page", "arguments": {"page_id": page_id}},
+    hint = (
+        "Use a field from the books collection schema. Unknown field: missing. "
+        "Collection fields: title."
     )
-    value = json.loads(inspected["content"][0]["text"])
-    assert value["layout"] == layout
+    if writer == "update_layout":
+        hint += " Did you mean title?"
+    assert json.loads(result["content"][0]["text"]) == {
+        "code": "invalid_input",
+        "path": f"/layout/blocks/0/{'filter' if block_type == 'detail' else 'where'}/field",
+        "expected": "field in collection schema",
+        "hint": hint,
+    }
 
 
 @pytest.mark.parametrize(
@@ -948,22 +959,12 @@ def test_detail_filter_validation_through_public_tools(creation_client, writer, 
             {"matched": 0, "hint": "no record has run_id = run-002"},
         ),
         (
-            [{"run_id": "run-003"}],
-            {"field": "missing", "equals": "run-002"},
-            {
-                "matched": 0,
-                "hint": (
-                    "no record has missing = run-002; missing is not in the books collection schema"
-                ),
-            },
-        ),
-        (
             [],
             {"field": "run_id", "equals": "run-002"},
             {"matched": 0, "hint": "no record has run_id = run-002"},
         ),
     ],
-    ids=["one", "several", "suggestion", "no-suggestion", "unknown-field", "empty"],
+    ids=["one", "several", "suggestion", "no-suggestion", "empty"],
 )
 def test_detail_filter_match_results_through_public_mcp(
     creation_client, records, field_filter, expected
@@ -971,7 +972,7 @@ def test_detail_filter_match_results_through_public_mcp(
     _, store, client, home_headers = creation_client
     data_schema = {
         "type": "object",
-        "properties": {"run_id": {"type": "string"}},
+        "properties": {"run_id": {"type": "string"}, "record_id": {"type": "string"}},
         "additionalProperties": False,
     }
     detail = {
@@ -999,8 +1000,6 @@ def test_detail_filter_match_results_through_public_mcp(
     )
     created_value = json.loads(created["content"][0]["text"])
     initial_hint = f"no record has {field_filter['field']} = run-002"
-    if field_filter["field"] != "run_id":
-        initial_hint += f"; {field_filter['field']} is not in the books collection schema"
     assert created_value["detail_filter_matches"] == [
         {"block": 0, "matched": 0, "hint": initial_hint}
     ]
@@ -1043,6 +1042,126 @@ def test_detail_filter_match_results_through_public_mcp(
     )
     inspect_value = json.loads(inspected["content"][0]["text"])
     assert inspect_value["detail_filter_matches"] == [{"block": 0, **expected}]
+
+
+def test_inspect_page_diagnoses_legacy_unknown_filter_field(creation_client):
+    _, store, client, home_headers = creation_client
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {"name": "create_page", "arguments": request()},
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    legacy_layout = {
+        "blocks": [
+            {
+                "type": "detail",
+                "title": "book",
+                "collection": "books",
+                "fields": ["title"],
+                "filter": {"field": "missing", "equals": "the book"},
+            }
+        ]
+    }
+    install_layout(store, page_id, 2, legacy_layout)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (page_id, "books", "book-1", 1, json.dumps({"title": "the book"}), "1", "1"),
+        )
+
+    inspected = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"page_id": page_id}},
+    )
+
+    assert json.loads(inspected["content"][0]["text"])["detail_filter_matches"] == [
+        {
+            "block": 0,
+            "matched": 0,
+            "hint": "no record has missing = the book; did you mean title?",
+        }
+    ]
+
+
+def test_concurrent_updates_return_their_own_match_counts(creation_client, monkeypatch):
+    _, store, client, home_headers = creation_client
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(layout={"blocks": [{"type": "text", "text": "start"}]}),
+        },
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (page_id, "books", "book-1", 1, json.dumps({"title": "first"}), "1", "1"),
+        )
+    store.set_create_mode(page_id, True)
+    first_headers = initialize(client, store.ensure_credential(page_id), 3)
+    second_headers = initialize(client, store.ensure_credential(page_id), 4)
+    first_committed = threading.Event()
+    second_committed = threading.Event()
+    original = PageStore.update_layout
+
+    def ordered_update(self, target_page_id, layout, expected_version):
+        if expected_version == 2:
+            assert first_committed.wait(10)
+        result = original(self, target_page_id, layout, expected_version)
+        if expected_version == 1:
+            first_committed.set()
+            assert second_committed.wait(10)
+        else:
+            second_committed.set()
+        return result
+
+    monkeypatch.setattr(PageStore, "update_layout", ordered_update)
+
+    def update(headers, request_id, expected_version, value):
+        layout = {
+            "blocks": [
+                {
+                    "type": "detail",
+                    "title": "book",
+                    "collection": "books",
+                    "fields": ["title"],
+                    "filter": {"field": "title", "equals": value},
+                }
+            ]
+        }
+        return mcp(
+            client,
+            headers,
+            request_id,
+            "tools/call",
+            {
+                "name": "update_layout",
+                "arguments": {"layout": layout, "expected_version": expected_version},
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(update, first_headers, 5, 1, "first")
+        second = pool.submit(update, second_headers, 6, 2, "second")
+        first_value = json.loads(first.result()["content"][0]["text"])
+        second_value = json.loads(second.result()["content"][0]["text"])
+
+    assert first_value["detail_filter_matches"] == [{"block": 0, "matched": 1}]
+    assert second_value["detail_filter_matches"] == [
+        {"block": 0, "matched": 0, "hint": "no record has title = second"}
+    ]
 
 
 def test_update_layout_refuses_page_too_large_to_inspect(creation_client):

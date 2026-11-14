@@ -10,7 +10,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
@@ -233,6 +233,8 @@ def validate_layout(
     assigned_tools: set[str] | None = None,
     assigned_collections: set[str] | None = None,
     prefix: str = "",
+    collection_fields: dict[str, set[str]] | None = None,
+    suggest_field: Callable[[str, str, Any, set[str]], str | None] | None = None,
 ) -> dict[str, Any]:
     validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
@@ -265,6 +267,35 @@ def validate_layout(
                     '"object","properties":{}}}}. A simple inferred input_schema is fine.'
                 ),
             )
+        filter_name = (
+            "filter"
+            if block["type"] == "detail" and "filter" in block
+            else "where"
+            if block["type"] == "metric" and "where" in block
+            else None
+        )
+        if filter_name is not None and collection_fields is not None:
+            field_filter = block[filter_name]
+            fields = collection_fields.get(block["collection"], set())
+            field = field_filter["field"]
+            if field not in fields:
+                listed = ", ".join(sorted(fields)) or "(none)"
+                hint = (
+                    f"Use a field from the {block['collection']} collection schema. "
+                    f"Unknown field: {field}. Collection fields: {listed}."
+                )
+                suggestion = (
+                    suggest_field(block["collection"], field, field_filter["equals"], fields)
+                    if suggest_field is not None
+                    else None
+                )
+                if suggestion is not None:
+                    hint += f" Did you mean {suggestion}?"
+                raise ValidationError(
+                    f"{prefix}/blocks/{index}/{filter_name}/field",
+                    "field in collection schema",
+                    hint=hint,
+                )
     return layout
 
 
@@ -321,6 +352,37 @@ def _filter_value_text(value: Any) -> str:
     return str(value)
 
 
+def _suggest_filter_field(
+    db: sqlite3.Connection,
+    page_id: str,
+    collection: str,
+    field: str,
+    expected: Any,
+    collection_fields: set[str],
+) -> str | None:
+    # shortcut: suggestions inspect the newest 200 records, raise the cap only with evidence.
+    rows = db.execute(
+        "SELECT document FROM page_record WHERE page_id=? AND collection=? "
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        (page_id, collection, DETAIL_SUGGESTION_RECORD_LIMIT),
+    ).fetchall()
+    documents = [json.loads(row[0]) for row in rows]
+    candidate_fields = set(collection_fields)
+    for document in documents:
+        candidate_fields.update(document)
+    return next(
+        (
+            candidate
+            for candidate in sorted(candidate_fields - {field})
+            if any(
+                candidate in document and _same_json_scalar(document[candidate], expected)
+                for document in documents
+            )
+        ),
+        None,
+    )
+
+
 def detail_filter_result(
     db: sqlite3.Connection,
     page_id: str,
@@ -341,27 +403,7 @@ def detail_filter_result(
         return result
 
     hint = f"no record has {field} = {_filter_value_text(expected)}"
-    # shortcut: suggestions inspect the newest 200 records, raise the cap only with evidence.
-    rows = db.execute(
-        "SELECT document FROM page_record WHERE page_id=? AND collection=? "
-        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
-        (page_id, collection, DETAIL_SUGGESTION_RECORD_LIMIT),
-    ).fetchall()
-    documents = [json.loads(row[0]) for row in rows]
-    candidate_fields = set(collection_fields)
-    for document in documents:
-        candidate_fields.update(document)
-    suggestion = next(
-        (
-            candidate
-            for candidate in sorted(candidate_fields - {field})
-            if any(
-                candidate in document and _same_json_scalar(document[candidate], expected)
-                for document in documents
-            )
-        ),
-        None,
-    )
+    suggestion = _suggest_filter_field(db, page_id, collection, field, expected, collection_fields)
     if suggestion is not None:
         hint += f"; did you mean {suggestion}?"
     elif field not in collection_fields:
@@ -610,6 +652,28 @@ class PageStore:
             "collections": collections,
         }
 
+    @staticmethod
+    def _detail_filter_matches(
+        db: sqlite3.Connection,
+        page_id: str,
+        layout: dict[str, Any],
+        collection_fields: dict[str, set[str]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "block": index,
+                **detail_filter_result(
+                    db,
+                    page_id,
+                    block["collection"],
+                    block["filter"],
+                    collection_fields.get(block["collection"], set()),
+                ),
+            }
+            for index, block in enumerate(layout.get("blocks", []))
+            if block.get("type") == "detail" and "filter" in block
+        ]
+
     def _inspect_page(
         self,
         db: sqlite3.Connection,
@@ -638,21 +702,9 @@ class PageStore:
             (page_id,),
         ).fetchall()
         tools = self._page_tools(db, page_id)
-        collection_fields = _collection_fields(tools)
-        detail_filter_matches = [
-            {
-                "block": index,
-                **detail_filter_result(
-                    db,
-                    page_id,
-                    block["collection"],
-                    block["filter"],
-                    collection_fields.get(block["collection"], set()),
-                ),
-            }
-            for index, block in enumerate(document.get("blocks", []))
-            if block.get("type") == "detail" and "filter" in block
-        ]
+        detail_filter_matches = self._detail_filter_matches(
+            db, page_id, document, _collection_fields(tools)
+        )
         return self._inspect_projection(
             row,
             (version, digest, document),
@@ -859,7 +911,7 @@ class PageStore:
         layout: Any,
         principal_id: str = "home",
         tools: Any = None,
-    ) -> tuple[sqlite3.Row, str, bool]:
+    ) -> tuple[sqlite3.Row, str, bool, list[dict[str, Any]]]:
         bundles = [] if tools is None else tools
         value = {"route": route, "title": title, "layout": layout, "tools": bundles}
         validate_schema(value, CREATE_PAGE_SCHEMA)
@@ -867,11 +919,13 @@ class PageStore:
             validate_bundle(bundle, f"/tools/{index}", reject_conflicting_output=True)
             for index, bundle in enumerate(bundles)
         ]
+        fields = _collection_fields(bundles)
         validate_layout(
             layout,
             {bundle["name"] for bundle in bundles},
             {bundle["implementation"]["collection"] for bundle in bundles},
             "/layout",
+            fields,
         )
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
@@ -907,10 +961,12 @@ class PageStore:
                         and existing_layout[0] == encoded
                         and [row[0] for row in existing_tools] == requested_tools
                     ):
-                        return existing, digest, True
+                        summary = self._inspect_page(db, existing["id"])["detail_filter_matches"]
+                        return existing, digest, True, summary
                     raise ValidationError(
                         "/route", "unused route or equivalent request", "conflict"
                     )
+                detail_summary = self._detail_filter_matches(db, "", layout, fields)
                 require_inspectable(
                     self._inspect_projection(
                         {"route": route, "title": title, "create_mode": False},
@@ -920,20 +976,7 @@ class PageStore:
                             for index, block in enumerate(layout["blocks"])
                             if block.get("type") == "metric" and block.get("count") is True
                         ],
-                        [
-                            {
-                                "block": index,
-                                **detail_filter_result(
-                                    db,
-                                    "",
-                                    block["collection"],
-                                    block["filter"],
-                                    _collection_fields(bundles).get(block["collection"], set()),
-                                ),
-                            }
-                            for index, block in enumerate(layout["blocks"])
-                            if block.get("type") == "detail" and "filter" in block
-                        ],
+                        detail_summary,
                         [
                             {**bundle, "version": 1}
                             for bundle in sorted(bundles, key=lambda item: item["name"])
@@ -1026,7 +1069,7 @@ class PageStore:
             raise ValidationError("", "atomic page creation", "create_failed") from exc
         row = self.page(page_id or "")
         assert row is not None
-        return row, digest, False
+        return row, digest, False, detail_summary
 
     @staticmethod
     def _cleanup_create_paths(paths: set[Path]) -> None:
@@ -1036,7 +1079,9 @@ class PageStore:
             else:
                 path.unlink(missing_ok=True)
 
-    def update_layout(self, page_id: str, layout: Any, expected_version: int) -> tuple[int, str]:
+    def update_layout(
+        self, page_id: str, layout: Any, expected_version: int
+    ) -> tuple[int, str, list[dict[str, Any]]]:
         validate_schema(
             {"layout": layout, "expected_version": expected_version}, UPDATE_LAYOUT_SCHEMA
         )
@@ -1057,11 +1102,16 @@ class PageStore:
                 (page_id,),
             ).fetchall()
             bundles = [validate_bundle(json.loads(tool["bundle"])) for tool in tools]
+            fields = _collection_fields(bundles)
             validate_layout(
                 layout,
                 {tool["name"] for tool in tools},
                 {bundle["implementation"]["collection"] for bundle in bundles},
                 "/layout",
+                fields,
+                lambda collection, field, value, collection_fields: _suggest_filter_field(
+                    db, page_id, collection, field, value, collection_fields
+                ),
             )
             if expected_version != active_version:
                 raise ValidationError(
@@ -1071,7 +1121,9 @@ class PageStore:
                     "Call inspect_page, set expected_version to layout.version, and retry.",
                 )
             version = active_version + 1
-            require_inspectable(self._inspect_page(db, page_id, (version, digest, layout)))
+            proposed = self._inspect_page(db, page_id, (version, digest, layout))
+            require_inspectable(proposed)
+            detail_summary = proposed["detail_filter_matches"]
             stamp = now()
             db.execute(
                 "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
@@ -1085,7 +1137,7 @@ class PageStore:
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                 (page_id, "update_layout", digest, stamp),
             )
-        return version, digest
+        return version, digest, detail_summary
 
     def create_tool(
         self, page_id: str, bundle: Any, validation_prefix: str = ""
