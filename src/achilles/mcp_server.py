@@ -149,7 +149,11 @@ def build_mcp(store: PageStore):
                     ),
                     Tool(
                         name="create_page",
-                        description="create a page; available only in create mode",
+                        description=(
+                            "create a page; available only in create mode; a detail block shows "
+                            "field labels only and cannot pin one record; use a list block to "
+                            "show records"
+                        ),
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
                     Tool(
@@ -167,7 +171,9 @@ def build_mcp(store: PageStore):
                         name="update_layout",
                         description=(
                             "replace this page's layout at the expected active version; "
-                            "open another page's chat to change that page"
+                            "open another page's chat to change that page; a detail block shows "
+                            "field labels only and cannot pin one record; use a list block to "
+                            "show records"
                         ),
                         inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),
