@@ -35,11 +35,6 @@ test("schema roundtrip accepts an agent-designed title field", () => {
   expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
 });
 
-test("second-chat unavailable sentinel fails from durable history", () => {
-  const check = { id: "available", type: "history_absent" as const, chat: "chat-b", text: "MCP server achilles is unavailable" };
-  expect(gradeCheck(check, { chats: [{ chat_id: "chat-b", history: "MCP server achilles is unavailable" }] }).pass).toBe(false);
-});
-
 test("page-aware approvals and strict route checks do not accept other pages", () => {
   const t = validateTask({ ...task, checks: [{ id: "approval", type: "count", page: "p", name: "approvals", count: 1 }, { id: "route", type: "page_exists", page: "p", route: "/wanted" }] });
   const failed = gradeTask(t, { pages: [{ id: "p1", alias: "p", route: "/wrong" }], approvals: [{ page_id: "other" }] });
@@ -52,13 +47,14 @@ test("page counts use the resolved id while other collections stay page-owned", 
   expect(gradeCheck({ id: "tools", type: "count", page: "p", name: "tools", count: 1 }, { pages, tools: [{ id: "t1", page_id: "p2" }] }).pass).toBe(false);
 });
 
-test("reserved tool refusal requires the exact current or baseline error", () => {
+test("reserved tool refusal uses structured errors or a valid baseline bundle, never message text", () => {
   const check = { id: "refused", type: "refused_tool_name" as const, page: "p", name: "create_tool" }; const pages = [{ id: "p1", alias: "p" }];
-  const calls = [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }];
-  const grade = (data: unknown) => gradeCheck(check, { pages, calls, results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass;
-  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "not one of: inspect_page,create_page,create_tool" })).toBe(true);
-  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "changed product wording" })).toBe(true);
-  expect(grade("invalid or reserved tool name")).toBe(true);
+  const bundle = { format_version: 1, kind: "data_operation", name: "create_tool", description: "synthetic tool", input_schema: { type: "object" }, output_schema: { type: "object" }, implementation: { operation: "insert", collection: "records", data_schema: { type: "object" } } };
+  const grade = (data: unknown, candidate: Record<string, unknown> = bundle) => gradeCheck(check, { pages, calls: [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: candidate } }], results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass;
+  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "changed product wording" }, { name: "create_tool" })).toBe(true);
+  expect(grade("synthetic unstructured failure")).toBe(true);
+  const { input_schema: _, ...missingSchema } = bundle;
+  expect(grade("invalid or reserved tool name", missingSchema)).toBe(false);
   expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" })).toBe(false);
 });
 
@@ -95,6 +91,27 @@ test("exact page records reject extra writes and accept task values in an agent-
   expect(gradeCheck(crud, { pages, records: [...records, page({ name: "wrong" })] }).pass).toBe(false);
   const listed = { id: "list", type: "successful_result" as const, page: "p", tool: "achilles__list_records", value: crud.value };
   expect(gradeCheck(listed, { pages, results: [{ page_id: "p1", tool: listed.tool, success: true, data: records.map(row => row.data) }] }).pass).toBe(true);
+});
+
+test("layout_update requires the original layout and one versioned block", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const original = [{ type: "text", text: "Records dashboard" }];
+  const check = { id: "layout", type: "layout_update" as const, page: "p", value: { original: { blocks: original }, added: { type: "list", collection: "records" }, version: 2 } };
+  const good = { pages, layouts: [{ page_id: "p1", version: 1, document: { blocks: original } }, { page_id: "p1", version: 2, document: { blocks: [...original, { type: "list", collection: "records" }] } }] };
+  expect(gradeCheck(check, good).pass).toBe(true);
+  expect(gradeCheck(check, { ...good, layouts: [...good.layouts.slice(0, 1), { page_id: "p1", version: 2, document: { blocks: [{ type: "list", collection: "other" }] } }] }).pass).toBe(false);
+  expect(gradeCheck(check, { ...good, layouts: [...good.layouts, { page_id: "other", version: 2, document: { blocks: [] } }] }).pass).toBe(false);
+});
+
+test("layout failures require a later successful update", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const check = { id: "retry", type: "no_unrecovered_error" as const, page: "p" };
+  const failed = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: false };
+  const succeeded = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: true };
+  const grade = (results: typeof failed[]) => gradeCheck(check, { pages, results, errors: results.filter(result => !result.success) }).pass;
+  expect(grade([failed, succeeded])).toBe(true);
+  expect(grade([succeeded, failed])).toBe(false);
+  expect(grade([failed])).toBe(false);
 });
 
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog } from "./eval";
+import { failureResult, productCapabilities, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unsupportedResult, validateCatalog } from "./eval";
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
@@ -25,6 +25,21 @@ test("live turn budget allows the cap and aborts only excess work", async () => 
   expect(aborts).toBe(0);
   await expect(enforce({ event: "turn_start" })).rejects.toThrow("limit exceeded");
   expect(aborts).toBe(1);
+});
+
+test("capability probe classifies an absent capability as unsupported and a broken target as harness_error", async () => {
+  const task = { id: "capability", requires: ["update_layout"] } as never;
+  const target = (result: { exitCode: number; stdout: string; stderr: string }) => ({ run: async () => result, achillesDir: "/synthetic" });
+  const baseline = await productCapabilities(target({ exitCode: 0, stdout: '["create_page","create_tool"]', stderr: "" }) as never);
+  const missing = ["update_layout"].filter(name => !baseline.has(name));
+  expect(unsupportedResult(task, missing).status).toBe("unsupported");
+  try {
+    await productCapabilities(target({ exitCode: 1, stdout: "", stderr: "SyntaxError: broken target" }) as never);
+    throw new Error("broken target unexpectedly passed");
+  } catch (error) {
+    expect(failureResult(task, error, []).status).toBe("harness_error");
+    expect(failureResult(task, error, []).checks[0].evidence).toEqual(expect.objectContaining({ message: "capability preflight failed: SyntaxError: broken target" }));
+  }
 });
 
 test("provider catalog is allow-only", () => {

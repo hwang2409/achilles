@@ -12,7 +12,6 @@ export { assertTurnBudget, reserveTurns, REQUIRED_FEATURES, connectEvalProtocol,
 export type { EvalStackConfig, EvalStack } from "./eval-stack";
 
 const TASK_TIMEOUT_MS = 180_000;
-const MCP_UNAVAILABLE = "MCP server achilles is unavailable";
 const sensitiveNames = /(?:TOKEN|KEY|SECRET|PASSWORD|AUTH|COOKIE|CREDENTIAL)/i;
 const fatalAccountFailure = /(?:oauth credentials.*login required|login[_ -]?required|log in required|not logged in|account (?:no longer exists|unavailable|disabled|expired)|authentication (?:failed|required)|unauthorized|quota|usage[_ -]?limit|insufficient (?:credits|quota)|billing limit)/i;
 class SecretScanFailure extends Error {}
@@ -73,24 +72,27 @@ const bundle = (name: string, operation: string, collection: string) => {
 };
 const CAPABILITIES_SCRIPT = `
 import json
-try:
- from achilles.tools import BUILTIN_TOOL_NAMES
-except ImportError:
- BUILTIN_TOOL_NAMES = ("create_page", "create_tool")
-print(json.dumps(list(BUILTIN_TOOL_NAMES)))`;
-async function productCapabilities(stack: EvalStack) {
+from achilles import tools
+names = getattr(tools, "BUILTIN_TOOL_NAMES", ("create_page", "create_tool"))
+print(json.dumps(list(names)))`;
+export async function productCapabilities(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);
   if (process.exitCode !== 0) throw new Error(`capability preflight failed: ${process.stderr}`);
   return new Set(JSON.parse(process.stdout) as string[]);
 }
 const SETUP_SCRIPT = `
-import json, sys
+import hashlib, json, sys
 from pathlib import Path
 from achilles.pages import PageStore, now
 root, page_id, raw = sys.argv[1:]
 setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
+    if "initial_layout" in setup:
+        document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(document.encode()).hexdigest()
+        stamp = now()
+        db.execute("UPDATE layout_version SET digest=?, document=?, created_at=? WHERE page_id=? AND version=1", (digest, document, stamp, page_id))
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
@@ -98,7 +100,7 @@ with store.transaction() as db:
 async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const plan = task.page_plan.find(page => page.source !== "created")!;
   if (task.setup) {
-    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records };
+    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
   }
@@ -265,11 +267,11 @@ function catalogProof(requests: Record<string, unknown>[], task: EvalTask) {
   const required = task.page_plan.some(page => page.create_mode) ? "achilles__create_tool" : task.setup?.tools[0] ? `achilles__${task.setup.tools[0].name}` : undefined;
   catalogs.forEach(catalog => validateCatalog(catalog)); if (required) validateCatalog(catalogs[0] ?? [], required); return [...new Set(catalogs.flat())];
 }
-function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
+export function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
   const detail = error as Error & { code?: number; method?: string; sessionId?: string; pageId?: string };
   return { task_id: task.id, status: "harness_error", pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
 }
-function unsupportedResult(task: EvalTask, missing: string[]) {
+export function unsupportedResult(task: EvalTask, missing: string[]) {
   return { task_id: task.id, status: "unsupported", pass: false, score: 0, checks: [{ id: "capability", pass: false, expected: task.requires, actual: [...(task.requires ?? []).filter(item => !missing.includes(item))], evidence: { missing } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>;
 }
 

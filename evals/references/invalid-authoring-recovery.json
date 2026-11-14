@@ -19,7 +19,23 @@
         "tool": "achilles__create_tool",
         "arguments": {
           "bundle": {
-            "name": "create_tool"
+            "format_version": 1,
+            "kind": "data_operation",
+            "name": "create_tool",
+            "description": "synthetic reserved-name bundle",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": {
+              "type": "object"
+            },
+            "implementation": {
+              "operation": "insert",
+              "collection": "safe_records",
+              "data_schema": {
+                "type": "object"
+              }
+            }
           }
         }
       }
@@ -30,11 +46,7 @@
         "page_id": "p",
         "tool": "achilles__create_tool",
         "success": false,
-        "data": {
-          "code": "invalid_input",
-          "path": "/bundle/name",
-          "expected": "not one of: inspect_page,create_page,create_tool"
-        }
+        "data": "synthetic unstructured failure"
       },
       {
         "page_id": "p",
@@ -57,10 +69,6 @@
     "tools": [
       {
         "page_id": "p",
-        "name": "create_tool"
-      },
-      {
-        "page_id": "p",
         "name": "safe_tool"
       }
     ],
@@ -71,7 +79,20 @@
         "tool": "achilles__create_tool",
         "arguments": {
           "bundle": {
-            "name": "create_tool"
+            "format_version": 1,
+            "kind": "data_operation",
+            "name": "create_tool",
+            "description": "synthetic reserved-name bundle",
+            "output_schema": {
+              "type": "object"
+            },
+            "implementation": {
+              "operation": "insert",
+              "collection": "safe_records",
+              "data_schema": {
+                "type": "object"
+              }
+            }
           }
         }
       }
@@ -82,11 +103,7 @@
         "page_id": "p",
         "tool": "achilles__create_tool",
         "success": false,
-        "data": {
-          "code": "invalid_input",
-          "path": "/bundle/input_schema",
-          "expected": "not one of: create_page,create_tool"
-        }
+        "data": "synthetic unstructured failure"
       },
       {
         "page_id": "p",

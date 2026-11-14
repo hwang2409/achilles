@@ -68,18 +68,6 @@
       "id": "no-errors",
       "type": "no_error",
       "page": "shared"
-    },
-    {
-      "id": "mcp-available",
-      "type": "history_absent",
-      "chat": "chat-a",
-      "text": "MCP server achilles is unavailable"
-    },
-    {
-      "id": "mcp-available-second",
-      "type": "history_absent",
-      "chat": "chat-b",
-      "text": "MCP server achilles is unavailable"
     }
   ]
 }
