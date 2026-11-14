@@ -279,13 +279,12 @@ try {
         await page.keyboard.press("Tab");
         const loadOlder = page.getByRole("button", { name: "load 50 older" });
         await assertActive("chat load-older button", loadOlder);
-        let sawHeldFirstPage!: () => void;
+        let firstPageHeld = false;
         let releaseFirstPage!: () => void;
-        const firstPageHeld = new Promise<void>((resolve) => { sawHeldFirstPage = resolve; });
         const firstPageReleased = new Promise<void>((resolve) => { releaseFirstPage = resolve; });
         const holdRefresh = async (route: Route) => {
           if (new URL(route.request().url()).searchParams.has("before")) return route.continue();
-          sawHeldFirstPage();
+          firstPageHeld = true;
           await firstPageReleased;
           await route.continue();
         };
@@ -293,7 +292,7 @@ try {
         const previousUrl = page.url();
         try {
           await page.locator(".new-chat").click();
-          await firstPageHeld;
+          await waitFor(async () => firstPageHeld, "held chat refresh first page");
           const createdChat = new URL(page.url()).searchParams.get("chat");
           if (!createdChat) throw new Error("forced chat refresh did not create a chat");
           await loadOlder.click();

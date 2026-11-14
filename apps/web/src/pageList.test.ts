@@ -64,6 +64,81 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
     },
   },
   {
+    name: "more during refresh extends that refresh instead of publishing an old cursor",
+    run: async (h) => {
+      const initial = h.owner.reload("all");
+      h.succeed(0, page(["A", "B"], "B"));
+      await initial;
+      const refresh = h.owner.reload("all");
+      const more = h.owner.more();
+      expect(h.calls.map(({ before }) => before)).toEqual([null, null]);
+      h.succeed(1, page(["X", "A"], "A"));
+      await Promise.resolve();
+      expect(h.calls[2].before).toBe("A");
+      h.succeed(2, page(["B", "D"], "D"));
+      await refresh;
+      expect(await more).toEqual({ id: "B" });
+      expect(h.state().items).toEqual(items("X", "A", "B", "D"));
+    },
+  },
+  ...(["continuation first", "refresh first"] as const).map((order) => ({
+    name: `more then reload keeps the requested depth: ${order}`,
+    run: async (h: ReturnType<typeof harness>) => {
+      const initial = h.owner.reload("all");
+      h.succeed(0, page(["A", "B"], "B"));
+      await initial;
+      const more = h.owner.more();
+      const refresh = h.owner.reload("all");
+      expect(h.calls[1].signal.aborted).toBe(true);
+      if (order === "continuation first") {
+        h.succeed(1, page(["C", "D"], "D"));
+        expect(await more).toBeNull();
+      }
+      h.succeed(2, page(["X", "A"], "A"));
+      await Promise.resolve();
+      h.succeed(3, page(["B", "D"], "D"));
+      await refresh;
+      if (order === "refresh first") {
+        h.succeed(1, page(["C", "D"], "D"));
+        expect(await more).toBeNull();
+      }
+      expect(h.state().items).toEqual(items("X", "A", "B", "D"));
+    },
+  })),
+  {
+    name: "two more requests during a reload extend its target twice",
+    run: async (h) => {
+      const initial = h.owner.reload("all");
+      h.succeed(0, page(["A", "B"], "B"));
+      await initial;
+      const refresh = h.owner.reload("all");
+      const first = h.owner.more();
+      const second = h.owner.more();
+      h.succeed(1, page(["X", "A"], "A"));
+      await Promise.resolve();
+      h.succeed(2, page(["B", "C"], "C"));
+      await Promise.resolve();
+      h.succeed(3, page(["D", "E"], "E"));
+      await refresh;
+      expect(await first).toEqual({ id: "B" });
+      expect(await second).toEqual({ id: "D" });
+      expect(h.state().items).toEqual(items("X", "A", "B", "C", "D", "E"));
+    },
+  },
+  {
+    name: "reload failure settles a pending more request",
+    run: async (h) => {
+      await h.seed();
+      const refresh = h.owner.reload("all");
+      const more = h.owner.more();
+      h.calls[1].result.reject(new Error("offline"));
+      await refresh;
+      expect(await more).toBeNull();
+      expect(h.state().error).toBe(true);
+      expect(h.state().loading).toBe(false);
+    },
+  },
+  {
     name: "refresh replaces the loaded depth when a row crosses the page boundary",
     run: async (h) => {
       const initial = h.owner.reload("all");
