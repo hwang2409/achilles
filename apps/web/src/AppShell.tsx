@@ -85,7 +85,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 759px)").matches);
+  const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const settingsOpener = useRef<Element>(null);
@@ -113,7 +113,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
 
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
-  useEffect(() => { const media = matchMedia("(max-width: 759px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
+  useEffect(() => { const media = matchMedia("(max-width: 760px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => firstFocusable(sidebar.current)?.focus()); }, [drawer, narrow]);
   useEffect(() => {
     let live = true;

@@ -154,8 +154,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const owner = useRef(createAttachmentOwner());
   const creation = useRef(createChatCreationOwner());
   const status = useSyncExternalStore(creation.current.subscribe, () => creationPageId ? creation.current.status(creationPageId) : NO_CREATION);
-  const creationError = status.error;
+  const creationError = status.error ? attachmentError(status.error) : null;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
+  const createAfterLoad = useRef(false);
 
   useEffect(() => {
     if (!client || !connected) return;
@@ -212,6 +213,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
 
   const newChat = useCallback(async () => {
     if (!client) return;
+    if (state.phase === "error" && state.error === "page not found") {
+      createAfterLoad.current = true;
+      owner.current.clear();
+      history.pushState({}, "", "/");
+      setState({ phase: "loading" });
+      setSelectedId(null);
+      return;
+    }
     const context = state.phase === "ready"
       ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } }
       : state.phase === "missing" ? missingCreation.current : null;
@@ -232,6 +241,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       if (pending) publishCreated(location.pathname, pending);
     }).catch(() => {});
   }, [creationPageId, publishCreated]);
+
+  useEffect(() => {
+    if (!createAfterLoad.current || state.phase !== "ready") return;
+    createAfterLoad.current = false;
+    void newChat();
+  }, [newChat, state]);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     if (!owner.current.current(token)) return;

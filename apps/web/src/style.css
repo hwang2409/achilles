@@ -123,7 +123,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .sidebar-collapsed .sidebar > footer { margin-top: auto; padding: 6px; }
 .sidebar-collapsed .sidebar > footer > button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
 
-@media (max-width: 759px) {
+@media (max-width: 760px) {
   .app-shell { display: block; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 320px; max-width: calc(100vw - 48px); transform: translateX(-100%); transition: transform 140ms ease-out; }
   .drawer-open .sidebar { transform: translateX(0); }
