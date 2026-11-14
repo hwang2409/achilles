@@ -14,6 +14,7 @@ type Scenario = {
   editAndRestore?: boolean;
   expectedDraft: string;
   expectedError?: string;
+  resendDropped?: boolean;
 };
 
 const scenarios: Scenario[] = [
@@ -25,10 +26,11 @@ const scenarios: Scenario[] = [
   {
     name: "steer dropped",
     state: "steerable",
-    statuses: [{ status: "queued" }, { status: "dropped" }],
-    statusReads: 2,
+    statuses: [{ status: "queued" }, { status: "dropped" }, { status: "delivered" }, { status: "dropped" }],
+    statusReads: 4,
     expectedDraft: "keep this exact draft",
-    expectedError: "this message was not sent. your text is still here.",
+    expectedError: "this message was not sent. your text is still here; press send to try again.",
+    resendDropped: true,
   },
   {
     name: "steer remains queued after bounded wait",
@@ -54,6 +56,7 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
   const heldSend = new Promise<void>((resolve) => { releaseSend = resolve; });
   const statuses = [...(scenario.statuses ?? [])];
   let statusReads = 0;
+  const deliveryIds: string[] = [];
   const methods: Array<{ method: "send" | "steer"; deliveryId: string }> = [];
 
   const client = {
@@ -90,7 +93,9 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
       remounted?.sync(scenario.state, persisted);
     },
     onSubmit: async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
-      await deliverChatMessage(client as never, "session", text, "delivery-1", intent.steer, track);
+      const id = `delivery-${deliveryIds.length + 1}`;
+      deliveryIds.push(id);
+      await deliverChatMessage(client as never, "session", text, id, intent.steer, track);
     },
   };
   const owner = createComposerDelivery(options);
@@ -113,6 +118,16 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
       owner.edit(scenario.expectedDraft);
     }
     expect(owner.getModel().error?.text).toBe(scenario.expectedError);
+    if (scenario.resendDropped) {
+      expect(owner.getModel().error?.kind).toBe("dropped");
+      await owner.submit();
+      expect(deliveryIds).toEqual(["delivery-1", "delivery-2"]);
+      expect(owner.getModel().draft).toBe("");
+      owner.edit("keep this exact draft");
+      await owner.submit();
+      expect(owner.getModel().draft).toBe("keep this exact draft");
+      expect(owner.getModel().error?.kind).toBe("dropped");
+    }
     if (scenario.editAndRestore) {
       owner.dismissError();
       expect(owner.getModel().error).toBeUndefined();

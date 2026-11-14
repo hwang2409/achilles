@@ -1,6 +1,6 @@
 import type { ComposerState } from "@fulcrum/react";
 
-export type ComposerError = { kind: "submit" | "stop" | "uncertain"; text: string };
+export type ComposerError = { kind: "submit" | "stop" | "uncertain" | "dropped"; text: string };
 type UncertainDelivery = ComposerError & { kind: "uncertain"; draft: string };
 type Send = { attempt: number; sent: string; steer: boolean };
 
@@ -24,7 +24,7 @@ export type ComposerEvent =
   | { type: "edit"; draft: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "confirm"; attempt: number }
-  | { type: "reject"; attempt: number; message: string; uncertain?: boolean }
+  | { type: "reject"; attempt: number; message: string; rejection?: "uncertain" | "dropped" }
   | { type: "dismiss-error" }
   | { type: "settle"; attempt: number }
   | { type: "stop" }
@@ -57,16 +57,16 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       const attempt = model.nextAttempt;
       const steer = event.turnRunning;
       return {
-        model: { ...model, sending: true, error: undefined, uncertainDelivery: undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
+        model: { ...model, sending: true, error: model.error?.kind === "dropped" ? model.error : undefined, uncertainDelivery: undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
         effect: { type: "submit", attempt, text: model.draft, steer },
       };
     }
     case "confirm":
       if (model.send?.attempt !== event.attempt) return { model };
-      return { model: { ...model, draft: unsentDraft(model.draft, model.send.sent), send: undefined, error: model.error?.kind === "submit" ? undefined : model.error } };
+      return { model: { ...model, draft: unsentDraft(model.draft, model.send.sent), send: undefined, error: model.error?.kind === "submit" || model.error?.kind === "dropped" ? undefined : model.error } };
     case "reject": {
       if (model.send?.attempt !== event.attempt) return { model };
-      if (!event.uncertain) return { model: { ...model, error: { kind: "submit", text: event.message } } };
+      if (event.rejection !== "uncertain") return { model: { ...model, error: { kind: event.rejection === "dropped" ? "dropped" : "submit", text: event.message } } };
       const uncertainDelivery: UncertainDelivery = { kind: "uncertain", text: event.message, draft: model.send.sent };
       return { model: { ...model, error: uncertainDelivery, uncertainDelivery } };
     }
