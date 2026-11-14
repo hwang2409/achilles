@@ -24,9 +24,9 @@ class Client implements EvalProtocol {
   private rejectAll(error: Error) { for (const waiter of this.pending.values()) waiter.reject(error); this.pending.clear(); }
   request(method: string, params: Record<string, unknown> = {}): Promise<any> {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ id, method, params })); });
+    return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params })); });
   }
-  hello(features: string[]) { return this.request("hello", { features, role: "controller" }); }
+  hello(features: string[]) { return this.request("hello", { protocol_version: "1.1", client_version: "1.1", features, role: "controller" }); }
   newSession(params: Record<string, unknown>) { return this.request("new_session", params); }
   async send(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { await this.request("send", { session_id: sessionId, text, delivery_id: deliveryId }); }
   async approve(sessionId: string, requestId: string) { await this.request("approve", { session_id: sessionId, request_id: requestId, scope: "once" }); }
