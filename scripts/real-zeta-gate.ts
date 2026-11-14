@@ -271,6 +271,11 @@ try {
   };
   const homeMcp = (id: number, method: string, params: object) =>
     mcp(credential, id, method, params);
+  const pageIndexRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/pages") pageIndexRequests.push(request.url());
+  });
   const modeToggle = page.getByRole("button", { name: "create mode off", exact: true });
   const toggleResponse = page.waitForResponse((response) => response.url().endsWith("/api/pages/home/create-mode"));
   await modeToggle.click();
@@ -287,9 +292,12 @@ try {
   const catalogReady = page.getByText("catalog ready", { exact: true });
   const catalogReadyBefore = await catalogReady.count();
   const catalogRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
+  const pageRequestsBeforeStreamingTurn = pageIndexRequests.length;
   await field.fill("catalog refresh");
   await field.press("Enter");
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
+  if (pageIndexRequests.length !== pageRequestsBeforeStreamingTurn)
+    throw new Error(`streaming turn made ${pageIndexRequests.length - pageRequestsBeforeStreamingTurn} extra /api/pages requests`);
   const backendSchemas = JSON.parse(await Bun.file(control).text()).schemas ?? [];
   if (!backendSchemas.includes("achilles__create_tool"))
     throw new Error(
@@ -298,6 +306,7 @@ try {
   const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
   const createApprovalBefore = await createApproval.count();
   const createRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
+  const pageRequestsBeforeCreate = pageIndexRequests.length;
   const annotationComplete = page.getByText("annotation complete", { exact: true });
   const annotationCompleteBefore = await annotationComplete.count();
   await field.fill("create page");
@@ -309,6 +318,8 @@ try {
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
+  if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
+    throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
   if (screenshotDir) {
     await page.screenshot({ path: join(screenshotDir, "page-index-1440x900.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 760 });
