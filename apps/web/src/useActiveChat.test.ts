@@ -59,9 +59,17 @@ describe("create mode tool refresh", () => {
     const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
     expect(result.blocked).toBe(true); expect(result.error).toContain(text);
     await expect(owner.beforeSend()).rejects.toThrow("send is off");
-    expect(await owner.run({ pageId: "home", sessionId: "session", enabled: false, client })).toEqual({ createMode: true, error: null, blocked: false });
+    expect(await owner.run({ pageId: "home", sessionId: "session", enabled: false, client })).toEqual({ createMode: true, error: null, blocked: false, retryable: false });
     await owner.beforeSend();
     expect(fetches).toBe(1); expect(requests).toBe(2);
+  });
+
+  test("explains how to recover an expired MCP session without offering a dead retry", async () => {
+    const client = { features: ["mcp_refresh_tools"], request: async () => { throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "achilles: MCP HTTP 404: Session not found" } }); } };
+    const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
+    const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
+    expect(result).toEqual({ createMode: null, error: "achilles restarted, but zeta kept its expired MCP session. restart zeta serve, then reload this page before using create mode.", blocked: true, retryable: false });
+    await expect(owner.beforeSend()).rejects.toThrow("send is off");
   });
 
   test.each([
@@ -72,7 +80,7 @@ describe("create mode tool refresh", () => {
     const owner = createModeToggleOwner(async () => Response.json({ create_mode: true }));
     const client = { features, request: async () => { requestCount += 1; throw Object.assign(new Error("unknown method"), { code }); } };
     const result = await owner.run({ pageId: "home", sessionId: "session", enabled: true, client });
-    expect(result).toEqual({ createMode: true, error: null, blocked: false });
+    expect(result).toEqual({ createMode: true, error: null, blocked: false, retryable: false });
     await owner.beforeSend();
     expect(requestCount).toBe(requests);
   });

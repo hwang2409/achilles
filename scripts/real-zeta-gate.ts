@@ -496,6 +496,8 @@ try {
   const toggleClick = modeToggle.click();
   try {
     await toggleReached;
+    const pendingMode = page.getByRole("button", { name: "turning on create mode…", exact: true });
+    if (!(await pendingMode.isVisible()) || !(await pendingMode.isDisabled())) throw new Error("create mode toggle did not show its pending state");
     await field.press("Enter");
   } finally {
     releaseToggle();
@@ -915,10 +917,24 @@ try {
   await page.locator('[data-part="message"]').first().waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
   if (!(await homeIdleWrite).ok()) throw new Error("home idle state write failed before achilles restart");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
-  app.kill("SIGTERM");
-  await new Promise<void>((resolve) => app.once("exit", () => resolve()));
+  const stopAfterToggle = async (route: Route) => {
+    app.kill("SIGTERM");
+    await new Promise<void>((resolve) => app.once("exit", () => resolve()));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ create_mode: true }) });
+  };
+  await page.route("**/api/pages/home/create-mode", stopAfterToggle);
+  await page.getByRole("button", { name: "create mode on", exact: true }).click();
+  await page.unroute("**/api/pages/home/create-mode", stopAfterToggle);
+  const refreshAlert = page.getByRole("alert").filter({ hasText: "could not refresh page tools" });
+  await refreshAlert.waitFor({ state: "visible" });
+  const retryRefresh = refreshAlert.getByRole("button", { name: "retry", exact: true });
+  if (!(await retryRefresh.isVisible())) throw new Error("create mode refresh retry was not visible above the transcript");
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "achilles restart");
+  await retryRefresh.click();
+  const staleSessionAlert = page.getByRole("alert").filter({ hasText: "restart zeta serve, then reload this page" });
+  await staleSessionAlert.waitFor({ state: "visible" });
+  if (await staleSessionAlert.getByRole("button", { name: "retry", exact: true }).count()) throw new Error("expired MCP session offered a retry that cannot recover");
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
