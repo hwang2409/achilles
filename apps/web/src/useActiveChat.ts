@@ -106,7 +106,7 @@ export async function attachPage(client: ZetaClient, key: string, selectedId: st
       try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); }
       catch (caught) {
         if (!(caught instanceof SessionNotFoundError)) throw caught;
-        if (selectedId) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
+        if (selectedId && !allowMissingSelected) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
       }
       requireCurrent(owner, token);
     }
