@@ -840,6 +840,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
     [
         ({"field": "title", "equals": "the book"}, False),
         ({"field": "missing", "equals": "the book"}, True),
+        ({"field": "run_id", "equals": "run-002"}, True),
         (None, False),
     ],
 )
@@ -894,8 +895,8 @@ def test_detail_filter_validation_through_public_tools(
             "path": "/layout/blocks/0/filter/field",
             "expected": "field in collection schema",
             "hint": (
-                "Use one of the collection's fields; inspect its assigned tool schema in "
-                "tools/list to see them."
+                "Use a field listed in the assigned tool's "
+                "implementation.data_schema.properties, or add it there."
             ),
         }
     else:

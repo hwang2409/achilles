@@ -229,8 +229,8 @@ def validate_layout(
                 f"{prefix}/blocks/{index}/filter/field",
                 "field in collection schema",
                 hint=(
-                    "Use one of the collection's fields; inspect its assigned tool schema in "
-                    "tools/list to see them."
+                    "Use a field listed in the assigned tool's "
+                    "implementation.data_schema.properties, or add it there."
                 ),
             )
     return layout
