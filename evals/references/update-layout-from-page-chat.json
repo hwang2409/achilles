@@ -151,7 +151,48 @@
         }
       }
     ],
-    "errors": []
+    "errors": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "record-1",
+          "collection": "records",
+          "data": {
+            "title": "Synthetic record"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
   },
   "bad": {
     "pages": [
@@ -271,7 +312,48 @@
         }
       }
     ],
-    "errors": []
+    "errors": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "record-1",
+          "collection": "records",
+          "data": {
+            "title": "Synthetic record"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
   },
   "good_old": {
     "pages": [
@@ -423,6 +505,47 @@
         }
       }
     ],
-    "errors": []
+    "errors": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "record-1",
+          "collection": "records",
+          "data": {
+            "title": "Synthetic record"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
   }
 }

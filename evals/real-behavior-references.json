@@ -31,7 +31,43 @@
               ]
             }
           }
-        ]
+        ],
+        "initial": {
+          "tool_versions": [
+            {
+              "page_id": "home",
+              "name": "list_records",
+              "operation": "list",
+              "collection": "records"
+            }
+          ],
+          "records": [
+            {
+              "page_id": "home",
+              "id": "record-1",
+              "collection": "records",
+              "data": {
+                "id": "record-1"
+              }
+            },
+            {
+              "page_id": "home",
+              "id": "record-2",
+              "collection": "records",
+              "data": {
+                "id": "record-2"
+              }
+            },
+            {
+              "page_id": "home",
+              "id": "record-3",
+              "collection": "records",
+              "data": {
+                "id": "record-3"
+              }
+            }
+          ]
+        }
       }
     },
     {
@@ -69,7 +105,18 @@
             }
           }
         ],
-        "errors": []
+        "errors": [],
+        "initial": {
+          "tool_versions": [
+            {
+              "page_id": "home",
+              "name": "add_note",
+              "operation": "insert",
+              "collection": "notes"
+            }
+          ],
+          "records": []
+        }
       }
     },
     {
@@ -455,7 +502,30 @@
               "name": "record-2"
             }
           }
-        ]
+        ],
+        "initial": {
+          "tool_versions": [
+            {
+              "page_id": "home",
+              "name": "add_record",
+              "operation": "insert",
+              "collection": "records"
+            },
+            {
+              "page_id": "home",
+              "name": "update_record",
+              "operation": "update",
+              "collection": "records"
+            },
+            {
+              "page_id": "home",
+              "name": "list_records",
+              "operation": "list",
+              "collection": "records"
+            }
+          ],
+          "records": []
+        }
       }
     },
     {
@@ -501,7 +571,27 @@
               "text": "seeded note"
             }
           }
-        ]
+        ],
+        "initial": {
+          "tool_versions": [
+            {
+              "page_id": "home",
+              "name": "list_notes",
+              "operation": "list",
+              "collection": "notes"
+            }
+          ],
+          "records": [
+            {
+              "page_id": "home",
+              "id": "seeded-note",
+              "collection": "notes",
+              "data": {
+                "text": "seeded note"
+              }
+            }
+          ]
+        }
       }
     },
     {
