@@ -25,6 +25,26 @@ export async function gateTranscript(
   const markdownText = await markdown.innerText();
   if (markdownText.includes("# Rendered markdown") || markdownText.includes("* first item"))
     throw new Error("markdown source markers remained visible");
+  const typography = await page.evaluate(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--achilles-ui-font", '"IBM Plex Sans"');
+    root.style.setProperty("--achilles-code-font", '"IBM Plex Mono"');
+    root.style.setProperty("--achilles-ui-size", "16px");
+    root.dataset.density = "compact";
+    const transcript = getComputedStyle(document.querySelector(".transcript")!);
+    const code = getComputedStyle(document.querySelector(".transcript pre code")!);
+    return {
+      font: transcript.fontFamily,
+      size: transcript.fontSize,
+      lineHeight: transcript.lineHeight,
+      codeFont: code.fontFamily,
+    };
+  });
+  if (
+    !typography.font.includes("IBM Plex Sans") || typography.size !== "16px" ||
+    typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono")
+  )
+    throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");
 
   await field.fill("stream enough lines to overflow");
