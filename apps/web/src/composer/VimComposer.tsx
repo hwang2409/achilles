@@ -24,9 +24,17 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const id = useId();
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const initialDefaultValue = useRef(defaultValue).current;
   const focusedRef = useRef(true);
   const editable = useRef(new Compartment()).current;
-  const { model, edit, submit, stop } = useComposerDelivery(props);
+  const onDeliveryConfirm = useCallback((sent: string) => {
+    props.onDeliveryConfirm(sent);
+    const view = viewRef.current;
+    if (!view || !view.state.doc.toString().startsWith(sent)) return;
+    view.dispatch({ changes: { from: 0, to: sent.length } });
+  }, [props.onDeliveryConfirm]);
+  const deliveryProps = { ...props, onDeliveryConfirm };
+  const { model, edit, submit, stop } = useComposerDelivery(deliveryProps);
   const modelRef = useRef<ComposerModel>(model);
   const submitRef = useRef(submit);
   modelRef.current = model;
@@ -35,13 +43,11 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const [focused, setFocused] = useState(true);
   const [pending, setPending] = useState("");
   const [selectionLength, setSelectionLength] = useState(0);
-
-  const replaceText = useCallback((next: string) => {
+  useLayoutEffect(() => {
     const view = viewRef.current;
-    if (!view || view.state.doc.toString() === next) return;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next }, selection: { anchor: next.length } });
-  }, []);
-  useLayoutEffect(() => { replaceText(model.draft); }, [model.draft, replaceText]);
+    if (focusedRef.current || !view || view.state.doc.toString() === defaultValue) return;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: defaultValue } });
+  }, [defaultValue]);
   useLayoutEffect(() => {
     viewRef.current?.dispatch({ effects: editable.reconfigure(EditorView.editable.of(state !== "read-only")) });
   }, [editable, state]);
@@ -59,7 +65,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     const view = new EditorView({
       parent: host.current,
       state: EditorState.create({
-        doc: defaultValue,
+        doc: initialDefaultValue,
         extensions: [
           vim(), drawSelection(), EditorView.lineWrapping, editable.of(EditorView.editable.of(state !== "read-only")),
           EditorView.contentAttributes.of({ "aria-label": label, "aria-describedby": `${id}-mode ${id}-hint ${id}-message`, "data-placeholder": placeholder ?? "" }),
@@ -129,7 +135,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       cm?.off("vim-command-done", commandDone);
       view.destroy(); viewRef.current = null;
     };
-  }, [defaultValue, edit, editable, id, label, placeholder]);
+  }, [edit, editable, id, initialDefaultValue, label, placeholder]);
 
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";

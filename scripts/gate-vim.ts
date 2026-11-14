@@ -257,5 +257,23 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await setVim(true);
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "kept draft") throw new Error("switching to vim changed the reconnected draft");
+  await field.focus();
+  await field.press("Escape");
+  await field.press("i");
+  await field.fill("start cursor stream");
+  const cursorDraft = "cursor-stays-here";
+  await field.press("Enter");
+  await waitFor(async () => {
+    const state = await composer.getAttribute("data-state");
+    return state === "running" || state === "steerable";
+  }, "cursor streaming turn");
+  await field.type(cursorDraft, { delay: 35 });
+  const cursorValue = await vimDraft();
+  const cursorOffset = await field.evaluate((element) => {
+    const selection = document.getSelection();
+    return selection && element.contains(selection.anchorNode) ? selection.anchorOffset : -1;
+  });
+  if (cursorValue !== cursorDraft || cursorOffset !== cursorDraft.length)
+    throw new Error(`vim cursor changed during streaming: value=${JSON.stringify(cursorValue)} offset=${cursorOffset} expected=${cursorDraft.length}`);
   await setVim(false);
 }
