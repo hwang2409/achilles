@@ -629,7 +629,7 @@ try {
   await page.getByText("layout updated", { exact: true }).waitFor({ timeout: 20000 });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
-    return blocks[0] === "layout updated without reload" && blocks[1]?.includes("books");
+    return blocks[0] === "layout updated without reload" && blocks[1]?.includes("add book") && blocks[2]?.includes("books");
   }, "open page layout re-render after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
@@ -886,7 +886,7 @@ try {
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
   const readingBody = await page.locator("body").innerText();
-  if (reconnectPage.layout?.blocks?.[1]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
+  if (reconnectPage.layout?.blocks?.[2]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
