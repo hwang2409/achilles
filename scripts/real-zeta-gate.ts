@@ -258,8 +258,55 @@ try {
   await waitFor(async () => (await approval.count()) > approvalBefore, "initial approval");
   const approvalComplete = page.getByText("approval complete", { exact: true });
   const approvalCompleteBefore = await approvalComplete.count();
-  await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+  const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T{i // 60:02}:{i % 60:02}:00Z') for i in range(105)]); db.commit(); db.close()"], env);
+  if (!(await waitForExit(paginationSeed, 10_000)) || paginationSeed.exitCode !== 0)
+    throw new Error(`pagination seed exited ${paginationSeed.exitCode}`);
+  const paginationSearch = page.locator(".chat-search input");
+  const searchedPagination = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.get("q") === "older chat");
+  await paginationSearch.fill("older chat");
+  await searchedPagination;
+  const resetPagination = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && !new URL(response.url()).searchParams.has("q"));
+  await paginationSearch.fill("");
+  await resetPagination;
+  await page.locator(".chat-row").nth(49).waitFor();
+  let olderHeld = false;
+  let releaseOlder!: () => void;
+  const olderReleased = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const holdOlder = async (route: Route) => {
+    if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
+    olderHeld = true;
+    await olderReleased;
+    await route.continue().catch(() => {});
+  };
+  await page.route("**/api/chats?**", holdOlder);
+  try {
+    await page.getByRole("button", { name: "load 50 older" }).click();
+    await waitFor(async () => olderHeld, "held older-chats response");
+    const olderRefresh = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/chats" && Number(url.searchParams.get("limit")) > 50;
+    }, { timeout: 20_000 }).catch(() => { throw new Error("timed out waiting for older chats response after turn-completion refresh"); });
+    await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
+    await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+    releaseOlder();
+    await olderRefresh;
+    await page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])').waitFor({ timeout: 20_000 });
+    if (await page.locator(".chat-row").count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
+  } finally {
+    releaseOlder();
+    await page.unroute("**/api/chats?**", holdOlder);
+  }
+  const beforeTrim = await page.locator(".chat-list").getAttribute("data-loaded-count");
+  const trimPagination = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.execute(\"DELETE FROM chat WHERE session_id LIKE 'older-%'\"); db.commit(); db.close()"], env);
+  if (!(await waitForExit(trimPagination, 10_000)) || trimPagination.exitCode !== 0)
+    throw new Error(`pagination trim exited ${trimPagination.exitCode}`);
+  const trimSearch = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.get("q") === "trim pagination");
+  await paginationSearch.fill("trim pagination");
+  await trimSearch;
+  const trimmedPagination = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && !new URL(response.url()).searchParams.has("q"));
+  await paginationSearch.fill("");
+  await trimmedPagination;
+  await page.locator(`.chat-list[data-list-state="ready"]:not([data-loaded-count="${beforeTrim}"])`).waitFor({ timeout: 20_000 });
   const own = JSON.parse(await Bun.file(ownDiscovery).text());
   const connected = await fetch(discoveryUrl).then((response) => response.json()) as { url: string };
   if (sharedProcess.exitCode !== null || zetaProcess.exitCode !== null) throw new Error("one of the unrelated zeta serves exited during chat");
@@ -267,10 +314,9 @@ try {
   if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor);
-  const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:02}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
-  await new Promise<void>((resolve, reject) => {
-    paginationSeed.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`pagination seed exited ${code}`)));
-  });
+  const focusPaginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
+  if (!(await waitForExit(focusPaginationSeed, 10_000)) || focusPaginationSeed.exitCode !== 0)
+    throw new Error(`focus pagination seed exited ${focusPaginationSeed.exitCode}`);
   const assertActive = async (name: string, target: Locator) => {
     if (await target.evaluate((element) => document.activeElement === element)) return;
     const active = await page.evaluate(() => {
@@ -282,6 +328,12 @@ try {
   const reloadShell = async () => {
     await page.reload();
     await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  };
+  const waitForListChange = async (selector: ".chat-list" | ".page-list", before: number, response: Promise<unknown>, label: string) => {
+    await response;
+    await page.locator(`${selector}[data-list-state="ready"]:not([data-loaded-count="${before}"])`).waitFor({ timeout: 20_000 }).catch(() => {
+      throw new Error(`${label} response completed without a new ready list state`);
+    });
   };
   const focusRows: Array<{ name: string; run: () => Promise<void> }> = [
     {
@@ -297,37 +349,12 @@ try {
         await assertActive("chat load-older button", loadOlder);
         const boundaryChat = await rows.last().getAttribute("data-chat-id");
         if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
-        let firstPageHeld = false;
-        let releaseFirstPage!: () => void;
-        const firstPageReleased = new Promise<void>((resolve) => { releaseFirstPage = resolve; });
-        const holdRefresh = async (route: Route) => {
-          if (new URL(route.request().url()).searchParams.has("before")) return route.continue();
-          firstPageHeld = true;
-          await firstPageReleased;
-          await route.continue();
-        };
-        await page.route("**/api/chats?**", holdRefresh);
-        const previousUrl = page.url();
-        try {
-          await page.locator(".new-chat").click();
-          await waitFor(async () => firstPageHeld, "held chat refresh first page");
-          const createdChat = new URL(page.url()).searchParams.get("chat");
-          if (!createdChat) throw new Error("forced chat refresh did not create a chat");
-          await loadOlder.click();
-          releaseFirstPage();
-          await waitFor(async () => (await rows.count()) > 50, "older chats");
-          const boundary = page.locator(`[data-chat-id="${boundaryChat}"]`);
-          const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
-          await waitFor(async () => await boundary.evaluate((row) => row.nextElementSibling === document.activeElement), "first newly loaded chat row focus");
-          await assertActive("chat load-older success", firstNewlyLoaded);
-          await page.locator(`[data-chat-id="${createdChat}"]`).waitFor({ state: "attached" });
-          if (await rows.count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
-        } finally {
-          releaseFirstPage();
-          await page.unroute("**/api/chats?**", holdRefresh);
-        }
-        await page.goto(previousUrl);
-        await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+        const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
+        await loadOlder.click();
+        await waitForListChange(".chat-list", 50, continuation, "older chats");
+        const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
+        await firstNewlyLoaded.waitFor({ state: "attached" });
+        await assertActive("chat load-older success", firstNewlyLoaded);
       },
     },
     {
@@ -342,7 +369,11 @@ try {
           else await route.continue();
         };
         await page.route("**/api/chats?**", emptyOlder);
+        const before = Number(await page.locator(".chat-list").getAttribute("data-loaded-count"));
+        const emptyResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await page.getByRole("button", { name: "load 50 older" }).click();
+        await emptyResponse;
+        await page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`).waitFor({ timeout: 20_000 });
         await page.getByRole("button", { name: "load 50 older" }).waitFor({ state: "detached" });
         await page.unroute("**/api/chats?**", emptyOlder);
         const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("q"));
@@ -360,8 +391,9 @@ try {
         const showMore = page.getByRole("button", { name: "show more pages" });
         await showMore.waitFor();
         const before = await links.count();
+        const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
-        await waitFor(async () => (await links.count()) > before, "non-final page continuation");
+        await waitForListChange(".page-list", before, continuation, "non-final page continuation");
         await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "non-final page continuation focus");
         if (!(await showMore.count())) throw new Error("non-final page continuation removed show more");
         await assertActive("page show-more non-final", links.nth(before));
@@ -375,11 +407,13 @@ try {
         const showMore = page.getByRole("button", { name: "show more pages" });
         await showMore.waitFor();
         const beforeFirst = await links.count();
+        const firstContinuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
-        await waitFor(async () => (await links.count()) > beforeFirst, "first page continuation before final");
+        await waitForListChange(".page-list", beforeFirst, firstContinuation, "first page continuation before final");
         const beforeFinal = await links.count();
+        const finalContinuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
-        await waitFor(async () => (await links.count()) > beforeFinal, "final page continuation");
+        await waitForListChange(".page-list", beforeFinal, finalContinuation, "final page continuation");
         await waitFor(async () => await links.nth(beforeFinal).evaluate((link) => document.activeElement === link), "final page continuation focus");
         if (await showMore.count()) throw new Error("final page continuation kept show more");
         await assertActive("page show-more final", links.nth(beforeFinal));
@@ -408,8 +442,9 @@ try {
         await page.unroute("**/api/pages?**", failContinuation);
         await page.getByRole("button", { name: "retry", exact: true }).click();
         await showMore.waitFor();
+        const retryContinuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
         await showMore.click();
-        await waitFor(async () => (await links.count()) > before, "page continuation after retry");
+        await waitForListChange(".page-list", before, retryContinuation, "page continuation after retry");
         await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "page continuation retry focus");
         await assertActive("page continuation retry", links.nth(before));
       },
@@ -435,8 +470,9 @@ try {
           await page.getByRole("button", { name: "show more pages" }).click();
           await waitFor(async () => seen, "held continuation before moving focus");
           await search.focus();
+          const continuation = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
           release();
-          await waitFor(async () => (await links.count()) > before, "held continuation rows published");
+          await waitForListChange(".page-list", before, continuation, "held continuation rows published");
           await assertActive("focus moved before commit", search);
         } finally {
           release();
@@ -469,8 +505,8 @@ try {
         release();
         await continued;
         await page.unroute("**/api/pages?**", holdContinuation);
+        await page.locator('.page-list[data-list-state="ready"]:not([data-loaded-count="20"])').waitFor({ timeout: 20_000 });
         await page.keyboard.press("Enter");
-        await waitFor(async () => (await page.locator(".page-list a").count()) > 20, "expanded pages after missing focus target");
         await assertActive("target removed before commit", heading);
       },
     },
