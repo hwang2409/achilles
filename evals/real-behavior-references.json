@@ -198,9 +198,46 @@
             "tool": "achilles__create_tool",
             "arguments": {
               "bundle": {
-                "name": "create_tool"
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "create_tool",
+                "description": "synthetic reserved-name bundle",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "output_schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "record_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "record_id",
+                    "revision"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "safe_records",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
               }
             }
+          }
+        ],
+        "bundle_validations": [
+          {
+            "call_id": "c1",
+            "valid": true
           }
         ],
         "results": [

@@ -1,9 +1,14 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { failureResult, productCapabilities, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unsupportedResult, validateCatalog } from "./eval";
+import { failureResult, productCapabilities, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unsupportedResult, validateCatalog, validateReservedBundles } from "./eval";
+
+const localRun = async (command: string, args: string[], cwd?: string) => {
+  const process = Bun.spawn([command, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
+};
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
@@ -27,19 +32,39 @@ test("live turn budget allows the cap and aborts only excess work", async () => 
   expect(aborts).toBe(1);
 });
 
-test("capability probe classifies an absent capability as unsupported and a broken target as harness_error", async () => {
+test("capability probe keeps an unrelated internal ImportError as a harness_error", async () => {
   const task = { id: "capability", requires: ["update_layout"] } as never;
-  const target = (result: { exitCode: number; stdout: string; stderr: string }) => ({ run: async () => result, achillesDir: "/synthetic" });
-  const baseline = await productCapabilities(target({ exitCode: 0, stdout: '["create_page","create_tool"]', stderr: "" }) as never);
-  const missing = ["update_layout"].filter(name => !baseline.has(name));
-  expect(unsupportedResult(task, missing).status).toBe("unsupported");
+  const root = await mkdtemp(join(tmpdir(), "achilles-broken-target-"));
   try {
-    await productCapabilities(target({ exitCode: 1, stdout: "", stderr: "SyntaxError: broken target" }) as never);
-    throw new Error("broken target unexpectedly passed");
-  } catch (error) {
-    expect(failureResult(task, error, []).status).toBe("harness_error");
-    expect(failureResult(task, error, []).checks[0].evidence).toEqual(expect.objectContaining({ message: "capability preflight failed: SyntaxError: broken target" }));
-  }
+    await mkdir(join(root, "achilles"));
+    await Bun.write(join(root, "pyproject.toml"), '[project]\nname="broken-target"\nversion="0.0.0"\nrequires-python=">=3.11"\n');
+    await Bun.write(join(root, "achilles", "__init__.py"), "");
+    await Bun.write(join(root, "achilles", "tools.py"), "from achilles import unrelated\n");
+    await Bun.write(join(root, "achilles", "unrelated.py"), 'raise ImportError("unrelated dependency broke")\n');
+    try {
+      await productCapabilities({ run: localRun, achillesDir: root } as never);
+      throw new Error("broken target unexpectedly passed");
+    } catch (error) {
+      const result = failureResult(task, error, []);
+      expect(result.status).toBe("harness_error");
+      expect(result.checks[0].evidence).toEqual(expect.objectContaining({ message: expect.stringContaining("unrelated dependency broke") }));
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("reserved bundle validation uses the target revision's validator after changing only the name", async () => {
+  const valid = { format_version: 1, kind: "data_operation", name: "create_tool", description: "synthetic tool", input_schema: { type: "object", additionalProperties: true }, output_schema: { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] }, implementation: { operation: "insert", collection: "records", data_schema: { type: "object", additionalProperties: true } } };
+  const invalid = [
+    { ...valid, implementation: { ...valid.implementation, collection: "" } },
+    { ...valid, input_schema: { type: "not-a-json-schema-type" } },
+    { ...valid, extra: true },
+    { ...valid, description: "x".repeat(10_000) },
+  ];
+  const bundles = [valid, ...invalid]; const calls = bundles.map((bundle, index) => ({ id: `call-${index}`, tool: "achilles__create_tool", arguments: { bundle } }));
+  const results = calls.map(call => ({ call_id: call.id, success: false }));
+  const target = Bun.env.ACHILLES_DIR ?? resolve(new URL("..", import.meta.url).pathname);
+  const validations = await validateReservedBundles({ run: localRun, achillesDir: target } as never, calls, results);
+  expect(validations.map(row => row.valid)).toEqual([true, false, false, false, false]);
 });
 
 test("provider catalog is allow-only", () => {

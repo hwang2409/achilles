@@ -159,6 +159,28 @@ for k in ("records","layouts"):
 for r in out["tool_versions"]:
  b=json.loads(r.pop("bundle")); r["operation"]=b["implementation"]["operation"]; r["collection"]=b["implementation"]["collection"]; r["input_schema"]=b["input_schema"]; r["data_schema"]=b["implementation"]["data_schema"]
 print(json.dumps(out))`;
+const BUNDLE_VALIDATION_SCRIPT = `import inspect,json,sys,uuid
+from achilles.tools import validate_bundle
+attempts=json.loads(sys.argv[1]); out=[]
+for attempt in attempts:
+ bundle={**attempt["bundle"],"name":f"eval_{uuid.uuid4().hex[:8]}"}
+ try:
+  kwargs={"reject_conflicting_output":True} if "reject_conflicting_output" in inspect.signature(validate_bundle).parameters else {}
+  validate_bundle(bundle,**kwargs); valid=True
+ except Exception: valid=False
+ out.append({"call_id":attempt["call_id"],"valid":valid})
+print(json.dumps(out))`;
+export async function validateReservedBundles(stack: EvalStack, calls: Record<string, unknown>[], results: Record<string, unknown>[]) {
+  const failed = new Set(results.filter(row => row.success === false || row.is_error === true).map(row => row.call_id));
+  const attempts = calls.filter(row => row.tool === "achilles__create_tool" && failed.has(row.id)).flatMap(row => {
+    const args = row.arguments; const candidate = args && typeof args === "object" ? (args as Record<string, unknown>).bundle : undefined;
+    return candidate && typeof candidate === "object" && !Array.isArray(candidate) ? [{ call_id: row.id, bundle: candidate }] : [];
+  });
+  if (!attempts.length) return [];
+  const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", BUNDLE_VALIDATION_SCRIPT, JSON.stringify(attempts)], stack.achillesDir);
+  if (process.exitCode !== 0) throw new Error(`bundle validation snapshot failed: ${process.stderr}`);
+  return JSON.parse(process.stdout) as Array<Record<string, unknown>>;
+}
 async function databaseSnapshot(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "python", "-c", SNAPSHOT_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3")]);
   if (process.exitCode !== 0) throw new Error(`snapshot failed: ${process.stderr}`); return JSON.parse(process.stdout) as EvalSnapshot;
@@ -230,12 +252,13 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
+    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
-    throw new TaskRunFailure(error, { ...after, ...tools, approvals, reconnects, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
+    const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
+    throw new TaskRunFailure(error, { ...after, ...tools, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows) });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 

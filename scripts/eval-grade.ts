@@ -20,7 +20,7 @@ export type EvalSnapshot = {
   records?: Array<Record<string, unknown>>; layouts?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
   calls?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; approvals?: Array<Record<string, unknown>>;
   errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
-  reconnects?: Array<Record<string, unknown>>; related_page_ids?: string[];
+  reconnects?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown };
@@ -153,18 +153,6 @@ function matchingSchemaObjects(actual: unknown, version: Record<string, unknown>
   const match = values.every(value => [...fields].some(field => object[field] === value)); const found = match ? [{ ...object, ...(recordId && !("record_id" in object) ? { record_id: recordId } : {}) }] : [];
   return [...found, ...Object.values(object).flatMap(value => matchingSchemaObjects(value, version, values, recordId))];
 }
-function baselineBundleWithReservedName(value: unknown, name: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const bundle = value as Record<string, unknown>; const implementation = bundle.implementation;
-  return Object.keys(bundle).sort().join(",") === "description,format_version,implementation,input_schema,kind,name,output_schema"
-    && bundle.format_version === 1 && bundle.kind === "data_operation" && bundle.name === name && typeof bundle.description === "string" && bundle.description.length > 0
-    && bundle.input_schema !== null && typeof bundle.input_schema === "object" && !Array.isArray(bundle.input_schema)
-    && bundle.output_schema !== null && typeof bundle.output_schema === "object" && !Array.isArray(bundle.output_schema)
-    && implementation !== null && typeof implementation === "object" && !Array.isArray(implementation)
-    && ["list", "get", "insert", "update"].includes(String((implementation as Record<string, unknown>).operation))
-    && typeof (implementation as Record<string, unknown>).collection === "string"
-    && (implementation as Record<string, unknown>).data_schema !== null && typeof (implementation as Record<string, unknown>).data_schema === "object" && !Array.isArray((implementation as Record<string, unknown>).data_schema);
-}
 function valueRows(value: unknown): value is string[][] { return Array.isArray(value) && value.every(row => Array.isArray(row) && row.length > 0 && row.every(item => typeof item === "string")); }
 function matchValueRows(actual: unknown, expected: string[][]) {
   const rows = Array.isArray(actual) ? actual : actual && typeof actual === "object" ? Object.values(actual).find(Array.isArray) ?? [] : [];
@@ -184,9 +172,9 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const call = rows(snapshot, "calls").find(row => row.page_id === page && row.tool === "achilles__create_tool" && structurallyContains(row.arguments, { bundle: { name: check.name } }));
     const result = rows(snapshot, "results").find(row => row.page_id === page && row.call_id === call?.id && (row.success === false || row.is_error === true));
     const refusal = result?.data ?? result?.result;
-    if (refusal && typeof refusal === "object" && !Array.isArray(refusal) && ("code" in refusal || "path" in refusal)) return structurallyContains(refusal, { code: "invalid_input", path: "/bundle/name" });
-    const bundle = call?.arguments && typeof call.arguments === "object" ? (call.arguments as Record<string, unknown>).bundle : undefined;
-    return Boolean(result) && baselineBundleWithReservedName(bundle, check.name!);
+    const structured = refusal && typeof refusal === "object" && !Array.isArray(refusal) && ("code" in refusal || "path" in refusal);
+    const otherwiseValid = rows(snapshot, "bundle_validations").some(row => row.call_id === call?.id && row.valid === true);
+    return Boolean(result) && otherwiseValid && (!structured || structurallyContains(refusal, { code: "invalid_input", path: "/bundle/name" }));
   },
   operations: ({ check, owned }) => {
     const versions = owned("tool_versions"); const required = check.value as string[];

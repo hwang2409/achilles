@@ -47,15 +47,13 @@ test("page counts use the resolved id while other collections stay page-owned", 
   expect(gradeCheck({ id: "tools", type: "count", page: "p", name: "tools", count: 1 }, { pages, tools: [{ id: "t1", page_id: "p2" }] }).pass).toBe(false);
 });
 
-test("reserved tool refusal uses structured errors or a valid baseline bundle, never message text", () => {
+test("reserved tool refusal requires target-validator proof and structured name errors when available", () => {
   const check = { id: "refused", type: "refused_tool_name" as const, page: "p", name: "create_tool" }; const pages = [{ id: "p1", alias: "p" }];
-  const bundle = { format_version: 1, kind: "data_operation", name: "create_tool", description: "synthetic tool", input_schema: { type: "object" }, output_schema: { type: "object" }, implementation: { operation: "insert", collection: "records", data_schema: { type: "object" } } };
-  const grade = (data: unknown, candidate: Record<string, unknown> = bundle) => gradeCheck(check, { pages, calls: [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: candidate } }], results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass;
-  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "changed product wording" }, { name: "create_tool" })).toBe(true);
-  expect(grade("synthetic unstructured failure")).toBe(true);
-  const { input_schema: _, ...missingSchema } = bundle;
-  expect(grade("invalid or reserved tool name", missingSchema)).toBe(false);
-  expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" })).toBe(false);
+  const grade = (data: unknown, valid: boolean) => gradeCheck(check, { pages, calls: [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }], results: [{ call_id: "call-1", page_id: "p1", success: false, data }], bundle_validations: [{ call_id: "call-1", valid }] }).pass;
+  expect(grade("synthetic unstructured failure", true)).toBe(true);
+  expect(grade("synthetic unstructured failure", false)).toBe(false);
+  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "changed product wording" }, true)).toBe(true);
+  expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" }, true)).toBe(false);
 });
 
 test("record-crud list matching is order-independent, distinct, and complete", () => {

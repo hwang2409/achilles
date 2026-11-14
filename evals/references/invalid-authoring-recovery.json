@@ -24,20 +24,41 @@
             "name": "create_tool",
             "description": "synthetic reserved-name bundle",
             "input_schema": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": true
             },
             "output_schema": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "record_id": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "record_id",
+                "revision"
+              ]
             },
             "implementation": {
               "operation": "insert",
               "collection": "safe_records",
               "data_schema": {
-                "type": "object"
+                "type": "object",
+                "additionalProperties": true
               }
             }
           }
         }
+      }
+    ],
+    "bundle_validations": [
+      {
+        "call_id": "c1",
+        "valid": true
       }
     ],
     "results": [
@@ -95,6 +116,12 @@
             }
           }
         }
+      }
+    ],
+    "bundle_validations": [
+      {
+        "call_id": "c1",
+        "valid": false
       }
     ],
     "results": [
