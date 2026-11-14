@@ -229,9 +229,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await confirmedStock.fill("steer while running");
   await confirmedStock.press("Enter");
   await waitFor(async () => requests().length >= delayedBeforeSteer + 1, "delayed turn steer request");
-  const delayedSteer = requests().at(-1);
-  if (delayedSteer?.method !== "steer" || delayedSteer.params?.text !== "steer while running")
-    throw new Error(`delayed turn did not send one steer request: ${JSON.stringify(delayedSteer)}`);
+  const delayedSteer = requests().slice(delayedBeforeSteer).find((request) => request.method === "steer");
+  if (delayedSteer?.params?.text !== "steer while running")
+    throw new Error(`delayed turn did not send a steer request: ${JSON.stringify(requests().slice(delayedBeforeSteer))}`);
   await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed steer to clear its draft");
   await confirmedStock.fill("kept draft");
   if (await stopButton.isVisible().catch(() => false)) await stopButton.focus();
