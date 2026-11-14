@@ -55,7 +55,7 @@ describe("composer delivery machine", () => {
     ["submit publish rejects", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit", turnRunning: false }).model;
       const failed = apply(submitted, { type: "reject", attempt: 1, message: "denied" }, { type: "settle", attempt: 1 });
-      expect(failed).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "could not send: denied" } });
+      expect(failed).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "denied" } });
     }],
     ["draft clears only on confirmed send", () => {
       const submitted = transition(createComposerModel("hello again", "idle"), { type: "submit", turnRunning: false }).model;
