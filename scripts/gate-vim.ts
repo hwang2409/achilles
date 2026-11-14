@@ -240,7 +240,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     throw new Error(`delayed turn did not send a steer request: ${JSON.stringify(requests().slice(delayedBeforeSteer))}`);
   await waitFor(async () => requests().some((frame) => frame.id === delayedSteer.id && (frame.result || frame.error)), "delayed steer response");
   if (await confirmedStock.inputValue() !== "") {
-    await page.getByText("could not steer: no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
+    await page.getByText("no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
     if (await confirmedStock.inputValue() !== "steer while running") throw new Error("rejected delayed steer did not keep its draft");
     await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
     await confirmedStock.fill("steer while running");
