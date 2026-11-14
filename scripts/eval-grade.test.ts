@@ -102,13 +102,15 @@ test("layout_update requires the original layout and one versioned block", () =>
   expect(gradeCheck(check, { ...good, layouts: [...good.layouts, { page_id: "other", version: 2, document: { blocks: [] } }] }).pass).toBe(false);
 });
 
-test("layout conflicts are accepted when a later update succeeds", () => {
+test("layout failures require a later successful update", () => {
   const pages = [{ id: "p1", alias: "p" }];
   const check = { id: "retry", type: "no_unrecovered_error" as const, page: "p" };
   const failed = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: false };
   const succeeded = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: true };
-  expect(gradeCheck(check, { pages, errors: [failed], results: [succeeded] }).pass).toBe(true);
-  expect(gradeCheck(check, { pages, errors: [failed], results: [] }).pass).toBe(false);
+  const grade = (results: typeof failed[]) => gradeCheck(check, { pages, results, errors: results.filter(result => !result.success) }).pass;
+  expect(grade([failed, succeeded])).toBe(true);
+  expect(grade([succeeded, failed])).toBe(false);
+  expect(grade([failed])).toBe(false);
 });
 
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {

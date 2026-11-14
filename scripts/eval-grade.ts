@@ -191,10 +191,8 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   successful_result: ({ check, snapshot, page }) => rows(snapshot, "results").some(row => row.page_id === page && successful(row) && row.tool === check.tool && (!check.chat || row.chat_id === check.chat) && (check.value === undefined || structurallyContains(row.data ?? row.result, check.value))),
   no_error: ({ check, snapshot, page }) => rows(snapshot, "errors").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat)).length === 0,
   no_unrecovered_error: ({ check, snapshot, page }) => {
-    const scoped = (type: keyof EvalSnapshot) => rows(snapshot, type).filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat));
-    const failures = scoped("errors").filter(row => row.tool === "achilles__update_layout");
-    const successes = scoped("results").filter(row => row.tool === "achilles__update_layout" && row.success === true);
-    return successes.length >= failures.length;
+    const attempts = rows(snapshot, "results").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && row.tool === "achilles__update_layout");
+    return attempts.length === 0 || (attempts.at(-1)?.success === true && attempts.every((attempt, index) => attempt.success !== false || attempts.slice(index + 1).some(later => later.success === true)));
   },
   browser_text: ({ check, owned }) => owned("browser").some(row => String(row.text ?? "").includes(String(check.text))),
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),

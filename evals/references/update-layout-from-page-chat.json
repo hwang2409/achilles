@@ -77,24 +77,36 @@
     ],
     "calls": [
       {
-        "id": "stale",
-        "page_id": "p",
-        "tool": "achilles__update_layout",
-        "arguments": {
-          "expected_version": 1
-        }
-      },
-      {
-        "id": "inspect-2",
+        "id": "inspect-1",
         "page_id": "p",
         "tool": "achilles__inspect_page",
         "arguments": {}
       },
       {
-        "id": "retry",
+        "id": "update-1",
         "page_id": "p",
         "tool": "achilles__update_layout",
         "arguments": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              },
+              {
+                "type": "list",
+                "title": "Page records",
+                "collection": "records"
+              }
+            ]
+          },
           "expected_version": 1
         }
       }
@@ -102,19 +114,13 @@
     "results": [
       {
         "page_id": "p",
-        "tool": "achilles__update_layout",
-        "call_id": "stale",
-        "success": false,
-        "data": {
-          "code": "version_conflict"
-        }
-      },
-      {
-        "page_id": "p",
         "tool": "achilles__inspect_page",
-        "call_id": "inspect-2",
+        "call_id": "inspect-1",
         "success": true,
         "data": {
+          "route": "/records",
+          "title": "Records",
+          "create_mode": true,
           "layout": {
             "version": 1,
             "blocks": [
@@ -136,22 +142,14 @@
       {
         "page_id": "p",
         "tool": "achilles__update_layout",
-        "call_id": "retry",
+        "call_id": "update-1",
         "success": true,
         "data": {
           "version": 2
         }
       }
     ],
-    "errors": [
-      {
-        "page_id": "p",
-        "tool": "achilles__update_layout",
-        "call_id": "stale",
-        "success": false,
-        "code": "version_conflict"
-      }
-    ]
+    "errors": []
   },
   "bad": {
     "pages": [
