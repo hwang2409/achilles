@@ -166,6 +166,14 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     return [...values];
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
+  const chatListKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(".chat-row")];
+    if (!rows.length) return;
+    event.preventDefault();
+    const current = rows.indexOf(document.activeElement as HTMLElement);
+    rows[(current + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length].focus();
+  };
   const searchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (!search || !chats?.length) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveResult((value) => (value + (event.key === "ArrowDown" ? 1 : -1) + chats.length) % chats.length); }
@@ -184,6 +192,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   };
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
+    <a className="skip-link" href="#message-composer" onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span><button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button></div>
@@ -194,7 +203,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
         <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pages.length}</b></button>
         {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}
       </section>
-      <section className="chat-list" id="chat-search-results">
+      <section className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>
         {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
         {next && <button className="load-older" onClick={loadOlder}>load 50 older</button>}
@@ -210,7 +219,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
 }
 
 function ChatRow({ chat, current, active, index, query, onSelect }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void }) {
-  return <a id={index === undefined ? undefined : `chat-result-${index}`} className={`chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
+  return <a tabIndex={-1} id={index === undefined ? undefined : `chat-result-${index}`} className={`chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     <span title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
   </a>;

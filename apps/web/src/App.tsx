@@ -17,7 +17,7 @@ const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={R
 function ComposerSlot({ focus, children }: { focus: boolean; children: ReactNode }) {
   const slot = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus({ preventScroll: true }); }, [focus]);
-  return <div ref={slot} style={{ display: "contents" }}>{children}</div>;
+  return <div id="message-composer" ref={slot} style={{ display: "contents" }}>{children}</div>;
 }
 
 function connectionFailure(state: ConnectionState): string | null {
