@@ -96,14 +96,18 @@ def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None
     assert client.get("/api/pages", headers={"origin": "http://evil.test"}).status_code == 403
 
     with store.transaction() as db:
-        for index in range(200):
+        for index in range(199):
             db.execute(
                 "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
                 (f"page-{index}", f"/page-{index}", f"page {index}", "2025-02-01", "2025-02-01"),
             )
     capped = client.get("/api/pages?limit=200").json()
     assert len(capped["pages"]) == 200
-    assert capped["truncated"] is True
+    assert capped["pages"][0]["updated_at"] >= capped["pages"][-1]["updated_at"]
+    assert capped["next"]
+    remainder = client.get(f"/api/pages?limit=200&before={capped['next']}").json()
+    assert len(remainder["pages"]) == 1
+    assert remainder["next"] is None
 
 
 def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:

@@ -22,7 +22,7 @@ type Props = {
   onNewChat: () => Promise<void>;
   onSelectChat: (chat: Chat) => void;
   refreshKey: number;
-  pageRefreshKey: string;
+  pageRefreshKey: number;
 };
 
 const pageHref = (route: string) => {
@@ -85,6 +85,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [pagesError, setPagesError] = useState(false);
   const [pagesRetry, setPagesRetry] = useState(0);
   const [next, setNext] = useState<string | null>(null);
+  const [pageNext, setPageNext] = useState<string | null>(null);
+  const [pagesLoading, setPagesLoading] = useState(false);
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -119,14 +121,19 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useEffect(() => { const media = matchMedia("(max-width: 759px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => firstFocusable(sidebar.current)?.focus()); }, [drawer, narrow]);
   useEffect(() => {
+    const controller = new AbortController();
     let live = true;
-    const load = () => void fetch("/api/pages?limit=200", { cache: "no-store" }).then(async (response) => {
-      if (!response.ok) throw new Error(`could not load pages (${response.status})`);
-      const result = await response.json() as { pages: PageLink[]; truncated: boolean };
-      if (live) { setPages(result.pages); setPagesError(false); }
-    }).catch(() => { if (live) setPagesError(true); });
+    const load = () => {
+      setPagesLoading(true);
+      void fetch("/api/pages?limit=200", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error(`could not load pages (${response.status})`);
+        const result = await response.json() as { pages: PageLink[]; next: string | null };
+        if (live) { setPages(result.pages); setPageNext(result.next); setPagesError(false); }
+      }).catch((error) => { if (live && !(error instanceof DOMException && error.name === "AbortError")) setPagesError(true); })
+        .finally(() => { if (live) setPagesLoading(false); });
+    };
     const settle = setTimeout(load, 0);
-    return () => { live = false; clearTimeout(settle); };
+    return () => { live = false; clearTimeout(settle); controller.abort(); };
   }, [pageRefreshKey, pagesRetry]);
   useEffect(() => {
     let live = true;
@@ -179,6 +186,16 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     if (event.key === "Enter") { event.preventDefault(); select(chats[activeResult] ?? chats[0]); }
   };
   const loadOlder = async () => {
+    if (!pageNext || pagesLoading) return;
+    setPagesLoading(true);
+    const response = await fetch(`/api/pages?limit=200&before=${encodeURIComponent(pageNext)}`, { cache: "no-store" });
+    if (!response.ok) { setPagesLoading(false); return; }
+    const result = await response.json() as { pages: PageLink[]; next: string | null };
+    setPages((current) => [...(current ?? []), ...result.pages]);
+    setPageNext(result.next);
+    setPagesLoading(false);
+  };
+  const loadOlderChats = async () => {
     if (!next) return;
     const params = new URLSearchParams({ limit: "50", before: next });
     if (search) params.set("q", search);
@@ -199,12 +216,12 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className="page-list">
         <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pagesError ? "!" : pages === null ? "" : pageRows.length}</b></button>
-        {pagesError ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => { setPagesError(false); setPagesRetry((value) => value + 1); }}>retry</button></div> : pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && pageRows.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}
+        {pagesError ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => { setPagesError(false); setPagesRetry((value) => value + 1); }}>retry</button></div> : pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}{pageNext && <button className="load-older" onClick={() => void loadOlder()}>show more pages</button>}</>}
       </section>
       <section className="chat-list" id="chat-search-results">
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>
         {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
-        {next && <button className="load-older" onClick={loadOlder}>load 50 older</button>}
+        {next && <button className="load-older" onClick={loadOlderChats}>load 50 older</button>}
       </section>
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><kbd>⌘K</kbd></footer>
     </aside>
