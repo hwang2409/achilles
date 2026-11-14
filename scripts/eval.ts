@@ -235,10 +235,12 @@ async function scriptedTask(task: EvalTask, hidden: string[], achillesDir?: stri
   let stack: EvalStack | undefined;
   try {
     stack = await startEvalStack({ achillesDir, model: "ollama/qwen3:4b", ollamaBaseUrl: `http://127.0.0.1:${provider.port}`, maxTurns: task.agent_turns }); onStack?.(stack);
-    const firstTools = () => ((requests[0]?.tools ?? []) as { function?: { name?: string } }[]).map(tool => tool.function?.name).filter((name): name is string => Boolean(name));
+    const requestTools = (request: Record<string, unknown>) => ((request.tools ?? []) as { function?: { name?: string } }[]).map(tool => tool.function?.name).filter((name): name is string => Boolean(name));
     const graded = await driveTask(stack, task, [], hidden);
-    const catalog = firstTools();
-    validateCatalog(catalog, "achilles__create_tool");
+    const catalogs = requests.map(requestTools);
+    for (const catalog of catalogs) validateCatalog(catalog);
+    const catalog = [...new Set(catalogs.flat())];
+    validateCatalog(catalogs[0] ?? [], "achilles__create_tool");
     if (requests.length < 3) throw new Error("scripted provider did not complete the create/use task");
     graded.diagnostics.observed_catalog = catalog;
     return graded;
@@ -259,8 +261,7 @@ async function main() {
   const repeats = Number(Bun.env.N ?? "1");
   if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1");
   const scripted = Bun.env.EVAL_BACKEND === "scripted";
-  const effectiveTaskId = scripted && taskId === "harness-smoke" ? "create-and-use-tool-same-chat" : taskId;
-  const task = await loadTask(effectiveTaskId);
+  const task = await loadTask(taskId);
   assertTurnBudget(reserveTurns([{ agent_turns: task.agent_turns, judge_turns: task.judge?.turns ?? 0 }], repeats));
   const runId = `${Date.now()}-${process.pid}`;
   const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("../evals/reports/", import.meta.url).pathname, runId));
@@ -282,13 +283,13 @@ async function main() {
     }
     if (!scripted) stack = await startEvalStack({ achillesDir: Bun.env.ACHILLES_DIR, model: Bun.env.MODEL, maxTurns: task.agent_turns, keep: Bun.env.KEEP_EVAL === "1" });
     const tasks = [];
-    for (let repeat = 0; repeat < repeats; repeat++) tasks.push(scripted ? await scriptedTask(task, hidden, Bun.env.ACHILLES_DIR, value => { stack = value; }) : await driveTask(stack!, task, [], hidden));
-    const report = makeReport({ run_id: runId, repeats, agent: { provider: stack?.provider ?? "scripted", model: stack?.model ?? "offline", tool_policy: TOOL_POLICY, observed_catalog: tasks[0]?.diagnostics?.observed_catalog ?? [] }, tasks });
+    for (let repeat = 0; repeat < repeats; repeat++) tasks.push(scripted ? await scriptedTask(task, hidden, Bun.env.ACHILLES_DIR, value => { if (value) stack = value; }) : await driveTask(stack!, task, [], hidden));
+    const report = makeReport({ run_id: runId, repeats, agent: { provider: scripted ? "scripted" : stack!.provider, model: scripted ? "offline" : stack!.model, tool_policy: TOOL_POLICY, observed_catalog: tasks[0]?.diagnostics?.observed_catalog ?? [], achilles_sha: stack?.achillesSha, zeta_sha: stack?.zetaSha }, tasks });
     await mkdir(output, { recursive: true });
     await Bun.write(join(output, "report.json"), renderReportJson(report)); await Bun.write(join(output, "report.md"), renderReportMarkdown(report));
     await scanArtifactTree(output, hidden);
     if (stack?.root && Bun.env.KEEP_EVAL === "1") { await stack.close(); await retainSanitized(stack, hidden); }
-    console.log(JSON.stringify({ task: task.id, pass: tasks.every(result => result.pass), turns: tasks.reduce((sum, result) => sum + result.turns, 0), provider: stack?.provider ?? "scripted", model: stack?.model ?? "offline", tool_policy: TOOL_POLICY, report: output, achilles_sha: stack?.achillesSha, zeta_sha: stack?.zetaSha }));
+    console.log(JSON.stringify({ task: task.id, pass: tasks.every(result => result.pass), turns: tasks.reduce((sum, result) => sum + result.turns, 0), provider: scripted ? "scripted" : stack!.provider, model: scripted ? "offline" : stack!.model, tool_policy: TOOL_POLICY, report: output, achilles_sha: stack?.achillesSha, zeta_sha: stack?.zetaSha }));
     if (!tasks.every(result => result.pass)) process.exitCode = 1;
   } catch (error) {
     await writeFailureReport(output, task, repeats, error, hidden);

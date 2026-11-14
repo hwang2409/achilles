@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { openSync } from "node:fs";
+import { closeSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { connectEvalProtocol } from "./eval-protocol";
@@ -22,7 +22,8 @@ async function freePort(excluding = new Set<number>()) {
 }
 function child(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, logPath: string) {
   const log = openSync(logPath, "a");
-  return spawn(command, args, { cwd, env, detached: true, stdio: ["ignore", log, log] });
+  try { return spawn(command, args, { cwd, env, detached: true, stdio: ["ignore", log, log] }); }
+  finally { closeSync(log); }
 }
 async function waitForExit(process: ChildProcess, timeoutMs: number) {
   if (process.exitCode !== null || process.signalCode !== null) return true;

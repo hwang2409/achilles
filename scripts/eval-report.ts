@@ -3,7 +3,7 @@ import type { EvalSnapshot } from "./eval-grade";
 export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]>;
 export type EvalReport = {
   run_id: string;
-  agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[] };
+  agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
   repeats: number;
   tasks: Array<TaskResult & { transcript?: string }>;
 };
@@ -35,6 +35,8 @@ export function reportMarkdown(report: EvalReport): string {
     `agent: \`${report.agent.provider}/${report.agent.model}\``,
     `tool policy: \`${report.agent.tool_policy}\``,
     `observed catalog: ${report.agent.observed_catalog.length ? report.agent.observed_catalog.map((name) => `\`${name}\``).join(", ") : "none"}`,
+    `achilles: ${report.agent.achilles_sha ?? "unavailable"}`,
+    `zeta: ${report.agent.zeta_sha ?? "unavailable"}`,
     `repeats: ${report.repeats}`, "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: |",
   ];
   for (const task of report.tasks) {
