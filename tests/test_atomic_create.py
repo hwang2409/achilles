@@ -109,6 +109,44 @@ def state(root):
     return counts, files
 
 
+def test_inspect_page_returns_bounded_safe_summary_with_scoped_auth(creation_client):
+    root, store, client, headers = creation_client
+    result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    page_id = json.loads(result["content"][0]["text"])["page_id"]
+    summary = mcp(client, headers, 3, "tools/call", {"name": "inspect_page", "arguments": {}})
+    value = json.loads(summary["content"][0]["text"])
+    assert value["route"] == "/"
+    assert value["layout"]["version"] is None
+    assert value["layout"]["blocks"] == []
+    assert value["tools"] == []
+    assert value["collections"] == {}
+    serialized = json.dumps(value)
+    assert len(serialized.encode()) <= 8 * 1024
+    assert "credentials" not in serialized and str(root) not in serialized
+    secret = (root / "credentials" / page_id).read_text()
+    with store.transaction() as db:
+        credential_hash = db.execute(
+            "SELECT credential_hash FROM page WHERE id=?", (page_id,)
+        ).fetchone()[0]
+    assert secret not in serialized and credential_hash not in serialized
+    forbidden = mcp(
+        client,
+        headers,
+        4,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"page_id": page_id}},
+    )
+    assert forbidden["isError"]
+    assert json.loads(forbidden["content"][0]["text"]) == {
+        "code": "forbidden",
+        "expected": "authorized page",
+        "path": "",
+    }
+    store.set_create_mode("home", False)
+    off = mcp(client, headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}})
+    assert off["isError"]
+
+
 def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creation_client):
     root, store, client, headers = creation_client
     result = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})

@@ -462,6 +462,36 @@ try {
   ).json();
   if (secondRecords.length !== 1 || secondRecords[0]?.title !== "Synthetic Book")
     throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
+
+  const readingCredential = (await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()).trim();
+  await fetch(`${origin}/api/pages/${createdPage.id}/create-mode`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: true }),
+  });
+  await mcp(readingCredential, 14, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "gate", version: "1" },
+  });
+  const inspectCatalog = await mcp(readingCredential, 15, "tools/list", {});
+  const inspectNames = inspectCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
+  if (!inspectNames.includes("inspect_page")) throw new Error("inspect_page missing in create mode catalog");
+  const inspected = await mcp(readingCredential, 16, "tools/call", {
+    name: "inspect_page",
+    arguments: {},
+  });
+  const inspectedValue = JSON.parse(inspected.result?.content?.[0]?.text ?? "{}");
+  if (
+    inspected.result?.isError ||
+    inspectedValue.route !== "/reading" ||
+    inspectedValue.layout?.version !== 1 ||
+    inspectedValue.tools?.[0]?.name !== "add_book" ||
+    inspectedValue.collections?.books !== 1 ||
+    JSON.stringify(inspectedValue).includes("credentials") ||
+    JSON.stringify(inspectedValue).includes(achillesHome)
+  )
+    throw new Error(`inspect_page summary mismatch: ${JSON.stringify(inspectedValue)}`);
   const versionTwo = {
     ...toolBundle,
     input_schema: {

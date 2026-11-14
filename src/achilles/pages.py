@@ -276,6 +276,50 @@ class PageStore:
             ).fetchone()
             return json.loads(row[0]) if row else {"blocks": []}
 
+    def inspect_page(self, page_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            layout = db.execute(
+                "SELECT version, digest, document FROM layout_version "
+                "WHERE page_id=? ORDER BY version DESC LIMIT 1",
+                (page_id,),
+            ).fetchone()
+            counts = db.execute(
+                "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
+                (page_id,),
+            ).fetchall()
+        row = self.page(page_id)
+        if row is None:
+            raise KeyError(page_id)
+        document = json.loads(layout[2]) if layout else {"blocks": []}
+        tools = self.page_tools(page_id)
+        return {
+            "route": row["route"],
+            "title": row["title"],
+            "create_mode": bool(row["create_mode"]),
+            "layout": {
+                "version": layout[0] if layout else None,
+                "digest": layout[1] if layout else None,
+                "blocks": [
+                    {
+                        key: block[key]
+                        for key in ("type", "title", "tool", "collection")
+                        if key in block
+                    }
+                    for block in document.get("blocks", [])
+                ],
+            },
+            "tools": [
+                {
+                    "name": tool["name"],
+                    "version": tool["version"],
+                    "operations": [tool["implementation"]["operation"]],
+                    "collection": tool["implementation"]["collection"],
+                }
+                for tool in tools
+            ],
+            "collections": {collection: count for collection, count in counts},
+        }
+
     def records(
         self, page_id: str, collection: str, limit: int = 100
     ) -> tuple[list[dict[str, Any]], int]:

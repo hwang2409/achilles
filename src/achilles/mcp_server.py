@@ -14,6 +14,13 @@ from .records import call_record
 from .tools import CREATE_TOOL_SCHEMA
 from .validation import ValidationError, validate_schema
 
+INSPECT_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {"route": {"type": "string"}, "page_id": {"type": "string"}},
+    "additionalProperties": False,
+}
+_INSPECT_MAX_BYTES = 8 * 1024
+
 
 def _token(context):
     request = context.request
@@ -51,6 +58,27 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
     )
 
 
+def _inspect_result(value: dict[str, Any]) -> CallToolResult:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
+        return _text(value)
+    value["truncated"] = True
+    value["layout"]["blocks"] = value["layout"]["blocks"][:32]
+    value["tools"] = value["tools"][:32]
+    value["collections"] = dict(list(value["collections"].items())[:32])
+    for key in ("title",):
+        value[key] = value[key][:256]
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    while len(encoded.encode()) > _INSPECT_MAX_BYTES and value["layout"]["blocks"]:
+        value["layout"]["blocks"].pop()
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return _text(value)
+
+
+def _inspect_error() -> CallToolResult:
+    return _safe_error(ValidationError("", "authorized page", "forbidden"))
+
+
 def _validate_create(name: str, args: Any) -> None:
     schema = CREATE_PAGE_SCHEMA if name == "create_page" else CREATE_TOOL_SCHEMA
     validate_schema(args, schema)
@@ -86,6 +114,11 @@ def build_mcp(store: PageStore):
             tools.extend(
                 [
                     Tool(
+                        name="inspect_page",
+                        description="inspect safe summaries of the caller's page",
+                        inputSchema=INSPECT_PAGE_SCHEMA,
+                    ),
+                    Tool(
                         name="create_page",
                         description="create a page; available only in create mode",
                         inputSchema=CREATE_PAGE_SCHEMA,
@@ -119,6 +152,26 @@ def build_mcp(store: PageStore):
                 isError=True, content=[TextContent(type="text", text="forbidden")]
             )
         args = params.arguments or {}
+        if params.name == "inspect_page":
+            try:
+                validate_schema(args, INSPECT_PAGE_SCHEMA)
+                if "route" in args and "page_id" in args:
+                    raise ValidationError("", "one selector", "invalid_input")
+                if not page["create_mode"]:
+                    return _inspect_error()
+                target = page
+                if "route" in args or "page_id" in args:
+                    target = await anyio.to_thread.run_sync(
+                        store.page, args.get("route", args.get("page_id"))
+                    )
+                if target is None or target["id"] != page["id"]:
+                    return _inspect_error()
+                summary = await anyio.to_thread.run_sync(store.inspect_page, target["id"])
+                return _inspect_result(summary)
+            except ValidationError as exc:
+                return _safe_error(exc)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return _inspect_error()
         if params.name in {"create_page", "create_tool"}:
             if not page["create_mode"]:
                 return CallToolResult(
