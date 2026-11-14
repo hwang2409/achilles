@@ -70,7 +70,8 @@
         "data": {
           "records": [
             {
-              "text": "reconnect note"
+              "note": "reconnect",
+              "text": "wrong reconnect text"
             }
           ]
         }
@@ -89,13 +90,8 @@
       {
         "page_id": "p",
         "data": {
-          "text": "reconnect note"
-        }
-      },
-      {
-        "page_id": "p",
-        "data": {
-          "text": "extra note"
+          "note": "reconnect",
+          "text": "wrong reconnect text"
         }
       }
     ],

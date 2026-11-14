@@ -51,14 +51,24 @@
       "type": "updated_record",
       "page": "reading",
       "chat": "reading-chat",
-      "value": {
+      "value": "Synthetic Book",
+      "transition": {
         "before": [
-          "Synthetic Book",
-          "unread"
+          "unread",
+          "want_to_read",
+          "to_read",
+          "not_read",
+          "not_started",
+          "queued",
+          "to-read",
+          "want to read"
         ],
         "after": [
-          "Synthetic Book",
-          "read"
+          "read",
+          "finished",
+          "done",
+          "completed",
+          "have_read"
         ]
       }
     },

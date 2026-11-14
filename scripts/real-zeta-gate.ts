@@ -677,7 +677,14 @@ try {
   lateControl = JSON.parse(await Bun.file(control).text());
   await Bun.write(control, JSON.stringify({ ...lateControl, release_late_steer_commit: true }));
   await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
-  await page.getByText("could not steer: this message may not have been sent yet. it may still arrive with your next message.", { exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByText("this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.", { exact: true }).waitFor({ timeout: 20_000 });
+  if (screenshotDir) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-light"; });
+    await page.screenshot({ path: join(screenshotDir, "steer-notice-after-light-1440.png"), fullPage: true });
+    await page.locator("html").evaluate((root) => { root.dataset.fulcrumTheme = "github-dark"; });
+    await page.screenshot({ path: join(screenshotDir, "steer-notice-after-dark-1440.png"), fullPage: true });
+  }
   if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("stuck steer did not keep its draft");
   const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
   const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);

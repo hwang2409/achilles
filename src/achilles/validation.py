@@ -11,15 +11,21 @@ _SAFE_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ValidationError(ValueError):
-    def __init__(self, path: str, expected: str, code: str = "invalid_input"):
+    def __init__(
+        self, path: str, expected: str, code: str = "invalid_input", hint: str | None = None
+    ):
         self.code = code
         self.path = path
         self.expected = expected
+        self.hint = hint
         super().__init__(expected)
 
 
 def error_document(exc: ValidationError) -> dict[str, str]:
-    return {"code": exc.code, "path": exc.path, "expected": exc.expected}
+    document = {"code": exc.code, "path": exc.path, "expected": exc.expected}
+    if exc.hint is not None:
+        document["hint"] = exc.hint
+    return document
 
 
 def _pointer(parts: Sequence[Any], schema: Mapping[str, Any]) -> str:
