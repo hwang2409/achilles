@@ -31,31 +31,19 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
   return serverMode === "ask" || !autoApproveDefault ? "ask" : "allow";
 }
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, serverMode?: string | null, autoApproveDefault = true, onCreated?: (sessionId: string) => Promise<void> | void) {
+export class SessionNotFoundError extends Error {}
+
+export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null) {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
-  let id = storedId;
   let name: string | null = null;
-  let created = false;
-  if (id) {
-    try {
-      const resumed = await rebindPage(client, id, binding) as { session?: { name?: string | null } };
-      name = resumed.session?.name ?? null;
-    } catch (caught) {
-      const code = (caught as { data?: { code?: string } }).data?.code;
-      if (code !== "session_not_found") throw caught;
-      id = null;
-    }
+  try {
+    const resumed = await rebindPage(client, id, binding) as { session?: { name?: string | null } };
+    name = resumed.session?.name ?? null;
+  } catch (caught) {
+    if ((caught as { data?: { code?: string } }).data?.code === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
+    throw caught;
   }
-  if (!id) {
-    const result = await client.request("new_session", binding) as { session?: { session_id?: string; name?: string | null } };
-    id = result.session?.session_id ?? null;
-    name = result.session?.name ?? null;
-    created = true;
-    if (!id) throw new Error("zeta did not return a session id");
-    await onCreated?.(id);
-  }
-  const desiredMode = creationApprovalMode(serverMode, autoApproveDefault);
-  if (created || serverMode === "ask") return { id, name, ...await applyApprovalMode(client, id, desiredMode) };
+  if (serverMode === "ask") return { id, name, ...await applyApprovalMode(client, id, "ask") };
   const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
   return { id, name, approvalMode: settings.approval_mode, pending: false };
 }

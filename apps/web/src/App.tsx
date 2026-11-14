@@ -64,6 +64,7 @@ export function App() {
     {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : lastState} toggling={active.toggling || !connected} toggle={active.toggle} toggleError={active.toggleError} />}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.orphanError ? <div className="full-state"><p role="alert">{active.orphanError}</p><button className="primary" onClick={active.retryOrphan}>retry saving this chat</button></div>
+      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>

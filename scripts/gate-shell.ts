@@ -55,7 +55,10 @@ export async function gateShell(
     throw new Error("chat selection discarded the theme query");
 
   await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=foreign-session`);
-  await page.getByRole("alert").filter({ hasText: "chat not found on this page" }).waitFor({ timeout: 20_000 });
+  await page.getByRole("alert").filter({ hasText: "this chat no longer exists" }).waitFor({ timeout: 20_000 });
+  await page.getByRole("button", { name: "new chat", exact: true }).waitFor({ timeout: 20_000 });
+  if (new URL(page.url()).searchParams.get("chat") !== "foreign-session")
+    throw new Error("missing chat state discarded the selected chat query");
   await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=${firstSessionId}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession } from "./session";
+import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -34,17 +34,15 @@ describe("openHomeSession", () => {
     expect(creationApprovalMode("ask")).toBe("ask");
   });
 
-  test("retains a created id before loading its settings", async () => {
-    let retained = false;
-    let retainedAtSettings = false;
+  test("reports a missing resumed chat without creating a replacement", async () => {
+    const methods: string[] = [];
     const client = { request: async (method: string) => {
-      if (method === "new_session") return { session: { session_id: "created" } };
-      if (method === "session_settings") { retainedAtSettings = retained; return { model: "offline", approval_mode: "allow" }; }
-      throw new Error(`unexpected ${method}`);
+      methods.push(method);
+      throw { data: { code: "session_not_found" } };
     } };
-    const open = openHomeSession as (...args: unknown[]) => ReturnType<typeof openHomeSession>;
-    await open(client as never, null, "credential", "/tmp", "allow", true, () => { retained = true; });
-    expect(retainedAtSettings).toBeTrue();
+
+    await expect(openHomeSession(client as never, "missing", "credential", "/tmp", "allow")).rejects.toBeInstanceOf(SessionNotFoundError);
+    expect(methods).toEqual(["resume"]);
   });
 
   test("preserves a resumed chat mode when the server does not force ask", async () => {

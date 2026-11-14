@@ -2,21 +2,25 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { applyApprovalMode } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
-const stages = ["created", "registered", "approvalApplied"] as const;
+const stages = ["created", "registered", "approvalApplied", "mapped"] as const;
 type Stage = typeof stages[number];
 
-export type PendingChat = { sessionId: string; pageId: string; mode: "ask" | "allow"; stage: Stage };
-export type ChatCreationInput = { client: ZetaClient; pageId: string; credential: string; cwd: string; mode: "ask" | "allow" };
+export type PendingChat = { sessionId: string; pageId: string; mode: "ask" | "allow"; stage: Stage; expectedSessionId?: string | null; mappedSessionId?: string };
+export type ChatCreationInput = { client: ZetaClient; pageId: string; credential: string; cwd: string; mode: "ask" | "allow"; mapExpectedSessionId?: string | null };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem"> & Partial<Pick<globalThis.Storage, "removeItem">>;
 type Fetch = typeof fetch;
 
 function isPendingChat(value: unknown): value is PendingChat {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
+  const hasMapping = Object.hasOwn(record, "expectedSessionId")
+    && (record.expectedSessionId === null || typeof record.expectedSessionId === "string");
   return typeof record.sessionId === "string" && record.sessionId.length > 0
     && typeof record.pageId === "string" && record.pageId.length > 0
     && (record.mode === "ask" || record.mode === "allow")
-    && stages.includes(record.stage as Stage);
+    && stages.includes(record.stage as Stage)
+    && (!Object.hasOwn(record, "expectedSessionId") || hasMapping)
+    && (record.stage !== "mapped" || (hasMapping && typeof record.mappedSessionId === "string" && record.mappedSessionId.length > 0));
 }
 
 function readRecords(storage: Storage): PendingChat[] {
@@ -55,6 +59,14 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       if (approval.pending) throw new Error("the creation approval mode is waiting for the session to become idle");
       record = { ...record, stage: "approvalApplied" }; save(record);
     }
+    if (record.stage === "approvalApplied" && Object.hasOwn(record, "expectedSessionId")) {
+      const response = await request(`/api/pages/${record.pageId}/session`, {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: record.expectedSessionId, session_id: record.sessionId }),
+      });
+      if (!response.ok && response.status !== 409) throw new Error(`could not save session mapping (${response.status})`);
+      const mappedSessionId = response.status === 409 ? ((await response.json()) as { session_id: string }).session_id : record.sessionId;
+      record = { ...record, stage: "mapped", mappedSessionId }; save(record);
+    }
     clear(record.pageId);
     return record;
   };
@@ -71,7 +83,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         const result = await input.client.request("new_session", binding) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
-        record = { sessionId, pageId: input.pageId, mode: input.mode, stage: "created" }; save(record);
+        record = { sessionId, pageId: input.pageId, mode: input.mode, stage: "created", ...(Object.hasOwn(input, "mapExpectedSessionId") ? { expectedSessionId: input.mapExpectedSessionId } : {}) }; save(record);
       }
       return finish(input, record);
     })();
