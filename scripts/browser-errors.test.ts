@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { expectBrowserErrors } from "./browser-errors";
-type BrowserErrorExpectation = { method: string; url: string; status: number };
+import { expectBrowserErrors, type BrowserErrorExpectation } from "./browser-errors";
 
 type Fake = { listeners: Record<string, ((value: unknown) => void)[]>; on(event: string, listener: (value: unknown) => void): void; off(event: string, listener: (value: unknown) => void): void; emit(event: string, value: unknown): void };
 const fakePage = (): Fake => {
@@ -23,5 +22,14 @@ describe("expectBrowserErrors", () => {
   test("rejects a missing expected error", async () => {
     const page = fakePage();
     await expect(expectBrowserErrors(page, expected, async () => {})).rejects.toThrow("expected browser error did not occur");
+  });
+  test("reports an unexpected response after the step", async () => {
+    const page = fakePage();
+    let stepFinished = false;
+    await expect(expectBrowserErrors(page, expected, async () => {
+      page.emit("response", response("GET", "http://test/other", 503));
+      stepFinished = true;
+    })).rejects.toThrow("unexpected browser response: GET http://test/other 503");
+    expect(stepFinished).toBe(true);
   });
 });

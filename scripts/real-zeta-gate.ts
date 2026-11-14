@@ -238,6 +238,21 @@ try {
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor);
+  const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:02}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
+  await new Promise<void>((resolve, reject) => {
+    paginationSeed.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`pagination seed exited ${code}`)));
+  });
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  const initialChatRows = page.locator(".chat-row");
+  if (await initialChatRows.count() !== 50) throw new Error("chat pagination did not show its first 50 rows");
+  await initialChatRows.last().focus();
+  await page.keyboard.press("Tab");
+  const loadOlder = page.getByRole("button", { name: "load 50 older" });
+  if (!(await loadOlder.evaluate((button) => document.activeElement === button))) throw new Error("load older was not keyboard reachable");
+  await page.keyboard.press("Enter");
+  await waitFor(async () => (await initialChatRows.count()) > 50, "older chats");
+  await waitFor(async () => await initialChatRows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
   await gateTranscript(page, waitFor);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
@@ -690,18 +705,32 @@ try {
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
   let registerFailures = 0;
-  const registrationExpected = [{ method: "POST", url: "", status: 503 }];
+  const allowPageId = (await (await fetch(`${origin}/api/pages/allow`)).json()).id;
+  const registrationFailureUrl = `${origin}/api/pages/${allowPageId}/chats`;
+  const registrationFailurePath = new URL(registrationFailureUrl).pathname;
+  const registrationExpected = [{ method: "POST", url: registrationFailureUrl, status: 503, count: 2 }];
 
   await page.route("**/api/**", async (route) => {
-    if (registerFailures < 2 && route.request().url().endsWith("/chats")) { registrationExpected.forEach((item) => { item.url ||= route.request().url(); }); registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
-    else await route.continue();
+    const request = route.request();
+    const url = new URL(request.url());
+    if (registerFailures < 2 && request.method() === "POST" && url.origin === origin && url.pathname === registrationFailurePath) {
+      registerFailures += 1;
+      await route.fulfill({ status: 503, body: "synthetic registration failure" });
+    } else await route.fallback();
   });
   const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
-  await expectBrowserErrors(page, registrationExpected, async () => {
-    await page.getByRole("button", { name: "new chat" }).click();
-  });
   const retryRegistration = page.getByRole("button", { name: "retry creating chat" });
-  await retryRegistration.waitFor({ timeout: 20_000 });
+  const registrationFailure = (response: { request(): { method(): string }; url(): string; status(): number }) => response.request().method() === "POST" && response.url() === registrationFailureUrl && response.status() === 503;
+  await expectBrowserErrors(page, registrationExpected, async () => {
+    const firstFailure = page.waitForResponse(registrationFailure);
+    await page.getByRole("button", { name: "new chat" }).click();
+    await firstFailure;
+    await retryRegistration.waitFor({ timeout: 20_000 });
+    const secondFailure = page.waitForResponse(registrationFailure);
+    await retryRegistration.click();
+    await secondFailure;
+    await retryRegistration.waitFor({ timeout: 20_000 });
+  });
   const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
   if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)
     throw new Error("failed chat registration did not retain exactly one new zeta session");
@@ -721,9 +750,11 @@ try {
   await page.keyboard.press("Meta+b");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
+    const discoveryFailure = page.waitForResponse((response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
     await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+    await discoveryFailure;
   });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
