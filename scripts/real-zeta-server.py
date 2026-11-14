@@ -171,7 +171,9 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(content=[TextContent("focus complete")], delay=5),
         ScriptedTurn(
             content=[TextContent(f"cursor stream delta {index}\n") for index in range(8)],
-            tool_calls=[ToolCall("cursor-stream-proof", "read", {"path": str(cwd / "fixture.txt")})],
+            tool_calls=[ToolCall(
+                "cursor-stream-proof", "read", {"path": str(cwd / "fixture.txt")}
+            )],
             delay=0.03,
         ),
     ]
