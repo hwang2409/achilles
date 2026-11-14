@@ -135,24 +135,28 @@ async function waitForSpawnedServe(path: string, pid: number, ws: number) {
   }
   throw new Error("timed out waiting for zeta serve discovery");
 }
-async function chooseServe(requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
-  const attached = process.env.ACHILLES_ZETA_DISCOVERY;
-  const discovery = attached ? resolve(attached) : resolve(achillesHome, "run/serve.json");
+async function attachServe(discovery: string, requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
   const document = await readDiscovery(discovery) as Partial<Discovery> | null;
   const identity = document?.pid ? await processIdentity(document.pid) : null;
   const decision = serveDecision(document, requestedOrigin, identity?.command ?? null);
-  if (attached) {
-    if (decision.kind === "reuse") { console.log(`attached to zeta serve on port ${decision.document.port}`); return { origin: decision.origin, discovery }; }
-    if (decision.kind === "origin-missing") throw new Error(`attached zeta serve does not allow ${requestedOrigin}; restart it with: ${decision.command}`);
-    throw new Error(`ACHILLES_ZETA_DISCOVERY does not name a live zeta serve: ${discovery}`);
-  }
+  if (decision.kind === "reuse") { console.log(`attached to zeta serve on port ${decision.document.port}`); return { origin: decision.origin, discovery }; }
+  if (decision.kind === "origin-missing") throw new Error(`attached zeta serve does not allow ${requestedOrigin}; restart it with: ${decision.command}`);
+  throw new Error(`ACHILLES_ZETA_DISCOVERY does not name a live zeta serve: ${discovery}`);
+}
+async function chooseOwnedServe(discovery: string, requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
   let saved: ProcessIdentity | null = null;
   try { saved = JSON.parse(await readFile(resolve(cache, "zeta-serve.json"), "utf8")); } catch {}
-  if (saved && document?.pid === saved.pid && ownedProcessMatches(saved, identity) && decision.kind === "reuse") {
-    console.log(`reusing achilles zeta serve on port ${decision.document.port}`);
-    return { origin: decision.origin, discovery };
+  const savedIdentity = saved ? await processIdentity(saved.pid) : null;
+  const document = await readDiscovery(discovery) as Partial<Discovery> | null;
+  const discoveryIdentity = document?.pid === saved?.pid ? savedIdentity : document?.pid ? await processIdentity(document.pid) : null;
+  const decision = serveDecision(document, requestedOrigin, discoveryIdentity?.command ?? null);
+  if (saved && ownedProcessMatches(saved, savedIdentity)) {
+    if (document?.pid === saved.pid && decision.kind === "reuse") {
+      console.log(`reusing achilles zeta serve on port ${decision.document.port}`);
+      return { origin: decision.origin, discovery };
+    }
+    await stopAchilles(saved, "owned zeta serve");
   }
-  if (saved && ownedProcessMatches(saved, identity)) await stopAchilles(saved);
   const ws = await freePort(); let control = await freePort(); while (control === ws) control = await freePort(); await mkdir(cache, { recursive: true });
   const runDir = dirname(discovery); await mkdir(runDir, { recursive: true, mode: 0o700 }); await chmod(runDir, 0o700);
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
@@ -167,16 +171,21 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string; d
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
   console.log(`started achilles zeta serve on port ${ws}`); return { origin: alternate, discovery };
 }
+async function chooseServe(requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
+  const attached = process.env.ACHILLES_ZETA_DISCOVERY;
+  if (attached) return await attachServe(resolve(attached), requestedOrigin);
+  return await chooseOwnedServe(resolve(achillesHome, "run/serve.json"), requestedOrigin);
+}
 async function portPid(): Promise<number | null> {
   const result = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
   if (result.exitCode !== 0) return null;
   const pid = Number(result.stdout.toString().trim().split("\n")[0]);
   return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
-async function stopAchilles(saved: ProcessIdentity) {
+async function stopAchilles(saved: ProcessIdentity, name = "achilles") {
   process.kill(saved.pid, "SIGTERM");
   for (let i = 0; i < 100 && await processIdentity(saved.pid); i++) await Bun.sleep(100);
-  if (await processIdentity(saved.pid)) throw new Error(`pid ${saved.pid} did not stop; stop it with: kill ${saved.pid}`);
+  if (await processIdentity(saved.pid)) throw new Error(`${name} pid ${saved.pid} did not stop; stop it with: kill ${saved.pid}`);
 }
 async function startAchilles(appOrigin: string, stamp: string) {
   const stateFile = resolve(cache, "achilles.json");

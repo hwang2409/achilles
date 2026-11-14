@@ -233,7 +233,9 @@ process.exit(0);
     expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
     expect(startedServe?.[startedServe.indexOf("--ws-discovery") + 1]).toBe(resolve(achillesHome, "run/serve.json"));
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
-    zetaPid = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")).pid;
+    const firstZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    zetaPid = firstZetaState.pid;
+    discovered.push(firstZetaState);
     expect(callsAfterFirst.some((args) => args[0] === "mcp" && ["add", "remove"].includes(args[1]) && !args.includes("--help"))).toBe(false);
     const firstState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8")) as ProcessIdentity & { stamp: string };
     managed.push(firstState);
@@ -246,6 +248,22 @@ process.exit(0);
     const callsAfterSecond = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
     expect(callsAfterSecond.filter((args) => args[0] === "serve")).toHaveLength(1);
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
+
+    const ownedDiscovery = resolve(achillesHome, "run/serve.json");
+    await writeFile(ownedDiscovery, "not json");
+    const afterCorruptDiscovery = await runDev();
+    expect(afterCorruptDiscovery.exitCode, afterCorruptDiscovery.stderr).toBe(0);
+    expect(alive(firstZetaState.pid), `owned zeta serve pid ${firstZetaState.pid} survived corrupt discovery`).toBe(false);
+    const secondZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    discovered.push(secondZetaState);
+
+    await rm(ownedDiscovery);
+    const afterMissingDiscovery = await runDev();
+    expect(afterMissingDiscovery.exitCode, afterMissingDiscovery.stderr).toBe(0);
+    expect(alive(secondZetaState.pid), `owned zeta serve pid ${secondZetaState.pid} survived missing discovery`).toBe(false);
+    const finalZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    discovered.push(finalZetaState);
+    zetaPid = finalZetaState.pid;
 
     await writeFile(webStamp, "test-web-stamp-2");
     const third = await runDev();
