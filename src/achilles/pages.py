@@ -15,6 +15,10 @@ from typing import Any
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
+_COLLECTION_KEY_PATTERN = TOOL_BUNDLE_SCHEMA["properties"]["implementation"]["properties"][
+    "collection"
+]["pattern"]
+
 _LAYOUT_BLOCK_SCHEMA = {
     "oneOf": [
         {
@@ -63,6 +67,34 @@ _LAYOUT_BLOCK_SCHEMA = {
             "required": ["type", "label", "value"],
             "additionalProperties": False,
         },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "metric"},
+                "label": {"type": "string"},
+                "collection": {"type": "string"},
+                "count": {"const": True},
+                "where": {
+                    "type": "object",
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "pattern": _COLLECTION_KEY_PATTERN,
+                        },
+                        "equals": {
+                            "type": ["string", "number", "boolean", "null"],
+                            "description": (
+                                "Exact JSON scalar match. Null also matches a missing field."
+                            ),
+                        },
+                    },
+                    "required": ["field", "equals"],
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["type", "label", "collection", "count"],
+            "additionalProperties": False,
+        },
     ]
 }
 LAYOUT_SCHEMA = {
@@ -77,8 +109,8 @@ UPDATE_LAYOUT_SCHEMA = {
         "layout": {
             **LAYOUT_SCHEMA,
             "description": (
-                "The complete replacement layout from achilles__inspect_page; "
-                "any block not included is removed."
+                "The complete stored layout from achilles__inspect_page; any block you "
+                "leave out is deleted."
             ),
             "properties": {
                 "blocks": {
@@ -94,8 +126,8 @@ UPDATE_LAYOUT_SCHEMA = {
             "type": "integer",
             "minimum": 1,
             "description": (
-                "The layout version from achilles__inspect_page; on a conflict, inspect "
-                "again and retry."
+                "The layout_version from achilles__inspect_page; pass it as "
+                "expected_version. On a conflict, inspect again and retry."
             ),
         },
     },
@@ -329,10 +361,54 @@ class PageStore:
         document = json.loads(row[2]) if row[2] else {"blocks": []}
         return row[0], row[1], document
 
+    @staticmethod
+    def _computed_layout(
+        db: sqlite3.Connection, page_id: str, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        for block in document.get("blocks", []):
+            if block.get("type") != "metric" or block.get("count") is not True:
+                continue
+            where = block.get("where")
+            if where is None:
+                count = db.execute(
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=?",
+                    (page_id, block["collection"]),
+                ).fetchone()[0]
+            else:
+                path = f'$."{where["field"]}"'
+                value = where["equals"]
+                if value is None:
+                    value_type = "null"
+                elif isinstance(value, bool):
+                    value_type = "boolean"
+                elif isinstance(value, (int, float)):
+                    value_type = "number"
+                else:
+                    value_type = "text"
+                count = db.execute(
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? "
+                    "AND json_extract(document, ?) IS json_extract(?, '$') "
+                    "AND CASE COALESCE(json_type(document, ?), 'null') "
+                    "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' "
+                    "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' "
+                    "ELSE COALESCE(json_type(document, ?), 'null') END = ?",
+                    (
+                        page_id,
+                        block["collection"],
+                        path,
+                        json.dumps(value),
+                        path,
+                        path,
+                        value_type,
+                    ),
+                ).fetchone()[0]
+            block["value"] = count
+        return document
+
     def layout(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             active = self._active_layout(db, page_id)
-        return active[2] if active else {"blocks": []}
+            return self._computed_layout(db, page_id, active[2]) if active else {"blocks": []}
 
     def inspect_page(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
@@ -341,28 +417,30 @@ class PageStore:
                 raise KeyError(page_id)
             active = self._active_layout(db, page_id)
             assert active is not None
+            version, digest, document = active
+            computed = self._computed_layout(
+                db,
+                page_id,
+                {"blocks": [dict(block) for block in document.get("blocks", [])]},
+            )
+            metric_values = [
+                {"block": index, "value": block["value"]}
+                for index, block in enumerate(computed["blocks"])
+                if block.get("type") == "metric" and block.get("count") is True
+            ]
             counts = db.execute(
                 "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
                 (page_id,),
             ).fetchall()
-        version, digest, document = active
         tools = self.page_tools(page_id)
         return {
             "route": row["route"],
             "title": row["title"],
             "create_mode": bool(row["create_mode"]),
-            "layout": {
-                "version": version,
-                "digest": digest,
-                "blocks": [
-                    {
-                        key: block[key]
-                        for key in ("type", "title", "tool", "collection")
-                        if key in block
-                    }
-                    for block in document.get("blocks", [])
-                ],
-            },
+            "layout": document,
+            "layout_version": version,
+            "layout_digest": digest,
+            "metric_values": metric_values,
             "tools": [
                 {
                     "name": tool["name"],

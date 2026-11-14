@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from achilles.pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, PageStore, validate_layout
 from achilles.records import call_record
 from achilles.tools import ValidationError
+from achilles.validation import error_document
 
 _BUNDLE = {
     "format_version": 1,
@@ -53,6 +54,20 @@ def _update_page(store: PageStore) -> str:
         ({"blocks": [{"type": "text", "text": "ok"}]}, set()),
         ({"blocks": [{"type": "detail", "title": "x", "fields": ["id"]}]}, set()),
         ({"blocks": [{"type": "metric", "label": "runs", "value": "3"}]}, set()),
+        (
+            {
+                "blocks": [
+                    {
+                        "type": "metric",
+                        "label": "reading",
+                        "collection": "books",
+                        "count": True,
+                        "where": {"field": "status", "equals": "reading"},
+                    }
+                ]
+            },
+            set(),
+        ),
         ({"blocks": [{"type": "list", "title": "runs", "collection": "runs"}]}, set()),
         ({"blocks": [{"type": "form", "title": "add", "tool": "add_run"}]}, {"add_run"}),
     ],
@@ -75,6 +90,168 @@ def test_invalid_layouts_fail_catalog_and_production(layout):
     with pytest.raises(ValidationError) as caught:
         validate_layout(layout)
     assert caught.value.code == "invalid_input"
+
+
+@pytest.mark.parametrize("equals", [None, True, 1, 1.5, "reading"])
+def test_computed_metric_schema_accepts_each_json_scalar(equals):
+    validate_layout(
+        {
+            "blocks": [
+                {
+                    "type": "metric",
+                    "label": "matching",
+                    "collection": "books",
+                    "count": True,
+                    "where": {"field": "status", "equals": equals},
+                }
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("metric", "bad_value"),
+    [
+        (
+            {
+                "type": "metric",
+                "label": "bad field",
+                "collection": "books",
+                "count": True,
+                "where": {"field": 'status") OR 1=1 --', "equals": "reading"},
+            },
+            'status") OR 1=1 --',
+        ),
+        (
+            {
+                "type": "metric",
+                "label": "bad equals",
+                "collection": "books",
+                "count": True,
+                "where": {"field": "status", "equals": {"nested": True}},
+            },
+            {"nested": True},
+        ),
+        (
+            {
+                "type": "metric",
+                "label": "extra",
+                "collection": "books",
+                "count": True,
+                "extra": "secret",
+            },
+            "secret",
+        ),
+    ],
+)
+def test_computed_metric_schema_rejects_unsafe_input_without_echo(metric, bad_value):
+    layout = {"blocks": [metric]}
+    assert not Draft202012Validator(LAYOUT_SCHEMA).is_valid(layout)
+    with pytest.raises(ValidationError) as caught:
+        validate_layout(layout)
+    error = error_document(caught.value)
+    assert set(error) == {"code", "path", "expected"}
+    assert json.dumps(bad_value) not in json.dumps(error)
+
+
+def test_computed_metrics_count_records_at_read_time(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    layout = {
+        "blocks": [
+            {"type": "metric", "label": "all", "collection": "books", "count": True},
+            {
+                "type": "metric",
+                "label": "reading",
+                "collection": "books",
+                "count": True,
+                "where": {"field": "status", "equals": "reading"},
+            },
+            {"type": "metric", "label": "missing", "collection": "other", "count": True},
+        ]
+    }
+    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    store.set_create_mode(page["id"], True)
+    assert store.update_layout(page["id"], layout, 1)[0] == 2
+    with store.transaction() as db:
+        for index, document in enumerate(
+            ({"status": "reading"}, {"status": "done"}, {"status": "reading"})
+        ):
+            db.execute(
+                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (page["id"], "books", str(index), 1, json.dumps(document), "now", "now"),
+            )
+
+    blocks = store.layout(page["id"])["blocks"]
+    assert [block["value"] for block in blocks] == [3, 2, 0]
+    inspected = store.inspect_page(page["id"])
+    assert inspected["metric_values"] == [
+        {"block": 0, "value": 3},
+        {"block": 1, "value": 2},
+        {"block": 2, "value": 0},
+    ]
+
+
+def test_inspected_computed_metric_layout_round_trips_to_update(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    layout = {
+        "blocks": [{"type": "metric", "label": "books", "collection": "books", "count": True}]
+    }
+    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    store.set_create_mode(page["id"], True)
+
+    inspected = store.inspect_page(page["id"])
+    assert inspected["layout"] == layout
+    assert store.update_layout(page["id"], inspected["layout"], inspected["layout_version"])[0] == 2
+
+
+def test_computed_metric_equals_preserves_json_scalar_types(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    equals_values = [True, False, "1", 1, None]
+    layout = {
+        "blocks": [
+            {
+                "type": "metric",
+                "label": str(value),
+                "collection": "items",
+                "count": True,
+                "where": {"field": "value", "equals": value},
+            }
+            for value in equals_values
+        ]
+    }
+    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    with store.transaction() as db:
+        for index, document in enumerate(
+            (
+                {},
+                {"value": None},
+                {"value": True},
+                {"value": 1},
+                {"value": 1.0},
+                {"value": "true"},
+                {"value": False},
+                {"value": 0},
+                {"value": ""},
+                {"value": "1"},
+            )
+        ):
+            db.execute(
+                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (page["id"], "items", str(index), 1, json.dumps(document), "now", "now"),
+            )
+
+    assert [block["value"] for block in store.layout(page["id"])["blocks"]] == [
+        1,
+        1,
+        1,
+        2,
+        2,
+    ]
 
 
 def test_create_page_schema_rejects_reserved_route_through_store(tmp_path):
@@ -224,7 +401,7 @@ def test_update_layout_preserves_records_tools_and_chats(tmp_path):
     layout = {"blocks": [{"type": "text", "text": "updated"}]}
     assert store.update_layout(page_id, layout, 1)[0] == 2
     assert store.layout(page_id) == layout
-    assert store.inspect_page(page_id)["layout"]["version"] == 2
+    assert store.inspect_page(page_id)["layout_version"] == 2
     with store._connect() as db:
         after = {
             table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
@@ -244,7 +421,7 @@ def test_null_active_layout_version_reads_version_one_not_latest(tmp_path):
             (page_id, 2, "inactive", json.dumps(inactive), "later"),
         )
     assert store.layout(page_id)["blocks"][0]["type"] == "list"
-    assert store.inspect_page(page_id)["layout"]["version"] == 1
+    assert store.inspect_page(page_id)["layout_version"] == 1
 
 
 def test_save_session_compare_and_set_has_one_winner(tmp_path):

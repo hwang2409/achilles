@@ -170,7 +170,7 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
     value = json.loads(text)
     assert len(text.encode()) <= 8 * 1024
     assert value["truncated"] is True
-    assert set(value["omitted"]) == {"blocks", "tools", "collections"}
+    assert set(value["omitted"]) == {"blocks", "metric_values", "tools", "collections"}
     assert sum(value["omitted"].values()) > 0
 
 
@@ -189,7 +189,7 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     )
     value = json.loads(summary["content"][0]["text"])
     assert value["route"] == "/reading"
-    assert value["layout"]["version"] == 1
+    assert value["layout_version"] == 1
     assert value["tools"][0]["name"] == "add_book"
     assert value["collections"] == {}
     serialized = json.dumps(value)
@@ -700,7 +700,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     before = json.loads(inspected["content"][0]["text"])
-    assert before["layout"]["version"] == 1
+    assert before["layout_version"] == 1
 
     layout = {"blocks": [{"type": "detail", "title": "changed", "fields": ["id"]}]}
     updated = mcp(
@@ -712,7 +712,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": layout,
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -726,8 +726,8 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     after = json.loads(inspected["content"][0]["text"])
-    assert after["layout"]["version"] == 2
-    assert after["layout"]["blocks"] == [{"type": "detail", "title": "changed"}]
+    assert after["layout_version"] == 2
+    assert after["layout"] == layout
 
     stale = mcp(
         client,
@@ -738,7 +738,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": {"blocks": []},
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -768,19 +768,37 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     catalog = mcp(client, page_headers, 5, "tools/list", {})
     update_tool = next(tool for tool in catalog["tools"] if tool["name"] == "update_layout")
     assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
-    assert "any block not included is removed" in update_tool["description"]
-    assert "First call achilles__inspect_page" in update_tool["description"]
+    assert update_tool["description"] == (
+        "REPLACES the whole layout; any block you leave out is deleted. First call "
+        "achilles__inspect_page, copy its `layout` exactly, change only what the user asked "
+        "(insert, reorder, edit, or remove blocks), and pass the full layout with "
+        "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
+        "To change another page, open that page's chat."
+    )
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]
-        == "The complete replacement layout from achilles__inspect_page; "
-        "any block not included is removed."
+        == "The complete stored layout from achilles__inspect_page; any block you leave out "
+        "is deleted."
+    )
+    assert (
+        update_tool["inputSchema"]["properties"]["expected_version"]["description"]
+        == "The layout_version from achilles__inspect_page; pass it as expected_version. "
+        "On a conflict, inspect again and retry."
     )
     assert (
         "full ordered block list"
         in update_tool["inputSchema"]["properties"]["layout"]["properties"]["blocks"]["description"]
     )
     inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
-    assert "complete stored document that round-trips unchanged" in inspect_tool["description"]
+    assert "layout is the complete stored layout to edit" in inspect_tool["description"]
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout"]["description"]
+        == "The complete stored layout to edit with update_layout."
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]
+        == "The value to pass as update_layout expected_version."
+    )
 
     layout = {"blocks": [{"type": "text", "text": "changed"}]}
     updated = mcp(
