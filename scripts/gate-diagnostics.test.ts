@@ -23,13 +23,14 @@ test.each([
 ])("gate wait: $name", async ({ fail }) => {
   const ring = createFrameRing();
   ring.record(0, "sent", JSON.stringify({ id: 7, method: "send", params: { delivery_id: "delivery-7", text: fake } }));
-  const gateWait = createGateWait(ring.snapshot, async () => '{"request_count":7}');
+  ring.record(0, "received", JSON.stringify({ method: "event", params: { event: "agent_start" } }));
+  const gateWait = createGateWait(ring.snapshot, async () => '{"request_count":7,"turn_barrier":"held"}');
   if (!fail) {
     expect(await gateWait(async () => "ready")).toBe("ready");
     return;
   }
   expect(gateWait(async () => { throw new Error("Timeout 30ms exceeded"); })).rejects.toThrow(
-    'Timeout 30ms exceeded; websocket frames=[{"direction":"sent","method":"send","delivery_id":"delivery-7"}]; backend catalog={"request_count":7}',
+    'Timeout 30ms exceeded; websocket frames=[{"direction":"sent","method":"send","delivery_id":"delivery-7"},{"direction":"received","method":"event","event":"agent_start"}]; backend catalog={"request_count":7,"turn_barrier":"held"}',
   );
 });
 
