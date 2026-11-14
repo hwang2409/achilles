@@ -169,7 +169,7 @@ function InteractiveVimComposer(props: ComposerProps) {
     };
     view.contentDOM.addEventListener("focus", onFocus);
     view.contentDOM.addEventListener("blur", onBlur);
-    view.dom.addEventListener("keydown", onKeyDown, true);
+    host.current.addEventListener("keydown", onKeyDown, true);
     if (cm) Vim.handleKey(cm, "i", "user");
     if (state !== "read-only") view.focus();
     syncVimState(view);
@@ -188,7 +188,7 @@ function InteractiveVimComposer(props: ComposerProps) {
     document.addEventListener("keydown", onPageKeyDown);
     return () => {
       document.removeEventListener("keydown", onPageKeyDown);
-      view.dom.removeEventListener("keydown", onKeyDown, true);
+      host.current?.removeEventListener("keydown", onKeyDown, true);
       cm?.off("vim-command-done", commandDone);
       view.destroy(); viewRef.current = null;
     };
