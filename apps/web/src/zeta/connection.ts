@@ -1,48 +1,68 @@
 // adapted from gamma@6cd69671 src/connection.ts
 import { createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
 
-/**
- * Connection states. Every waiting state carries `attempt` (failures in a row) and `retryAt` (epoch ms of the next
- * automatic try). `lost` marks failures that follow a connection this page had, so the UI can say "connection lost".
- */
+const TAKEOVER_RETRY_LIMIT = 5;
+
+type TakeoverFailure = "busy_bound" | "error";
+
+/** Every waiting state carries the number of failures and the next automatic retry time. */
 export type ConnectionState =
   | { phase: "connecting"; attempt: number; lost: boolean; lastFailure?: "unresponsive" }
   | { phase: "connected"; authority: ZetaRole }
+  | { phase: "taking_control"; authority: "observer"; attempt: number }
+  | { phase: "takeover_failed"; authority: "observer"; reason: TakeoverFailure }
   | { phase: "not_running"; attempt: number; retryAt: number; lost: boolean }
   | { phase: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; attempt: number; retryAt: number; lost: boolean }
   | { phase: "dropped"; attempt: number; retryAt: number; lost: true }
-  | { phase: "unresponsive" | "incompatible"; attempt: number; retryAt: number; lost: boolean };
+  | { phase: "unresponsive" | "incompatible" | "capacity"; attempt: number; retryAt: number; lost: boolean };
 
 export type ConnectionEvent =
   | { type: "attempt" }
   | { type: "connected"; authority: ZetaRole }
+  | { type: "takeover_started" }
+  | { type: "takeover_cancelled" }
+  | { type: "takeover_outcome"; outcome: "success" | "busy" | "error" }
   | { type: "not_running"; now: number }
   | { type: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; now: number }
-  | { type: "unresponsive" | "incompatible"; now: number }
+  | { type: "unresponsive" | "incompatible" | "capacity"; now: number }
   | { type: "closed"; now: number };
-
-/** The command that starts a server this page may connect to. The origin is exact: localhost and 127.0.0.1 differ. */
 
 export const initialConnection: ConnectionState = { phase: "connecting", attempt: 0, lost: false };
 
-/** 0.5 s, 1 s, 2 s, 4 s, 8 s, then every 10 s: quick after a blip, and cheap while the server stays down. */
+/** 0.5 s, 1 s, 2 s, 4 s, 8 s, then every 10 s. */
 export const backoff = (attempt: number) => Math.min(10_000, 500 * 2 ** Math.max(0, attempt - 1));
 
 const attemptOf = (state: ConnectionState) => ("attempt" in state ? state.attempt : 0);
-const lostOf = (state: ConnectionState) => state.phase === "connected" || ("lost" in state && state.lost);
+const hasLiveClient = (state: ConnectionState) => state.phase === "connected" || state.phase === "taking_control" || state.phase === "takeover_failed";
+const lostOf = (state: ConnectionState) => hasLiveClient(state) || ("lost" in state && state.lost);
+
+function reduceTakeover(state: ConnectionState, event: Extract<ConnectionEvent, { type: "takeover_started" | "takeover_cancelled" | "takeover_outcome" }>): ConnectionState {
+  if (event.type === "takeover_started")
+    return (state.phase === "connected" && state.authority === "observer") || state.phase === "takeover_failed" ? { phase: "taking_control", authority: "observer", attempt: 0 } : state;
+  if (event.type === "takeover_cancelled")
+    return state.phase === "taking_control" ? { phase: "connected", authority: "observer" } : state;
+  if (state.phase !== "taking_control") return state;
+  if (event.outcome === "success") return { phase: "connected", authority: "controller" };
+  if (event.outcome === "error") return { phase: "takeover_failed", authority: "observer", reason: "error" };
+  const attempt = state.attempt + 1;
+  return attempt > TAKEOVER_RETRY_LIMIT
+    ? { phase: "takeover_failed", authority: "observer", reason: "busy_bound" }
+    : { ...state, attempt };
+}
 
 export function reduceConnection(state: ConnectionState, event: ConnectionEvent): ConnectionState {
+  if (event.type === "takeover_started" || event.type === "takeover_cancelled" || event.type === "takeover_outcome") return reduceTakeover(state, event);
   const lost = lostOf(state);
   switch (event.type) {
     case "attempt":
-      return state.phase === "connected" ? state : { phase: "connecting", attempt: attemptOf(state), lost, ...(state.phase === "unresponsive" || (state.phase === "connecting" && state.lastFailure === "unresponsive") ? { lastFailure: "unresponsive" as const } : {}) };
+      return hasLiveClient(state) ? state : { phase: "connecting", attempt: attemptOf(state), lost, ...(state.phase === "unresponsive" || (state.phase === "connecting" && state.lastFailure === "unresponsive") ? { lastFailure: "unresponsive" as const } : {}) };
     case "connected":
       return { phase: "connected", authority: event.authority };
     case "closed":
-      return state.phase === "connected" ? { phase: "dropped", attempt: 1, retryAt: event.now + backoff(1), lost: true } : state;
-
+      if (state.phase === "taking_control" || state.phase === "takeover_failed") return { ...state };
+      return hasLiveClient(state) ? { phase: "dropped", attempt: 1, retryAt: event.now + backoff(1), lost: true } : state;
     default: {
-      if (state.phase !== "connecting") return state; // failures only finish an attempt in flight
+      if (state.phase !== "connecting") return state;
       const attempt = state.attempt + 1;
       const retryAt = event.now + backoff(attempt);
       if (event.type === "auth_failed") return { phase: "auth_failed", reason: event.reason, origins: event.origins, attempt, retryAt, lost };
@@ -52,7 +72,6 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
 }
 
 export type ConnectionDeps = {
-  /** The page origin the server's `--ws-origin` allowlist must contain. */
   origin: string;
   discover?: () => Promise<ZetaDiscovery | null>;
   connect?: (discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) => Promise<ZetaClient>;
@@ -65,21 +84,21 @@ export type ConnectionDeps = {
 
 export type Connection = {
   readonly state: ConnectionState;
-  /** The live client while `state.phase` is `connected`, else `null`. */
   readonly client: ZetaClient | null;
-  /** The websocket port of the last server found, so a restart hint names it; 8765 (zeta's documented port) before any. */
   readonly port: number;
   subscribe(listener: () => void): () => void;
-  /** Skips the wait before the next automatic try. */
   retryNow(): void;
+  takeControl(): void;
+  cancelTakeControl(): void;
   stop(): void;
 };
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "serve_observers"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
-
 export const supportsFeature = (client: ZetaClient, feature: string) => client.features.includes(feature);
+
+type OpenResult = { kind: "connected"; client: ZetaClient } | { kind: "busy" | "unresponsive" | "version_mismatch" | "rejected" };
 
 async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) {
   const url = new URL(discovery.url);
@@ -99,17 +118,26 @@ async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (c
   return client;
 }
 
-/**
- * Finds the server through the dev-server handoff, connects, and reconnects with backoff after any failure or drop.
- * A fresh client per connection means a fresh store per session, so a reconnect rebuilds history instead of
- * appending to what the old socket left behind.
- */
+async function openRole(discovery: ZetaDiscovery, role: ZetaRole, connect: NonNullable<ConnectionDeps["connect"]>, helloTimeoutMs: number): Promise<OpenResult> {
+  let timedOut = false;
+  let closePending = () => {};
+  let connectTimeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const opened = await Promise.race([
+      connect(discovery, role, (close) => { closePending = close; }).then((value) => { if (timedOut) value.close(); return value; }),
+      new Promise<never>((_, reject) => { connectTimeout = setTimeout(() => { timedOut = true; closePending(); reject(new Error("hello timeout")); }, helloTimeoutMs); }),
+    ]);
+    return { kind: "connected", client: opened };
+  } catch (error) {
+    if (timedOut) return { kind: "unresponsive" };
+    const kind = error instanceof ZetaError ? error.kind : "connect_failed";
+    return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
+  } finally { clearTimeout(connectTimeout); }
+}
+
 export function createConnection({
   origin,
-  discover = async () => {
-    const response = await fetch("/api/zeta/discovery", { cache: "no-store" });
-    return response.ok ? await response.json() : null;
-  },
+  discover = async () => { const response = await fetch("/api/zeta/discovery", { cache: "no-store" }); return response.ok ? await response.json() : null; },
   connect = connectRole,
   now = Date.now,
   setTimer = (callback, ms) => setTimeout(callback, ms),
@@ -124,68 +152,66 @@ export function createConnection({
   let generation = 0;
   let stopped = false;
   const listeners = new Set<() => void>();
+  const publish = (next: ConnectionState) => { if (next !== state) { state = next; listeners.forEach((listener) => listener()); } };
   const send = (event: ConnectionEvent) => {
-    const next = reduceConnection(state, event);
-    if (next === state) return;
-    state = next;
-    if ("retryAt" in state) schedule(state.retryAt - now());
-    listeners.forEach((listener) => listener());
+    publish(reduceConnection(state, event));
+    if ("retryAt" in state && !(state.phase === "capacity" && state.attempt > TAKEOVER_RETRY_LIMIT)) schedule(state.retryAt - now());
   };
   const schedule = (ms: number) => {
     if (timer !== null) clearTimer(timer);
     timer = setTimer(() => { timer = null; void attempt(); }, Math.max(0, ms));
   };
-  const attempt = async () => {
-    if (stopped || state.phase === "connected") return;
-    const mine = ++generation;
-    send({ type: "attempt" });
-    const current = () => mine === generation && !stopped;
-    let discovery: ZetaDiscovery | null;
-    try {
-      discovery = await discover();
-    } catch {
-      discovery = null; // the dev server itself is unreachable: same remedy as a stopped zeta
-    }
-    if (!current()) return;
-    if (!discovery) return send({ type: "not_running", now: now() });
-    port = Number(new URL(discovery.url).port) || port;
-    // An origin the allowlist lacks fails at the upgrade with no detail, so name it before trying.
-    if (discovery.origins.length && !discovery.origins.includes(origin))
-      return send({ type: "auth_failed", reason: "origin", origins: discovery.origins, now: now() });
-    type OpenResult = { kind: "connected"; client: ZetaClient } | { kind: "busy" } | { kind: "unresponsive" } | { kind: "version_mismatch" } | { kind: "rejected" };
-    const openRole = async (role: ZetaRole): Promise<OpenResult> => {
-      let timedOut = false;
-      let closePending = () => {};
-      let connectTimeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const opened = await Promise.race([
-          connect(discovery, role, (close) => { closePending = close; }).then((value) => { if (timedOut) value.close(); return value; }),
-          new Promise<never>((_, reject) => { connectTimeout = setTimeout(() => { timedOut = true; closePending(); reject(new Error("hello timeout")); }, helloTimeoutMs); }),
-        ]);
-        return { kind: "connected", client: opened };
-      } catch (error) {
-        if (timedOut) return { kind: "unresponsive" };
-        const kind = error instanceof ZetaError ? error.kind : "connect_failed";
-        return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
-      } finally { clearTimeout(connectTimeout); }
-    };
-    const authority = "controller" as const;
-    const opened = await openRole(authority);
-    if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    if (opened.kind === "busy") return send({ type: "incompatible", now: now() });
+  const installClient = (next: ZetaClient, authority: ZetaRole, takingOver: boolean) => {
+    if (takingOver) client?.close();
+    client = next;
+    next.onClose(() => { if (client === next) { client = null; send({ type: "closed", now: now() }); } });
+    send(takingOver ? { type: "takeover_outcome", outcome: "success" } : { type: "connected", authority });
+  };
+  const discardStale = (opened: OpenResult, current: () => boolean) => {
+    if (current()) return false;
+    if (opened.kind === "connected") opened.client.close();
+    return true;
+  };
+  const finishTakeover = (opened: OpenResult) => {
+    if (opened.kind === "connected") return installClient(opened.client, "controller", true);
+    send({ type: "takeover_outcome", outcome: opened.kind === "busy" ? "busy" : "error" });
+    if (state.phase === "taking_control") schedule(backoff(state.attempt));
+  };
+  const finishObserverOpen = (opened: OpenResult) => {
+    if (opened.kind === "connected") return installClient(opened.client, "observer", false);
     if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
-    // The process runs and the origin is allowed, so a refused upgrade means the token was refused.
-    if (opened.kind === "rejected") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
-    const next = opened.client;
-    if (!current()) return next.close();
-    client = next;
-    next.onClose(() => {
-      if (client !== next) return;
-      client = null;
-      send({ type: "closed", now: now() });
-    });
-    send({ type: "connected", authority });
+    send({ type: "capacity", now: now() });
+  };
+  const finishControllerOpen = async (opened: OpenResult, discovery: ZetaDiscovery, takingOver: boolean, current: () => boolean) => {
+    if (discardStale(opened, current)) return;
+    if (takingOver) return finishTakeover(opened);
+    if (opened.kind === "connected") return installClient(opened.client, "controller", false);
+    if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
+    if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
+    if (opened.kind !== "busy") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
+    if (!discovery.observer_token) return send({ type: "capacity", now: now() });
+    const observer = await openRole(discovery, "observer", connect, helloTimeoutMs);
+    if (!discardStale(observer, current)) finishObserverOpen(observer);
+  };
+  const failAttempt = (event: ConnectionEvent, takingOver: boolean) => {
+    if (takingOver) send({ type: "takeover_outcome", outcome: "error" });
+    else send(event);
+  };
+  const attempt = async () => {
+    const takingOver = state.phase === "taking_control";
+    if (stopped || (hasLiveClient(state) && !takingOver)) return;
+    const mine = ++generation;
+    if (!takingOver) send({ type: "attempt" });
+    const current = () => mine === generation && !stopped;
+    let discovery: ZetaDiscovery | null;
+    try { discovery = await discover(); } catch { discovery = null; }
+    if (!current()) return;
+    if (!discovery) return failAttempt({ type: "not_running", now: now() }, takingOver);
+    port = Number(new URL(discovery.url).port) || port;
+    if (discovery.origins.length && !discovery.origins.includes(origin))
+      return failAttempt({ type: "auth_failed", reason: "origin", origins: discovery.origins, now: now() }, takingOver);
+    await finishControllerOpen(await openRole(discovery, "controller", connect, helloTimeoutMs), discovery, takingOver, current);
   };
   void attempt();
   return {
@@ -194,18 +220,26 @@ export function createConnection({
     get port() { return port; },
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     retryNow() {
-      if (state.phase === "connected" || state.phase === "connecting" || stopped) return;
+      if (state.phase === "takeover_failed") { send({ type: "takeover_started" }); schedule(0); return; }
+      if (hasLiveClient(state) || state.phase === "connecting" || stopped) return;
       if (timer !== null) { clearTimer(timer); timer = null; }
-      // A slot may have freed since both roles were refused: start again as a fresh open does, controller first.
       void attempt();
     },
-    stop() {
-      stopped = true;
+    takeControl() {
+      if (state.phase !== "connected" || state.authority !== "observer" || stopped) return;
+      send({ type: "takeover_started" });
+      schedule(0);
+    },
+    cancelTakeControl() {
+      if (state.phase !== "taking_control") return;
       generation++;
+      if (timer !== null) { clearTimer(timer); timer = null; }
+      send({ type: "takeover_cancelled" });
+    },
+    stop() {
+      stopped = true; generation++;
       if (timer !== null) clearTimer(timer);
-      const open = client;
-      client = null;
-      open?.close();
+      const open = client; client = null; open?.close();
     },
   };
 }

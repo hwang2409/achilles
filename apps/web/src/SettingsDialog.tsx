@@ -12,6 +12,7 @@ import {
   type UiFont,
 } from "./settings";
 import "./settings-dialog.css";
+import { useCanWrite } from "./write-access";
 
 const swatches = ["bg", "fg", "accent", "ok", "warn", "danger"];
 const uiFonts: Array<[UiFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "system"]];
@@ -63,8 +64,8 @@ function Segments<T extends string | number>({ label, value, choices, onChange }
   </div>;
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange(value: boolean): void }) {
-  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
+function Toggle({ label, checked, onChange, disabled = false }: { label: string; checked: boolean; onChange(value: boolean): void; disabled?: boolean }) {
+  return <button className="settings-toggle" type="button" disabled={disabled} role="switch" aria-label={label} aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
 }
 
 function Row({ title, description, children }: { title: string; description: string; children: ReactNode }) {
@@ -74,6 +75,7 @@ function Row({ title, description, children }: { title: string; description: str
 export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { open: boolean; onClose(): void; serverForcesAsk?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
+  const canWrite = useCanWrite();
   useLayoutEffect(() => {
     const node = dialog.current;
     if (!node) return;
@@ -102,9 +104,9 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
         <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} onChange={(uiFont) => updateSettings({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
         <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} onChange={(size) => updateSettings({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} onChange={(density) => updateSettings({ density })} /></div></Row>
         <Row title="vim mode" description="in the composer only."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
-        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} onChange={(autoApproveDefault) => updateSettings({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
+        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} disabled={!canWrite} onChange={(autoApproveDefault) => updateSettings({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
       </div>
-      <footer><button type="button" className="settings-link" onClick={() => resetSettings()} disabled={JSON.stringify(settings) === JSON.stringify(defaultSettings)}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+      <footer><button type="button" className="settings-link" onClick={() => resetSettings()} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(defaultSettings)}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
     </div>
   </dialog>;
 }

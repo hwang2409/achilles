@@ -61,6 +61,17 @@ describe("openHomeSession", () => {
 });
 
 describe("loadSession", () => {
+  test("joins the session event stream when replay sequencing is available", async () => {
+    const requests: Array<[string, unknown]> = [];
+    const client = {
+      features: ["session_replay_seq"],
+      request: async (method: string, params: unknown) => { requests.push([method, params]); return { messages: [{ role: "user", content: "joined" }], status: { state: "idle", pending_approvals: [] }, replay: { stream_id: "stream", history_seq: 0 } }; },
+      replay: async (_id: string, load: () => Promise<unknown[]>) => { await load(); return { store: { resync() {} }, release() {} }; },
+    };
+    await loadSession(client as never, "s");
+    expect(requests).toEqual([["session_history_and_subscribe", { session_id: "s" }]]);
+  });
+
   test("releases an acquired lease when replay finalization fails", async () => {
     let statusRequests = 0;
     let releases = 0;

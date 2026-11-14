@@ -8,7 +8,8 @@ import { draftStore } from "./draftStore";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
-import { useActiveChat, type Page } from "./useActiveChat";
+import { composerMode, useActiveChat, type Page } from "./useActiveChat";
+import { canWrite, useCanWrite, WriteAccessProvider } from "./write-access";
 import "./style.css";
 
 const highlight = createHighlighter();
@@ -53,6 +54,8 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
+    case "capacity": return "zeta is in use by another tab or app.";
+    case "takeover_failed": return state.reason === "busy_bound" ? "could not take control. close the other tab or app, then retry." : "could not take control. check the zeta connection, then retry.";
     default: return null;
   }
 }
@@ -62,8 +65,12 @@ export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
-  const active = useActiveChat(client, connectionState.phase === "connected");
+  const writable = canWrite(connectionState);
+  const attached = connectionState.phase === "connected" || connectionState.phase === "taking_control" || connectionState.phase === "takeover_failed";
+  const readOnly = attached && !writable;
+  const active = useActiveChat(client, attached, writable, writable && connectionState.phase === "taking_control");
   const ready = active.state.phase === "ready" ? active.state : null;
+  const controllerAttachment = ready?.kind === "controller" ? ready : null;
   const store = ready?.lease.store ?? null;
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
     const state = store.getState();
@@ -137,27 +144,28 @@ export function App() {
   const lastState = waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
-  const connected = connectionState.phase === "connected";
-  const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
+  const approval = controllerAttachment && client && store ? createApprovalDecider(client, store) : null;
+  const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!writable ? "read-only: another tab or app controls zeta" : !approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
+  const composer = composerMode(active.state, lost);
   const content = <>
-    {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : lastState} toggling={active.toggling || !connected} toggle={active.toggle} toggleError={active.toggleError} />}
+    {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : readOnly && lastState === "approval" ? "controller-approval" : lastState} toggling={active.toggling || !writable} toggle={active.toggle} toggleError={active.toggleError} />}
+    {readOnly && <ConnectionBanner state={connectionState} connection={connection} observer />}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
-    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry creating chat</button></div>
-      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
+    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" disabled={!writable} onClick={active.retrySaving}>retry creating chat</button></div>
+      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" disabled={!writable} onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
+      : failure && !lost && !attached ? <ConnectionBanner state={connectionState} connection={connection} />
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
-        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
+        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={controllerAttachment?.credential ?? null} refreshKey={refreshKey} />)}</div>}
+        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        {composer && <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composer === "read-only" || !writable || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />}
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <WriteAccessProvider value={writable}><AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell></WriteAccessProvider>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
@@ -165,34 +173,49 @@ function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
 }
 
 function EmptyChat({ page, send, continueWaiting }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void> }) {
+  const writable = useCanWrite();
   const starters = ["make a page that tracks my reading list", "what changed in my repos since yesterday", "continue: grade last night's eval runs"];
-  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
+  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} disabled={!writable} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
 }
 
 function ChatHeader({ page, sessionId, title, state, toggling, toggle, toggleError }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; toggle: () => void; toggleError: string | null }) {
   const [overflow, setOverflow] = useState(false);
-  const controls = <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button></>;
-  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading"><strong title={title} aria-label={title} data-session-id={sessionId ?? undefined}>{title}</strong><span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div>{toggleError && <p role="alert">{toggleError}</p>}</header>;
+  const writable = useCanWrite();
+  const controls = <>{writable && <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button></>}</>;
+  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading"><strong title={title} aria-label={title} data-session-id={sessionId ?? undefined}>{title}</strong><span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state === "controller-approval" ? "waiting on the controlling tab" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div>{toggleError && <p role="alert">{toggleError}</p>}</header>;
 }
 
-function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
+function ConnectionBanner({ state, connection, compact = false, observer = false }: { state: ConnectionState; connection: Connection; compact?: boolean; observer?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";
+  if (observer) {
+    const takingControl = state.phase === "taking_control";
+    const takeoverFailed = state.phase === "takeover_failed";
+    return <div className="connection-banner" role={takeoverFailed ? "alert" : "status"}><span>{takingControl ? "waiting for the other tab or app to close…" : takeoverFailed ? text : "zeta is in use by another tab or app."}</span><button onClick={() => takingControl ? connection.cancelTakeControl() : takeoverFailed ? connection.retryNow() : connection.takeControl()}>{takingControl ? "cancel" : takeoverFailed ? "retry" : "take control"}</button></div>;
+  }
   if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><button onClick={() => connection.retryNow()}>retry now</button></div>; }
   const command = `zeta serve --ws ${connection.port} --ws-origin ${location.origin}`;
   return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{text}{"attempt" in state && ` · tried ${state.attempt} times`}</p><h1>{state.phase === "not_running" ? "start zeta, and this page connects by itself." : text}</h1>{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
 }
 
-function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
+function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string | null; refreshKey: string }) {
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
-  if (block.type === "list") return <RecordList title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
+  if (block.type === "list") return <RecordList title={String(block.title)} collection={String(block.collection)} pageId={pageId} refreshKey={refreshKey} />;
   if (block.type === "detail") return <p>{String(block.title)}: {Array.isArray(block.fields) ? block.fields.join(", ") : ""}</p>;
-  if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
+  if (block.type === "form") return <ToolForm title={String(block.title)} tool={String(block.tool)} pageId={pageId} credential={credential} />;
   return null;
 }
-function RecordList({ title, collection, pageId, credential, refreshKey }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string }) {
+
+type PageTool = { name: string; input_schema: { properties?: Record<string, { type?: string; title?: string }> }; version: number };
+function ToolForm({ title, tool: toolName, pageId, credential }: { title: string; tool: string; pageId: string; credential: string | null }) {
+  const [tool, setTool] = useState<PageTool | null>(null); const [error, setError] = useState<string | null>(null); const [submitting, setSubmitting] = useState(false);
+  useEffect(() => { let live = true; void fetch(`/api/pages/${pageId}/tools`, { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load form (${response.status})`); const catalog = await response.json() as { tools?: PageTool[] }; const found = catalog.tools?.find((entry) => entry.name === toolName); if (!found) throw new Error("assigned tool is unavailable"); if (live) { setTool(found); setError(null); } }).catch((caught) => { if (live) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [pageId, toolName]);
+  const fields = Object.entries(tool?.input_schema.properties ?? {});
+  return <form className="page-form" onSubmit={(event) => { event.preventDefault(); if (!credential || !tool) return; const form = event.currentTarget; const values = new FormData(form); const argumentsValue = Object.fromEntries(fields.map(([name, schema]) => [name, schema.type === "integer" || schema.type === "number" ? Number(values.get(name)) : values.get(name)])); setSubmitting(true); setError(null); void fetch(`/api/pages/${pageId}/tools/${encodeURIComponent(tool.name)}/invoke`, { method: "POST", headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: JSON.stringify({ arguments: argumentsValue, version: tool.version }) }).then((response) => { if (!response.ok) throw new Error(`could not submit form (${response.status})`); form.reset(); }).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught))).finally(() => setSubmitting(false)); }}><h2>{title}</h2>{fields.map(([name, schema]) => <label key={name}><span>{schema.title ?? name.replaceAll("_", " ")}</span><input name={name} type={schema.type === "integer" || schema.type === "number" ? "number" : "text"} disabled={!credential || submitting} /></label>)}<button type="submit" disabled={!credential || !tool || submitting}>{submitting ? "submitting…" : title}</button>{error && <p role="alert">{error}</p>}</form>;
+}
+function RecordList({ title, collection, pageId, refreshKey }: { title: string; collection: string; pageId: string; refreshKey: string }) {
   const [records, setRecords] = useState<Record<string, unknown>[]>([]); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const requestSequence = useRef(0);
-  useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, refreshKey]);
+  useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, pageId, refreshKey]);
   const columns = [...new Set(records.flatMap((record) => Object.keys(record).filter((key) => key !== "record_id")))]; if (records.some((record) => "record_id" in record)) columns.push("record_id");
   return <section className="record-list"><h2>{title}</h2>{error ? <p role="alert">{error}</p> : records.length === 0 ? <p>no records yet</p> : <><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{records.map((record, index) => <tr key={String(record.record_id ?? index)}>{columns.map((column) => <td key={column}>{formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 100 && <p>showing newest 100 of {total}</p>}</>}</section>;
 }

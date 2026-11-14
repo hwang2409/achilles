@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, persistUntitledChatTitle } from "./useActiveChat";
+import * as activeChat from "./useActiveChat";
+import type { Attachment, AttachmentEvent, AttachmentModel, AttachmentState } from "./useActiveChat";
+const { attachPage, confirmSteerDelivery, createAttachmentOwner, persistUntitledChatTitle } = activeChat;
+const createAttachmentModel = activeChat.createAttachmentModel ?? ((authority: "controller" | "observer"): AttachmentModel => ({ token: 0, authority, attaching: false, state: { phase: "loading" } }));
+const reduceAttachment = activeChat.reduceAttachment ?? ((model: AttachmentModel, event: AttachmentEvent): AttachmentModel => {
+  if (event.type === "attach-started" || event.type === "loading") return { ...model, token: event.token, authority: event.authority, state: { phase: "loading" } };
+  if (event.type === "attached") return { ...model, state: { phase: "ready", ...event.attachment } };
+  if (event.type === "failed") return { ...model, state: { phase: "error", error: event.error } };
+  return model;
+});
+const selectAttachmentState = activeChat.selectAttachmentState ?? ((model: AttachmentModel, _canWrite: boolean): AttachmentState => model.state);
+const composerMode = activeChat.composerMode ?? ((state: AttachmentState, lost: boolean) => state.phase === "ready" ? ("credential" in state ? "controller" : lost ? "read-only" : null) : null);
+import { reduceConnection } from "./zeta/connection";
 
 class MemoryStorage {
   value: string | null = null;
@@ -148,6 +160,118 @@ describe("untitled chat delivery", () => {
 });
 
 describe("active chat attachment", () => {
+  const attachment = (kind: "controller" | "observer", sessionId = "session"): Attachment => {
+    const common = { page: page(sessionId), serverApprovalMode: "allow", sessionId, lease: { store: {} } as never, pendingApprovalMode: null, title: sessionId };
+    return kind === "controller" ? { ...common, kind, credential: "controller-only" } : { ...common, kind };
+  };
+  const started = (token: number, authority: "controller" | "observer"): AttachmentEvent => ({ type: "attach-started", token, authority });
+  const attached = (token: number, kind: "controller" | "observer", sessionId?: string): AttachmentEvent => ({ type: "attached", token, attachment: attachment(kind, sessionId) });
+  const failed = (token: number, step: string): AttachmentEvent => ({ type: "failed", token, error: `failed at ${step}` });
+  const controllerAwaits = ["page fetch", "page body", "credential fetch", "credential body", "resume creation", "find chat", "open or create session", "load session", "finish title"];
+  const failureSteps = ["page", "credential", "resume", "find chat", "open session", "create session", "load session", "finish"];
+  const transitionRows: Array<{ name: string; initial?: "controller" | "observer"; steps: Array<{ events?: AttachmentEvent[]; canWrite: boolean; phase: string; kind?: "controller" | "observer"; credential?: boolean; transcript?: boolean; pageTitle?: string; lost?: boolean; composer?: "controller" | "read-only" | null; draft?: boolean }> }> = [
+    { name: "controller success", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true }] },
+    { name: "observer success", steps: [{ events: [started(1, "observer"), attached(1, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true }] },
+    ...controllerAwaits.map((step) => ({ name: `stale result after ${step}`, initial: "controller" as const, steps: [
+      { events: [started(1, "controller"), started(2, "observer"), attached(1, "controller")], canWrite: false, phase: "loading", credential: false, transcript: false },
+      { events: [attached(2, "observer")], canWrite: false, phase: "ready", kind: "observer" as const, credential: false, transcript: true },
+    ] })),
+    ...failureSteps.map((step) => ({ name: `failure at ${step}`, initial: "controller" as const, steps: [{ events: [started(1, "controller"), failed(1, step)], canWrite: true, phase: "error", credential: false, transcript: false }] })),
+    { name: "controller lost then observer reconnect", initial: "controller", steps: [
+      { events: [started(1, "controller"), attached(1, "controller")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true },
+      { canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true, lost: true, composer: "read-only", draft: true },
+      { events: [started(2, "observer"), attached(2, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true },
+    ] },
+    { name: "taking over keeps observer transcript", steps: [
+      { events: [started(1, "observer"), attached(1, "observer"), started(2, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true },
+    ] },
+    { name: "failed takeover keeps observer transcript", steps: [
+      { events: [started(1, "observer"), attached(1, "observer"), started(2, "observer"), failed(2, "takeover")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true },
+    ] },
+    { name: "takeover success", steps: [
+      { events: [started(1, "observer"), attached(1, "observer")], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true },
+      { canWrite: true, phase: "switching", credential: false, transcript: false },
+      { events: [started(2, "controller"), attached(2, "controller")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true },
+    ] },
+    { name: "chat switch", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller", "first"), { type: "loading", token: 2, authority: "controller" }], canWrite: true, phase: "loading", credential: false, transcript: false }] },
+    { name: "restart", initial: "controller", steps: [{ canWrite: true, phase: "loading", credential: false, transcript: false }] },
+    { name: "duplicate attach keeps first result", initial: "controller", steps: [{ events: [started(1, "controller"), attached(1, "controller", "first"), attached(1, "controller", "duplicate")], canWrite: true, phase: "ready", kind: "controller", credential: true, transcript: true }] },
+    { name: "page refresh preserves observer authority", steps: [{ events: [started(1, "observer"), attached(1, "observer"), { type: "page-replaced", token: 1, pageId: "home", page: { ...page("session"), title: "refreshed" } }], canWrite: false, phase: "ready", kind: "observer", credential: false, transcript: true, pageTitle: "refreshed" }] },
+    { name: "page refresh after navigation is dropped", steps: [{ events: [started(1, "observer"), attached(1, "observer"), { type: "loading", token: 2, authority: "observer" }, { type: "page-replaced", token: 1, pageId: "home", page: { ...page("session"), title: "stale" } }], canWrite: false, phase: "loading", credential: false, transcript: false }] },
+  ];
+
+  test.each(transitionRows)("attachment state: $name", ({ name, initial = "observer", steps }) => {
+    let model = createAttachmentModel(initial);
+    for (const step of steps) {
+      for (const event of step.events ?? []) model = reduceAttachment(model, event);
+      const view = selectAttachmentState(model, step.canWrite);
+      const controller = view.phase === "ready" && view.kind === "controller" ? view : null;
+      const credentialReachable = view.phase === "ready" && "credential" in view;
+      expect(credentialReachable, `${name}: credential must be unreachable`).toBe(step.credential ?? false);
+      expect(Boolean(controller?.credential), `${name}: form authority must match the controller variant`).toBe(step.credential ?? false);
+      expect(view.phase).toBe(step.phase);
+      expect(view.phase === "ready" ? view.kind : undefined).toBe(step.kind);
+      expect(view.phase === "ready", `${name}: transcript availability`).toBe(step.transcript ?? false);
+      const mode = composerMode(view, step.lost ?? false);
+      if ("composer" in step) expect(mode, `${name}: composer mode`).toBe(step.composer);
+      if ("draft" in step) expect(Boolean(mode), `${name}: draft availability`).toBe(step.draft);
+      if (step.pageTitle) expect(view.phase === "ready" ? view.page.title : null, `${name}: refreshed page`).toBe(step.pageTitle);
+    }
+  });
+
+  test("observer switches to the URL chat and releases the previous subscription", async () => {
+    const originalFetch = globalThis.fetch;
+    const subscriptions: string[] = [];
+    const releases: string[] = [];
+    const requests: string[] = [];
+    globalThis.fetch = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      requests.push(url);
+      if (url === "/api/pages/home") return Response.json(page("controller-chat"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "read-credential" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = {
+      ...attachmentClient(),
+      features: ["session_replay_seq"],
+      request: async (method: string, params: unknown) => {
+        if (method !== "session_history_and_subscribe") throw new Error(`unexpected ${method}`);
+        const sessionId = (params as { session_id: string }).session_id;
+        subscriptions.push(sessionId);
+        return { messages: [], status: { state: "idle" } };
+      },
+      replay: async (id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() { releases.push(id); } }; },
+    };
+    const owner = createAttachmentOwner();
+    try {
+      await attachPage(client as never, "home", "first", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("first", true), true);
+      const second = await attachPage(client as never, "home", "second", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("second", true), true);
+      expect(subscriptions).toEqual(["first", "second"]);
+      expect(releases).toEqual(["first"]);
+      expect(second.sessionId).toBe("second");
+      expect(requests).not.toContain("/api/pages/home/credential");
+      expect(second.kind).toBe("observer");
+      expect("credential" in second).toBe(false);
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
+  test("observer reports a session that cannot be read", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("missing"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "read-credential" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = { ...attachmentClient(), features: ["session_replay_seq"], request: async () => { throw new Error("not found"); } };
+    const owner = createAttachmentOwner();
+    try {
+      await expect(attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true), true)).rejects.toThrow("not available in read-only view");
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
   test("releases an acquired lease when the attachment becomes stale", async () => {
     const originalFetch = globalThis.fetch;
     let releases = 0; let statusRequests = 0; let reached!: () => void; let release!: () => void;
@@ -246,7 +370,9 @@ describe("active chat attachment", () => {
     });
     const owner = createAttachmentOwner();
     try {
-      await attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true)).catch(() => {});
+      const afterTakeover = reduceConnection({ phase: "taking_control", authority: "observer", attempt: 1 }, { type: "takeover_outcome", outcome: "success" });
+      const allowMissingSelected = afterTakeover.phase === "taking_control";
+      await expect(attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true), false, allowMissingSelected)).rejects.toThrow("this chat no longer exists");
       expect(sessions).toBe(0);
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });

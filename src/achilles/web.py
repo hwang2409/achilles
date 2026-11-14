@@ -302,12 +302,6 @@ def create_app() -> Starlette:
         page_id = request.path_params["id"]
         if await anyio.to_thread.run_sync(store.page, page_id) is None:
             raise HTTPException(404, "page not found")
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(403, "forbidden")
-        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
-        if principal is None or principal["id"] != page_id:
-            raise HTTPException(403, "forbidden")
         tools = await anyio.to_thread.run_sync(store.page_tools, page_id)
         return JSONResponse(
             {
@@ -315,12 +309,8 @@ def create_app() -> Starlette:
                     {
                         "name": tool["name"],
                         "description": tool["description"],
-                        "operation": tool["implementation"]["operation"],
-                        "collection": tool["implementation"]["collection"],
                         "input_schema": tool["input_schema"],
                         "version": tool["version"],
-                        "needs_record_id": tool["implementation"]["operation"] in {"get", "update"},
-                        "needs_version": True,
                     }
                     for tool in tools
                 ]
@@ -367,13 +357,9 @@ def create_app() -> Starlette:
         return JSONResponse(result)
 
     async def records(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
         page_id = request.path_params["id"]
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(401, "missing bearer")
-        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
-        if principal is None or principal["id"] != page_id:
-            raise HTTPException(403, "forbidden")
         collection = request.path_params["collection"]
         raw_limit = request.query_params.get("limit", "100")
         try:

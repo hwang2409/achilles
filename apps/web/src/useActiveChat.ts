@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
@@ -7,9 +7,62 @@ import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner
 import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./zeta/session";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
-type Attachment = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null; title: string };
-type ReadyState = Attachment & { phase: "ready" };
-type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | ReadyState;
+type AttachmentBase = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string };
+export type Attachment = (AttachmentBase & { kind: "controller"; credential: string }) | (AttachmentBase & { kind: "observer" });
+export type ReadyState = Attachment & { phase: "ready" };
+export type AttachmentState = { phase: "loading" | "switching" } | { phase: "error"; error: string } | { phase: "missing" } | ReadyState;
+export type AttachmentModel = { token: number; authority: Attachment["kind"]; attaching: boolean; state: AttachmentState };
+export type AttachmentEvent =
+  | { type: "attach-started"; token: number; authority: Attachment["kind"] }
+  | { type: "attached"; token: number; attachment: Attachment }
+  | { type: "failed"; token: number; error: string }
+  | { type: "missing"; token: number }
+  | { type: "loading"; token: number; authority: Attachment["kind"] }
+  | { type: "page-replaced"; token: number; pageId: string; page: Page }
+  | { type: "update"; token: number; update: (current: ReadyState) => ReadyState };
+
+export const createAttachmentModel = (authority: Attachment["kind"]): AttachmentModel => ({ token: 0, authority, attaching: false, state: { phase: "loading" } });
+
+export function reduceAttachment(model: AttachmentModel, event: AttachmentEvent): AttachmentModel {
+  if (event.type === "attach-started") {
+    const keepReady = model.authority === event.authority && model.state.phase === "ready";
+    return { token: event.token, authority: event.authority, attaching: true, state: keepReady ? model.state : { phase: "loading" } };
+  }
+  if (event.type === "loading") return { token: event.token, authority: event.authority, attaching: false, state: { phase: "loading" } };
+  if (event.token !== model.token) return model;
+  if (event.type === "attached") return model.attaching && event.attachment.kind === model.authority ? { ...model, attaching: false, state: { phase: "ready", ...event.attachment } } : model;
+  if (event.type === "failed") return { ...model, attaching: false, state: model.state.phase === "ready" ? model.state : { phase: "error", error: event.error } };
+  if (event.type === "missing") return { ...model, attaching: false, state: { phase: "missing" } };
+  if (event.type === "page-replaced") {
+    if (model.state.phase !== "ready" || model.state.page.id !== event.pageId) return model;
+    return { ...model, state: { ...model.state, page: { ...event.page, approval_mode: model.state.page.approval_mode } } };
+  }
+  return model.state.phase === "ready" ? { ...model, state: event.update(model.state) } : model;
+}
+
+export function selectAttachmentState(model: AttachmentModel, canWrite: boolean): AttachmentState {
+  const authority = canWrite ? "controller" : "observer";
+  if (model.state.phase === "ready" && model.state.kind === "controller" && !canWrite) {
+    return {
+      phase: "ready",
+      kind: "observer",
+      page: model.state.page,
+      serverApprovalMode: model.state.serverApprovalMode,
+      sessionId: model.state.sessionId,
+      lease: model.state.lease,
+      pendingApprovalMode: model.state.pendingApprovalMode,
+      title: model.state.title,
+    };
+  }
+  if (model.authority !== authority || (model.state.phase === "ready" && model.state.kind !== authority)) return { phase: "switching" };
+  return model.state;
+}
+
+export function composerMode(state: AttachmentState, lost: boolean): "controller" | "read-only" | null {
+  if (state.phase !== "ready") return null;
+  if (state.kind === "controller") return "controller";
+  return lost ? "read-only" : null;
+}
 
 export function createAttachmentOwner(release: (lease: SessionLease) => void = (lease) => lease.release()) {
   let attempt = 0;
@@ -76,58 +129,92 @@ async function findWaitingChat() {
 }
 
 type AttachmentOwner = ReturnType<typeof createAttachmentOwner>;
+type Target = { page: Page; selectedId: string | null; sessionId: string | null };
+type ControllerMetadata = Target & { credential: string };
 class StaleAttachment extends Error {}
 const requireCurrent = (owner: AttachmentOwner, token: number) => { if (!owner.current(token)) throw new StaleAttachment(); };
 
-export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number): Promise<Attachment> {
-  let ownsLease = false;
+async function resolveTarget(key: string, selectedId: string | null, owner: AttachmentOwner, token: number): Promise<Target> {
+  const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); requireCurrent(owner, token);
+  if (!loaded.ok) throw new Error("page not found");
+  const page = await loaded.json() as Page; requireCurrent(owner, token);
+  return { page, selectedId, sessionId: selectedId ?? page.zeta_session_id };
+}
+
+async function attachObserver(client: ZetaClient, target: Target, owner: AttachmentOwner, token: number): Promise<Attachment> {
+  const { page, sessionId } = target;
+  if (!sessionId) throw new Error("not available in read-only view");
+  const selectedChat = await findChat(sessionId); requireCurrent(owner, token);
+  let lease: SessionLease;
+  try { lease = await loadSession(client, sessionId); }
+  catch { throw new Error("not available in read-only view"); }
+  if (!owner.accept(token, lease)) throw new StaleAttachment();
+  return { kind: "observer", page, serverApprovalMode: page.approval_mode ?? null, sessionId, lease, pendingApprovalMode: null, title: selectedChat?.title?.trim() || "untitled chat" };
+}
+
+type OpenedSession = Awaited<ReturnType<typeof openHomeSession>>;
+
+async function resumeCreation(creation: ChatCreationOwner, input: ChatCreationInput) {
+  try { return await creation.resume(input); }
+  catch (caught) { throw new PendingCreationError(caught, input); }
+}
+
+async function openControllerSession(client: ZetaClient, metadata: ControllerMetadata, input: ChatCreationInput, sessionId: string | null, allowMissingSelected: boolean): Promise<OpenedSession | undefined> {
+  if (!sessionId) return;
+  try { return await openHomeSession(client, sessionId, metadata.credential, metadata.page.workspace, metadata.page.approval_mode); }
+  catch (caught) {
+    if (!(caught instanceof SessionNotFoundError)) throw caught;
+    if (metadata.selectedId && !allowMissingSelected) throw new MissingChatError(input, metadata.page.route === "/" ? "/" : metadata.page.route);
+  }
+}
+
+async function createControllerSession(client: ZetaClient, metadata: ControllerMetadata, input: ChatCreationInput, creation: ChatCreationOwner, owner: AttachmentOwner, token: number): Promise<OpenedSession> {
+  const mappingInput = { ...input, mapExpectedSessionId: metadata.page.zeta_session_id };
+  let created: PendingChat;
+  try { created = await creation.create(mappingInput); }
+  catch (caught) { throw new PendingCreationError(caught, mappingInput); }
+  requireCurrent(owner, token);
+  const sessionId = created.mappedSessionId ?? created.sessionId;
+  const session = await openHomeSession(client, sessionId, metadata.credential, metadata.page.workspace, metadata.page.approval_mode); requireCurrent(owner, token);
+  return session;
+}
+
+async function finishControllerAttachment(metadata: ControllerMetadata, session: OpenedSession, selectedChat: Chat | null, lease: SessionLease, owner: AttachmentOwner, token: number): Promise<Attachment> {
+  const { page, credential } = metadata;
   try {
-    const loaded = await fetch(`/api/pages/${key}`, { cache: "no-store" }); requireCurrent(owner, token);
-    if (!loaded.ok) throw new Error("page not found");
-    const page = await loaded.json() as Page; requireCurrent(owner, token);
-    if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
-    const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
-    if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
-    const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
-    const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
-    let resumedCreation: PendingChat | null;
-    try { resumedCreation = await creation.resume(creationInput); }
-    catch (caught) { throw new PendingCreationError(caught, creationInput); }
-    requireCurrent(owner, token);
-    const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
-    if (selectedId && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
     const serverApprovalMode = page.approval_mode ?? null;
-    let sessionId = selectedId ?? resumedCreation?.mappedSessionId ?? page.zeta_session_id;
-    let session: Awaited<ReturnType<typeof openHomeSession>> | undefined;
-    if (sessionId) {
-      try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); }
-      catch (caught) {
-        if (!(caught instanceof SessionNotFoundError)) throw caught;
-        if (selectedId) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
-      }
-      requireCurrent(owner, token);
-    }
-    if (!session) {
-      const mappingInput = { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
-      let created: PendingChat;
-      try { created = await creation.create(mappingInput); }
-      catch (caught) { throw new PendingCreationError(caught, mappingInput); }
-      requireCurrent(owner, token);
-      sessionId = created.mappedSessionId ?? created.sessionId;
-      session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); requireCurrent(owner, token);
-    }
-    const lease = await loadSession(client, session.id);
-    if (!owner.accept(token, lease)) throw new StaleAttachment();
-    ownsLease = true;
     page.approval_mode = session.approvalMode;
     const title = session.name?.trim() || selectedChat?.title?.trim() || (await findChat(session.id))?.title?.trim() || "untitled chat"; requireCurrent(owner, token);
     if (session.name?.trim() && session.name.trim() !== selectedChat?.title?.trim())
       void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-    return { page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
-  } catch (caught) {
-    if (ownsLease) owner.release(token);
-    throw caught;
-  }
+    return { kind: "controller", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
+  } catch (caught) { owner.release(token); throw caught; }
+}
+
+async function attachController(client: ZetaClient, target: Target, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, allowMissingSelected: boolean): Promise<Attachment> {
+  const response = await fetch(`/api/pages/${target.page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
+  if (!response.ok) throw new Error(`could not load page credential (${response.status})`);
+  const credential = ((await response.json()) as { credential: string }).credential; requireCurrent(owner, token);
+  const metadata = { ...target, credential };
+  const { page, selectedId } = metadata;
+  if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
+  const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
+  const resumedCreation = await resumeCreation(creation, creationInput); requireCurrent(owner, token);
+  const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
+  if (selectedId && !allowMissingSelected && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
+  const targetSessionId = selectedId ?? resumedCreation?.mappedSessionId ?? metadata.sessionId;
+  const session = await openControllerSession(client, metadata, creationInput, targetSessionId, allowMissingSelected) ?? await createControllerSession(client, metadata, creationInput, creation, owner, token);
+  requireCurrent(owner, token);
+  const lease = await loadSession(client, session.id);
+  if (!owner.accept(token, lease)) throw new StaleAttachment();
+  return finishControllerAttachment(metadata, session, selectedChat, lease, owner, token);
+}
+
+export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, readOnly = false, allowMissingSelected = false): Promise<Attachment> {
+  const target = await resolveTarget(key, selectedId, owner, token);
+  return readOnly
+    ? attachObserver(client, target, owner, token)
+    : attachController(client, target, owner, creation, token, allowMissingSelected);
 }
 
 const selectedFromUrl = () => new URLSearchParams(location.search).get("chat");
@@ -201,9 +288,15 @@ export async function confirmSteerDelivery(
   }
 }
 
-export function useActiveChat(client: ZetaClient | null, connected: boolean) {
+function chatCreationContext(state: AttachmentState, client: ZetaClient) {
+  if (state.phase === "ready" && state.kind === "controller") return { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } };
+  return null;
+}
+
+export function useActiveChat(client: ZetaClient | null, connected: boolean, canWrite = false, allowMissingSelected = false) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
-  const [state, setState] = useState<State>({ phase: "loading" });
+  const [attachment, dispatchAttachment] = useReducer(reduceAttachment, canWrite ? "controller" : "observer", createAttachmentModel);
+  const state = selectAttachmentState(attachment, canWrite);
   const [creationPageId, setCreationPageId] = useState<string | null>(null);
   const [listRefresh, setListRefresh] = useState(0);
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -220,28 +313,29 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   useEffect(() => {
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
+    const authority = canWrite ? "controller" : "observer";
     setCreationPageId(null);
-    setState((current) => current.phase === "ready" ? current : { phase: "loading" });
-    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token).then((next) => {
+    dispatchAttachment({ type: "attach-started", token, authority });
+    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, !canWrite, allowMissingSelected).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
-      setState({ phase: "ready", ...next });
+      dispatchAttachment({ type: "attached", token, attachment: next });
     }).catch((caught) => {
       if (caught instanceof PendingCreationError && owner.current.current(token)) {
         setCreationPageId(caught.input.pageId);
       } else if (caught instanceof MissingChatError && owner.current.current(token)) {
         missingCreation.current = { input: caught.input, route: caught.route };
-        setState({ phase: "missing" });
-      } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
+        dispatchAttachment({ type: "missing", token });
+      } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) dispatchAttachment({ type: "failed", token, error: attachmentError(caught) });
     });
     return () => owner.current.clear(token);
-  }, [client, connected, routeRefresh, selectedId]);
+  }, [allowMissingSelected, canWrite, client, connected, routeRefresh, selectedId]);
 
   useEffect(() => {
-    const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
+    const pop = () => { owner.current.clear(); dispatchAttachment({ type: "loading", token: owner.current.token(), authority: canWrite ? "controller" : "observer" }); setSelectedId(selectedFromUrl()); };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
-  }, []);
+  }, [canWrite]);
   useEffect(() => () => owner.current.clear(), []);
 
   const selectChat = useCallback((chat: Chat) => {
@@ -250,11 +344,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (route !== location.pathname) { location.assign(target); return; }
     if (chat.session_id === selectedId) return;
     owner.current.begin(`${keyFromPath()}:${chat.session_id}`);
-    setState({ phase: "loading" });
+    dispatchAttachment({ type: "loading", token: owner.current.token(), authority: canWrite ? "controller" : "observer" });
     history.pushState({}, "", target);
     setFocusSessionId(null);
     setSelectedId(chat.session_id);
-  }, [selectedId]);
+  }, [canWrite, selectedId]);
 
   const continueWaitingChat = useCallback(async () => {
     const waiting = await findWaitingChat();
@@ -264,57 +358,57 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const publishCreated = useCallback((route: string, pending: PendingChat, token?: number) => {
     if (token !== undefined && !owner.current.current(token)) return;
     missingCreation.current = null; setCreationPageId(pending.pageId); setListRefresh((value) => value + 1);
-    owner.current.clear(); setState({ phase: "loading" });
+    owner.current.clear(); dispatchAttachment({ type: "loading", token: owner.current.token(), authority: canWrite ? "controller" : "observer" });
     const attachedSessionId = pending.mappedSessionId ?? pending.sessionId;
     history.pushState({}, "", routeWithChat(route, attachedSessionId));
     setFocusSessionId(attachedSessionId); setSelectedId(attachedSessionId);
-  }, []);
+  }, [canWrite]);
 
   const newChat = useCallback(async () => {
-    if (!client) return;
+    if (!client || !canWrite) return;
     if (state.phase === "error" && state.error === "page not found") {
       createAfterLoad.current = true;
       owner.current.clear();
       history.pushState({}, "", "/");
-      setState({ phase: "loading" });
+      dispatchAttachment({ type: "loading", token: owner.current.token(), authority: "controller" });
       setSelectedId(null);
       setRouteRefresh((value) => value + 1);
       return;
     }
-    const context = state.phase === "ready"
+    const context = state.phase === "ready" && state.kind === "controller"
       ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } }
       : state.phase === "missing" ? missingCreation.current : null;
     if (!context) return;
     const token = owner.current.begin(`new:${context.input.pageId}`, true);
     setCreationPageId(context.input.pageId);
-    setState({ phase: "loading" });
+    dispatchAttachment({ type: "loading", token, authority: "controller" });
     try {
       publishCreated(context.route, await creation.current.create(context.input), token);
     } catch (caught) {
-      if (!creation.current.status(context.input.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
+      if (!creation.current.status(context.input.pageId).pending && owner.current.current(token)) dispatchAttachment({ type: "failed", token, error: attachmentError(caught, "creation") });
     }
-  }, [client, publishCreated, state]);
+  }, [canWrite, client, publishCreated, state]);
 
   const retrySaving = useCallback(() => {
-    if (!creationPageId) return;
+    if (!canWrite || !creationPageId) return;
     void creation.current.resume(creationPageId)?.then((pending) => {
       if (pending) publishCreated(location.pathname, pending);
     }).catch(() => {});
-  }, [creationPageId, publishCreated]);
+  }, [canWrite, creationPageId, publishCreated]);
 
   useEffect(() => {
-    if (!createAfterLoad.current || state.phase !== "ready") return;
+    if (!createAfterLoad.current || state.phase !== "ready" || state.kind !== "controller") return;
     createAfterLoad.current = false;
     void newChat();
   }, [newChat, state]);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     if (!owner.current.current(token)) return;
-    setState((current) => current.phase === "ready" ? update(current) : current);
+    dispatchAttachment({ type: "update", token, update });
   }, []);
 
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
-    if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
+    if (!canWrite || !client || state.phase !== "ready" || state.kind !== "controller") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
     let delivery_id: string = crypto.randomUUID();
     if (!intent.steer) track(delivery_id);
@@ -335,10 +429,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       updateReady(token, (value) => ({ ...value, title: nextTitle }));
       setListRefresh((value) => value + 1);
     });
-  }, [client, state, updateReady]);
+  }, [canWrite, client, state, updateReady]);
 
   const toggle = useCallback(async () => {
-    if (state.phase !== "ready") return;
+    if (!canWrite || state.phase !== "ready" || state.kind !== "controller") return;
     const current = state; const token = owner.current.token();
     setToggleError(null); setToggling(true);
     try {
@@ -348,7 +442,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       updateReady(token, (value) => ({ ...value, page: { ...value.page, create_mode: result.create_mode } }));
     } catch (caught) { if (owner.current.current(token)) setToggleError(caught instanceof Error ? caught.message : String(caught)); }
     finally { if (owner.current.current(token)) setToggling(false); }
-  }, [state, updateReady]);
+  }, [canWrite, state, updateReady]);
 
   const refreshPage = useCallback(async () => {
     if (state.phase !== "ready") return;
@@ -357,27 +451,27 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       const response = await fetch(`/api/pages/${current.page.id}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`could not refresh page (${response.status})`);
       const page = await response.json() as Page;
-      updateReady(token, (value) => value.page.id === page.id ? { ...value, page: { ...page, approval_mode: value.page.approval_mode } } : value);
+      dispatchAttachment({ type: "page-replaced", token, pageId: current.page.id, page });
     } catch (caught) {
       if (owner.current.current(token)) console.error("could not refresh page", caught);
     }
-  }, [state, updateReady]);
+  }, [state]);
 
   const settleApprovalMode = useCallback(async () => {
-    if (!client || state.phase !== "ready" || !state.pendingApprovalMode) return;
+    if (!canWrite || !client || state.phase !== "ready" || state.kind !== "controller" || !state.pendingApprovalMode) return;
     const current = state; const mode = state.pendingApprovalMode; const token = owner.current.token();
     try {
       const result = await applyApprovalMode(client, current.sessionId, mode);
       updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, pendingApprovalMode: result.pending ? mode : null }));
-    } catch (caught) { if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) }); }
-  }, [client, state, updateReady]);
+    } catch (caught) { if (owner.current.current(token)) dispatchAttachment({ type: "failed", token, error: attachmentError(caught) }); }
+  }, [canWrite, client, state, updateReady]);
 
   const recordLastState = useCallback((lastState: string) => {
-    if (state.phase !== "ready") return;
+    if (!canWrite || state.phase !== "ready" || state.kind !== "controller") return;
     const token = owner.current.token();
     void fetch(`/api/chats/${encodeURIComponent(state.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) })
       .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); });
-  }, [state]);
+  }, [canWrite, state]);
 
   return { state, selectedId, listRefresh, toggleError, toggling, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
 }

@@ -252,6 +252,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "text", "text": "layout updated without reload"},
+                                {"type": "form", "title": "add book", "tool": "add_book"},
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
@@ -361,6 +362,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ws_origins=(os.environ["ZETA_PROOF_ORIGIN"],),
             provider="codex",
             auto_memory=False,
+            approval_reconnect_grace=int(os.environ.get("ZETA_PROOF_APPROVAL_GRACE", "90")),
             backend_factory=lambda provider, model, selected_home: (backend, model or "offline"),
         ),
         control,
