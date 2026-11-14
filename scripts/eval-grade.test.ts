@@ -94,11 +94,21 @@ test("exact page records reject extra reconnect, approval, and crud writes", () 
 
 test("layout_update requires the original layout and one versioned block", () => {
   const pages = [{ id: "p1", alias: "p" }];
-  const check = { id: "layout", type: "layout_update" as const, page: "p", value: { original: { blocks: [] }, added: { type: "list", collection: "records" }, version: 2 } };
-  const good = { pages, layouts: [{ page_id: "p1", version: 1, document: { blocks: [] } }, { page_id: "p1", version: 2, document: { blocks: [{ type: "list", collection: "records" }] } }] };
+  const original = [{ type: "text", text: "Records dashboard" }];
+  const check = { id: "layout", type: "layout_update" as const, page: "p", value: { original: { blocks: original }, added: { type: "list", collection: "records" }, version: 2 } };
+  const good = { pages, layouts: [{ page_id: "p1", version: 1, document: { blocks: original } }, { page_id: "p1", version: 2, document: { blocks: [...original, { type: "list", collection: "records" }] } }] };
   expect(gradeCheck(check, good).pass).toBe(true);
   expect(gradeCheck(check, { ...good, layouts: [...good.layouts.slice(0, 1), { page_id: "p1", version: 2, document: { blocks: [{ type: "list", collection: "other" }] } }] }).pass).toBe(false);
   expect(gradeCheck(check, { ...good, layouts: [...good.layouts, { page_id: "other", version: 2, document: { blocks: [] } }] }).pass).toBe(false);
+});
+
+test("layout conflicts are accepted when a later update succeeds", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const check = { id: "retry", type: "no_unrecovered_error" as const, page: "p" };
+  const failed = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: false };
+  const succeeded = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: true };
+  expect(gradeCheck(check, { pages, errors: [failed], results: [succeeded] }).pass).toBe(true);
+  expect(gradeCheck(check, { pages, errors: [failed], results: [] }).pass).toBe(false);
 });
 
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {

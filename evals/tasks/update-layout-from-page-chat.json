@@ -34,7 +34,22 @@
           "title": "Synthetic record"
         }
       }
-    ]
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Records dashboard"
+        },
+        {
+          "type": "detail",
+          "title": "Featured record",
+          "fields": [
+            "title"
+          ]
+        }
+      ]
+    }
   },
   "checks": [
     {
@@ -43,7 +58,19 @@
       "page": "records",
       "value": {
         "original": {
-          "blocks": []
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
         },
         "added": {
           "type": "list",
@@ -59,8 +86,8 @@
       "tool": "achilles__update_layout"
     },
     {
-      "id": "no-errors",
-      "type": "no_error",
+      "id": "no-unrecovered-errors",
+      "type": "no_unrecovered_error",
       "page": "records"
     },
     {

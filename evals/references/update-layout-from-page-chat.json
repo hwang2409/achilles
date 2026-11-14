@@ -32,7 +32,19 @@
         "page_id": "p",
         "version": 1,
         "document": {
-          "blocks": []
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
         }
       },
       {
@@ -40,6 +52,17 @@
         "version": 2,
         "document": {
           "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            },
             {
               "type": "list",
               "title": "Page records",
@@ -49,17 +72,86 @@
         }
       }
     ],
+    "related_page_ids": [
+      "p"
+    ],
+    "calls": [
+      {
+        "id": "stale",
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "expected_version": 1
+        }
+      },
+      {
+        "id": "inspect-2",
+        "page_id": "p",
+        "tool": "achilles__inspect_page",
+        "arguments": {}
+      },
+      {
+        "id": "retry",
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "expected_version": 1
+        }
+      }
+    ],
     "results": [
       {
         "page_id": "p",
         "tool": "achilles__update_layout",
+        "call_id": "stale",
+        "success": false,
+        "data": {
+          "code": "version_conflict"
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-2",
+        "success": true,
+        "data": {
+          "layout": {
+            "version": 1,
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Records dashboard"
+              },
+              {
+                "type": "detail",
+                "title": "Featured record",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "call_id": "retry",
         "success": true,
         "data": {
           "version": 2
         }
       }
     ],
-    "related_page_ids": ["p"]
+    "errors": [
+      {
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "call_id": "stale",
+        "success": false,
+        "code": "version_conflict"
+      }
+    ]
   },
   "bad": {
     "pages": [
@@ -94,7 +186,19 @@
         "page_id": "p",
         "version": 1,
         "document": {
-          "blocks": []
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
         }
       },
       {
@@ -110,16 +214,30 @@
         }
       }
     ],
+    "related_page_ids": [
+      "p"
+    ],
+    "calls": [
+      {
+        "id": "bad-update",
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "expected_version": 1
+        }
+      }
+    ],
     "results": [
       {
         "page_id": "p",
         "tool": "achilles__update_layout",
+        "call_id": "bad-update",
         "success": true,
         "data": {
           "version": 2
         }
       }
     ],
-    "related_page_ids": ["p"]
+    "errors": []
   }
 }
