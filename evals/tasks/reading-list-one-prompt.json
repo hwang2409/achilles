@@ -1,0 +1,102 @@
+{
+  "id": "reading-list-one-prompt",
+  "prompt": "make a page that tracks my reading list",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "reading",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 20,
+  "steps": [
+    {
+      "id": "creation-prompt",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat"
+    },
+    {
+      "id": "use-reading-list",
+      "kind": "prompt",
+      "page": "reading",
+      "chat": "reading-chat",
+      "prompt": "use this page's tools to add a book titled Synthetic Book with status unread, update its status to read, then list the books"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "reading"
+    },
+    {
+      "id": "workflow",
+      "type": "operations",
+      "page": "reading",
+      "value": [
+        "insert",
+        "update"
+      ]
+    },
+    {
+      "id": "update-and-read",
+      "type": "updated_record",
+      "page": "reading",
+      "chat": "reading-chat",
+      "value": {
+        "before": {
+          "title": "Synthetic Book",
+          "status": "unread"
+        },
+        "after": {
+          "title": "Synthetic Book",
+          "status": "read"
+        }
+      }
+    },
+    {
+      "id": "record",
+      "type": "records_exact",
+      "page": "reading",
+      "value": [
+        {
+          "title": "Synthetic Book",
+          "status": "read"
+        }
+      ]
+    },
+    {
+      "id": "layout",
+      "type": "layout_contains",
+      "page": "reading",
+      "value": {
+        "type": "list"
+      }
+    },
+    {
+      "id": "visible-book",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "Synthetic Book"
+    },
+    {
+      "id": "visible-status",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "read"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "reading"
+    }
+  ]
+}

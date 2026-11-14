@@ -19,7 +19,7 @@ const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={R
 function ComposerSlot({ focus, children }: { focus: boolean; children: ReactNode }) {
   const slot = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus({ preventScroll: true }); }, [focus]);
-  return <div ref={slot} style={{ display: "contents" }}>{children}</div>;
+  return <div id="message-composer" ref={slot} style={{ display: "contents" }}>{children}</div>;
 }
 
 function useRunSnapshot(store: SessionLease["store"] | null) {
@@ -113,6 +113,7 @@ export function App() {
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" disabled={!writable} onClick={active.retrySaving}>retry saving this chat</button></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" disabled={!writable} onClick={active.newChat}>new chat</button></div>
+      : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : failure && !lost && !attached ? <ConnectionBanner state={connectionState} connection={connection} />
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
@@ -122,20 +123,24 @@ export function App() {
         {!readOnly && <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!writable || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>}
       </RunProvider>}
   </>;
-  return <WriteAccessProvider value={writable}><AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell></WriteAccessProvider>;
+  return <WriteAccessProvider value={writable}><AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell></WriteAccessProvider>;
+}
+
+function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
+  return <div className="full-state not-found-state"><p role="alert">page not found</p><div><a className="primary" href="/">go home</a><button className="primary" onClick={() => void onNewChat()}>new chat</button></div></div>;
 }
 
 function EmptyChat({ page, send, continueWaiting }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void> }) {
   const writable = useCanWrite();
   const starters = ["make a page that tracks my reading list", "what changed in my repos since yesterday", "continue: grade last night's eval runs"];
-  return <div className="empty-chat"><h1>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} disabled={!writable} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
+  return <div className="empty-chat"><h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} disabled={!writable} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
 }
 
 function ChatHeader({ page, sessionId, title, state, toggling, toggle, toggleError }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; toggle: () => void; toggleError: string | null }) {
   const [overflow, setOverflow] = useState(false);
   const writable = useCanWrite();
   const controls = <>{writable && <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button></>}</>;
-  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading"><strong data-session-id={sessionId ?? undefined}>{title}</strong><span>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state === "controller-approval" ? "waiting on the controlling tab" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div>{toggleError && <p role="alert">{toggleError}</p>}</header>;
+  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading"><strong title={title} aria-label={title} data-session-id={sessionId ?? undefined}>{title}</strong><span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state === "controller-approval" ? "waiting on the controlling tab" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div>{toggleError && <p role="alert">{toggleError}</p>}</header>;
 }
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {

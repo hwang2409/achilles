@@ -7,55 +7,55 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .pages import now
-from .tools import validate_bundle
+from .tools import bundle_digest, validate_bundle
+from .validation import ValidationError, validate_schema
 
 
-def _check(validator: Draft202012Validator, value: Any, label: str) -> None:
-    error = next(validator.iter_errors(value), None)
-    if error is not None:
-        raise ValueError(f"invalid {label}: {error.message}")
+def _check(validator: Draft202012Validator, value: Any) -> None:
+    validate_schema(value, validator.schema)
 
 
 def _insert(db, page_id, collection, version, schema, arguments):
     document = arguments
-    _check(schema, document, "record")
+    _check(schema, document)
     record_id = str(arguments.get("id") or secrets.token_hex(12))
     stamp = now()
     db.execute(
-        "INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,"
+        "INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,"
         "updated_at) "
-        "VALUES(?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?)",
         (
             page_id,
             collection,
             record_id,
             version,
+            1,
             json.dumps(document, sort_keys=True),
             stamp,
             stamp,
         ),
     )
-    return {**document, "record_id": record_id}
+    return {**document, "record_id": record_id, "revision": 1}
 
 
 def _get(db, page_id, collection, arguments):
     found = db.execute(
-        "SELECT record_id, document FROM page_record "
+        "SELECT record_id, document, revision FROM page_record "
         "WHERE page_id=? AND collection=? AND record_id=?",
         (page_id, collection, arguments.get("record_id")),
     ).fetchone()
     if found is None:
         return None
-    return {**json.loads(found[1]), "record_id": found[0]}
+    return {**json.loads(found[1]), "record_id": found[0], "revision": found[2]}
 
 
 def _list(db, page_id, collection):
     found = db.execute(
-        "SELECT record_id,document FROM page_record "
+        "SELECT record_id,document,revision FROM page_record "
         "WHERE page_id=? AND collection=? ORDER BY created_at",
         (page_id, collection),
     ).fetchall()
-    return [{**json.loads(item[1]), "record_id": item[0]} for item in found]
+    return [{**json.loads(item[1]), "record_id": item[0], "revision": item[2]} for item in found]
 
 
 def _update(db, page_id, collection, version, schema, arguments):
@@ -66,12 +66,13 @@ def _update(db, page_id, collection, version, schema, arguments):
     ).fetchone()
     if found is None:
         raise ValueError("record not found")
+    revision = arguments.get("revision")
     document = json.loads(found[0])
-    document.update({k: v for k, v in arguments.items() if k != "record_id"})
-    _check(schema, document, "record")
-    db.execute(
-        "UPDATE page_record SET version=?, document=?, updated_at=? "
-        "WHERE page_id=? AND collection=? AND record_id=?",
+    document.update({k: v for k, v in arguments.items() if k not in {"record_id", "revision"}})
+    _check(schema, document)
+    updated = db.execute(
+        "UPDATE page_record SET version=?, revision=revision+1, document=?, updated_at=? "
+        "WHERE page_id=? AND collection=? AND record_id=? AND revision=?",
         (
             version,
             json.dumps(document, sort_keys=True),
@@ -79,12 +80,26 @@ def _update(db, page_id, collection, version, schema, arguments):
             page_id,
             collection,
             record_id,
+            revision,
         ),
     )
-    return {**document, "record_id": record_id}
+    if updated.rowcount != 1:
+        raise VersionConflict("/revision", "current record revision")
+    return {**document, "record_id": record_id, "revision": revision + 1}
 
 
-def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) -> Any:
+class VersionConflict(ValidationError):
+    def __init__(self, path: str, expected: str):
+        super().__init__(path, expected, "conflict")
+
+
+def call_record(
+    store,
+    page_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    expected_version: int,
+) -> Any:
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")
     with store.transaction() as db:
@@ -97,8 +112,10 @@ def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) 
         ).fetchone()
         if row is None:
             raise PermissionError("forbidden: tool is not assigned to this page")
+        if expected_version != row["version"]:
+            raise VersionConflict("/version", "active tool version")
         bundle = validate_bundle(json.loads(row["bundle"]))
-        _check(Draft202012Validator(bundle["input_schema"]), arguments, "tool input")
+        _check(Draft202012Validator(bundle["input_schema"]), arguments)
         implementation = bundle["implementation"]
         operation = implementation["operation"]
         collection = implementation["collection"]
@@ -111,5 +128,9 @@ def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) 
             result = _list(db, page_id, collection)
         else:
             result = _update(db, page_id, collection, row["version"], schema, arguments)
-        _check(Draft202012Validator(bundle["output_schema"]), result, "tool output")
+        _check(Draft202012Validator(bundle["output_schema"]), result)
+        db.execute(
+            "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+            (page_id, f"invoke:{tool_name}", bundle_digest(bundle), now()),
+        )
         return result

@@ -1,0 +1,59 @@
+{
+  "id": "invalid-authoring-recovery",
+  "page_plan": [
+    {
+      "alias": "authoring",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "create",
+      "kind": "prompt",
+      "page": "authoring",
+      "chat": "authoring-chat",
+      "prompt": "first call create_tool with a valid bundle whose reserved name is create_tool; after Achilles refuses it, create a valid safe_tool insert tool for safe_records"
+    },
+    {
+      "id": "use",
+      "kind": "prompt",
+      "page": "authoring",
+      "chat": "authoring-chat",
+      "prompt": "use safe_tool successfully"
+    }
+  ],
+  "checks": [
+    {
+      "id": "reserved-refused",
+      "type": "refused_tool_name",
+      "page": "authoring",
+      "name": "create_tool"
+    },
+    {
+      "id": "reserved-absent",
+      "type": "tool_absent",
+      "page": "authoring",
+      "name": "create_tool"
+    },
+    {
+      "id": "valid-tool",
+      "type": "tool",
+      "page": "authoring",
+      "name": "safe_tool"
+    },
+    {
+      "id": "use",
+      "type": "successful_result",
+      "page": "authoring",
+      "tool": "achilles__safe_tool"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "authoring"
+    }
+  ]
+}

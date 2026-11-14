@@ -7,6 +7,20 @@ import sys
 from pathlib import Path
 
 
+def holder_status(value: str) -> str:
+    try:
+        pid = int(value)
+    except ValueError:
+        return "invalid"
+    status = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return status.stdout.strip() if status.returncode == 0 else "missing"
+
+
 def main() -> int:
     lock_path = Path(__file__).resolve().parents[1] / ".cache" / "dev" / "lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -17,8 +31,12 @@ def main() -> int:
         except BlockingIOError:
             lock.seek(0)
             holder = lock.read().strip()
+            status = holder_status(holder)
             suffix = f" (pid {holder})" if holder else ""
-            print(f"make dev is already running{suffix}", file=sys.stderr)
+            print(
+                f"make dev is already running{suffix} (lock holder ps state {status})",
+                file=sys.stderr,
+            )
             return 1
 
         lock.seek(0)
