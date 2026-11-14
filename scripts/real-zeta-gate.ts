@@ -309,10 +309,20 @@ try {
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
-  const readingLink = page.locator('.page-list a[href="/reading"]');
+  if (screenshotDir) {
+    await page.screenshot({ path: join(screenshotDir, "page-index-1440x900.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 760 });
+    await page.screenshot({ path: join(screenshotDir, "page-index-1440x760.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 760 });
+    await page.screenshot({ path: join(screenshotDir, "page-index-390x760.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+  console.log("page links at create completion", await page.locator(".page-list a").evaluateAll((links) => links.map((link) => ({ href: (link as HTMLAnchorElement).href, text: link.textContent }))));
+  console.log("tool call names", await page.locator('[data-part="timeline-frame"]').evaluateAll((frames) => [...new Set(frames.flatMap((frame) => frame.textContent?.match(/(?:achilles__)?create_page/g) ?? []))]));
+  const readingLink = page.locator('.page-list a[href^="/reading"]');
   await readingLink.waitFor({ timeout: 20000 });
   await readingLink.click();
-  await page.waitForURL(`${origin}/reading`);
+  await page.waitForURL((url) => new URL(url).pathname === "/reading");
   await page.goto(origin);
   await field.waitFor({ timeout: 20000 });
   const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
