@@ -1,4 +1,16 @@
 {
+  "initial": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      }
+    ],
+    "tools": [],
+    "assignments": [],
+    "records": [],
+    "layouts": []
+  },
   "good": {
     "pages": [
       {
@@ -23,6 +35,26 @@
     ],
     "results": [
       {
+        "call_id": "failed-create",
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": false,
+        "data": {
+          "error": "invalid layout"
+        }
+      },
+      {
+        "call_id": "create-review",
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "review",
+          "route": "/run-review"
+        }
+      },
+      {
+        "call_id": "add-annotation",
         "page_id": "review",
         "tool": "achilles__add_annotation",
         "success": true,
@@ -47,9 +79,6 @@
         }
       }
     ],
-    "related_page_ids": [
-      "review"
-    ],
     "records": [
       {
         "page_id": "review",
@@ -57,6 +86,73 @@
           "run_id": "run-002",
           "verdict": "bad"
         }
+      }
+    ],
+    "calls": [
+      {
+        "id": "failed-create",
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": false,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "inspect-home",
+        "page_id": "home",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "create-review",
+        "page_id": "home",
+        "tool": "achilles__create_page",
+        "success": true,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "inspect-review-from-home",
+        "page_id": "home",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "arguments": {
+          "route": "/run-review"
+        }
+      },
+      {
+        "id": "inspect-review",
+        "page_id": "review",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "create-add-tool",
+        "page_id": "review",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "discover-add-tool",
+        "page_id": "review",
+        "tool": "mcp_discover",
+        "success": true
+      },
+      {
+        "id": "add-annotation",
+        "page_id": "review",
+        "tool": "achilles__add_annotation",
+        "success": true
+      },
+      {
+        "id": "list-annotations",
+        "page_id": "review",
+        "tool": "achilles__list_annotations",
+        "success": true
       }
     ]
   },
@@ -84,7 +180,8 @@
     ],
     "results": [
       {
-        "page_id": "review",
+        "call_id": "wrong-page-add",
+        "page_id": "home",
         "tool": "achilles__add_annotation",
         "success": true,
         "data": {
@@ -109,15 +206,24 @@
       }
     ],
     "related_page_ids": [
+      "home",
       "review"
     ],
     "records": [
       {
         "page_id": "review",
         "data": {
-          "run_id": "run-003",
+          "run_id": "run-002",
           "verdict": "bad"
         }
+      }
+    ],
+    "calls": [
+      {
+        "id": "wrong-page-add",
+        "page_id": "home",
+        "tool": "achilles__add_annotation",
+        "success": true
       }
     ]
   }
