@@ -582,6 +582,65 @@ def test_create_page_failures_leave_no_rows_or_files(creation_client, arguments,
     assert state(root) == before
 
 
+def test_actionable_layout_errors_reach_public_mcp_without_echoing_values(creation_client):
+    _, _, client, headers = creation_client
+    cases = [
+        (
+            "create_page",
+            request(
+                layout={
+                    "blocks": [{"type": "list", "title": "runs", "collection": "private value!"}]
+                }
+            ),
+            {
+                "code": "invalid_input",
+                "path": "/layout/blocks/0/collection",
+                "expected": "assigned collection",
+            },
+            "create_page.tools",
+            "private value!",
+        ),
+        (
+            "create_page",
+            request(
+                layout={"blocks": [{"type": "form", "title": "edit", "tool": "private value!"}]}
+            ),
+            {
+                "code": "invalid_input",
+                "path": "/layout/blocks/0/tool",
+                "expected": "assigned tool name",
+            },
+            "create_tool",
+            "private value!",
+        ),
+        (
+            "update_layout",
+            {"layout": {"blocks": []}, "expected_version": 99},
+            {
+                "code": "conflict",
+                "path": "/expected_version",
+                "expected": "current active layout version",
+            },
+            "inspect_page",
+            "99",
+        ),
+    ]
+
+    for request_id, (tool, arguments, expected, named_fix, private_value) in enumerate(cases, 2):
+        result = mcp(
+            client,
+            headers,
+            request_id,
+            "tools/call",
+            {"name": tool, "arguments": arguments},
+        )
+        document = json.loads(result["content"][0]["text"])
+        assert result["isError"] is True
+        assert {key: document[key] for key in ("code", "path", "expected")} == expected
+        assert named_fix in document["hint"]
+        assert private_value not in document["hint"]
+
+
 def test_create_page_file_failure_leaves_no_rows_or_files(creation_client, monkeypatch):
     root, _store, client, headers = creation_client
     before = state(root)
