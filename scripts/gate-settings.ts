@@ -43,11 +43,20 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
 
+  const composer = page.getByRole("textbox", { name: "message" });
+  await composer.focus();
+  await openSettings(page);
+  await page.keyboard.press("Escape");
+  if (!await composer.evaluate((node) => node === document.activeElement)) throw new Error("desktop settings escape did not restore opener focus");
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
-  await page.keyboard.press("Control+Comma");
+  const menuButton = page.getByRole("button", { name: "open menu" });
+  await menuButton.click();
+  const settingsButton = page.locator("aside.sidebar").getByRole("button", { name: /settings/ });
+  await settingsButton.click();
   const narrowDialog = page.getByRole("dialog", { name: "settings" });
-  if (await narrowDialog.count() !== 1) throw new Error("narrow settings shortcut did not expose a named dialog");
+  if (await narrowDialog.count() !== 1) throw new Error("narrow settings button did not expose a named dialog");
   const narrowTargets = await narrowDialog.locator("button").evaluateAll((controls) => controls.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
   if (narrowTargets.some(({ width, height }) => width < 40 || height < 40)) throw new Error(`narrow settings target is smaller than 40px: ${JSON.stringify(narrowTargets)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/settings-narrow-390x844.png` });
@@ -59,9 +68,15 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   if (!await lastControl.evaluate((node) => node === document.activeElement)) throw new Error("settings focus did not wrap backward to the last enabled control");
   await page.keyboard.press("Tab");
   if (!await firstControl.evaluate((node) => node === document.activeElement && document.activeElement !== document.body)) throw new Error("settings focus did not wrap forward to the first enabled control");
-  await page.getByRole("button", { name: "esc" }).click();
+  await page.keyboard.press("Escape");
+  if (await narrowDialog.isVisible()) throw new Error("narrow settings escape did not close the dialog");
+  if (await page.locator("aside.sidebar").getAttribute("aria-hidden") === "true") throw new Error("settings escape closed the drawer before the dialog");
+  if (!await settingsButton.evaluate((node) => node === document.activeElement)) throw new Error("narrow settings escape did not restore opener focus");
+  await page.keyboard.press("Escape");
+  if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
+  if (!await menuButton.evaluate((node) => node === document.activeElement)) throw new Error("drawer escape did not restore menu focus");
   await page.setViewportSize({ width: 1440, height: 900 });
-  console.log("settings gate passed: live theme, persistence, query override, reset, narrow shortcut, and focus wrap");
+  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, and focus return");
 }
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };
