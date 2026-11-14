@@ -414,7 +414,7 @@ try {
     console.log(`focus after commit: ${row.name}`);
   }
   await reloadShell();
-  await gateTranscript(page, waitFor);
+  await gateTranscript(page, waitFor, requests, control);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests(), approvalModeResponse);
