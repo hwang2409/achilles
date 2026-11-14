@@ -221,7 +221,7 @@ try {
     throw new Error("stale session did not fall back to exactly one replacement");
   await assertServerAskWins(page, first, requests(), approvalModeResponse);
   await page.goto(`${origin}/not-a-real-page`);
-  await page.getByRole("alert", { name: "page not found" }).waitFor({ timeout: 20_000 });
+  await page.getByRole("alert").filter({ hasText: "page not found" }).waitFor({ timeout: 20_000 });
   await page.getByRole("button", { name: "new chat", exact: true }).click();
   await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
   const unknownRouteSession = await homeSessionId();
