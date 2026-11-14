@@ -66,6 +66,7 @@ const waitForExit = (child: ChildProcess, timeoutMs: number) =>
     child.once("exit", onExit);
   });
 let browser;
+let controllerContext;
 try {
   await Bun.spawn(["git", "init", cwd]).exited;
   await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
@@ -130,7 +131,8 @@ try {
     "achilles",
   );
   browser = await chromium.launch({ headless: true });
-  let page = await browser.newPage();
+  controllerContext = await browser.newContext();
+  let page = await controllerContext.newPage();
   const errors: string[] = [];
   let ignoreBrowserErrors = false;
   let expectingRegistrationFailures = false;
@@ -701,7 +703,7 @@ try {
   if (await observerPage.getByRole("textbox", { name: "message" }).count()) throw new Error("observer page exposed a composer");
   if (!(await observerPage.getByRole("status").innerText()).includes("another tab or app")) throw new Error("observer page did not show the controller capacity banner");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "08-observer-read-only-review-1440x900.png"), fullPage: true });
-  await page.close({ runBeforeUnload: true });
+  await controllerContext.close();
   page = observerPage;
   await page.waitForTimeout(3_000);
   await page.getByRole("button", { name: "take control" }).click();
