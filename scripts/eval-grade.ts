@@ -248,5 +248,6 @@ export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
 
 export function gradeReference(task: EvalTask, snapshot: EvalSnapshot) {
   const result = gradeTask(task, snapshot);
-  return { ...result, status: result.pass ? "pass" as const : "agent_fail" as const };
+  const staticFailure = rows(snapshot, "browser").some(row => /static file not found/i.test(String(row.text ?? "")));
+  return { ...result, status: staticFailure ? "harness_error" as const : result.pass ? "pass" as const : "agent_fail" as const };
 }

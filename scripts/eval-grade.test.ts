@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
-import { gradeCheck, gradeTask, structurallyContains, validateTask } from "./eval-grade";
+import { gradeCheck, gradeReference, gradeTask, structurallyContains, validateTask } from "./eval-grade";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
+
+test("static file failures are harness errors, not agent failures", () => {
+  const result = gradeReference(task, { browser: [{ text: "static file not found" }] });
+  expect(result.status).toBe("harness_error");
+  expect(result.pass).toBe(false);
+});
 
 test("task schema is closed and count checks name real collections", () => {
   expect(validateTask(task).id).toBe("x-task");
