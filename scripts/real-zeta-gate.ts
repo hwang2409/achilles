@@ -131,6 +131,7 @@ try {
   const page = await browser.newPage();
   const errors: string[] = [];
   let ignoreBrowserErrors = false;
+  let expectingRegistrationFailures = false;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
@@ -140,7 +141,9 @@ try {
     if (!ignoreBrowserErrors) errors.push(e.message);
   });
   page.on("console", (m) => {
-    if (m.type() === "error" && !ignoreBrowserErrors) errors.push(m.text());
+    if (m.type() !== "error") return;
+    if (expectingRegistrationFailures && m.text().includes("the server responded with a status of 503")) return;
+    if (!ignoreBrowserErrors) errors.push(m.text());
   });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
@@ -621,7 +624,7 @@ try {
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
   let registerFailures = 0;
-  ignoreBrowserErrors = true;
+  expectingRegistrationFailures = true;
   await page.route("**/api/pages/*/chats", async (route) => {
     if (registerFailures < 2) { registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
     else await route.continue();
@@ -641,7 +644,7 @@ try {
   }, "orphan chat retry");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsAfterFailure)
     throw new Error("retrying an orphaned chat created another zeta session");
-  ignoreBrowserErrors = false;
+  await page.waitForTimeout(1_000);
 
   const draft = "this draft must remain after zeta disconnects";
   const droppedField = page.getByRole("textbox", { name: "message" });
@@ -655,8 +658,25 @@ try {
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
+  const droppedPid = zetaProcess.pid;
+  zetaProcess = start(
+    "uv",
+    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
+    env,
+  );
+  await waitFor(async () => {
+    try { return JSON.parse(await Bun.file(control).text()).pid !== droppedPid; }
+    catch { return false; }
+  }, "zeta reconnect after dropped connection");
+  await page.getByRole("button", { name: "retry now" }).click();
+  const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
+  await recoveredField.waitFor({ timeout: 20_000 });
+  if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
+    zetaProcess.kill("SIGTERM");
+    if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
     const heldRequests: Route[] = [];
     const hold = (route: Route) => { heldRequests.push(route); };
     ignoreBrowserErrors = true;

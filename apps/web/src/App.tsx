@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
 import { AppShell } from "./AppShell";
 import { createApprovalDecider } from "./zeta/approvals";
@@ -7,6 +7,12 @@ import { useActiveChat, type Page } from "./useActiveChat";
 import "./style.css";
 
 const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
+
+function ComposerSlot({ focus, children }: { focus: boolean; children: ReactNode }) {
+  const slot = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus({ preventScroll: true }); }, [focus]);
+  return <div ref={slot} style={{ display: "contents" }}>{children}</div>;
+}
 
 function connectionFailure(state: ConnectionState): string | null {
   if (state.phase !== "connected" && "lost" in state && state.lost) return "the connection to zeta was lost.";
@@ -63,7 +69,7 @@ export function App() {
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         <section className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={active.send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} />{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</section>
-        {!connected || !client ? <Composer key={ready.sessionId} state="read-only" reason="send is off until zeta is back" onSubmit={active.send} placeholder="message zeta" /> : <Composer key={ready.sessionId} state={turn === "running" ? "steerable" : "idle"} onSubmit={active.send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}
+        <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!connected || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={active.send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={active.send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>
       </RunProvider>}
   </>;
   return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;

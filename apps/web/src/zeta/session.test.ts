@@ -34,6 +34,19 @@ describe("openHomeSession", () => {
     expect(creationApprovalMode("ask")).toBe("ask");
   });
 
+  test("retains a created id before loading its settings", async () => {
+    let retained = false;
+    let retainedAtSettings = false;
+    const client = { request: async (method: string) => {
+      if (method === "new_session") return { session: { session_id: "created" } };
+      if (method === "session_settings") { retainedAtSettings = retained; return { model: "offline", approval_mode: "allow" }; }
+      throw new Error(`unexpected ${method}`);
+    } };
+    const open = openHomeSession as (...args: unknown[]) => ReturnType<typeof openHomeSession>;
+    await open(client as never, null, "credential", "/tmp", "allow", true, () => { retained = true; });
+    expect(retainedAtSettings).toBeTrue();
+  });
+
   test("preserves a resumed chat mode when the server does not force ask", async () => {
     const methods: string[] = [];
     const client = { request: async (method: string) => {
@@ -50,6 +63,27 @@ describe("openHomeSession", () => {
 });
 
 describe("loadSession", () => {
+  test("releases an acquired lease when replay finalization fails", async () => {
+    let statusRequests = 0;
+    let releases = 0;
+    const client = {
+      request: async (method: string) => {
+        if (method === "session_history") return { messages: [], next_offset: null };
+        statusRequests += 1;
+        if (statusRequests > 1) throw new Error("status failed after acquire");
+        return { session: { session_id: "s" }, state: "idle" };
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => {
+        await refresh();
+        return { store: { resync() {} }, release() { releases += 1; } };
+      },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
+    await expect(loadSession(client as never, "s")).rejects.toThrow("status failed after acquire");
+    expect(releases).toBe(1);
+  });
+
   test("reconciles a tail event that arrives during refresh", async () => {
     let revision = 0;
     let historyRequests = 0;

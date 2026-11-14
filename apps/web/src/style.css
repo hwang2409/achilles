@@ -17,7 +17,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border); }
 .brand-row strong { font-size: 16px; letter-spacing: .02em; }
 .brand-row > span:last-of-type { color: var(--fulcrum-muted); font-size: 12px; }
-.brand-row button { width: 30px; height: 30px; margin-left: auto; color: var(--fulcrum-muted); }
+.brand-row button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
 .brand-mark { position: relative; width: 11px; height: 11px; background: var(--fulcrum-accent); }
 .brand-mark::after { content: ""; position: absolute; width: 11px; height: 11px; left: 5px; top: 5px; background: color-mix(in srgb, var(--fulcrum-accent) 55%, white); }
 .new-chat, .chat-search { flex: 0 0 40px; margin: 12px 16px 0; display: flex; align-items: center; gap: 10px; padding: 0 10px; }
@@ -102,12 +102,12 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
 .sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
 .sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
-.sidebar-collapsed .brand-row button { display: block; width: 32px; height: 32px; margin: 0; }
+.sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
 .sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed footer span, .sidebar-collapsed footer > kbd { display: none; }
-.sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 32px; justify-content: center; margin: 12px 9px 0; padding: 0; }
+.sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 40px; justify-content: center; margin: 12px 6px 0; padding: 0; }
 .sidebar-collapsed .waiting-count { display: grid; place-items: center; width: 32px; height: 32px; margin: 12px 9px; border: 1px solid var(--fulcrum-warn); }
-.sidebar-collapsed footer { margin-top: auto; padding: 9px; }
-.sidebar-collapsed footer button { width: 32px; flex: 0 0 32px; padding: 0; text-align: center; }
+.sidebar-collapsed footer { margin-top: auto; padding: 6px; }
+.sidebar-collapsed footer button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
 
 @media (max-width: 759px) {
   .app-shell { display: block; }

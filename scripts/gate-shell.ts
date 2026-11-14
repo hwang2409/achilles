@@ -14,6 +14,7 @@ export async function gateShell(
     const current = await page.locator("[data-session-id]").getAttribute("data-session-id");
     return Boolean(current && current !== firstSessionId);
   }, "second home chat");
+  await waitFor(async () => await page.getByRole("textbox", { name: "message", exact: true }).evaluate((field) => field === document.activeElement), "pointer new chat composer focus");
   const secondSessionId = await page.locator("[data-session-id]").getAttribute("data-session-id");
   const selectedUrl = new URL(page.url());
   if (!secondSessionId || selectedUrl.searchParams.get("chat") !== secondSessionId)
@@ -29,6 +30,11 @@ export async function gateShell(
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== secondSessionId)
     throw new Error("reload did not keep the selected chat query");
+  await page.keyboard.press("Meta+Shift+O");
+  await waitFor(async () => {
+    const field = page.getByRole("textbox", { name: "message", exact: true });
+    return await field.count() === 1 && await field.evaluate((element) => element === document.activeElement);
+  }, "shortcut new chat composer focus");
 
   const search = page.getByRole("combobox", { name: "search chats and pages" });
   await search.waitFor({ timeout: 20_000 });
@@ -59,6 +65,14 @@ export async function gateShell(
   const menu = page.getByRole("button", { name: "open menu" });
   await menu.click();
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  const main = page.locator("main.main-pane");
+  if (!(await main.evaluate((element) => element.inert)) || await main.getAttribute("aria-hidden") !== "true")
+    throw new Error("open drawer left the main pane interactive");
+  if (!(await sidebar.evaluate((element) => element.contains(document.activeElement))))
+    throw new Error("opening the drawer did not move focus into it");
+  await page.keyboard.press("Tab");
+  if (!(await sidebar.evaluate((element) => element.contains(document.activeElement))))
+    throw new Error("drawer tab escaped into the obscured main pane");
   await capture("10-narrow-drawer-review-390x844.png");
   await page.keyboard.press("Escape");
   if ((await sidebar.getAttribute("aria-hidden")) !== "true") throw new Error("escape did not close the drawer");

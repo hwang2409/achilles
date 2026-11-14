@@ -31,7 +31,7 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
   return serverMode === "ask" || !autoApproveDefault ? "ask" : "allow";
 }
 
-export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, serverMode?: string | null, autoApproveDefault = true) {
+export async function openHomeSession(client: ZetaClient, storedId: string | null, credential: string, cwd: string, serverMode?: string | null, autoApproveDefault = true, onCreated?: (sessionId: string) => Promise<void> | void) {
   const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let id = storedId;
   let name: string | null = null;
@@ -52,6 +52,7 @@ export async function openHomeSession(client: ZetaClient, storedId: string | nul
     name = result.session?.name ?? null;
     created = true;
     if (!id) throw new Error("zeta did not return a session id");
+    await onCreated?.(id);
   }
   const desiredMode = creationApprovalMode(serverMode, autoApproveDefault);
   if (created || serverMode === "ask") return { id, name, ...await applyApprovalMode(client, id, desiredMode) };
@@ -69,10 +70,15 @@ export async function loadSession(client: ZetaClient, id: string): Promise<Sessi
   const snapshot = (rows: unknown[], status: Status) => [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(status)];
   const loadAll = async () => { pages = []; for (let offset: number | null = 0; offset !== null;) { const next = await page(offset); pages.push(next); offset = next.nextOffset; } };
   const initial = await client.request("status", {}) as Status;
-  lease = await client.replay(id, async () => { await loadAll(); const status = initial.session?.session_id === id ? initial : await client.request("status", {}) as Status; return snapshot(allRows(), status); }, true);
-  const revision = client.replayRevision(id); const tail = pages.at(-1);
-  if (tail) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tail.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); }
-  let status = await client.request("status", {}) as Status;
-  while (!client.finishReplay(id, revision)) { const nextRevision = client.replayRevision(id); const tailPage = pages.at(-1); if (tailPage) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tailPage.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); } status = await client.request("status", {}) as Status; if (client.finishReplay(id, nextRevision)) break; }
-  lease.store.resync(snapshot(allRows(), status)); return lease;
+  try {
+    lease = await client.replay(id, async () => { await loadAll(); const status = initial.session?.session_id === id ? initial : await client.request("status", {}) as Status; return snapshot(allRows(), status); }, true);
+    const revision = client.replayRevision(id); const tail = pages.at(-1);
+    if (tail) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tail.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); }
+    let status = await client.request("status", {}) as Status;
+    while (!client.finishReplay(id, revision)) { const nextRevision = client.replayRevision(id); const tailPage = pages.at(-1); if (tailPage) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tailPage.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); } status = await client.request("status", {}) as Status; if (client.finishReplay(id, nextRevision)) break; }
+    lease.store.resync(snapshot(allRows(), status)); return lease;
+  } catch (caught) {
+    lease?.release();
+    throw caught;
+  }
 }
