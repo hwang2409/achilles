@@ -685,6 +685,7 @@ try {
     throw new Error(`mcp_discover resources call did not succeed: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
   if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "inspect-after-discovery" && !result.is_error))
     throw new Error(`achilles inspect_page call did not succeed after resources discovery: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+  await page.getByText("new chat tools complete", { exact: true }).waitFor({ timeout: 20_000 });
   console.log(`two-chat page tools asserted: ${chatOne} created /reading; ${chatTwo} discovered resources and inspected it`);
   const homeInspect = await homeMcp(11, "tools/call", {
     name: "inspect_page",
