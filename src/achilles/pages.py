@@ -395,38 +395,30 @@ class PageStore:
                 raise KeyError(page_id)
             active = self._active_layout(db, page_id)
             assert active is not None
-            active = (active[0], active[1], self._computed_layout(db, page_id, active[2]))
+            version, digest, document = active
+            computed = self._computed_layout(
+                db,
+                page_id,
+                {"blocks": [dict(block) for block in document.get("blocks", [])]},
+            )
+            metric_values = [
+                {"block": index, "value": block["value"]}
+                for index, block in enumerate(computed["blocks"])
+                if block.get("type") == "metric" and block.get("count") is True
+            ]
             counts = db.execute(
                 "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
                 (page_id,),
             ).fetchall()
-        version, digest, document = active
         tools = self.page_tools(page_id)
         return {
             "route": row["route"],
             "title": row["title"],
             "create_mode": bool(row["create_mode"]),
-            "layout": {
-                "version": version,
-                "digest": digest,
-                "blocks": [
-                    {
-                        key: block[key]
-                        for key in (
-                            "type",
-                            "title",
-                            "tool",
-                            "label",
-                            "value",
-                            "collection",
-                            "count",
-                            "where",
-                        )
-                        if key in block
-                    }
-                    for block in document.get("blocks", [])
-                ],
-            },
+            "layout": document,
+            "layout_version": version,
+            "layout_digest": digest,
+            "metric_values": metric_values,
             "tools": [
                 {
                     "name": tool["name"],

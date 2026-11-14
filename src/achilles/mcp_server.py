@@ -9,7 +9,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from .pages import CREATE_PAGE_SCHEMA, UPDATE_LAYOUT_SCHEMA, PageStore
+from .pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, UPDATE_LAYOUT_SCHEMA, PageStore
 from .records import call_record
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
@@ -17,6 +17,51 @@ from .validation import ValidationError, error_document, validate_schema
 INSPECT_PAGE_SCHEMA = {
     "type": "object",
     "properties": {"route": {"type": "string"}, "page_id": {"type": "string"}},
+    "additionalProperties": False,
+}
+INSPECT_PAGE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "route": {"type": "string"},
+        "title": {"type": "string"},
+        "create_mode": {"type": "boolean"},
+        "layout": LAYOUT_SCHEMA,
+        "layout_version": {"type": "integer", "minimum": 1},
+        "layout_digest": {"type": ["string", "null"]},
+        "metric_values": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "block": {"type": "integer", "minimum": 0},
+                    "value": {"type": "integer", "minimum": 0},
+                },
+                "required": ["block", "value"],
+                "additionalProperties": False,
+            },
+        },
+        "tools": {"type": "array", "items": {"type": "object"}},
+        "collections": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0},
+        },
+        "truncated": {"type": "boolean"},
+        "omitted": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0},
+        },
+    },
+    "required": [
+        "route",
+        "title",
+        "create_mode",
+        "layout",
+        "layout_version",
+        "layout_digest",
+        "metric_values",
+        "tools",
+        "collections",
+    ],
     "additionalProperties": False,
 }
 _INSPECT_MAX_BYTES = 8 * 1024
@@ -60,6 +105,7 @@ def _inspect_result(value: dict[str, Any]) -> CallToolResult:
     result = {
         **value,
         "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
+        "metric_values": list(value["metric_values"]),
         "tools": list(value["tools"]),
         "collections": dict(value["collections"]),
     }
@@ -74,12 +120,14 @@ def _inspect_result(value: dict[str, Any]) -> CallToolResult:
     result["truncated"] = True
     original_counts = {
         "blocks": len(result["layout"]["blocks"]),
+        "metric_values": len(result["metric_values"]),
         "tools": len(result["tools"]),
         "collections": len(result["collections"]),
     }
     result["omitted"] = {key: 0 for key in original_counts}
     for key, container in (
         ("blocks", result["layout"]["blocks"]),
+        ("metric_values", result["metric_values"]),
         ("tools", result["tools"]),
         ("collections", result["collections"]),
     ):
@@ -143,9 +191,12 @@ def build_mcp(store: PageStore):
                         name="inspect_page",
                         description=(
                             "inspect safe summaries of this page and pages it created; "
-                            "legacy pages can inspect only themselves"
+                            "layout is stored input ready for update_layout, while metric_values "
+                            "reports computed counts by layout block index; legacy pages can "
+                            "inspect only themselves"
                         ),
                         inputSchema=INSPECT_PAGE_SCHEMA,
+                        outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
                     ),
                     Tool(
                         name="create_page",

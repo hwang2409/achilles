@@ -170,7 +170,7 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
     value = json.loads(text)
     assert len(text.encode()) <= 8 * 1024
     assert value["truncated"] is True
-    assert set(value["omitted"]) == {"blocks", "tools", "collections"}
+    assert set(value["omitted"]) == {"blocks", "metric_values", "tools", "collections"}
     assert sum(value["omitted"].values()) > 0
 
 
@@ -189,7 +189,7 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     )
     value = json.loads(summary["content"][0]["text"])
     assert value["route"] == "/reading"
-    assert value["layout"]["version"] == 1
+    assert value["layout_version"] == 1
     assert value["tools"][0]["name"] == "add_book"
     assert value["collections"] == {}
     serialized = json.dumps(value)
@@ -700,7 +700,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     before = json.loads(inspected["content"][0]["text"])
-    assert before["layout"]["version"] == 1
+    assert before["layout_version"] == 1
 
     layout = {"blocks": [{"type": "detail", "title": "changed", "fields": ["id"]}]}
     updated = mcp(
@@ -712,7 +712,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": layout,
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )
@@ -726,8 +726,8 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
         {"name": "inspect_page", "arguments": {}},
     )
     after = json.loads(inspected["content"][0]["text"])
-    assert after["layout"]["version"] == 2
-    assert after["layout"]["blocks"] == [{"type": "detail", "title": "changed"}]
+    assert after["layout_version"] == 2
+    assert after["layout"] == layout
 
     stale = mcp(
         client,
@@ -738,7 +738,7 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
             "name": "update_layout",
             "arguments": {
                 "layout": {"blocks": []},
-                "expected_version": before["layout"]["version"],
+                "expected_version": before["layout_version"],
             },
         },
     )

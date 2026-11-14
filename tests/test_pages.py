@@ -185,10 +185,26 @@ def test_computed_metrics_count_records_at_read_time(tmp_path):
 
     blocks = store.layout(page["id"])["blocks"]
     assert [block["value"] for block in blocks] == [3, 2, 0]
-    assert store.inspect_page(page["id"])["layout"]["blocks"][1] == {
-        **layout["blocks"][1],
-        "value": 2,
+    inspected = store.inspect_page(page["id"])
+    assert inspected["metric_values"] == [
+        {"block": 0, "value": 3},
+        {"block": 1, "value": 2},
+        {"block": 2, "value": 0},
+    ]
+
+
+def test_inspected_computed_metric_layout_round_trips_to_update(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    layout = {
+        "blocks": [{"type": "metric", "label": "books", "collection": "books", "count": True}]
     }
+    page, _, _ = store.create_page("/metrics", "metrics", layout)
+    store.set_create_mode(page["id"], True)
+
+    inspected = store.inspect_page(page["id"])
+    assert inspected["layout"] == layout
+    assert store.update_layout(page["id"], inspected["layout"], inspected["layout_version"])[0] == 2
 
 
 def test_computed_metric_equals_preserves_json_scalar_types(tmp_path):
@@ -385,7 +401,7 @@ def test_update_layout_preserves_records_tools_and_chats(tmp_path):
     layout = {"blocks": [{"type": "text", "text": "updated"}]}
     assert store.update_layout(page_id, layout, 1)[0] == 2
     assert store.layout(page_id) == layout
-    assert store.inspect_page(page_id)["layout"]["version"] == 2
+    assert store.inspect_page(page_id)["layout_version"] == 2
     with store._connect() as db:
         after = {
             table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
@@ -405,7 +421,7 @@ def test_null_active_layout_version_reads_version_one_not_latest(tmp_path):
             (page_id, 2, "inactive", json.dumps(inactive), "later"),
         )
     assert store.layout(page_id)["blocks"][0]["type"] == "list"
-    assert store.inspect_page(page_id)["layout"]["version"] == 1
+    assert store.inspect_page(page_id)["layout_version"] == 1
 
 
 def test_save_session_compare_and_set_has_one_winner(tmp_path):
