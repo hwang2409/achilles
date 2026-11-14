@@ -322,6 +322,24 @@ def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
     return fields
 
 
+def _missing_update_note(bundles: list[dict[str, Any]]) -> str | None:
+    operations: dict[str, set[str]] = {}
+    for bundle in bundles:
+        implementation = bundle["implementation"]
+        operations.setdefault(implementation["collection"], set()).add(implementation["operation"])
+    missing = sorted(
+        collection
+        for collection, collection_operations in operations.items()
+        if "insert" in collection_operations and "update" not in collection_operations
+    )
+    if not missing:
+        return None
+    return " ".join(
+        f"collection {collection} has no update tool; rows cannot be changed after insert"
+        for collection in missing
+    )
+
+
 def _json_scalar_match(
     field: str, value: str | int | float | bool | None
 ) -> tuple[str, tuple[Any, ...]]:
@@ -924,7 +942,7 @@ class PageStore:
         layout: Any,
         principal_id: str = "home",
         tools: Any = None,
-    ) -> tuple[sqlite3.Row, str, bool, list[dict[str, Any]]]:
+    ) -> tuple[sqlite3.Row, str, bool, list[dict[str, Any]], str | None]:
         bundles = [] if tools is None else tools
         value = {"route": route, "title": title, "layout": layout, "tools": bundles}
         validate_schema(value, CREATE_PAGE_SCHEMA)
@@ -975,7 +993,7 @@ class PageStore:
                         and [row[0] for row in existing_tools] == requested_tools
                     ):
                         summary = self._inspect_page(db, existing["id"])["detail_filter_matches"]
-                        return existing, digest, True, summary
+                        return existing, digest, True, summary, _missing_update_note(bundles)
                     raise ValidationError(
                         "/route", "unused route or equivalent request", "conflict"
                     )
@@ -1055,6 +1073,7 @@ class PageStore:
                     "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                     (page_id, "create_page", digest, stamp),
                 )
+                note = _missing_update_note(bundles)
                 for bundle in bundles:
                     tool_id = secrets.token_hex(12)
                     tool_digest = bundle_digest(bundle)
@@ -1082,7 +1101,7 @@ class PageStore:
             raise ValidationError("", "atomic page creation", "create_failed") from exc
         row = self.page(page_id or "")
         assert row is not None
-        return row, digest, False, detail_summary
+        return row, digest, False, detail_summary, note
 
     @staticmethod
     def _cleanup_create_paths(paths: set[Path]) -> None:
@@ -1154,7 +1173,7 @@ class PageStore:
 
     def create_tool(
         self, page_id: str, bundle: Any, validation_prefix: str = ""
-    ) -> tuple[dict[str, Any], str]:
+    ) -> tuple[dict[str, Any], str, str | None]:
         bundle = validate_bundle(bundle, validation_prefix, reject_conflicting_output=True)
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
@@ -1200,7 +1219,8 @@ class PageStore:
                     "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                     (page_id, "create_tool", digest, stamp),
                 )
-            return {"tool_id": tool_id, "name": bundle["name"], "version": version}, digest
+                note = _missing_update_note(self._page_tools(db, page_id))
+            return {"tool_id": tool_id, "name": bundle["name"], "version": version}, digest, note
         except Exception:
             raise
 

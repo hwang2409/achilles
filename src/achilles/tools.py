@@ -146,7 +146,14 @@ def validate_bundle(
             or revision.get("type") != "integer"
             or "revision" not in input_schema.get("required", [])
         ):
-            raise ValidationError(f"{prefix}/input_schema", "required integer property: revision")
+            raise ValidationError(
+                f"{prefix}/input_schema",
+                "required integer property: revision",
+                hint=(
+                    "Add revision with type integer to input_schema properties and required; "
+                    "pass the revision returned by a list or get tool."
+                ),
+            )
     output_schema, _ = derived_output_schema(bundle)
     if reject_conflicting_output and _normalize_schema(
         bundle.get("output_schema", output_schema)
