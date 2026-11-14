@@ -860,6 +860,84 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
     }
 
 
+@pytest.mark.parametrize("writer", ["create_page", "update_layout"])
+@pytest.mark.parametrize(
+    ("field_filter", "expect_error"),
+    [
+        ({"field": "title", "equals": "the book"}, False),
+        ({"field": "missing", "equals": "the book"}, True),
+        ({"field": "run_id", "equals": "run-002"}, True),
+        (None, False),
+    ],
+)
+def test_detail_filter_validation_through_public_tools(
+    creation_client, writer, field_filter, expect_error
+):
+    _, store, client, home_headers = creation_client
+    detail = {
+        "type": "detail",
+        "title": "book",
+        "collection": "books",
+        "fields": ["title"],
+    }
+    if field_filter is not None:
+        detail["filter"] = field_filter
+    layout = {"blocks": [detail]}
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(
+                layout=layout
+                if writer == "create_page"
+                else {"blocks": [{"type": "text", "text": "start"}]}
+            ),
+        },
+    )
+    result = created
+    page_id = None
+    if writer == "update_layout":
+        page_id = json.loads(created["content"][0]["text"])["page_id"]
+        store.set_create_mode(page_id, True)
+        page_headers = initialize(client, store.ensure_credential(page_id), 3)
+        result = mcp(
+            client,
+            page_headers,
+            4,
+            "tools/call",
+            {
+                "name": "update_layout",
+                "arguments": {"layout": layout, "expected_version": 1},
+            },
+        )
+
+    assert bool(result.get("isError")) is expect_error
+    if expect_error:
+        assert json.loads(result["content"][0]["text"]) == {
+            "code": "invalid_input",
+            "path": "/layout/blocks/0/filter/field",
+            "expected": "field in collection schema",
+            "hint": (
+                "Use a field listed in the assigned tool's "
+                "implementation.data_schema.properties, or add it there."
+            ),
+        }
+    else:
+        page_id = page_id or json.loads(created["content"][0]["text"])["page_id"]
+        inspected = mcp(
+            client,
+            home_headers,
+            5,
+            "tools/call",
+            {"name": "inspect_page", "arguments": {"page_id": page_id}},
+        )
+        value = json.loads(inspected["content"][0]["text"])
+        assert value["layout"] == layout
+
+
 def test_update_layout_refuses_page_too_large_to_inspect(creation_client):
     _, store, client, home_headers = creation_client
     large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
@@ -1016,8 +1094,10 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
         "change only what the user asked (insert, "
         "reorder, edit, or remove blocks), and pass the full layout with "
         "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
-        "To change another page, open that page's chat. A detail block shows field labels only "
-        "and cannot pin one record; use a list block to show records."
+        "To change another page, open that page's chat. A detail block can select records with "
+        'collection and filter, for example {"field":"run_id","equals":"run-002"}; use a '
+        "field from the collection's assigned tool schema. It shows the highest creation time, "
+        "with ties resolved by highest record id; without a filter it shows field labels only."
     )
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]

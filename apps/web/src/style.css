@@ -7,14 +7,14 @@
 html, body, #root { height: 100%; overflow: hidden; }
 body { margin: 0; }
 button, input, textarea, select { color: inherit; font: inherit; }
-.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 button, input, a { border-radius: 0; }
 button { background: transparent; border: 1px solid var(--fulcrum-border); cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 kbd { color: var(--fulcrum-muted); font: inherit; }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
 .app-shell { height: 100%; display: grid; grid-template-columns: 288px minmax(0, 1fr); background: var(--fulcrum-bg); }
-.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border); }
 .brand-row strong { font-size: 16px; letter-spacing: .02em; }
@@ -89,6 +89,12 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .layout-blocks { flex: 0 1 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; overflow-y: auto; padding: 16px max(24px, calc((100% - 880px) / 2)); border-bottom: 1px solid var(--fulcrum-border); }
 .layout-blocks > :not(.layout-metric) { grid-column: 1 / -1; }
 .layout-metric { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.record-detail h2 { margin: 0 0 12px; font-size: 16px; text-wrap: balance; }
+.record-detail dl { display: grid; grid-template-columns: minmax(96px, .35fr) minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+.record-detail dl > div { display: contents; }
+.record-detail dt { color: var(--fulcrum-muted); }
+.record-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.record-detail .match-note { margin: 12px 0 0; color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
 .transcript { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
 .transcript table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
