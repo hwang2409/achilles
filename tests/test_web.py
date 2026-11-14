@@ -543,9 +543,10 @@ def test_rollback_requires_page_bearer_and_same_origin(tmp_path):
     assert store.page_tools("home")[0]["version"] == 2
 
 
-def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
+def test_records_are_same_origin_get_only_with_limit_order_and_total_header(
+    tmp_path: Path,
+) -> None:
     store = PageStore(tmp_path / "achilles")
-    token = store.ensure_credential("home")
     with store.transaction() as db:
         for index in range(101):
             stamp = "2025-01-01T00:00:00+00:00"
@@ -555,23 +556,22 @@ def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
                 ") VALUES(?,?,?,?,?,?,?)",
                 ("home", "events", str(index), 1, json.dumps({"value": index}), stamp, stamp),
             )
-    client = TestClient(web.create_app())
-    response = client.get(
-        "/api/pages/home/records/events?limit=100",
-        headers={"authorization": f"Bearer {token}"},
+    client = TestClient(
+        web.create_app(),
+        client=("127.0.0.1", 1234),
+        headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
     )
+    path = "/api/pages/home/records/events?limit=100"
+    response = client.get(path)
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 100
     assert body[0]["value"] == 100
     assert body[-1]["value"] == 1
     assert response.headers["x-achilles-total"] == "101"
-    assert (
-        client.get(
-            "/api/pages/home/records/events?limit=101", headers={"authorization": f"Bearer {token}"}
-        ).status_code
-        == 400
-    )
+    assert client.get("/api/pages/home/records/events?limit=101").status_code == 400
+    assert client.get(path, headers={"origin": "https://synthetic.example"}).status_code == 403
+    assert client.post(path).status_code == 405
 
 
 def test_mcp_connection_cleanup_removes_sessions_safely() -> None:

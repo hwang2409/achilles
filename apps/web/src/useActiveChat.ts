@@ -7,7 +7,7 @@ import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner
 import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./zeta/session";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
-type Attachment = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null; title: string };
+type Attachment = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; credential: string | null; pendingApprovalMode: string | null; title: string };
 type ReadyState = Attachment & { phase: "ready" };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | ReadyState;
 
@@ -71,7 +71,7 @@ async function findWaitingChat() {
 
 type AttachmentOwner = ReturnType<typeof createAttachmentOwner>;
 type Target = { page: Page; selectedId: string | null; sessionId: string | null };
-type ReadMetadata = Target & { credential: string };
+type ControllerMetadata = Target & { credential: string };
 class StaleAttachment extends Error {}
 const requireCurrent = (owner: AttachmentOwner, token: number) => { if (!owner.current(token)) throw new StaleAttachment(); };
 
@@ -82,22 +82,15 @@ async function resolveTarget(key: string, selectedId: string | null, owner: Atta
   return { page, selectedId, sessionId: selectedId ?? page.zeta_session_id };
 }
 
-async function loadReadMetadata(target: Target, owner: AttachmentOwner, token: number): Promise<ReadMetadata> {
-  const response = await fetch(`/api/pages/${target.page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
-  if (!response.ok) throw new Error(`could not load page credential (${response.status})`);
-  const credential = ((await response.json()) as { credential: string }).credential; requireCurrent(owner, token);
-  return { ...target, credential };
-}
-
-async function attachObserver(client: ZetaClient, metadata: ReadMetadata, owner: AttachmentOwner, token: number): Promise<Attachment> {
-  const { page, sessionId, credential } = metadata;
+async function attachObserver(client: ZetaClient, target: Target, owner: AttachmentOwner, token: number): Promise<Attachment> {
+  const { page, sessionId } = target;
   if (!sessionId) throw new Error("not available in read-only view");
   const selectedChat = await findChat(sessionId); requireCurrent(owner, token);
   let lease: SessionLease;
   try { lease = await loadSession(client, sessionId); }
   catch { throw new Error("not available in read-only view"); }
   if (!owner.accept(token, lease)) throw new StaleAttachment();
-  return { page, serverApprovalMode: page.approval_mode ?? null, sessionId, lease, credential, pendingApprovalMode: null, title: selectedChat?.title?.trim() || "untitled chat" };
+  return { page, serverApprovalMode: page.approval_mode ?? null, sessionId, lease, credential: null, pendingApprovalMode: null, title: selectedChat?.title?.trim() || "untitled chat" };
 }
 
 type OpenedSession = Awaited<ReturnType<typeof openHomeSession>>;
@@ -107,7 +100,7 @@ async function resumeCreation(creation: ChatCreationOwner, input: ChatCreationIn
   catch (caught) { throw new PendingCreationError(caught, input); }
 }
 
-async function openControllerSession(client: ZetaClient, metadata: ReadMetadata, input: ChatCreationInput, sessionId: string | null, allowMissingSelected: boolean): Promise<OpenedSession | undefined> {
+async function openControllerSession(client: ZetaClient, metadata: ControllerMetadata, input: ChatCreationInput, sessionId: string | null, allowMissingSelected: boolean): Promise<OpenedSession | undefined> {
   if (!sessionId) return;
   try { return await openHomeSession(client, sessionId, metadata.credential, metadata.page.workspace, metadata.page.approval_mode); }
   catch (caught) {
@@ -116,7 +109,7 @@ async function openControllerSession(client: ZetaClient, metadata: ReadMetadata,
   }
 }
 
-async function createControllerSession(client: ZetaClient, metadata: ReadMetadata, input: ChatCreationInput, creation: ChatCreationOwner, owner: AttachmentOwner, token: number): Promise<OpenedSession> {
+async function createControllerSession(client: ZetaClient, metadata: ControllerMetadata, input: ChatCreationInput, creation: ChatCreationOwner, owner: AttachmentOwner, token: number): Promise<OpenedSession> {
   const mappingInput = { ...input, mapExpectedSessionId: metadata.page.zeta_session_id };
   let created: PendingChat;
   try { created = await creation.create(mappingInput); }
@@ -127,7 +120,7 @@ async function createControllerSession(client: ZetaClient, metadata: ReadMetadat
   return session;
 }
 
-async function finishControllerAttachment(metadata: ReadMetadata, session: OpenedSession, selectedChat: Chat | null, lease: SessionLease, owner: AttachmentOwner, token: number): Promise<Attachment> {
+async function finishControllerAttachment(metadata: ControllerMetadata, session: OpenedSession, selectedChat: Chat | null, lease: SessionLease, owner: AttachmentOwner, token: number): Promise<Attachment> {
   const { page, credential } = metadata;
   try {
     const serverApprovalMode = page.approval_mode ?? null;
@@ -139,8 +132,12 @@ async function finishControllerAttachment(metadata: ReadMetadata, session: Opene
   } catch (caught) { owner.release(token); throw caught; }
 }
 
-async function attachController(client: ZetaClient, metadata: ReadMetadata, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, allowMissingSelected: boolean): Promise<Attachment> {
-  const { page, selectedId, credential } = metadata;
+async function attachController(client: ZetaClient, target: Target, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, allowMissingSelected: boolean): Promise<Attachment> {
+  const response = await fetch(`/api/pages/${target.page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
+  if (!response.ok) throw new Error(`could not load page credential (${response.status})`);
+  const credential = ((await response.json()) as { credential: string }).credential; requireCurrent(owner, token);
+  const metadata = { ...target, credential };
+  const { page, selectedId } = metadata;
   if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
   const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
   const resumedCreation = await resumeCreation(creation, creationInput); requireCurrent(owner, token);
@@ -156,10 +153,9 @@ async function attachController(client: ZetaClient, metadata: ReadMetadata, owne
 
 export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, readOnly = false, allowMissingSelected = false): Promise<Attachment> {
   const target = await resolveTarget(key, selectedId, owner, token);
-  const metadata = await loadReadMetadata(target, owner, token);
   return readOnly
-    ? attachObserver(client, metadata, owner, token)
-    : attachController(client, metadata, owner, creation, token, allowMissingSelected);
+    ? attachObserver(client, target, owner, token)
+    : attachController(client, target, owner, creation, token, allowMissingSelected);
 }
 
 const selectedFromUrl = () => new URLSearchParams(location.search).get("chat");
@@ -182,7 +178,7 @@ class PendingCreationError extends Error {
 const NO_CREATION = { pending: null, error: null };
 
 function chatCreationContext(state: State, client: ZetaClient) {
-  if (state.phase === "ready") return { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } };
+  if (state.phase === "ready" && state.credential) return { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } };
   return null;
 }
 
@@ -269,7 +265,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, can
       setRouteRefresh((value) => value + 1);
       return;
     }
-    const context = state.phase === "ready"
+    const context = state.phase === "ready" && state.credential
       ? { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } }
       : state.phase === "missing" ? missingCreation.current : null;
     if (!context) return;

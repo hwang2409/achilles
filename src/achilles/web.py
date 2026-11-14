@@ -326,13 +326,9 @@ def create_app() -> Starlette:
         return JSONResponse(result)
 
     async def records(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
         page_id = request.path_params["id"]
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(401, "missing bearer")
-        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
-        if principal is None or principal["id"] != page_id:
-            raise HTTPException(403, "forbidden")
         collection = request.path_params["collection"]
         raw_limit = request.query_params.get("limit", "100")
         try:

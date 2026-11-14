@@ -49,8 +49,10 @@ describe("active chat attachment", () => {
     const originalFetch = globalThis.fetch;
     const subscriptions: string[] = [];
     const releases: string[] = [];
+    const requests: string[] = [];
     globalThis.fetch = (async (resource: string | URL | Request) => {
       const url = String(resource);
+      requests.push(url);
       if (url === "/api/pages/home") return Response.json(page("controller-chat"));
       if (url === "/api/pages/home/credential") return Response.json({ credential: "read-credential" });
       if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
@@ -74,7 +76,8 @@ describe("active chat attachment", () => {
       expect(subscriptions).toEqual(["first", "second"]);
       expect(releases).toEqual(["first"]);
       expect(second.sessionId).toBe("second");
-      expect(second.credential).toBe("read-credential");
+      expect(requests).not.toContain("/api/pages/home/credential");
+      expect(second.credential).toBeNull();
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
