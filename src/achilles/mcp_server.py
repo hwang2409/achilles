@@ -139,7 +139,10 @@ def build_mcp(store: PageStore):
                 [
                     Tool(
                         name="inspect_page",
-                        description="inspect safe summaries of the caller's page",
+                        description=(
+                            "inspect safe summaries of this page and pages it created; "
+                            "legacy pages can inspect only themselves"
+                        ),
                         inputSchema=INSPECT_PAGE_SCHEMA,
                     ),
                     Tool(

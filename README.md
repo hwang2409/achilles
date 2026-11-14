@@ -16,6 +16,8 @@ prerequisites: `make`, `uv`, `bun`, `git`, and `zeta` on `PATH`, plus a provider
 
 set `ACHILLES_APPROVAL=ask` to require approval for tool calls.
 
+create-mode pages can use `inspect_page` for themselves and pages they created with `create_page`; older pages can inspect only themselves.
+
 use `make stop` to stop only processes started by `make dev`.
 
 use `make dev PORT=5297` for another port.
