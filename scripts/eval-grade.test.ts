@@ -92,6 +92,27 @@ test("exact page records reject extra reconnect, approval, and crud writes", () 
   expect(gradeCheck(crud, { pages, records: [page({ id: "record-2" }), page({ id: "record-1", status: "done" }), page({ id: "wrong" })] }).pass).toBe(false);
 });
 
+test("layout_update requires the original layout and one versioned block", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const original = [{ type: "text", text: "Records dashboard" }];
+  const check = { id: "layout", type: "layout_update" as const, page: "p", value: { original: { blocks: original }, added: { type: "list", collection: "records" }, version: 2 } };
+  const good = { pages, layouts: [{ page_id: "p1", version: 1, document: { blocks: original } }, { page_id: "p1", version: 2, document: { blocks: [...original, { type: "list", collection: "records" }] } }] };
+  expect(gradeCheck(check, good).pass).toBe(true);
+  expect(gradeCheck(check, { ...good, layouts: [...good.layouts.slice(0, 1), { page_id: "p1", version: 2, document: { blocks: [{ type: "list", collection: "other" }] } }] }).pass).toBe(false);
+  expect(gradeCheck(check, { ...good, layouts: [...good.layouts, { page_id: "other", version: 2, document: { blocks: [] } }] }).pass).toBe(false);
+});
+
+test("layout failures require a later successful update", () => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const check = { id: "retry", type: "no_unrecovered_error" as const, page: "p" };
+  const failed = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: false };
+  const succeeded = { page_id: "p1", chat_id: "c", tool: "achilles__update_layout", success: true };
+  const grade = (results: typeof failed[]) => gradeCheck(check, { pages, results, errors: results.filter(result => !result.success) }).pass;
+  expect(grade([failed, succeeded])).toBe(true);
+  expect(grade([succeeded, failed])).toBe(false);
+  expect(grade([failed])).toBe(false);
+});
+
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {
   const pages = [{ id: "p1", alias: "p" }];
   expect(gradeCheck({ id: "ops", type: "operations", page: "p", value: ["insert", "update"] }, { pages, tool_versions: [{ page_id: "p1", collection: "books", operation: "insert" }, { page_id: "p1", collection: "books", operation: "update" }] }).pass).toBe(true);

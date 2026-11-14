@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, persistUntitledChatTitle } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
   value: string | null = null;
@@ -119,6 +119,20 @@ describe("steer delivery confirmation", () => {
     }};
     await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {})).rejects.toThrow("timed out");
     expect(timeoutMs).toBeGreaterThan(0);
+  });
+});
+
+describe("chat state persistence", () => {
+  test("a rejected state write does not become an unhandled rejection", async () => {
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const write = persistChatState("session", "idle", () => Promise.reject(new Error("achilles stopped")));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toBe(0);
+      expect(await write).toBe(false);
+    } finally { process.off("unhandledRejection", onUnhandled); }
   });
 });
 

@@ -57,13 +57,18 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 
 const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
 const SETUP_SCRIPT = `
-import json, sys
+import hashlib, json, sys
 from pathlib import Path
 from achilles.pages import PageStore, now
 root, page_id, raw = sys.argv[1:]
 setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
+    if "initial_layout" in setup:
+        document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(document.encode()).hexdigest()
+        stamp = now()
+        db.execute("UPDATE layout_version SET digest=?, document=?, created_at=? WHERE page_id=? AND version=1", (digest, document, stamp, page_id))
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
@@ -71,7 +76,7 @@ with store.transaction() as db:
 async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const plan = task.page_plan.find(page => page.source !== "created")!;
   if (task.setup) {
-    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records };
+    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
   }
