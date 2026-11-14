@@ -6,7 +6,7 @@ import { gradeReference, validateTask, type EvalSnapshot } from "./eval-grade";
 const tasksDir = new URL("../evals/tasks/", import.meta.url).pathname;
 const referencesDir = new URL("../evals/references/", import.meta.url).pathname;
 
-test("every task's known-good passes and plausible known-bad agent fails", async () => {
+test("every task passes the expectation lint and its known-good and known-bad references", async () => {
   const taskFiles = (await readdir(tasksDir)).filter(name => name.endsWith(".json")).sort();
   const referenceFiles = (await readdir(referencesDir)).filter(name => name.endsWith(".json")).sort();
   expect(referenceFiles).toEqual(taskFiles);

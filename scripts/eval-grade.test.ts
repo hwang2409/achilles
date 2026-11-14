@@ -11,6 +11,11 @@ test("task schema is closed and count checks name real collections", () => {
   expect(() => validateTask({ ...task, prompt: "duplicate" })).toThrow("prompt source");
 });
 
+test("task expectation lint rejects undeclared check literals", () => {
+  const task = { id: "lint-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "do", kind: "prompt", page: "p", chat: "c", prompt: "do work" }], setup: { tools: [{ name: "add_note", operation: "insert", collection: "notes" }], records: [] }, checks: [{ id: "record", type: "records_exact", page: "p", value: [{ text: "undocumented literal" }] }] };
+  expect(() => validateTask(task)).toThrow("without a prompt quote or declared schema");
+});
+
 test("same-page grading rejects empty and wrong-page evidence", () => {
   const check = { id: "same", type: "same_page" as const, page: "p" };
   const base = { pages: [{ id: "p1", alias: "p" }] };

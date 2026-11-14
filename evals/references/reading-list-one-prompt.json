@@ -23,7 +23,11 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "want_to_read",
+                "finished"
+              ]
             }
           },
           "required": [
@@ -44,7 +48,11 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "want_to_read",
+                "finished"
+              ]
             }
           },
           "required": [
@@ -65,7 +73,11 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "want_to_read",
+                "finished"
+              ]
             }
           },
           "required": [
@@ -80,7 +92,7 @@
         "page_id": "reading",
         "data": {
           "title": "Synthetic Book",
-          "status": "read"
+          "status": "finished"
         },
         "collection": "books"
       }
@@ -115,7 +127,7 @@
         "data": {
           "record_id": "book-1",
           "title": "Synthetic Book",
-          "status": "unread"
+          "status": "want_to_read"
         }
       },
       {
@@ -126,7 +138,7 @@
         "data": {
           "record_id": "book-1",
           "title": "Synthetic Book",
-          "status": "read"
+          "status": "finished"
         }
       },
       {
@@ -139,7 +151,7 @@
             {
               "record_id": "book-1",
               "title": "Synthetic Book",
-              "status": "read"
+              "status": "finished"
             }
           ]
         }

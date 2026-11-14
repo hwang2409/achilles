@@ -13,7 +13,7 @@ export type TaskCheck = {
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
 export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect"; page: string; chat: string; prompt?: string };
-export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
+export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[] };
 export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>; tools?: Array<Record<string, unknown>>; assignments?: Array<Record<string, unknown>>;
@@ -36,7 +36,7 @@ function validateSetup(value: unknown): TaskSetup | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("setup must be an object");
   own(value, ["tools", "records", "initial_layout"], "setup"); const setup = value as TaskSetup;
   if (!Array.isArray(setup.tools) || !Array.isArray(setup.records)) throw new Error("setup tools and records must be arrays");
-  setup.tools.forEach((tool, i) => { own(tool, ["name", "operation", "collection"], `setup.tools[${i}]`); if (!identifier(tool.name) || !["list", "get", "insert", "update"].includes(tool.operation) || !identifier(tool.collection)) throw new Error(`invalid setup.tools[${i}]`); });
+  setup.tools.forEach((tool, i) => { own(tool, ["name", "operation", "collection", "input_schema"], `setup.tools[${i}]`); if (!identifier(tool.name) || !["list", "get", "insert", "update"].includes(tool.operation) || !identifier(tool.collection) || (tool.input_schema !== undefined && (!tool.input_schema || typeof tool.input_schema !== "object" || Array.isArray(tool.input_schema)))) throw new Error(`invalid setup.tools[${i}]`); });
   setup.records.forEach((record, i) => { own(record, ["id", "collection", "data"], `setup.records[${i}]`); if (typeof record.id !== "string" || !identifier(record.collection) || !record.data || typeof record.data !== "object" || Array.isArray(record.data)) throw new Error(`invalid setup.records[${i}]`); });
   if (setup.initial_layout !== undefined && (!setup.initial_layout || !Array.isArray(setup.initial_layout.blocks))) throw new Error("invalid setup.initial_layout");
   return setup;
@@ -109,7 +109,17 @@ export function validateTask(value: unknown): EvalTask {
   if (task.goal_capabilities !== undefined && (!Array.isArray(task.goal_capabilities) || !task.goal_capabilities.length || !task.goal_capabilities.every(identifier) || new Set(task.goal_capabilities).size !== task.goal_capabilities.length)) throw new Error("goal_capabilities must name unique capabilities");
   const page_plan = validatePages(task.page_plan); const aliases = new Set(page_plan.map(page => page.alias));
   const prompt = task.prompt as string | undefined;
-  return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup: validateSetup(task.setup), steps: validateSteps(task.steps, aliases, prompt), checks: validateChecks(task.checks, aliases) };
+  const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt); const checks = validateChecks(task.checks, aliases);
+  const promptText = [prompt, ...steps.flatMap(step => step.prompt ?? [])].join(" ");
+  const declared = new Set<string>();
+  for (const tool of setup?.tools ?? []) {
+    declared.add(tool.name); const properties = tool.input_schema?.properties;
+    if (properties && typeof properties === "object" && !Array.isArray(properties)) for (const [name, schema] of Object.entries(properties)) { declared.add(name); if (schema && typeof schema === "object" && !Array.isArray(schema)) for (const key of ["const", "default"] as const) if (typeof schema[key] === "string") declared.add(schema[key]); for (const value of (schema as Record<string, unknown>)?.enum as unknown[] ?? []) if (typeof value === "string") declared.add(value); }
+  }
+  for (const record of setup?.records ?? []) { declared.add(record.collection); for (const [key, value] of Object.entries(record.data)) { declared.add(key); if (typeof value === "string") declared.add(value); } }
+  const collect = (value: unknown): string[] => Array.isArray(value) ? value.flatMap(collect) : value && typeof value === "object" ? Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => ["before", "after"].includes(key) ? collect(nested) : [key, ...collect(nested)]) : typeof value === "string" ? [value] : [];
+  for (const check of checks.filter(check => ["record", "records_exact", "successful_result", "updated_record", "schema_roundtrip"].includes(check.type))) for (const token of collect(check.value)) if (!promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
+  return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks };
 }
 
 const rows = (snapshot: EvalSnapshot, type: keyof EvalSnapshot): Array<Record<string, unknown>> => (snapshot[type] as Array<Record<string, unknown>> | undefined) ?? [];
@@ -185,13 +195,30 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const versions = owned("tool_versions"); const results = rows(snapshot, "results").filter(row => row.page_id === page && row.chat_id === check.chat && successful(row));
     const transition = check.value as { before: unknown; after: unknown };
     return [...new Set(versions.map(row => row.collection))].some(collection => {
-      const matches = (operations: string[], value: unknown) => versions.filter(version => version.collection === collection && operations.includes(String(version.operation))).flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => Array.isArray(value) ? matchingSchemaObjects(row.data ?? row.result, version, value as string[]) : matchingObjects(row.data ?? row.result, value)));
-      return matches(["insert"], transition.before).some(inserted => typeof inserted.record_id === "string" && inserted.record_id.length > 0 && matches(["update"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id }).some(updated => updated.record_id === inserted.record_id) && matches(["list", "get"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id }).some(read => read.record_id === inserted.record_id));
+      const collectionVersions = versions.filter(version => version.collection === collection);
+      const matches = (operations: string[], value: unknown) => collectionVersions.filter(version => operations.includes(String(version.operation))).flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => Array.isArray(value) ? matchingSchemaObjects(row.data ?? row.result, version, value as string[]) : matchingObjects(row.data ?? row.result, value)));
+      const beforeMatches = matches(["insert"], transition.before);
+      const beforeValues = Array.isArray(transition.before) ? transition.before : Object.values(transition.before as object);
+      const schemaBefore = beforeValues.length ? collectionVersions.filter(version => version.operation === "insert").flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => matchingSchemaObjects(row.data ?? row.result, version, [String(beforeValues[0])]))) : [];
+      return [...beforeMatches, ...schemaBefore].some(inserted => {
+        if (typeof inserted.record_id !== "string" || !inserted.record_id.length) return false;
+        const updateRows = results.filter(row => collectionVersions.some(version => version.operation === "update" && row.tool === `achilles__${version.name}`)).map(row => row.data ?? row.result).filter(value => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).record_id === inserted.record_id) as Array<Record<string, unknown>>;
+        const readRows = results.filter(row => collectionVersions.some(version => ["list", "get"].includes(String(version.operation)) && row.tool === `achilles__${version.name}`)).flatMap(row => matchingObjects(row.data ?? row.result, { record_id: inserted.record_id }));
+        const reads = matches(["list", "get"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id });
+        const literal = matches(["update"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id }).some(updated => updated.record_id === inserted.record_id) && reads.some(read => read.record_id === inserted.record_id);
+        const fields = collectionVersions.flatMap(version => [...schemaStringFields(version)]);
+        const changed = updateRows.some(update => fields.some(field => typeof inserted[field] === "string" && typeof update[field] === "string" && inserted[field] !== update[field]));
+        const final = [...reads, ...readRows].some(read => fields.some(field => updateRows.some(update => update[field] === read[field] && typeof read[field] === "string")));
+        return literal || (changed && final);
+      });
     });
   },
   schema_roundtrip: ({ check, snapshot, page, owned }) => {
     const values = check.value as string[]; const results = rows(snapshot, "results").filter(row => row.page_id === page && successful(row)); const records = owned("records");
-    return owned("tool_versions").some(version => records.some(record => record.collection === version.collection && matchingSchemaObjects(record.data ?? record, version, values).length > 0) && results.some(result => result.tool === `achilles__${version.name}` && matchingSchemaObjects(result.data ?? result.result, version, values).length > 0));
+    return owned("tool_versions").some(version => {
+      const matches = (actual: unknown) => matchingSchemaObjects(actual, version, values).length > 0 || matchingSchemaObjects(actual, version, [values[0]]).some(row => [...schemaStringFields(version)].some(field => typeof row[field] === "string"));
+      return records.some(record => record.collection === version.collection && matches(record.data ?? record)) && results.some(result => result.tool === `achilles__${version.name}` && matches(result.data ?? result.result));
+    });
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
