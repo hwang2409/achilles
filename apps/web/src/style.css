@@ -50,10 +50,10 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 8%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
 .load-older { width: calc(100% - 32px); height: 40px; margin: 12px 16px; }
-.sidebar footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
-.sidebar footer button { flex: 1; height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
-.sidebar footer button kbd { margin-left: auto; }
-.sidebar footer > kbd { border: 1px solid var(--fulcrum-border); padding: 8px; }
+.sidebar > footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
+.sidebar > footer > button { flex: 1; height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
+.sidebar > footer > button kbd { margin-left: auto; }
+.sidebar > footer > kbd { border: 1px solid var(--fulcrum-border); padding: 8px; }
 .sidebar-skeleton { padding: 8px 16px; }
 .search-skeleton { flex: 0 0 40px; margin: 12px 16px 0; border: 1px solid var(--fulcrum-border); background: linear-gradient(90deg, transparent, var(--fulcrum-surface), transparent); }
 .shell-loading .new-chat { color: var(--fulcrum-muted); border-color: var(--fulcrum-border); background: transparent; }
