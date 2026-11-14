@@ -1015,16 +1015,17 @@ try {
   await observerPage.locator(".transcript").waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer attach failed: ${await observerPage.locator("body").innerText()}`); });
   await observerPage.getByRole("status").filter({ hasText: "zeta is in use by another tab or app" }).waitFor({ timeout: 20_000 });
   await observerPage.getByRole("cell", { name: "from zeta", exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer record list failed: ${await observerPage.locator("body").innerText()}`); });
-  await observerPage.goto(`${origin}/reading`);
-  await observerPage.getByRole("cell", { name: "Synthetic Book", exact: true }).waitFor({ timeout: 20_000 });
+  await observerPage.goto(`${origin}/reading?chat=${encodeURIComponent(observerSession)}`);
+  await observerPage.getByRole("status").filter({ hasText: "zeta is in use by another tab or app" }).waitFor({ timeout: 20_000 });
+  await observerPage.getByRole("cell", { name: "Synthetic Book", exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer reading page did not render records: ${await observerPage.locator("body").innerText()}`); });
   const assertObserverPageBlocks = async (label: string) => {
     const controls = observerPage.locator(".page-form input, .page-form button");
     if (!(await controls.count()) || !(await controls.evaluateAll((elements) => elements.every((element) => (element as HTMLInputElement | HTMLButtonElement).disabled))))
       throw new Error(`${label} observer form controls were missing or enabled`);
     const record = await observerPage.getByRole("cell", { name: "Synthetic Book", exact: true }).boundingBox();
-    const firstMessage = await observerPage.locator('[data-part="message"]').first().boundingBox();
-    if (!record || !firstMessage || record.y + record.height > firstMessage.y)
-      throw new Error(`${label} observer record overlapped the transcript: record=${JSON.stringify(record)} message=${JSON.stringify(firstMessage)}`);
+    const transcript = await observerPage.locator(".transcript").boundingBox();
+    if (!record || !transcript || record.y + record.height > transcript.y)
+      throw new Error(`${label} observer record overlapped the transcript: record=${JSON.stringify(record)} transcript=${JSON.stringify(transcript)}`);
   };
   await assertObserverPageBlocks("desktop");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "09-observer-page-records-form-1440x900.png"), fullPage: true });
