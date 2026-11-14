@@ -105,15 +105,27 @@ def _derived_output_expectation(operation: str) -> str:
     return f"derived {operation} result: record with required record_id and revision"
 
 
-def _normalize_required_order(value: Any, required: bool = False) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _normalize_required_order(child, key == "required") for key, child in value.items()
+def _normalize_schema(schema: Any) -> Any:
+    if not isinstance(schema, dict):
+        return schema
+    normalized = {**schema}
+    required = schema.get("required")
+    if isinstance(required, list) and all(isinstance(item, str) for item in required):
+        normalized["required"] = frozenset(required)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        normalized["properties"] = {
+            name: _normalize_schema(child) for name, child in properties.items()
         }
-    if isinstance(value, list):
-        normalized = [_normalize_required_order(child) for child in value]
-        return sorted(normalized) if required else normalized
-    return value
+    for key in ("items", "additionalProperties"):
+        child = schema.get(key)
+        if isinstance(child, dict):
+            normalized[key] = _normalize_schema(child)
+    for key in ("allOf", "anyOf", "oneOf"):
+        children = schema.get(key)
+        if isinstance(children, list):
+            normalized[key] = [_normalize_schema(child) for child in children]
+    return normalized
 
 
 def validate_bundle(
@@ -136,9 +148,9 @@ def validate_bundle(
         ):
             raise ValidationError(f"{prefix}/input_schema", "required integer property: revision")
     output_schema, _ = derived_output_schema(bundle)
-    if reject_conflicting_output and _normalize_required_order(
+    if reject_conflicting_output and _normalize_schema(
         bundle.get("output_schema", output_schema)
-    ) != _normalize_required_order(output_schema):
+    ) != _normalize_schema(output_schema):
         operation = bundle["implementation"]["operation"]
         raise ValidationError(f"{prefix}/output_schema", _derived_output_expectation(operation))
     bundle = {**bundle, "output_schema": output_schema}

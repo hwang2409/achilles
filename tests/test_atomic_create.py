@@ -406,6 +406,48 @@ def test_create_tool_rejects_wrong_output_and_derives_usable_result(creation_cli
     assert value["revision"] == 1
 
 
+def test_create_tool_compares_instance_values_without_required_normalization(creation_client):
+    _, _, client, headers = creation_client
+    generated = bundle(name="add_const_book")
+    generated["implementation"]["data_schema"]["properties"]["metadata"] = {
+        "const": {"required": ["first", "second"]}
+    }
+    generated["output_schema"], _ = derived_output_schema(generated)
+    generated["output_schema"]["properties"]["metadata"]["const"]["required"].reverse()
+
+    rejected = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": generated}},
+    )
+
+    assert rejected["isError"], "reordered const instance data was accepted"
+    assert json.loads(rejected["content"][0]["text"]) == {
+        "code": "invalid_input",
+        "path": "/bundle/output_schema",
+        "expected": "derived insert result: record with required record_id and revision",
+    }
+
+
+def test_create_tool_handles_mixed_type_enum(creation_client):
+    _, _, client, headers = creation_client
+    generated = bundle(name="add_enum_book")
+    generated["implementation"]["data_schema"]["properties"]["edition"] = {"enum": [1, "second"]}
+    generated["output_schema"], _ = derived_output_schema(generated)
+
+    created = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": generated}},
+    )
+
+    assert not created.get("isError")
+
+
 def test_all_operation_tools_list_and_run_over_mcp(creation_client):
     _, store, client, headers = creation_client
     data_schema = bundle()["implementation"]["data_schema"]
