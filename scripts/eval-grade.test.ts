@@ -92,6 +92,12 @@ test("list_shows requires a collection or value", () => {
   expect(() => validateTask({ ...task, checks: [{ id: "list", type: "list_shows", page: "p" }] })).toThrow("collection or string value");
 });
 
+test("list_shows grades only the final stored layout", () => {
+  const snapshot = detailSnapshot({ type: "list", collection: "books" }, [annotation({ title: "Synthetic Book" }, "book-1", "books")]);
+  snapshot.layouts.push({ page_id: "review-page", version: 2, document: { blocks: [{ type: "text" }] } });
+  expect(gradeCheck(listCheck({ value: "Synthetic Book" }), snapshot).pass).toBe(false);
+});
+
 for (const testCase of [
   { name: "filter run_id=run-002, record has run_id run-002", block: { type: "detail", collection: "annotations", filter: { field: "run_id", equals: "run-002" } }, records: [annotation({ run_id: "run-002" })], pass: true },
   { name: "filter record_id=run-002, record has run_id run-002", block: { type: "detail", collection: "annotations", filter: { field: "record_id", equals: "run-002" } }, records: [annotation({ run_id: "run-002" })], pass: false, reason: 'filter {"field":"record_id","equals":"run-002"} matches 0 records' },
