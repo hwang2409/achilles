@@ -1,0 +1,125 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "records"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "p",
+        "name": "list_records",
+        "collection": "records",
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "collection": "records",
+        "data": {
+          "title": "Synthetic record"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "p",
+        "version": 1,
+        "document": {
+          "blocks": []
+        }
+      },
+      {
+        "page_id": "p",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Page records",
+              "collection": "records"
+            }
+          ]
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "success": true,
+        "data": {
+          "version": 2
+        }
+      }
+    ],
+    "related_page_ids": ["p"]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "records"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "p",
+        "name": "list_records",
+        "collection": "records",
+        "operation": "list",
+        "data_schema": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "collection": "records",
+        "data": {
+          "title": "Synthetic record"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "p",
+        "version": 1,
+        "document": {
+          "blocks": []
+        }
+      },
+      {
+        "page_id": "p",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "records"
+            }
+          ]
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__update_layout",
+        "success": true,
+        "data": {
+          "version": 2
+        }
+      }
+    ],
+    "related_page_ids": ["p"]
+  }
+}
