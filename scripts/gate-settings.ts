@@ -48,6 +48,9 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.keyboard.press("Control+Comma");
   const narrowDialog = page.getByRole("dialog", { name: "settings" });
   if (await narrowDialog.count() !== 1) throw new Error("narrow settings shortcut did not expose a named dialog");
+  const narrowTargets = await narrowDialog.locator("button").evaluateAll((controls) => controls.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
+  if (narrowTargets.some(({ width, height }) => width < 40 || height < 40)) throw new Error(`narrow settings target is smaller than 40px: ${JSON.stringify(narrowTargets)}`);
+  if (screenshots) await page.screenshot({ path: `${screenshots}/settings-narrow-390x844.png` });
   const enabledControls = narrowDialog.locator("button:not(:disabled):not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
   const firstControl = enabledControls.first();
   const lastControl = enabledControls.last();
