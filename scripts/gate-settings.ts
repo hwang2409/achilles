@@ -43,9 +43,14 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
   await page.keyboard.press("Control+Comma");
-  const desktopDialog = page.getByRole("dialog", { name: "settings" });
-  await desktopDialog.waitFor({ state: "visible" });
-  if (await desktopDialog.count() !== 1) throw new Error("open while settings was closing created multiple dialogs");
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const desktopDialog = page.getByRole("dialog", { name: "settings", exact: true });
+  const roleDialogs = await desktopDialog.evaluateAll((dialogs) => dialogs.map((dialog) => {
+    const labelledBy = dialog.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join(" ") ?? null;
+    return { tagName: dialog.tagName, ariaLabel: dialog.getAttribute("aria-label"), labelledBy, open: dialog instanceof HTMLDialogElement ? dialog.open : null, hidden: dialog.hidden || dialog.getAttribute("aria-hidden"), outerHTML: dialog.outerHTML.slice(0, 150) };
+  }));
+  const domDialogs = await page.locator("dialog.settings-dialog").evaluateAll((dialogs) => dialogs.map((dialog) => ({ open: (dialog as HTMLDialogElement).open, hidden: dialog.hidden || dialog.getAttribute("aria-hidden"), outerHTML: dialog.outerHTML.slice(0, 150) })));
+  if (roleDialogs.length !== 1 || domDialogs.length !== 1 || !domDialogs[0]?.open) throw new Error(`open while settings was closing left the wrong dialog state: role count=${roleDialogs.length} matches=${JSON.stringify(roleDialogs)} dom=${JSON.stringify(domDialogs)}`);
   await page.keyboard.press("Escape");
   await desktopDialog.waitFor({ state: "hidden" });
 

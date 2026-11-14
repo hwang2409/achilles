@@ -85,7 +85,6 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
     className="settings-dialog"
     aria-labelledby="settings-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}
-    onClose={onClose}
     onClick={(event) => { if (event.target === dialog.current) onClose(); }}
     onKeyDown={(event) => {
       if (event.key !== "Tab") return;
