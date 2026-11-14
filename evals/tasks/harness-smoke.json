@@ -1,0 +1,1 @@
+{"id":"harness-smoke","agent_turns":3,"judge_turns":0,"steps":["bound mcp write","approval","paged history"],"checks":["tool policy","turn budget","teardown"]}

@@ -48,6 +48,7 @@ jobs:
         working-directory: apps/web
       - run: bun run build
         working-directory: apps/web
+      - run: EVAL_BACKEND=scripted bun test ./scripts/eval*.test.ts
       - id: zeta-pin
         run: echo "sha=$(tr -d '[:space:]' < zeta.rev)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
