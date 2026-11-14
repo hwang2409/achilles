@@ -49,11 +49,13 @@
   "checks": [
     {
       "id": "record",
-      "type": "record",
+      "type": "records_exact",
       "page": "reconnect",
-      "value": {
-        "text": "reconnect note"
-      }
+      "value": [
+        {
+          "text": "reconnect note"
+        }
+      ]
     },
     {
       "id": "result",

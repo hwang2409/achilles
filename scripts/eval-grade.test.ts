@@ -62,16 +62,25 @@ test("record-crud list matching is order-independent, distinct, and complete", (
   expect(structurallyContains([{ id: "record-1" }], [{ id: "record-1" }, { id: "record-1" }])).toBe(false);
 });
 
-test("reading-list requires successful update and read results in the follow-up chat", () => {
+test("reading-list carries one record id through insert, update, and read", () => {
   const pages = [{ id: "p1", alias: "p" }]; const final = { title: "Synthetic Book", status: "read" };
   const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: { before: { title: "Synthetic Book", status: "unread" }, after: final } };
   const tool_versions = [{ page_id: "p1", name: "add_book", collection: "books", operation: "insert" }, { page_id: "p1", name: "update_book", collection: "books", operation: "update" }, { page_id: "p1", name: "list_books", collection: "books", operation: "list" }];
-  const insertedFinal = [{ page_id: "p1", chat_id: "reading-chat", tool: "achilles__add_book", success: true, data: final }];
-  expect(gradeCheck(check, { pages, tool_versions, records: [{ page_id: "p1", data: final }], results: insertedFinal }).pass).toBe(false);
-  const finalResults = [{ page_id: "p1", chat_id: "reading-chat", tool: "achilles__update_book", success: true, data: final }, { page_id: "p1", chat_id: "reading-chat", tool: "achilles__list_books", success: true, data: { records: [final] } }];
-  expect(gradeCheck(check, { pages, tool_versions, results: [...insertedFinal, ...finalResults] }).pass).toBe(false);
-  const initial = { page_id: "p1", chat_id: "reading-chat", tool: "achilles__add_book", success: true, data: { title: "Synthetic Book", status: "unread" } };
-  expect(gradeCheck(check, { pages, tool_versions, results: [initial, ...finalResults] }).pass).toBe(true);
+  const result = (tool: string, record_id: string, data: object) => ({ page_id: "p1", chat_id: "reading-chat", tool, success: true, data: { ...data, record_id } });
+  const insertA = result("achilles__add_book", "a", { title: "Synthetic Book", status: "unread" });
+  const updateB = result("achilles__update_book", "b", final); const readB = { page_id: "p1", chat_id: "reading-chat", tool: "achilles__list_books", success: true, data: { records: [{ ...final, record_id: "b" }] } };
+  expect(gradeCheck(check, { pages, tool_versions, results: [insertA, updateB, readB] }).pass).toBe(false);
+  const updateA = result("achilles__update_book", "a", final); const readA = { ...readB, data: { records: [{ ...final, record_id: "a" }] } };
+  expect(gradeCheck(check, { pages, tool_versions, results: [insertA, updateA, readA] }).pass).toBe(true);
+});
+
+test("exact page records reject extra reconnect, approval, and crud writes", () => {
+  const pages = [{ id: "p1", alias: "p" }]; const page = (data: object) => ({ page_id: "p1", data });
+  const notes = { id: "notes", type: "records_exact" as const, page: "p", value: [{ text: "reconnect note" }] };
+  expect(gradeCheck(notes, { pages, records: [page({ text: "reconnect note" })] }).pass).toBe(true);
+  expect(gradeCheck(notes, { pages, records: [page({ text: "reconnect note" }), page({ text: "wrong extra note" })] }).pass).toBe(false);
+  const crud = { id: "crud", type: "records_exact" as const, page: "p", value: [{ id: "record-1", status: "done" }, { id: "record-2" }] };
+  expect(gradeCheck(crud, { pages, records: [page({ id: "record-2" }), page({ id: "record-1", status: "done" }), page({ id: "wrong" })] }).pass).toBe(false);
 });
 
 test("workflow, approval, and reconnect checks use page-local structured evidence", () => {

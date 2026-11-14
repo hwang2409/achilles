@@ -48,11 +48,13 @@
     },
     {
       "id": "record",
-      "type": "record",
+      "type": "records_exact",
       "page": "approval",
-      "value": {
-        "text": "approved note"
-      }
+      "value": [
+        {
+          "text": "approved note"
+        }
+      ]
     },
     {
       "id": "no-errors",

@@ -41,27 +41,17 @@
   "checks": [
     {
       "id": "records",
-      "type": "count",
+      "type": "records_exact",
       "page": "records",
-      "name": "records",
-      "count": 2
-    },
-    {
-      "id": "record-1",
-      "type": "record",
-      "page": "records",
-      "value": {
-        "id": "record-1",
-        "status": "done"
-      }
-    },
-    {
-      "id": "record-2",
-      "type": "record",
-      "page": "records",
-      "value": {
-        "id": "record-2"
-      }
+      "value": [
+        {
+          "id": "record-1",
+          "status": "done"
+        },
+        {
+          "id": "record-2"
+        }
+      ]
     },
     {
       "id": "list",

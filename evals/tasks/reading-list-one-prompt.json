@@ -64,12 +64,14 @@
     },
     {
       "id": "record",
-      "type": "record",
+      "type": "records_exact",
       "page": "reading",
-      "value": {
-        "title": "Synthetic Book",
-        "status": "read"
-      }
+      "value": [
+        {
+          "title": "Synthetic Book",
+          "status": "read"
+        }
+      ]
     },
     {
       "id": "layout",
