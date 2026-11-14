@@ -99,12 +99,14 @@ export function App() {
     for (const item of store.getState().outline) {
       if (item.kind !== "tool") continue;
       const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
-      if ((value?.tool_call?.name === "create_page" || value?.tool_call?.name === "achilles__create_page") && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+      const name = value?.tool_call?.name ?? "";
+      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
         completedCreatePages.current.add(item.id);
         setPageRefreshNonce((current) => current + 1);
+        if (["update_layout", "achilles__update_layout"].includes(name)) void active.refreshPage();
       }
     }
-  }), [store]);
+  }), [active.refreshPage, store]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
