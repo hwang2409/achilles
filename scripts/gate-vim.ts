@@ -183,12 +183,16 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await confirmedStock.press("Enter");
   const stopButton = page.getByRole("button", { name: "stop the running turn" });
   await stopButton.waitFor({ state: "visible", timeout: 20_000 });
+  await confirmedStock.fill("kept draft");
   await stopButton.focus();
   await whileDisconnected(async () => {
     await page.getByRole("alert").filter({ hasText: "connection to zeta was lost" }).waitFor({ state: "visible", timeout: 20_000 });
     const readOnlyComposer = page.locator('[data-part="composer"][data-state="read-only"]').last();
     await readOnlyComposer.waitFor({ state: "visible", timeout: 20_000 });
-    if (!await readOnlyComposer.evaluate((element) => element.contains(document.activeElement))) throw new Error("read-only composer did not retain focus after its focused stop button disappeared");
+    if (!await readOnlyComposer.evaluate((element) => element.contains(document.activeElement))) {
+      const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 300));
+      throw new Error(`read-only composer did not retain focus after its focused stop button disappeared; active=${active}`);
+    }
     const keptDraft = await readOnlyComposer.locator("textarea").inputValue().catch(() => null);
     if (keptDraft !== "kept draft") throw new Error(`plain read-only draft-kept assertion failed: expected "kept draft", got ${JSON.stringify(keptDraft)}`);
     await screenshot("connection-lost");
