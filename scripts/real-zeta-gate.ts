@@ -9,6 +9,8 @@ import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gateVim } from "./gate-vim";
 
+import { expectBrowserErrors } from "./browser-errors";
+
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -133,21 +135,14 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
-  let ignoreBrowserErrors = false;
-  let expectingRegistrationFailures = false;
+  const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
+  const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
     socket.on("framereceived", (event) => frames.push(String(event.payload)));
   });
-  page.on("pageerror", (e) => {
-    if (!ignoreBrowserErrors) errors.push(e.message);
-  });
-  page.on("console", (m) => {
-    if (m.type() !== "error") return;
-    if (expectingRegistrationFailures && m.text().includes("the server responded with a status of 503")) return;
-    if (!ignoreBrowserErrors) errors.push(m.text());
-  });
+  page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
   await setupAlert.waitFor({ timeout: 20000 });
@@ -155,7 +150,6 @@ try {
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const firstZetaPid = zetaProcess.pid;
-  ignoreBrowserErrors = true;
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) {
     zetaProcess.kill("SIGKILL");
@@ -182,7 +176,6 @@ try {
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
-  ignoreBrowserErrors = false;
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
@@ -221,6 +214,17 @@ try {
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
   await assertServerAskWins(page, first, requests(), approvalModeResponse);
+  await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
+    await page.goto(`${origin}/not-a-real-page`);
+  await page.getByRole("alert").filter({ hasText: "page not found" }).waitFor({ timeout: 20_000 });
+  await page.getByRole("button", { name: "new chat", exact: true }).click();
+  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  });
+  const unknownRouteSession = await homeSessionId();
+  if (!unknownRouteSession || unknownRouteSession === first) throw new Error("unknown-route new chat did not create a new session");
+  if (!(await page.locator(".empty-chat").count())) throw new Error("unknown-route new chat did not show an empty chat");
+  await page.goto(`${origin}/?chat=${first}`);
+  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
@@ -235,7 +239,31 @@ try {
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor);
+  const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:02}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
+  await new Promise<void>((resolve, reject) => {
+    paginationSeed.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`pagination seed exited ${code}`)));
+  });
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  const initialChatRows = page.locator(".chat-row");
+  if (await initialChatRows.count() !== 50) throw new Error("chat pagination did not show its first 50 rows");
+  await initialChatRows.last().focus();
+  await page.keyboard.press("Tab");
+  const loadOlder = page.getByRole("button", { name: "load 50 older" });
+  if (!(await loadOlder.evaluate((button) => document.activeElement === button))) throw new Error("load older was not keyboard reachable");
+  await page.keyboard.press("Enter");
+  await waitFor(async () => (await initialChatRows.count()) > 50, "older chats");
+  try {
+    await waitFor(async () => await initialChatRows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
+  } catch (error) {
+    const focus = await page.evaluate(() => {
+      const element = document.activeElement;
+      return { tag: element?.tagName, text: element?.textContent?.trim().slice(0, 120), data: element ? Object.fromEntries([...element.attributes].filter((attribute) => attribute.name.startsWith("data-")).map((attribute) => [attribute.name, attribute.value])) : {} };
+    });
+    throw new Error(`${error}; pagination focus=${JSON.stringify(focus)}; rows before=50 after=${await initialChatRows.count()}`);
+  }
   await gateTranscript(page, waitFor, requests);
+
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests(), approvalModeResponse);
@@ -713,19 +741,36 @@ try {
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
   let registerFailures = 0;
-  expectingRegistrationFailures = true;
-  await page.route("**/api/pages/*/chats", async (route) => {
-    if (registerFailures < 2) { registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
-    else await route.continue();
+  const allowPageId = (await (await fetch(`${origin}/api/pages/allow`)).json()).id;
+  const registrationFailureUrl = `${origin}/api/pages/${allowPageId}/chats`;
+  const registrationFailurePath = new URL(registrationFailureUrl).pathname;
+  const registrationExpected = [{ method: "POST", url: registrationFailureUrl, status: 503, count: 2 }];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (registerFailures < 2 && request.method() === "POST" && url.origin === origin && url.pathname === registrationFailurePath) {
+      registerFailures += 1;
+      await route.fulfill({ status: 503, body: "synthetic registration failure" });
+    } else await route.fallback();
   });
   const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
-  await page.getByRole("button", { name: "new chat" }).click();
-  const retryRegistration = page.getByRole("button", { name: "retry saving this chat" });
-  await retryRegistration.waitFor({ timeout: 20_000 });
+  const retryRegistration = page.getByRole("button", { name: "retry creating chat" });
+  const registrationFailure = (response: { request(): { method(): string }; url(): string; status(): number }) => response.request().method() === "POST" && response.url() === registrationFailureUrl && response.status() === 503;
+  await expectBrowserErrors(page, registrationExpected, async () => {
+    const firstFailure = page.waitForResponse(registrationFailure);
+    await page.getByRole("button", { name: "new chat" }).click();
+    await firstFailure;
+    await retryRegistration.waitFor({ timeout: 20_000 });
+    const secondFailure = page.waitForResponse(registrationFailure);
+    await retryRegistration.click();
+    await secondFailure;
+    await retryRegistration.waitFor({ timeout: 20_000 });
+  });
   const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
   if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)
     throw new Error("failed chat registration did not retain exactly one new zeta session");
-  await page.unroute("**/api/pages/*/chats");
+  await page.unroute("**/api/**");
   await retryRegistration.click();
   await waitFor(async () => {
     const current = await homeSessionId();
@@ -740,9 +785,13 @@ try {
   await droppedField.fill(draft);
   await page.keyboard.press("Meta+b");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
-  zetaProcess.kill("SIGTERM");
-  if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
-  await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+  await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
+    const discoveryFailure = page.waitForResponse((response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
+    zetaProcess.kill("SIGTERM");
+    if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
+    await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+    await discoveryFailure;
+  });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
@@ -768,7 +817,6 @@ try {
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
     const heldRequests: Route[] = [];
     const hold = (route: Route) => { heldRequests.push(route); };
-    ignoreBrowserErrors = true;
     await page.route("**/api/pages**", hold);
     await page.route("**/api/chats**", hold);
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -778,7 +826,6 @@ try {
     await Promise.all(heldRequests.map((route) => route.abort().catch(() => {})));
     await page.unroute("**/api/pages**", hold);
     await page.unroute("**/api/chats**", hold);
-    ignoreBrowserErrors = false;
   }
 
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);

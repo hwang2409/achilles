@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { isEditableTarget } from "./keyboard";
 
@@ -21,6 +21,7 @@ type Props = {
   serverForcesAsk?: boolean;
   children: ReactNode;
   onNewChat: () => Promise<void>;
+  onToggleCreateMode: () => Promise<void>;
   onSelectChat: (chat: Chat) => void;
   refreshKey: number;
 };
@@ -74,7 +75,7 @@ function Highlight({ value, query }: { value: string; query: string }) {
   return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
 }
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onSelectChat, refreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onToggleCreateMode, onSelectChat, refreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -85,9 +86,11 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 759px)").matches);
+  const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const chatList = useRef<HTMLElement>(null);
+  const pendingFocusIndex = useRef<number | null>(null);
   const settingsOpener = useRef<Element>(null);
   const loading = chats === null;
   const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => restoreFocus(menuButton.current)); };
@@ -113,8 +116,15 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
 
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
-  useEffect(() => { const media = matchMedia("(max-width: 759px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
+  useEffect(() => { const media = matchMedia("(max-width: 760px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => firstFocusable(sidebar.current)?.focus()); }, [drawer, narrow]);
+  useLayoutEffect(() => {
+    const index = pendingFocusIndex.current;
+    if (index === null) return;
+    pendingFocusIndex.current = null;
+    const row = chatList.current?.querySelectorAll<HTMLElement>(".chat-row")[index];
+    row?.focus();
+  }, [chats]);
   useEffect(() => {
     let live = true;
     const params = new URLSearchParams({ limit: "50" });
@@ -147,11 +157,12 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); return; }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); return; }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); return; }
+      if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); return; }
       if (isEditableTarget(event)) return;
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [loading, onNewChat, settingsOpen]);
+  }, [loading, onNewChat, onToggleCreateMode, settingsOpen]);
 
   const pages = useMemo(() => {
     const values = new Map<string, PageLink>();
@@ -166,6 +177,21 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     return [...values];
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
+  const chatListKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!["Home", "End", "ArrowDown", "ArrowUp"].includes(event.key)) return;
+    const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(".chat-row")];
+    if (!rows.length) return;
+    event.preventDefault();
+    const current = rows.indexOf(document.activeElement as HTMLElement);
+    let next = current;
+    switch (event.key) {
+      case "Home": next = 0; break;
+      case "End": next = rows.length - 1; break;
+      case "ArrowDown": next = current < 0 ? 0 : current + 1; break;
+      case "ArrowUp": next = current < 0 ? rows.length - 1 : current - 1; break;
+    }
+    if (next >= 0 && next < rows.length) rows[next].focus();
+  };
   const searchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (!search || !chats?.length) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveResult((value) => (value + (event.key === "ArrowDown" ? 1 : -1) + chats.length) % chats.length); }
@@ -175,15 +201,18 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     if (!next) return;
     const params = new URLSearchParams({ limit: "50", before: next });
     if (search) params.set("q", search);
+    const existingCount = chats?.length ?? 0;
     const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
     if (!response.ok) return;
     const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
+    pendingFocusIndex.current = existingCount;
     setChats((current) => [...(current ?? []), ...result.chats]);
     setApprovalCount(result.approval_count);
     setNext(result.chats.length ? result.next : null);
   };
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
+    <a className="skip-link" href="#message-composer" onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span><button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button></div>
@@ -192,9 +221,9 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className="page-list">
         <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pages.length}</b></button>
-        {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}
+        {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}
       </section>
-      <section className="chat-list" id="chat-search-results">
+      <section ref={chatList} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>
         {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
         {next && <button className="load-older" onClick={loadOlder}>load 50 older</button>}
@@ -210,9 +239,9 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
 }
 
 function ChatRow({ chat, current, active, index, query, onSelect }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void }) {
-  return <a id={index === undefined ? undefined : `chat-result-${index}`} className={`chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
-    <strong><Highlight value={titleOf(chat)} query={query} /></strong>
-    <span>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
+  return <a tabIndex={-1} id={index === undefined ? undefined : `chat-result-${index}`} className={`chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
+    <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
+    <span title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
   </a>;
 }
 
