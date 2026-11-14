@@ -9,7 +9,22 @@
   ],
   "agent_turns": 20,
   "judge": null,
-  "steps": [],
+  "steps": [
+    {
+      "id": "creation-prompt",
+      "kind": "prompt",
+      "page": "reading",
+      "chat": "home-chat",
+      "prompt": "make a page that tracks my reading list"
+    },
+    {
+      "id": "verify-page",
+      "kind": "prompt",
+      "page": "reading",
+      "chat": "reading-chat",
+      "prompt": "add a synthetic book and update its status"
+    }
+  ],
   "checks": [
     {
       "id": "page",
