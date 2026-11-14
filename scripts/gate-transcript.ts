@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import type { GateWait } from "./gate-diagnostics";
 
 export async function waitForIdleTurn(
   page: Page,
@@ -28,6 +29,7 @@ export async function gateTranscript(
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
   requests: () => Array<{ id?: number | string; method?: string; params?: { text?: string; delivery_id?: string }; result?: { accepted?: boolean }; error?: { code?: number; message?: string } }>,
   controlPath: string,
+  gateWait: GateWait,
 ) {
   const capture = async (name: string) => {
     if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${name}`, fullPage: true });
@@ -127,7 +129,7 @@ export async function gateTranscript(
   if (Math.abs(afterMoreDeltas - scrolledUp) > 4)
     throw new Error(`streaming transcript jumped after scroll up: ${scrolledUp} -> ${afterMoreDeltas}`);
   const jump = page.locator('[data-part="jump-to-latest"]');
-  await jump.waitFor({ state: "visible", timeout: 20_000 });
+  await gateWait(() => jump.waitFor({ state: "visible", timeout: 20_000 }));
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("tool-call stream rendered more than one visible jump to latest control");
   await capture("streaming-scrolled-up-jump-1440x900.png");
@@ -144,9 +146,9 @@ export async function gateTranscript(
   if (!steerFrame?.params?.delivery_id) throw new Error("held steer frame did not include a delivery id");
   const control = JSON.parse(await Bun.file(controlPath).text());
   await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
-  await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
+  await gateWait(() => page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 }));
   await waitFor(async () => requests().some((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending"), "turn-end fallback send");
-  await page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 });
+  await gateWait(() => page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 }));
   if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
     throw new Error("prompt during turn end was not delivered exactly once");
   if (await field.inputValue() !== "") throw new Error("turn-end fallback did not clear its confirmed draft");
@@ -167,7 +169,7 @@ export async function gateTranscript(
   await waitFor(async () => await distanceFromBottom() > 100, "user scroll up during text-only stream");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
   const textOnlyJump = page.locator('[data-part="jump-to-latest"]');
-  await textOnlyJump.waitFor({ state: "visible", timeout: 20_000 });
+  await gateWait(() => textOnlyJump.waitFor({ state: "visible", timeout: 20_000 }));
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("text-only stream rendered more than one visible jump to latest control");
   await textOnlyJump.focus();

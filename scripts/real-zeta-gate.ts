@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { controlSnapshot, createFrameRing, diagnostic } from "./gate-diagnostics";
+import { controlSnapshot, createFrameRing, createGateWait, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -35,6 +35,10 @@ const secrets: string[] = [];
 const redact = (text: string) => diagnostic(text, secrets);
 const safeControl = (text: string) => controlSnapshot(text, secrets);
 const frameRing = createFrameRing();
+const gateWait = createGateWait(
+  frameRing.snapshot,
+  async () => safeControl(await Bun.file(control).text()),
+);
 const start = (
   command: string,
   args: string[],
@@ -52,13 +56,13 @@ const start = (
   child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + data));
   return child;
 };
-const waitFor = async (check: () => Promise<boolean>, label: string) => {
+const waitFor = (check: () => Promise<boolean>, label: string) => gateWait(async () => {
   for (let i = 0; i < 300; i++) {
     if (await check()) return;
     await Bun.sleep(100);
   }
-  throw new Error(`timed out waiting for ${label}; websocket frames=${JSON.stringify(frameRing.snapshot())}; backend catalog=${safeControl(await Bun.file(control).text())}`);
-};
+  throw new Error(`timed out waiting for ${label}`);
+});
 const waitForExit = (child: ChildProcess, timeoutMs: number) =>
   new Promise<boolean>((resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
@@ -537,7 +541,7 @@ try {
     console.log(`focus after commit: ${row.name}`);
   }
   await reloadShell();
-  await gateTranscript(page, waitFor, requests, control);
+  await gateTranscript(page, waitFor, requests, control, gateWait);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests(), approvalModeResponse);

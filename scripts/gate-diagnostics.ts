@@ -2,6 +2,21 @@ const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential/i;
 
 type FrameSummary = { direction: "received" | "sent"; method?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
 
+export type GateWait = <T>(operation: () => Promise<T>) => Promise<T>;
+
+export function createGateWait(
+  frames: () => readonly FrameSummary[],
+  control: () => Promise<string>,
+): GateWait {
+  return async <T>(operation: () => Promise<T>) => {
+    try {
+      return await operation();
+    } catch (error) {
+      throw new Error(`${error}; websocket frames=${JSON.stringify(frames())}; backend catalog=${await control()}`);
+    }
+  };
+}
+
 export function createFrameRing(limit = 20) {
   const frames: FrameSummary[] = [];
   const pending = new Map<string, { delivery_id?: string; method?: string }>();
