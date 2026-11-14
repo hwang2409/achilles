@@ -207,7 +207,6 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
       const pageId = pages.get(plan.alias); if (!pageId) continue;
       const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
       const page = await browser.newPage();
-      if (Bun.env.EVAL_HOLD_BROWSER_LOADING === "1") await page.route("**/api/pages/**", () => {});
       await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
       signal.throwIfAborted();
       let abortReady: (() => void) | undefined;

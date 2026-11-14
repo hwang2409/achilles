@@ -102,15 +102,20 @@ jobs:
           assert result.returncode == 0, report['tasks'][0]
           assert report['tasks'][0]['status'] == 'pass'
 
-          env.update({'EVAL_HOLD_BROWSER_LOADING': '1', 'REPORT_DIR': '.cache/eval-ci-browser-loading'})
-          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'browser-controller-slot'], env=env, timeout=30)
+          index = Path('apps/web/dist/index.html')
+          original = index.read_text()
+          index.write_text(original.replace('</body>', '<p role="status">loading chat…</p></body>'))
+          env['REPORT_DIR'] = '.cache/eval-ci-browser-loading'
+          try:
+              result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'browser-controller-slot'], env=env, timeout=30)
+          finally:
+              index.write_text(original)
           report = json.loads((Path('.cache/eval-ci-browser-loading') / 'report.json').read_text())
           task = report['tasks'][0]
           assert result.returncode == 1
           assert task['status'] == 'harness_error', task
           assert 'browser page did not become ready' in task['checks'][0]['evidence']['message'], task
 
-          env.pop('EVAL_HOLD_BROWSER_LOADING')
           env['REPORT_DIR'] = '.cache/eval-ci-missing-page'
           result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'reading-list-one-prompt'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-missing-page') / 'report.json').read_text())

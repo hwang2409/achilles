@@ -51,7 +51,13 @@ class Client implements EvalProtocol {
   async close(signal?: AbortSignal, timeoutMs = 5_000) {
     if (this.socket.readyState === WebSocket.CLOSED) return;
     if (this.socket.readyState < WebSocket.CLOSING) this.socket.close();
-    await withDeadline(this.closed, "zeta websocket close", timeoutMs, signal);
+    try { await withDeadline(this.closed, "zeta websocket close", timeoutMs, signal); }
+    catch (error) {
+      // Forced cleanup must not replace the close timeout or cancellation.
+      try { this.socket.terminate(); } catch {}
+      try { await withDeadline(this.closed, "zeta websocket termination", timeoutMs); } catch {}
+      throw error;
+    }
   }
 }
 
