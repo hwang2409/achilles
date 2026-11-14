@@ -16,6 +16,7 @@ from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
 from .pages import PageStore
+from .records import RecordValidationError, VersionConflict, call_record
 
 
 def _home() -> Path:
@@ -249,6 +250,73 @@ def create_app() -> Starlette:
             raise HTTPException(404, "chat not found") from exc
         return JSONResponse(row)
 
+    async def page_tools(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        page_id = request.path_params["id"]
+        if await anyio.to_thread.run_sync(store.page, page_id) is None:
+            raise HTTPException(404, "page not found")
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(403, "forbidden")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        tools = await anyio.to_thread.run_sync(store.page_tools, page_id)
+        return JSONResponse(
+            {
+                "tools": [
+                    {
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "operation": tool["implementation"]["operation"],
+                        "collection": tool["implementation"]["collection"],
+                        "input_schema": tool["input_schema"],
+                        "version": tool["version"],
+                        "needs_record_id": tool["implementation"]["operation"] in {"get", "update"},
+                        "needs_version": True,
+                    }
+                    for tool in tools
+                ]
+            }
+        )
+
+    async def invoke_tool(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        page_id = request.path_params["id"]
+        if await anyio.to_thread.run_sync(store.page, page_id) is None:
+            raise HTTPException(404, "page not found")
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(403, "forbidden")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) - {"arguments", "version"}:
+            raise HTTPException(400, "expected arguments and optional version")
+        arguments = body.get("arguments", {})
+        version = body.get("version")
+        if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+            raise HTTPException(400, "version must be an integer")
+        try:
+            result = await anyio.to_thread.run_sync(
+                call_record, store, page_id, request.path_params["name"], arguments, version
+            )
+        except VersionConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(404, "tool not found") from exc
+        except RecordValidationError as exc:
+            return JSONResponse(
+                {"error": {"code": "validation_error", "path": exc.path, "expected": exc.expected}},
+                status_code=400,
+            )
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(result)
+
     async def records(request):
         page_id = request.path_params["id"]
         token = request.headers.get("authorization", "")
@@ -319,6 +387,8 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/session", session, methods=["PUT"]),
             Route("/api/pages/{id}/credential", credential),
             Route("/api/pages/{id}/create-mode", create_mode, methods=["POST"]),
+            Route("/api/pages/{id}/tools", page_tools),
+            Route("/api/pages/{id}/tools/{name}/invoke", invoke_tool, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
             Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),

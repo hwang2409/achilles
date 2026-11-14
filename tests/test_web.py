@@ -22,6 +22,71 @@ def isolated_homes(monkeypatch, tmp_path):
     monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
 
 
+def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setattr(web, "_same_origin", lambda request: True)
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "add_note",
+        "description": "add a note",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": "object"},
+        "implementation": {
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    store.create_tool("home", bundle)
+    token = store.ensure_credential("home")
+    client = TestClient(
+        web.create_app(), headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"}
+    )
+    headers = {"authorization": f"Bearer {token}"}
+    catalog = client.get("/api/pages/home/tools", headers=headers)
+    assert catalog.status_code == 200
+    assert catalog.json()["tools"][0]["input_schema"] == bundle["input_schema"]
+    assert "implementation" not in catalog.text and "credential" not in catalog.text
+    invalid = client.post(
+        "/api/pages/home/tools/add_note/invoke", headers=headers, json={"arguments": {"text": 7}}
+    )
+    assert invalid.status_code == 400
+    assert "/text" in invalid.text and "7" not in invalid.text
+    created = client.post(
+        "/api/pages/home/tools/add_note/invoke", headers=headers, json={"arguments": {"text": "ok"}}
+    )
+    assert created.status_code == 200
+    assert client.get("/api/pages/home/records/notes", headers=headers).json()[0]["text"] == "ok"
+    stale = client.post(
+        "/api/pages/home/tools/add_note/invoke",
+        headers=headers,
+        json={"arguments": {"text": "no write"}, "version": 2},
+    )
+    assert stale.status_code == 409
+    assert (
+        client.post(
+            "/api/pages/home/tools/missing/invoke", headers=headers, json={"arguments": {}}
+        ).status_code
+        == 404
+    )
+    assert client.get("/api/pages/home/tools").status_code == 403
+    with store.transaction() as db:
+        assert db.execute("SELECT action FROM audit WHERE action='invoke:add_note'").fetchone()
+
+
 def test_approval_mode_validation(monkeypatch) -> None:
     monkeypatch.delenv("ACHILLES_APPROVAL", raising=False)
     assert web.approval_mode() == "allow"

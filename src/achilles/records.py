@@ -7,13 +7,21 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .pages import now
-from .tools import validate_bundle
+from .tools import bundle_digest, validate_bundle
+
+
+class RecordValidationError(ValueError):
+    def __init__(self, label: str, path: str, expected: str):
+        super().__init__(f"invalid {label}")
+        self.path = path
+        self.expected = expected
 
 
 def _check(validator: Draft202012Validator, value: Any, label: str) -> None:
     error = next(validator.iter_errors(value), None)
     if error is not None:
-        raise ValueError(f"invalid {label}: {error.message}")
+        path = "/" + "/".join(str(part) for part in error.absolute_path)
+        raise RecordValidationError(label, path, error.validator)
 
 
 def _insert(db, page_id, collection, version, schema, arguments):
@@ -84,7 +92,17 @@ def _update(db, page_id, collection, version, schema, arguments):
     return {**document, "record_id": record_id}
 
 
-def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) -> Any:
+class VersionConflict(ValueError):
+    """the caller used an older published tool version"""
+
+
+def call_record(
+    store,
+    page_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    expected_version: int | None = None,
+) -> Any:
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")
     with store.transaction() as db:
@@ -97,6 +115,8 @@ def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) 
         ).fetchone()
         if row is None:
             raise PermissionError("forbidden: tool is not assigned to this page")
+        if expected_version is not None and expected_version != row["version"]:
+            raise VersionConflict("stale tool version")
         bundle = validate_bundle(json.loads(row["bundle"]))
         _check(Draft202012Validator(bundle["input_schema"]), arguments, "tool input")
         implementation = bundle["implementation"]
@@ -112,4 +132,8 @@ def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) 
         else:
             result = _update(db, page_id, collection, row["version"], schema, arguments)
         _check(Draft202012Validator(bundle["output_schema"]), result, "tool output")
+        db.execute(
+            "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+            (page_id, f"invoke:{tool_name}", bundle_digest(bundle), now()),
+        )
         return result
