@@ -11,6 +11,9 @@ type PageAttachment = { page: Page; serverApprovalMode: string | null; credentia
 type EmptyState = PageAttachment & { phase: "empty" };
 type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState;
+const ATTACH_SLOW_MS = 15_000;
+type AttachmentClock = Pick<typeof globalThis, "setTimeout" | "clearTimeout">;
+const attachmentClock: AttachmentClock = globalThis;
 
 function claimComposerFocus() {
   const owner = document.activeElement;
@@ -343,9 +346,10 @@ export async function confirmSteerDelivery(
   }
 }
 
-export function useActiveChat(client: ZetaClient | null, connected: boolean) {
+export function useActiveChat(client: ZetaClient | null, connected: boolean, clock: AttachmentClock = attachmentClock) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
   const [state, setState] = useState<State>({ phase: "loading" });
+  const [attachSlow, setAttachSlow] = useState(false);
   const [creationPageId, setCreationPageId] = useState<string | null>(null);
   const [listRefresh, setListRefresh] = useState(0);
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -387,7 +391,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false);
     setCreationPageId(null);
+    setAttachSlow(false);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
+    const slowTimer = clock.setTimeout(() => { if (owner.current.current(token)) setAttachSlow(true); }, ATTACH_SLOW_MS);
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, false, applyPendingCreateMode, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token);
@@ -403,9 +409,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
         missingCreation.current = { input: caught.input, route: caught.route };
         setState({ phase: "missing" });
       } else if (!(caught instanceof StaleAttachment) && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) });
+    }).finally(() => {
+      clock.clearTimeout(slowTimer);
+      if (owner.current.current(token)) setAttachSlow(false);
     });
-    return () => owner.current.clear(token);
-  }, [applyPendingCreateMode, client, connected, publishReady, routeRefresh, selectedId]);
+    return () => { clock.clearTimeout(slowTimer); owner.current.clear(token); };
+  }, [applyPendingCreateMode, client, clock, connected, publishReady, routeRefresh, selectedId]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
@@ -460,6 +469,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   }, [applyPendingCreateMode, client, publishReady, state]);
 
   const retrySaving = useCallback(() => { setRouteRefresh((value) => value + 1); }, []);
+  const retryAttachment = useCallback(() => {
+    owner.current.clear();
+    setAttachSlow(false);
+    setRouteRefresh((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     if (!createAfterLoad.current || (state.phase !== "ready" && state.phase !== "empty")) return;
@@ -571,5 +585,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
 }
