@@ -196,7 +196,9 @@ try {
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
   const homeSessionId = async () =>
-    page.locator("[data-session-id]").getAttribute("data-session-id");
+    page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 }).catch(async (error) => {
+      throw new Error(`${error}\nhome session id missing at ${page.url()}: ${redact(await page.locator("body").innerText({ timeout: 10_000 }))}`);
+    });
   const first = await homeSessionId();
   if (!first) throw new Error("home session id missing");
   const requests = () =>
@@ -1242,6 +1244,10 @@ try {
   await page.goto(`${origin}/allow`);
   const allowField = page.getByRole("textbox", { name: "message" });
   await allowField.waitFor({ timeout: 20000 });
+  await allowField.fill("start allow-mode chat", { timeout: 20_000 });
+  await allowField.press("Enter", { timeout: 20_000 });
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).allow_open_request === true, "allow-mode opening request");
+  await page.getByText("allow page ready", { exact: true }).waitFor({ timeout: 20_000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
   await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
