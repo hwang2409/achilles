@@ -113,7 +113,7 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "open menu");
   await menu.click();
   const sidebar = page.locator(".sidebar");
-  const controls = sidebar.locator("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
+  const controls = sidebar.locator("button:not(:disabled), a[href]:not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
   await controls.first().waitFor();
   await controls.last().focus();
   await page.keyboard.press("Tab");
