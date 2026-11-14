@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { constants, existsSync } from "node:fs";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 
 export const root = resolve(new URL("..", import.meta.url).pathname);
 export const port = Number(process.env.PORT ?? 5191);
 const home = resolve(process.env.ZETA_HOME ?? `${process.env.HOME}/.zeta`);
+const achillesHome = resolve(process.env.ACHILLES_HOME ?? `${process.env.HOME}/.local/share/achilles`);
 const cache = resolve(root, ".cache/dev");
 
 type Discovery = { pid: number; port: number; origins: string[] };
@@ -134,17 +135,33 @@ async function waitForSpawnedServe(path: string, pid: number, ws: number) {
   }
   throw new Error("timed out waiting for zeta serve discovery");
 }
-async function chooseServe(requestedOrigin: string): Promise<{ origin: string }> {
-  const discovery = resolve(home, "run/serve.ws.json");
+async function attachServe(discovery: string, requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
   const document = await readDiscovery(discovery) as Partial<Discovery> | null;
   const identity = document?.pid ? await processIdentity(document.pid) : null;
   const decision = serveDecision(document, requestedOrigin, identity?.command ?? null);
-  if (decision.kind === "reuse") { console.log(`reusing zeta serve on port ${decision.document.port}`); return { origin: decision.origin }; }
-  if (decision.kind === "origin-missing") throw new Error(`zeta serve is running without ${requestedOrigin}; stop it first, then restart it with: ${decision.command}`);
+  if (decision.kind === "reuse") { console.log(`attached to zeta serve on port ${decision.document.port}`); return { origin: decision.origin, discovery }; }
+  if (decision.kind === "origin-missing") throw new Error(`attached zeta serve does not allow ${requestedOrigin}; restart it with: ${decision.command}`);
+  throw new Error(`ACHILLES_ZETA_DISCOVERY does not name a live zeta serve: ${discovery}`);
+}
+async function chooseOwnedServe(discovery: string, requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
+  let saved: ProcessIdentity | null = null;
+  try { saved = JSON.parse(await readFile(resolve(cache, "zeta-serve.json"), "utf8")); } catch {}
+  const savedIdentity = saved ? await processIdentity(saved.pid) : null;
+  const document = await readDiscovery(discovery) as Partial<Discovery> | null;
+  const discoveryIdentity = document?.pid === saved?.pid ? savedIdentity : document?.pid ? await processIdentity(document.pid) : null;
+  const decision = serveDecision(document, requestedOrigin, discoveryIdentity?.command ?? null);
+  if (saved && ownedProcessMatches(saved, savedIdentity)) {
+    if (document?.pid === saved.pid && decision.kind === "reuse") {
+      console.log(`reusing achilles zeta serve on port ${decision.document.port}`);
+      return { origin: decision.origin, discovery };
+    }
+    await stopAchilles(saved, "owned zeta serve");
+  }
   const ws = await freePort(); let control = await freePort(); while (control === ws) control = await freePort(); await mkdir(cache, { recursive: true });
+  const runDir = dirname(discovery); await mkdir(runDir, { recursive: true, mode: 0o700 }); await chmod(runDir, 0o700);
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
   const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
-  const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-origin", requestedOrigin, "--ws-origin", alternate];
+  const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-discovery", discovery, "--ws-origin", requestedOrigin, "--ws-origin", alternate];
   const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: { ...process.env, PWD: home }, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
@@ -152,7 +169,12 @@ async function chooseServe(requestedOrigin: string): Promise<{ origin: string }>
   if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
   const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
-  console.log(`started zeta serve on port ${ws}`); return { origin: alternate };
+  console.log(`started achilles zeta serve on port ${ws}`); return { origin: alternate, discovery };
+}
+async function chooseServe(requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
+  const attached = process.env.ACHILLES_ZETA_DISCOVERY;
+  if (attached) return await attachServe(resolve(attached), requestedOrigin);
+  return await chooseOwnedServe(resolve(achillesHome, "run/serve.json"), requestedOrigin);
 }
 async function portPid(): Promise<number | null> {
   const result = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
@@ -160,10 +182,10 @@ async function portPid(): Promise<number | null> {
   const pid = Number(result.stdout.toString().trim().split("\n")[0]);
   return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
-async function stopAchilles(saved: ProcessIdentity) {
+async function stopAchilles(saved: ProcessIdentity, name = "achilles") {
   process.kill(saved.pid, "SIGTERM");
   for (let i = 0; i < 100 && await processIdentity(saved.pid); i++) await Bun.sleep(100);
-  if (await processIdentity(saved.pid)) throw new Error(`pid ${saved.pid} did not stop; stop it with: kill ${saved.pid}`);
+  if (await processIdentity(saved.pid)) throw new Error(`${name} pid ${saved.pid} did not stop; stop it with: kill ${saved.pid}`);
 }
 async function startAchilles(appOrigin: string, stamp: string) {
   const stateFile = resolve(cache, "achilles.json");
@@ -241,6 +263,7 @@ async function dev() {
   }
   const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin);
   const achillesStamp = await digest([webStamp, ...(await filesUnder(resolve(root, "src/achilles"))), resolve(root, "pyproject.toml"), resolve(root, "uv.lock")]);
+  process.env.ACHILLES_ZETA_DISCOVERY = selected.discovery;
   await ensureMcp(mcpUrl(port)); await startAchilles(selected.origin, achillesStamp);
   const opener = process.platform === "darwin" ? "open" : "xdg-open";
   if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, selected.origin]); else console.log(`open ${selected.origin} in your browser`);

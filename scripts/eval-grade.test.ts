@@ -27,6 +27,14 @@ test("structured outcomes cannot pass on unrelated text", () => {
   expect(structurallyContains({ records: [{ run_id: "run-002", verdict: "bad", extra: 1 }] }, { run_id: "run-002", verdict: "bad" })).toBe(true);
 });
 
+test("schema roundtrip accepts an agent-designed title field", () => {
+  const check = { id: "roundtrip", type: "schema_roundtrip" as const, page: "p", value: ["synthetic note"] }; const pages = [{ id: "p1", alias: "p" }];
+  const version = { page_id: "p1", name: "add_note", collection: "notes", operation: "insert", data_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } };
+  const snapshot = { pages, tool_versions: [version], records: [{ page_id: "p1", collection: "notes", data: { title: "synthetic note" } }], results: [{ page_id: "p1", tool: "achilles__add_note", success: true, data: { title: "synthetic note" } }] };
+  expect(gradeCheck(check, snapshot).pass).toBe(true);
+  expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
+});
+
 test("second-chat unavailable sentinel fails from durable history", () => {
   const check = { id: "available", type: "history_absent" as const, chat: "chat-b", text: "MCP server achilles is unavailable" };
   expect(gradeCheck(check, { chats: [{ chat_id: "chat-b", history: "MCP server achilles is unavailable" }] }).pass).toBe(false);
@@ -64,8 +72,9 @@ test("record-crud list matching is order-independent, distinct, and complete", (
 
 test("reading-list carries one record id through insert, update, and read", () => {
   const pages = [{ id: "p1", alias: "p" }]; const final = { title: "Synthetic Book", status: "read" };
-  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: { before: { title: "Synthetic Book", status: "unread" }, after: final } };
-  const tool_versions = [{ page_id: "p1", name: "add_book", collection: "books", operation: "insert" }, { page_id: "p1", name: "update_book", collection: "books", operation: "update" }, { page_id: "p1", name: "list_books", collection: "books", operation: "list" }];
+  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: { before: ["Synthetic Book", "unread"], after: ["Synthetic Book", "read"] } };
+  const data_schema = { type: "object", properties: { title: { type: "string" }, status: { type: "string" } } };
+  const tool_versions = [{ page_id: "p1", name: "add_book", collection: "books", operation: "insert", data_schema }, { page_id: "p1", name: "update_book", collection: "books", operation: "update", data_schema }, { page_id: "p1", name: "list_books", collection: "books", operation: "list", data_schema }];
   const result = (tool: string, record_id: string, data: object) => ({ page_id: "p1", chat_id: "reading-chat", tool, success: true, data: { ...data, record_id } });
   const insertA = result("achilles__add_book", "a", { title: "Synthetic Book", status: "unread" });
   const updateB = result("achilles__update_book", "b", final); const readB = { page_id: "p1", chat_id: "reading-chat", tool: "achilles__list_books", success: true, data: { records: [{ ...final, record_id: "b" }] } };

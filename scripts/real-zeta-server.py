@@ -9,9 +9,56 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
-from zeta.protocol.types import TextContent, ToolCall
+from zeta.protocol.types import MessageRole, TextContent, ToolCall
+from zeta.providers.completion import owned_completion
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
+
+
+class BarrierBackend(FakeBackend):
+    def __init__(self, turns, request_serializer, control, barrier_turn):
+        super().__init__(turns, request_serializer=request_serializer)
+        self.control = control
+        self.barrier_turn = barrier_turn
+
+    @owned_completion
+    async def complete(self, messages, tool_schemas):
+        turn_index = len(self.calls)
+        stream = FakeBackend.complete.__wrapped__(self, messages, tool_schemas)
+        async for event in stream:
+            if turn_index == self.barrier_turn and event.type.name == "MESSAGE_END":
+                document = json.loads(self.control.read_text())
+                document["turn_barrier"] = "held"
+                write_control(self.control, document)
+                for _ in range(300):
+                    document = json.loads(self.control.read_text())
+                    if document.get("release_turn_barrier"):
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise RuntimeError("turn barrier release timed out after 15 seconds")
+            yield event
+
+
+class RestartBackend:
+    def __init__(self, resume_turns, cursor_turn, request_serializer):
+        self.resume = FakeBackend(resume_turns, request_serializer=request_serializer)
+        self.cursor = FakeBackend([cursor_turn], request_serializer=request_serializer)
+
+    @owned_completion
+    async def complete(self, messages, tool_schemas):
+        cursor_prompt = any(
+            message.role is MessageRole.USER
+            and any(
+                isinstance(block, TextContent) and block.text == "start cursor stream"
+                for block in message.content
+            )
+            for message in messages
+        )
+        backend = self.cursor if cursor_prompt else self.resume
+        stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
+        async for event in stream:
+            yield event
 
 
 def write_control(path: Path, document: dict) -> None:
@@ -97,6 +144,10 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     home = private_proof_home()
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
+    try:
+        restarting_turn = json.loads(control.read_text()).get("request_count", 0) > 0
+    except (FileNotFoundError, json.JSONDecodeError):
+        restarting_turn = False
     home.mkdir(parents=True, exist_ok=True)
     if not (home / "storage-format.json").exists():
         advance(home, expected_epoch=0)
@@ -127,6 +178,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             delay=0.03,
         ),
         ScriptedTurn(content=[TextContent("stream tool complete")]),
+        ScriptedTurn(content=[TextContent("end-of-turn followup complete")]),
         ScriptedTurn(
             content=[
                 TextContent(
@@ -218,6 +270,16 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("allow-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("allow complete")]),
+        ScriptedTurn(content=[TextContent("stock complete")]),
+        ScriptedTurn(content=[TextContent("vim complete")]),
+        ScriptedTurn(content=[TextContent("focus complete")], delay=5),
+        ScriptedTurn(
+            content=[TextContent(f"cursor stream delta {index}\n") for index in range(8)],
+            tool_calls=[
+                ToolCall("cursor-stream-proof", "read", {"path": str(cwd / "fixture.txt")})
+            ],
+            delay=0.03,
+        ),
     ]
 
     def record_request(messages, tool_schemas):
@@ -251,12 +313,17 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         write_control(control, document)
         return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()
 
-    backend = FakeBackend(turns, request_serializer=record_request)
+    backend = (
+        RestartBackend(turns[:2], turns[-1], record_request)
+        if restarting_turn
+        else BarrierBackend(turns, record_request, control, barrier_turn=4)
+    )
     return (
         ZetaServer(
             home=home,
             cwd=cwd,
             ws_port=0,
+            ws_discovery=os.environ["ZETA_PROOF_DISCOVERY"],
             ws_origins=(os.environ["ZETA_PROOF_ORIGIN"],),
             provider="codex",
             auto_memory=False,

@@ -1,6 +1,6 @@
 {
   "id": "reading-list-one-prompt",
-  "prompt": "make a page that tracks my reading list with required string fields named `title` and `status`",
+  "prompt": "make a page that tracks my reading list",
   "page_plan": [
     {
       "alias": "home",
@@ -52,25 +52,30 @@
       "page": "reading",
       "chat": "reading-chat",
       "value": {
-        "before": {
-          "title": "Synthetic Book",
-          "status": "unread"
-        },
-        "after": {
-          "title": "Synthetic Book",
-          "status": "read"
-        }
+        "before": [
+          "Synthetic Book",
+          "unread"
+        ],
+        "after": [
+          "Synthetic Book",
+          "read"
+        ]
       }
     },
     {
+      "id": "record-count",
+      "type": "count",
+      "page": "reading",
+      "name": "records",
+      "count": 1
+    },
+    {
       "id": "record",
-      "type": "records_exact",
+      "type": "schema_roundtrip",
       "page": "reading",
       "value": [
-        {
-          "title": "Synthetic Book",
-          "status": "read"
-        }
+        "Synthetic Book",
+        "read"
       ]
     },
     {

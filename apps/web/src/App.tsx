@@ -1,8 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
-import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
+import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell } from "./AppShell";
+import { PlainComposer } from "./composer/PlainComposer";
+import { draftStore } from "./draftStore";
+import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
@@ -13,11 +16,34 @@ addEventListener("pagehide", () => highlight.dispose(), { once: true });
 const fences: Fences = {};
 const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
 const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
+const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
 
-function ComposerSlot({ focus, children }: { focus: boolean; children: ReactNode }) {
+function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
   const slot = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus({ preventScroll: true }); }, [focus]);
-  return <div id="message-composer" ref={slot} style={{ display: "contents" }}>{children}</div>;
+  const draft = useSyncExternalStore(
+    (listener) => {
+      const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
+      const unsubscribeRemote = draftStore.subscribeRemote(sessionId, listener);
+      return () => { unsubscribeConfirm(); unsubscribeRemote(); };
+    },
+    () => draftStore.get(sessionId),
+    () => draftStore.get(sessionId),
+  );
+  useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  const adapterProps = {
+    ...props,
+    defaultValue: draft,
+    onDraftChange: (text: string) => draftStore.set(sessionId, text),
+    onDeliveryConfirm: (sent: string) => draftStore.confirm(sessionId, sent),
+  };
+  const composer = vim
+    ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
+    : <PlainComposer {...adapterProps} />;
+  return <div id="message-composer" ref={slot} style={{ display: "contents" }}>{composer}</div>;
+}
+
+function VimLoading() {
+  return <div className="vim-loading" data-part="composer" data-state="read-only" role="group" aria-label="message" aria-disabled="true"><div data-part="composer-field"><textarea rows={1} aria-label="message" placeholder="loading vim…" disabled /></div></div>;
 }
 
 function connectionFailure(state: ConnectionState): string | null {
@@ -32,6 +58,7 @@ function connectionFailure(state: ConnectionState): string | null {
 }
 
 export function App() {
+  const settings = useSettings();
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -43,13 +70,19 @@ export function App() {
     const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
     const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
     const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
-    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}`;
-  } : () => "idle:0:0:0::0");
+    const toolStates = state.outline.map((item) => {
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
+      return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
+    }).join(",");
+    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
+  } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
   const waiting = Number(approvalCount);
   const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
+  const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
+  const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [fulcrumJumpToLatest, setFulcrumJumpToLatest] = useState(false);
   const transcriptRef = useRef<HTMLElement>(null);
@@ -62,6 +95,16 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
+  useEffect(() => store?.subscribe(() => {
+    for (const item of store.getState().outline) {
+      if (item.kind !== "tool") continue;
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
+      if ((value?.tool_call?.name === "create_page" || value?.tool_call?.name === "achilles__create_page") && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+        completedCreatePages.current.add(item.id);
+        setPageRefreshNonce((current) => current + 1);
+      }
+    }
+  }), [store]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
@@ -108,11 +151,11 @@ export function App() {
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!connected || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>
+        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;
+  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {

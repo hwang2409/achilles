@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "history_absent" | "layout_contains";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "history_absent" | "layout_contains";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -26,7 +26,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "history_absent", "layout_contains"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "history_absent", "layout_contains"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -75,12 +75,14 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "operations" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => ["insert", "update", "list", "get"].includes(String(value))))) throw new Error(`checks[${i}] needs operation kinds`);
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
-  if (["record", "records_exact", "updated_record", "layout_contains"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
   if (check.type === "records_exact" && !Array.isArray(check.value)) throw new Error(`checks[${i}] needs a record array`);
+  if (check.type === "schema_roundtrip" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string"))) throw new Error(`checks[${i}] needs string values`);
   if (check.type === "updated_record") {
     if (typeof check.chat !== "string" || !check.value || typeof check.value !== "object" || Array.isArray(check.value)) throw new Error(`checks[${i}] needs chat and transition`);
     own(check.value as object, ["before", "after"], `checks[${i}].value`); const transition = check.value as Record<string, unknown>;
     if (transition.before === undefined || transition.after === undefined) throw new Error(`checks[${i}] needs before and after`);
+    if ([transition.before, transition.after].some(value => Array.isArray(value) && (!(value as unknown[]).length || !(value as unknown[]).every(item => typeof item === "string")))) throw new Error(`checks[${i}] transition arrays need string values`);
   }
   if (["browser_text", "prompt", "history_absent"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
@@ -149,6 +151,23 @@ function matchingObjects(actual: unknown, expected: unknown): Array<Record<strin
   const match = expected && typeof expected === "object" && !Array.isArray(expected) && Object.entries(shape).every(([key, value]) => key in object && structurallyContains(object[key], value));
   return [...(match ? [object] : []), ...Object.values(object).flatMap(value => matchingObjects(value, expected))];
 }
+function schemaStringFields(version: Record<string, unknown>) {
+  const fields = new Set<string>();
+  for (const schema of [version.data_schema, version.input_schema]) {
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) continue;
+    const properties = (schema as Record<string, unknown>).properties;
+    if (!properties || typeof properties !== "object" || Array.isArray(properties)) continue;
+    for (const [name, value] of Object.entries(properties)) if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).type === "string") fields.add(name);
+  }
+  return fields;
+}
+function matchingSchemaObjects(actual: unknown, version: Record<string, unknown>, values: string[], inheritedRecordId?: string): Array<Record<string, unknown>> {
+  if (!actual || typeof actual !== "object") return [];
+  if (Array.isArray(actual)) return actual.flatMap(value => matchingSchemaObjects(value, version, values, inheritedRecordId));
+  const object = actual as Record<string, unknown>; const recordId = typeof object.record_id === "string" ? object.record_id : inheritedRecordId; const fields = schemaStringFields(version);
+  const match = values.every(value => [...fields].some(field => object[field] === value)); const found = match ? [{ ...object, ...(recordId && !("record_id" in object) ? { record_id: recordId } : {}) }] : [];
+  return [...found, ...Object.values(object).flatMap(value => matchingSchemaObjects(value, version, values, recordId))];
+}
 
 type GradeContext = { check: TaskCheck; snapshot: EvalSnapshot; page: unknown; owned(type: keyof EvalSnapshot): Array<Record<string, unknown>> };
 const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
@@ -167,13 +186,15 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   },
   updated_record: ({ check, snapshot, page, owned }) => {
     const versions = owned("tool_versions"); const results = rows(snapshot, "results").filter(row => row.page_id === page && row.chat_id === check.chat && successful(row));
-    const names = (collection: unknown, operations: string[]) => new Set(versions.filter(row => row.collection === collection && operations.includes(String(row.operation))).map(row => `achilles__${row.name}`));
     const transition = check.value as { before: unknown; after: unknown };
     return [...new Set(versions.map(row => row.collection))].some(collection => {
-      const inserts = names(collection, ["insert"]); const updates = names(collection, ["update"]); const reads = names(collection, ["list", "get"]);
-      const matches = (tools: Set<string>, value: unknown) => results.filter(row => tools.has(String(row.tool))).flatMap(row => matchingObjects(row.data ?? row.result, value));
-      return matches(inserts, transition.before).some(inserted => typeof inserted.record_id === "string" && inserted.record_id.length > 0 && matches(updates, { ...transition.after as object, record_id: inserted.record_id }).length > 0 && matches(reads, { ...transition.after as object, record_id: inserted.record_id }).length > 0);
+      const matches = (operations: string[], value: unknown) => versions.filter(version => version.collection === collection && operations.includes(String(version.operation))).flatMap(version => results.filter(row => row.tool === `achilles__${version.name}`).flatMap(row => Array.isArray(value) ? matchingSchemaObjects(row.data ?? row.result, version, value as string[]) : matchingObjects(row.data ?? row.result, value)));
+      return matches(["insert"], transition.before).some(inserted => typeof inserted.record_id === "string" && inserted.record_id.length > 0 && matches(["update"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id }).some(updated => updated.record_id === inserted.record_id) && matches(["list", "get"], Array.isArray(transition.after) ? transition.after : { ...transition.after as object, record_id: inserted.record_id }).some(read => read.record_id === inserted.record_id));
     });
+  },
+  schema_roundtrip: ({ check, snapshot, page, owned }) => {
+    const values = check.value as string[]; const results = rows(snapshot, "results").filter(row => row.page_id === page && successful(row)); const records = owned("records");
+    return owned("tool_versions").some(version => records.some(record => record.collection === version.collection && matchingSchemaObjects(record.data ?? record, version, values).length > 0) && results.some(result => result.tool === `achilles__${version.name}` && matchingSchemaObjects(result.data ?? result.result, version, values).length > 0));
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
