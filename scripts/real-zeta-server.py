@@ -9,35 +9,38 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
+from zeta.core.store import ConversationStore
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
 from zeta.providers.completion import owned_completion
+from zeta.server.delivery import DeliveryRequests
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 
 class BarrierBackend(FakeBackend):
-    def __init__(self, turns, request_serializer, control, barrier_turn):
+    def __init__(self, turns, request_serializer, control):
         super().__init__(turns, request_serializer=request_serializer)
         self.control = control
-        self.barrier_turn = barrier_turn
 
     @owned_completion
     async def complete(self, messages, tool_schemas):
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(self, messages, tool_schemas)
         async for event in stream:
-            if turn_index == self.barrier_turn and event.type.name == "MESSAGE_END":
-                document = json.loads(self.control.read_text())
-                document["turn_barrier"] = "held"
-                write_control(self.control, document)
-                for _ in range(300):
-                    document = json.loads(self.control.read_text())
-                    if document.get("release_turn_barrier"):
-                        break
-                    await asyncio.sleep(0.05)
-                else:
-                    raise RuntimeError("turn barrier release timed out after 15 seconds")
+            if turn_index == 4 and event.type.name == "MESSAGE_END":
+                await self._hold("turn_barrier")
             yield event
+
+    async def _hold(self, barrier):
+        document = json.loads(self.control.read_text())
+        document[barrier] = "held"
+        write_control(self.control, document)
+        for _ in range(300):
+            document = json.loads(self.control.read_text())
+            if document.get(f"release_{barrier}"):
+                return
+            await asyncio.sleep(0.05)
+        raise RuntimeError(f"{barrier} release timed out after 15 seconds")
 
 
 class RestartBackend:
@@ -321,6 +324,13 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         request_count = document.get("request_count", 0) + 1
         document["request_count"] = request_count
         document["last_message"] = str(messages[-1]) if messages else ""
+        document["user_messages"] = [
+            block.text
+            for message in messages
+            if message.role is MessageRole.USER
+            for block in message.content
+            if isinstance(block, TextContent)
+        ]
         document["schemas"] = [schema["name"] for schema in tool_schemas]
         document["schema_documents"] = tool_schemas
         returned_calls = turns[request_count - 1].tool_calls if request_count <= len(turns) else []
@@ -350,7 +360,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     backend = (
         RestartBackend(turns[:2], turns[-1], record_request)
         if restarting_turn
-        else BarrierBackend(turns, record_request, control, barrier_turn=4)
+        else BarrierBackend(turns, record_request, control)
     )
     return (
         ZetaServer(
@@ -369,6 +379,54 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
 
 async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
+    original_append_delivery = ConversationStore.append_client_delivery_async
+
+    async def held_append_delivery(instance, delivery_id, method, status, outcome, **kwargs):
+        delivery = await original_append_delivery(
+            instance, delivery_id, method, status, outcome, **kwargs
+        )
+        accepted_message = kwargs.get("accepted_message")
+        if (
+            method == "steer"
+            and accepted_message is not None
+            and any(
+                isinstance(block, TextContent)
+                and block.text == "repeat that layout update with the old version"
+                for block in accepted_message.content
+            )
+        ):
+            document = json.loads(control.read_text())
+            document["late_steer_commit"] = "held"
+            write_control(control, document)
+            for _ in range(300):
+                document = json.loads(control.read_text())
+                if document.get("release_late_steer_commit"):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise RuntimeError("late steer commit release timed out after 15 seconds")
+        return delivery
+
+    original_finalize_turn = DeliveryRequests.finalize_turn
+
+    async def held_finalize_turn(instance, *args, **kwargs):
+        document = json.loads(control.read_text())
+        if document.get("request_count") == 17 and not document.get("late_turn_released"):
+            document["late_turn_barrier"] = "held"
+            write_control(control, document)
+            for _ in range(300):
+                document = json.loads(control.read_text())
+                if document.get("release_late_turn_barrier"):
+                    document["late_turn_released"] = True
+                    write_control(control, document)
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise RuntimeError("late turn barrier release timed out after 15 seconds")
+        await original_finalize_turn(instance, *args, **kwargs)
+
+    ConversationStore.append_client_delivery_async = held_append_delivery
+    DeliveryRequests.finalize_turn = held_finalize_turn
     await server.start()
     websocket = server._websocket
     assert websocket is not None and websocket.controller_token is not None

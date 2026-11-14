@@ -133,52 +133,22 @@ const page = (sessionId: string | null) => ({ id: "home", route: "/", title: "ho
 
 describe("steer delivery confirmation", () => {
   test.each([
-    { name: "delivered", statuses: [{ status: "delivered" }], sends: 0 },
-    { name: "dropped then resend", statuses: [{ status: "dropped" }, { status: "delivered" }], sends: 1 },
-    { name: "evicted delivered", statuses: [{ status: "evicted", outcome: "delivered" }], sends: 0 },
-    { name: "evicted dropped then resend", statuses: [{ status: "evicted", outcome: "dropped" }, { status: "delivered" }], sends: 1 },
-  ])("confirms $name", async ({ statuses, sends }) => {
-    const requests: string[] = [];
+    { name: "delivered", status: { status: "delivered" } },
+    { name: "evicted delivered", status: { status: "evicted", outcome: "delivered" } },
+  ])("confirms $name", async ({ status }) => {
     const ids: string[] = [];
-    const client = { request: async (method: string, params: { delivery_id?: string }) => {
-      requests.push(method);
-      if (method === "delivery_status") return statuses.shift();
-      if (method === "status") return { state: "idle" };
-      if (method === "send") return { accepted: true, delivery_id: params.delivery_id };
-      throw new Error(`unexpected ${method}`);
-    }};
+    const client = { request: async () => status };
     const result = await confirmSteerDelivery(client as never, "session", "text", "initial", (id) => ids.push(id));
-    expect(result).toBe(ids.at(-1));
-    expect(requests.filter((method) => method === "send")).toHaveLength(sends);
-    expect(new Set(ids).size).toBe(sends + 1);
+    expect(result).toBe("initial");
+    expect(ids).toEqual(["initial"]);
   });
 
-  test("waits for the finished turn before resending a dropped steer exactly once", async () => {
-    let releaseTurnEnd!: () => void;
-    const turnEnded = new Promise<void>((resolve) => { releaseTurnEnd = resolve; });
-    let markStatusReached!: () => void;
-    const statusReached = new Promise<void>((resolve) => { markStatusReached = resolve; });
-    let statusChecks = 0;
-    let sends = 0;
-    const client = { request: async (method: string) => {
-      if (method === "delivery_status") return sends ? { status: "delivered" } : { status: "dropped" };
-      if (method === "status") { statusChecks += 1; markStatusReached(); await turnEnded; return { state: "idle" }; }
-      if (method === "send") { sends += 1; return { accepted: true }; }
-      throw new Error(`unexpected ${method}`);
-    }};
-
-    const confirmation = confirmSteerDelivery(client as never, "session", "new turn", "initial", () => {});
-    try {
-      await waitBounded(statusReached, () => releaseTurnEnd(), () => confirmation);
-      expect(statusChecks).toBe(1);
-      expect(sends).toBe(0);
-      releaseTurnEnd();
-      await confirmation;
-      expect(sends).toBe(1);
-    } finally {
-      releaseTurnEnd();
-      await confirmation.catch(() => {});
-    }
+  test.each([
+    { name: "dropped", status: { status: "dropped" } },
+    { name: "evicted dropped", status: { status: "evicted", outcome: "dropped" } },
+  ])("keeps the draft when $name", async ({ status }) => {
+    const client = { request: async () => status };
+    await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {})).rejects.toThrow("message was not sent");
   });
 
   test.each([
@@ -195,7 +165,7 @@ describe("steer delivery confirmation", () => {
     Date.now = () => now;
     try {
       const client = { request: async () => { now = 102; return { status: "queued" }; } };
-      await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {}, 1)).rejects.toThrow("timed out");
+      await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {}, 1)).rejects.toThrow("may still arrive with your next message");
     } finally { Date.now = originalNow; }
   });
 
