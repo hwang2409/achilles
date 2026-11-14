@@ -1,10 +1,49 @@
+import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 from jsonschema import Draft202012Validator
 
 from achilles.pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, PageStore, validate_layout
+from achilles.records import call_record
 from achilles.tools import ValidationError
+
+_BUNDLE = {
+    "format_version": 1,
+    "kind": "data_operation",
+    "name": "add_book",
+    "description": "add a book",
+    "input_schema": {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    },
+    "implementation": {
+        "operation": "insert",
+        "collection": "books",
+        "data_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def _update_page(store: PageStore) -> str:
+    store.set_create_mode("home", True)
+    page, _, _ = store.create_page(
+        "/reading",
+        "reading",
+        {"blocks": [{"type": "list", "title": "books", "collection": "books"}]},
+        tools=[_BUNDLE],
+    )
+    store.set_create_mode(page["id"], True)
+    return page["id"]
 
 
 @pytest.mark.parametrize(
@@ -100,6 +139,112 @@ def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
             "SELECT session_id,page_id,created_at,updated_at FROM chat "
             "WHERE session_id='session-old'"
         ).fetchall() == [("session-old", "existing", "created", "updated")]
+
+
+def test_update_layout_rejects_stale_and_unknown_tool_without_writes(tmp_path):
+    store = PageStore(tmp_path)
+    page_id = _update_page(store)
+    with store._connect() as db:
+        before = {
+            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+            for table in ("page", "layout_version", "audit")
+        }
+
+    with pytest.raises(ValidationError) as stale:
+        store.update_layout(page_id, {"blocks": []}, 2)
+    assert (stale.value.code, stale.value.path, stale.value.expected) == (
+        "conflict",
+        "/expected_version",
+        "current active layout version",
+    )
+    with pytest.raises(ValidationError) as unknown:
+        store.update_layout(
+            page_id,
+            {"blocks": [{"type": "form", "title": "edit", "tool": "missing"}]},
+            1,
+        )
+    assert (unknown.value.path, unknown.value.expected) == (
+        "/layout/blocks/0/tool",
+        "assigned tool name",
+    )
+    with store._connect() as db:
+        after = {
+            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+            for table in ("page", "layout_version", "audit")
+        }
+    assert after == before
+
+
+def test_concurrent_layout_updates_have_one_winner(tmp_path):
+    store = PageStore(tmp_path)
+    page_id = _update_page(store)
+    barrier = Barrier(2)
+
+    def update(text):
+        connection = PageStore(tmp_path)
+        barrier.wait(timeout=10)
+        try:
+            return connection.update_layout(
+                page_id, {"blocks": [{"type": "text", "text": text}]}, 1
+            )
+        except ValidationError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(update, ("first", "second")))
+    winners = [outcome for outcome in outcomes if isinstance(outcome, tuple)]
+    conflicts = [outcome for outcome in outcomes if isinstance(outcome, ValidationError)]
+    assert len(winners) == 1 and winners[0][0] == 2
+    assert len(conflicts) == 1 and conflicts[0].code == "conflict"
+    with store._connect() as db:
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM layout_version WHERE page_id=?", (page_id,)
+            ).fetchone()[0]
+            == 2
+        )
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM audit WHERE page_id=? AND action='update_layout'", (page_id,)
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_update_layout_preserves_records_tools_and_chats(tmp_path):
+    store = PageStore(tmp_path)
+    page_id = _update_page(store)
+    store.register_chat(page_id, "synthetic-chat")
+    call_record(store, page_id, "add_book", {"title": "one"}, 1)
+    with store._connect() as db:
+        before = {
+            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+            for table in ("page_record", "tool", "tool_version", "page_tool", "chat")
+        }
+    layout = {"blocks": [{"type": "text", "text": "updated"}]}
+    assert store.update_layout(page_id, layout, 1)[0] == 2
+    assert store.layout(page_id) == layout
+    assert store.inspect_page(page_id)["layout"]["version"] == 2
+    with store._connect() as db:
+        after = {
+            table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+            for table in ("page_record", "tool", "tool_version", "page_tool", "chat")
+        }
+    assert after == before
+
+
+def test_null_active_layout_version_reads_version_one_not_latest(tmp_path):
+    store = PageStore(tmp_path)
+    page_id = _update_page(store)
+    inactive = {"blocks": [{"type": "text", "text": "inactive"}]}
+    with store.transaction() as db:
+        db.execute("UPDATE page SET active_layout_version=NULL WHERE id=?", (page_id,))
+        db.execute(
+            "INSERT INTO layout_version VALUES(?,?,?,?,?)",
+            (page_id, 2, "inactive", json.dumps(inactive), "later"),
+        )
+    assert store.layout(page_id)["blocks"][0]["type"] == "list"
+    assert store.inspect_page(page_id)["layout"]["version"] == 1
 
 
 def test_save_session_compare_and_set_has_one_winner(tmp_path):

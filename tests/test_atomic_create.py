@@ -688,3 +688,73 @@ def test_simultaneous_identical_create_page_calls_are_idempotent(creation_client
     assert len([path for path in files if path.startswith("bundles/")]) == 2
     page_id = values[0]["page_id"]
     assert store.page_tools(page_id)[0]["name"] == "add_book"
+
+
+def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
+    _, store, client, home_headers = creation_client
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {"name": "create_page", "arguments": request()},
+    )
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    assert "update_layout" not in [tool["name"] for tool in catalog["tools"]]
+
+    store.set_create_mode(page_id, True)
+    catalog = mcp(client, page_headers, 5, "tools/list", {})
+    update_tool = next(tool for tool in catalog["tools"] if tool["name"] == "update_layout")
+    assert update_tool["inputSchema"] == {
+        "type": "object",
+        "properties": {
+            "layout": update_tool["inputSchema"]["properties"]["layout"],
+            "expected_version": {"type": "integer", "minimum": 1},
+        },
+        "required": ["layout", "expected_version"],
+        "additionalProperties": False,
+    }
+    assert "open another page's chat" in update_tool["description"]
+
+    layout = {"blocks": [{"type": "text", "text": "changed"}]}
+    updated = mcp(
+        client,
+        page_headers,
+        6,
+        "tools/call",
+        {"name": "update_layout", "arguments": {"layout": layout, "expected_version": 1}},
+    )
+    assert json.loads(updated["content"][0]["text"])["version"] == 2
+    assert store.layout(page_id) == layout
+
+    other = mcp(
+        client,
+        home_headers,
+        7,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": {**request(), "route": "/other", "title": "other"},
+        },
+    )
+    other_id = json.loads(other["content"][0]["text"])["page_id"]
+    before = store.layout(other_id)
+    forbidden = mcp(
+        client,
+        page_headers,
+        8,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"page_id": other_id, "layout": layout, "expected_version": 1},
+        },
+    )
+    assert forbidden["isError"] is True
+    assert json.loads(forbidden["content"][0]["text"]) == {
+        "code": "invalid_input",
+        "path": "",
+        "expected": "only properties: layout, expected_version",
+    }
+    assert store.layout(other_id) == before

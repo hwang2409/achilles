@@ -9,7 +9,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from .pages import CREATE_PAGE_SCHEMA, PageStore
+from .pages import CREATE_PAGE_SCHEMA, UPDATE_LAYOUT_SCHEMA, PageStore
 from .records import call_record
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
@@ -102,7 +102,11 @@ def _inspect_error() -> CallToolResult:
 
 
 def _validate_create(name: str, args: Any) -> None:
-    schema = CREATE_PAGE_SCHEMA if name == "create_page" else CREATE_TOOL_SCHEMA
+    schema = {
+        "create_page": CREATE_PAGE_SCHEMA,
+        "create_tool": CREATE_TOOL_SCHEMA,
+        "update_layout": UPDATE_LAYOUT_SCHEMA,
+    }[name]
     validate_schema(args, schema)
 
 
@@ -158,6 +162,14 @@ def build_mcp(store: PageStore):
                             "or provide the exact derived schema; bundle <= 64 KB"
                         ),
                         inputSchema=CREATE_TOOL_SCHEMA,
+                    ),
+                    Tool(
+                        name="update_layout",
+                        description=(
+                            "replace this page's layout at the expected active version; "
+                            "open another page's chat to change that page"
+                        ),
+                        inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),
                 ]
             )
@@ -235,6 +247,14 @@ def build_mcp(store: PageStore):
                         "digest": digest,
                         "existing": existing,
                     }
+                elif params.name == "update_layout":
+                    version, digest = await anyio.to_thread.run_sync(
+                        store.update_layout,
+                        page["id"],
+                        args["layout"],
+                        args["expected_version"],
+                    )
+                    result = {"version": version, "digest": digest}
                 else:
                     created, digest = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle"

@@ -71,6 +71,15 @@ LAYOUT_SCHEMA = {
     "required": ["blocks"],
     "additionalProperties": False,
 }
+UPDATE_LAYOUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "layout": LAYOUT_SCHEMA,
+        "expected_version": {"type": "integer", "minimum": 1},
+    },
+    "required": ["layout", "expected_version"],
+    "additionalProperties": False,
+}
 CREATE_PAGE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -286,26 +295,29 @@ class PageStore:
     def layout(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
-                "SELECT document FROM layout_version WHERE page_id=? ORDER BY version DESC LIMIT 1",
+                "SELECT lv.document FROM page p LEFT JOIN layout_version lv "
+                "ON lv.page_id=p.id AND lv.version=COALESCE(p.active_layout_version, 1) "
+                "WHERE p.id=?",
                 (page_id,),
             ).fetchone()
-            return json.loads(row[0]) if row else {"blocks": []}
+            return json.loads(row[0]) if row and row[0] else {"blocks": []}
 
     def inspect_page(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
+            row = db.execute("SELECT * FROM page WHERE id=?", (page_id,)).fetchone()
+            if row is None:
+                raise KeyError(page_id)
             layout = db.execute(
-                "SELECT version, digest, document FROM layout_version "
-                "WHERE page_id=? ORDER BY version DESC LIMIT 1",
+                "SELECT lv.version, lv.digest, lv.document FROM page p "
+                "LEFT JOIN layout_version lv ON lv.page_id=p.id "
+                "AND lv.version=COALESCE(p.active_layout_version, 1) WHERE p.id=?",
                 (page_id,),
             ).fetchone()
             counts = db.execute(
                 "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
                 (page_id,),
             ).fetchall()
-        row = self.page(page_id)
-        if row is None:
-            raise KeyError(page_id)
-        document = json.loads(layout[2]) if layout else {"blocks": []}
+        document = json.loads(layout[2]) if layout and layout[2] else {"blocks": []}
         tools = self.page_tools(page_id)
         return {
             "route": row["route"],
@@ -651,6 +663,50 @@ class PageStore:
                 shutil.rmtree(path, ignore_errors=True)
             else:
                 path.unlink(missing_ok=True)
+
+    def update_layout(self, page_id: str, layout: Any, expected_version: int) -> tuple[int, str]:
+        validate_schema(
+            {"layout": layout, "expected_version": expected_version}, UPDATE_LAYOUT_SCHEMA
+        )
+        encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        with self.transaction() as db:
+            page = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
+            if page is None or not page["create_mode"]:
+                raise PermissionError("forbidden: create mode is off")
+            tools = db.execute(
+                "SELECT t.name, v.bundle FROM page_tool pt "
+                "JOIN tool t ON t.id=pt.tool_id JOIN tool_version v ON v.tool_id=t.id "
+                "AND v.version=pt.active_version WHERE pt.page_id=?",
+                (page_id,),
+            ).fetchall()
+            bundles = [validate_bundle(json.loads(tool["bundle"])) for tool in tools]
+            validate_layout(
+                layout,
+                {tool["name"] for tool in tools},
+                {bundle["implementation"]["collection"] for bundle in bundles},
+                "/layout",
+            )
+            version = expected_version + 1
+            stamp = now()
+            updated = db.execute(
+                "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=? AND "
+                "(active_layout_version=? OR (active_layout_version IS NULL AND ?=1))",
+                (version, stamp, page_id, expected_version, expected_version),
+            ).rowcount
+            if updated != 1:
+                raise ValidationError(
+                    "/expected_version", "current active layout version", "conflict"
+                )
+            db.execute(
+                "INSERT INTO layout_version VALUES(?,?,?,?,?)",
+                (page_id, version, digest, encoded, stamp),
+            )
+            db.execute(
+                "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+                (page_id, "update_layout", digest, stamp),
+            )
+        return version, digest
 
     def create_tool(
         self, page_id: str, bundle: Any, validation_prefix: str = ""
