@@ -51,7 +51,10 @@ async function diagnostic(args: string[]): Promise<string> {
   ]);
   if (timedOut) {
     try { child.kill("SIGKILL"); } catch {}
-    await Promise.race([child.exited, Bun.sleep(1_000)]);
+    await Promise.race([
+      child.exited,
+      Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping diagnostic pid ${child.pid}`); }),
+    ]);
     return `[diagnostic timeout: ${args.join(" ")}]`;
   }
   await child.exited;
@@ -304,7 +307,22 @@ process.exit(0);
     await rm(home, { recursive: true, force: true });
     await waitFor(() => !alive(zetaPid), "fake zeta to stop after its home is removed");
   } finally {
-    for (const child of spawned) await killAndReap(child).catch(() => {});
+    const cleanupErrors: string[] = [];
+    const survivors = new Map<number, string>();
+    const rememberSurvivor = async (pid: number, fallbackCommand: string) => {
+      const current = await processIdentity(pid);
+      if (current) survivors.set(pid, current.command);
+      else survivors.set(pid, fallbackCommand);
+    };
+    for (const child of spawned) {
+      const before = await processIdentity(child.pid);
+      try {
+        await killAndReap(child);
+      } catch (error) {
+        await rememberSurvivor(child.pid, before?.command ?? "direct child");
+        cleanupErrors.push(String(error));
+      }
+    }
     const owned: ProcessIdentity[] = [...managed, ...discovered];
     const addStoredIdentity = async (path: string) => {
       try {
@@ -315,10 +333,26 @@ process.exit(0);
     await addStoredIdentity(resolve(home, "run/serve.ws.json"));
     await addStoredIdentity(resolve(devCache, "zeta-serve.json"));
     await addStoredIdentity(resolve(devCache, "achilles.json"));
-    for (const saved of owned) { try { await stop(saved); } catch {} }
-    expect(processesContaining(temp), "fake dev processes survived cleanup").toEqual([]);
-    await rm(devCache, { recursive: true, force: true });
-    if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
-    await rm(temp, { recursive: true, force: true });
+    for (const saved of owned) {
+      try {
+        await stop(saved);
+      } catch (error) {
+        await rememberSurvivor(saved.pid, saved.command);
+        cleanupErrors.push(String(error));
+      }
+    }
+    for (const survivor of processesContaining(temp)) {
+      const match = survivor.match(/^pid (\d+) (.*)$/);
+      if (match) survivors.set(Number(match[1]), match[2]);
+    }
+    try { await rm(devCache, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
+    try {
+      if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
+    } catch (error) { cleanupErrors.push(String(error)); }
+    try { await rm(temp, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
+    if (cleanupErrors.length || survivors.size) {
+      const details = [...survivors].map(([pid, command]) => `pid ${pid} ${command}`);
+      throw new Error([...cleanupErrors, ...details].join("\n"));
+    }
   }
 }, 60_000);
