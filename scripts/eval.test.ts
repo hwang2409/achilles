@@ -1,15 +1,30 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
+import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
   const process = Bun.spawn(python, { cwd, env: { ...Bun.env, PYTHONPATH: [join(target, "src"), target].join(delimiter) }, stdout: "pipe", stderr: "pipe" });
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
+
+test("setup seeds an initial layout on a fresh page at version 1", async () => {
+  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-layout-setup-"));
+  try {
+    const source = await readFile(join(target, "scripts/eval.ts"), "utf8"); const script = source.match(/(?:export )?const SETUP_SCRIPT = `([\s\S]*?)`;/)?.[1];
+    expect(script).toBeDefined();
+    const layout = { blocks: [{ type: "text", text: "seeded dashboard" }] }; const setup = { tools: [], records: [], initial_layout: layout };
+    const seeded = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", script!, root, "home", JSON.stringify(setup)], target);
+    expect(seeded.exitCode, seeded.stderr).toBe(0);
+    expect(() => verifySetup(setup, JSON.parse(seeded.stdout))).not.toThrow();
+    const inspected = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", "import json,sys; from pathlib import Path; from achilles.pages import PageStore; store=PageStore(Path(sys.argv[1])); print(json.dumps({'layout':store.layout('home'),'version':store.inspect_page('home')['layout']['version']}))", root], target);
+    expect(inspected.exitCode, inspected.stderr).toBe(0);
+    expect(JSON.parse(inspected.stdout)).toEqual({ layout, version: 1 });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();

@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
-import { gradeCheck, gradeTask, structurallyContains, validateTask } from "./eval-grade";
+import { gradeCheck, gradeReference, gradeTask, structurallyContains, validateTask } from "./eval-grade";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
+
+test("a missing seeded layout is a harness error before grading", () => {
+  const original = { blocks: [{ type: "text", text: "seeded" }] }; const added = { type: "text", text: "added" };
+  const layoutTask = validateTask({ ...task, setup: { tools: [], records: [], initial_layout: original }, checks: [{ id: "layout", type: "layout_update", page: "p", value: { original, added, version: 2 } }] });
+  const result = gradeReference(layoutTask, { initial: { layouts: [] }, pages: [{ id: "home", alias: "p" }], layouts: [{ page_id: "home", version: 1, document: original }, { page_id: "home", version: 2, document: { blocks: [...original.blocks, added] } }], turns: 0 });
+  expect(result.status).toBe("harness_error");
+  expect(result.turns).toBe(0);
+});
 
 test("task schema is closed and count checks name real collections", () => {
   expect(validateTask(task).id).toBe("x-task");

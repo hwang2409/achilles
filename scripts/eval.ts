@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
-import { gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan } from "./eval-grade";
+import { assertSetupPreconditions, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup } from "./eval-grade";
 import { makeReport, reportJson, reportMarkdown } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 
@@ -83,29 +83,50 @@ export async function productCapabilities(stack: EvalStack) {
   if (process.exitCode !== 0) throw new Error(`capability preflight failed: ${process.stderr}`);
   return new Set(JSON.parse(process.stdout) as string[]);
 }
-const SETUP_SCRIPT = `
+export const SETUP_SCRIPT = `
 import hashlib, json, sys
 from pathlib import Path
-from achilles.pages import PageStore, now
+from achilles.pages import PageStore, now, validate_layout
 root, page_id, raw = sys.argv[1:]
 setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
     if "initial_layout" in setup:
+        tools = store.page_tools(page_id)
+        validate_layout(setup["initial_layout"], {tool["name"] for tool in tools}, {tool["implementation"]["collection"] for tool in tools}, "/layout")
         document = json.dumps(setup["initial_layout"], sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(document.encode()).hexdigest()
         stamp = now()
-        db.execute("UPDATE layout_version SET digest=?, document=?, created_at=? WHERE page_id=? AND version=1", (digest, document, stamp, page_id))
+        updated = db.execute("UPDATE page SET active_layout_version=1, updated_at=? WHERE id=?", (stamp, page_id))
+        if updated.rowcount != 1: raise RuntimeError(f"setup page {page_id} is missing")
+        db.execute("INSERT INTO layout_version VALUES(?,?,?,?,?) ON CONFLICT(page_id,version) DO UPDATE SET digest=excluded.digest,document=excluded.document,created_at=excluded.created_at", (page_id,1,digest,document,stamp))
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
+summary = store.inspect_page(page_id)
+collections = {item["collection"] for item in setup.get("records", [])}
+print(json.dumps({"inspect": summary, "layout": store.layout(page_id), "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
-async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
+export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
+  const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
+  const equal = (left: unknown, right: unknown) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+  const inspect = actual.inspect as Record<string, any> | undefined;
+  if (!inspect) throw new Error("task setup verification returned no page inspection");
+  const expectedTools = setup.tools.map(tool => ({ name: tool.name, operations: [tool.operation], collection: tool.collection }));
+  for (const expected of expectedTools) if (!inspect.tools?.some((tool: Record<string, unknown>) => expected.name === tool.name && expected.collection === tool.collection && equal(expected.operations, tool.operations))) throw new Error(`task setup verification failed for tool ${expected.name}`);
+  if (setup.initial_layout && (inspect.layout?.version !== 1 || !equal(actual.layout, setup.initial_layout))) throw new Error("task setup verification failed for initial_layout at version 1");
+  for (const expected of setup.records) {
+    const record = actual.records?.[expected.collection]?.find((item: Record<string, unknown>) => item.record_id === expected.id);
+    if (!record || Object.entries(expected.data).some(([key, value]) => !equal(record[key], value))) throw new Error(`task setup verification failed for record ${expected.collection}/${expected.id}`);
+  }
+}
+export async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const plan = task.page_plan.find(page => page.source !== "created")!;
   if (task.setup) {
     const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
+    verifySetup(task.setup, JSON.parse(process.stdout));
   }
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal);
   if (!response.ok) throw new Error(`could not set create mode for ${plan.alias} (${response.status})`);
@@ -213,7 +234,7 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
 
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
-  await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack);
+  await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
@@ -255,7 +276,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
