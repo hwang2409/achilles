@@ -27,10 +27,10 @@ class BarrierBackend(FakeBackend):
 
     @owned_completion
     async def complete(self, messages, tool_schemas):
-        page_open = any(
-            message.role is MessageRole.USER
-            and any(isinstance(block, TextContent) and block.text == "open created page" for block in message.content)
-            for message in messages
+        page_open = bool(
+            messages
+            and messages[-1].role is MessageRole.USER
+            and any(isinstance(block, TextContent) and block.text == "open created page" for block in messages[-1].content)
         )
         backend = self.page_open if page_open else self
         turn_index = len(self.calls)
@@ -387,10 +387,10 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
-        page_open = any(
-            message.role is MessageRole.USER
-            and any(isinstance(block, TextContent) and block.text == "open created page" for block in message.content)
-            for message in messages
+        page_open = bool(
+            messages
+            and messages[-1].role is MessageRole.USER
+            and any(isinstance(block, TextContent) and block.text == "open created page" for block in messages[-1].content)
         )
         if page_open:
             document["page_open_request"] = True
