@@ -20,6 +20,15 @@ test("every task's known-good passes and plausible known-bad agent fails", async
   }
 });
 
+test("synthetic real-behavior references keep their hand-graded status", async () => {
+  const source = await Bun.file(new URL("../evals/real-behavior-references.json", import.meta.url)).json() as { synthetic: boolean; cases: Array<{ id: string; task_id: string; expected_status: "pass" | "agent_fail"; snapshot: EvalSnapshot }> };
+  expect(source.synthetic).toBe(true);
+  for (const reference of source.cases) {
+    const task = validateTask(JSON.parse(await readFile(join(tasksDir, `${reference.task_id}.json`), "utf8")));
+    expect(gradeReference(task, reference.snapshot).status, reference.id).toBe(reference.expected_status);
+  }
+});
+
 test("text does not accept a near-miss title field", async () => {
   const task = validateTask(JSON.parse(await readFile(join(tasksDir, "harness-smoke.json"), "utf8")));
   const references = JSON.parse(await readFile(join(referencesDir, "harness-smoke.json"), "utf8")) as { good: EvalSnapshot; bad: EvalSnapshot };

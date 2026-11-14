@@ -1,0 +1,2208 @@
+{
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "after-agent-data-access",
+      "task_id": "agent-data-access",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "p",
+            "alias": "data"
+          }
+        ],
+        "results": [
+          {
+            "page_id": "p",
+            "tool": "achilles__list_records",
+            "success": true,
+            "data": {
+              "records": [
+                {
+                  "id": "record-1"
+                },
+                {
+                  "id": "record-2"
+                },
+                {
+                  "id": "record-3"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "after-approval-once",
+      "task_id": "approval-once",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "p",
+            "alias": "approval"
+          }
+        ],
+        "approvals": [
+          {
+            "page_id": "p",
+            "tool": "achilles__add_note"
+          }
+        ],
+        "results": [
+          {
+            "page_id": "p",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "text": "approved note"
+            }
+          }
+        ],
+        "records": [
+          {
+            "page_id": "p",
+            "data": {
+              "text": "approved note"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "id": "after-create-and-use-tool-same-chat",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "p",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "page_id": "p",
+            "name": "add_note"
+          }
+        ],
+        "results": [
+          {
+            "page_id": "p",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "records": [
+          {
+            "page_id": "p",
+            "data": {
+              "title": "synthetic note"
+            },
+            "collection": "notes"
+          }
+        ],
+        "related_page_ids": [
+          "p"
+        ],
+        "tool_versions": [
+          {
+            "page_id": "p",
+            "name": "add_note",
+            "collection": "notes",
+            "operation": "insert",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "after-harness-smoke",
+      "task_id": "harness-smoke",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "home",
+            "alias": "home"
+          },
+          {
+            "id": "smoke",
+            "alias": "smoke",
+            "route": "/eval-smoke"
+          }
+        ],
+        "layouts": [
+          {
+            "page_id": "smoke",
+            "document": {
+              "blocks": [
+                {
+                  "type": "text",
+                  "text": "smoke"
+                }
+              ]
+            }
+          }
+        ],
+        "results": [
+          {
+            "page_id": "home",
+            "tool": "achilles__create_page",
+            "success": true,
+            "data": {
+              "page_id": "smoke",
+              "route": "/eval-smoke"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "after-invalid-authoring-recovery",
+      "task_id": "invalid-authoring-recovery",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "p",
+            "alias": "authoring"
+          }
+        ],
+        "tools": [
+          {
+            "page_id": "p",
+            "name": "safe_tool"
+          }
+        ],
+        "calls": [
+          {
+            "id": "c1",
+            "page_id": "p",
+            "tool": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "create_tool",
+                "description": "synthetic reserved-name bundle",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "output_schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "record_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "record_id",
+                    "revision"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "safe_records",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "bundle_validations": [
+          {
+            "call_id": "c1",
+            "valid": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "c1",
+            "page_id": "p",
+            "tool": "achilles__create_tool",
+            "success": false,
+            "data": {
+              "code": "invalid_input",
+              "path": "/bundle/name",
+              "expected": "not one of: inspect_page,create_page,create_tool"
+            }
+          },
+          {
+            "page_id": "p",
+            "tool": "achilles__safe_tool",
+            "success": true,
+            "data": {}
+          }
+        ],
+        "related_page_ids": [
+          "p"
+        ]
+      }
+    },
+    {
+      "id": "after-judge-page-and-annotate",
+      "task_id": "judge-page-and-annotate",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "home",
+            "alias": "home"
+          },
+          {
+            "id": "review",
+            "alias": "review",
+            "route": "/run-review"
+          }
+        ],
+        "tools": [
+          {
+            "page_id": "review",
+            "name": "add_annotation"
+          },
+          {
+            "page_id": "review",
+            "name": "list_annotations"
+          }
+        ],
+        "results": [
+          {
+            "page_id": "review",
+            "tool": "achilles__add_annotation",
+            "success": true,
+            "data": {
+              "run_id": "run-002",
+              "verdict": "bad"
+            }
+          }
+        ],
+        "layouts": [
+          {
+            "page_id": "review",
+            "document": {
+              "blocks": [
+                {
+                  "type": "list"
+                },
+                {
+                  "type": "detail"
+                }
+              ]
+            }
+          }
+        ],
+        "related_page_ids": [
+          "review"
+        ],
+        "records": [
+          {
+            "page_id": "review",
+            "data": {
+              "run_id": "run-002",
+              "verdict": "bad"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "after-record-crud",
+      "task_id": "record-crud",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "p",
+            "alias": "records"
+          }
+        ],
+        "results": [
+          {
+            "page_id": "p",
+            "tool": "achilles__list_records",
+            "success": true,
+            "data": [
+              {
+                "name": "record-1",
+                "status": "done",
+                "record_id": "synthetic-1",
+                "revision": 2
+              },
+              {
+                "name": "record-2",
+                "record_id": "synthetic-2",
+                "revision": 1
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "page_id": "p",
+            "data": {
+              "name": "record-1",
+              "status": "done"
+            }
+          },
+          {
+            "page_id": "p",
+            "data": {
+              "name": "record-2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "after-second-chat-tools",
+      "task_id": "second-chat-tools",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "p",
+            "alias": "shared"
+          }
+        ],
+        "errors": [],
+        "chats": [
+          {
+            "chat_id": "chat-a",
+            "page_id": "p",
+            "history": "tools available"
+          },
+          {
+            "chat_id": "chat-b",
+            "page_id": "p",
+            "history": "tools available"
+          }
+        ],
+        "results": [
+          {
+            "page_id": "p",
+            "chat_id": "chat-a",
+            "tool": "achilles__list_notes",
+            "success": true,
+            "data": {
+              "text": "seeded note"
+            }
+          },
+          {
+            "page_id": "p",
+            "chat_id": "chat-b",
+            "tool": "achilles__list_notes",
+            "success": true,
+            "data": {
+              "text": "seeded note"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-1",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-2",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-3",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-4",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-5",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-6",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-7",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-8",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-9",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    },
+    {
+      "id": "title-field-10",
+      "task_id": "create-and-use-tool-same-chat",
+      "expected_status": "pass",
+      "snapshot": {
+        "pages": [
+          {
+            "id": "synthetic-id-1",
+            "route": "/",
+            "title": "home",
+            "alias": "notes"
+          }
+        ],
+        "tools": [
+          {
+            "id": "synthetic-id-2",
+            "page_id": "synthetic-id-1",
+            "name": "add_note"
+          }
+        ],
+        "assignments": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "active_version": 1
+          }
+        ],
+        "records": [
+          {
+            "page_id": "synthetic-id-1",
+            "collection": "notes",
+            "id": "synthetic-id-3",
+            "data": {
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "layouts": [],
+        "tool_versions": [
+          {
+            "page_id": "synthetic-id-1",
+            "tool_id": "synthetic-id-2",
+            "name": "add_note",
+            "operation": "insert",
+            "collection": "notes",
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        ],
+        "calls": [
+          {
+            "id": "synthetic-id-4",
+            "name": "achilles__create_tool",
+            "arguments": {
+              "bundle": {
+                "format_version": 1,
+                "kind": "data_operation",
+                "name": "add_note",
+                "description": "Insert a new note into the notes collection.",
+                "input_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 10000
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                },
+                "implementation": {
+                  "operation": "insert",
+                  "collection": "notes",
+                  "data_schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "title"
+                    ]
+                  }
+                }
+              }
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true
+          },
+          {
+            "id": "synthetic-id-5",
+            "name": "achilles__add_note",
+            "arguments": {
+              "title": "synthetic note"
+            },
+            "arguments_truncated": false,
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true
+          }
+        ],
+        "results": [
+          {
+            "call_id": "synthetic-id-4",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__create_tool",
+            "success": true,
+            "data": {
+              "name": "add_note",
+              "tool_id": "synthetic-id-2",
+              "version": 1
+            }
+          },
+          {
+            "call_id": "synthetic-id-5",
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "tool": "achilles__add_note",
+            "success": true,
+            "data": {
+              "record_id": "synthetic-id-3",
+              "revision": 1,
+              "title": "synthetic note"
+            }
+          }
+        ],
+        "errors": [],
+        "approvals": [],
+        "reconnects": [],
+        "related_page_ids": [
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1",
+          "synthetic-id-1"
+        ],
+        "browser": [],
+        "chats": [
+          {
+            "chat_id": "notes-chat",
+            "page_id": "synthetic-id-1",
+            "session_id": "synthetic-id-6",
+            "first_prompt": "create a page-local add_note insert tool for a notes collection"
+          }
+        ]
+      }
+    }
+  ]
+}

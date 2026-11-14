@@ -95,5 +95,8 @@
       "type": "same_page",
       "page": "records"
     }
+  ],
+  "requires": [
+    "update_layout"
   ]
 }

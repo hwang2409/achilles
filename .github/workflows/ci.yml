@@ -60,6 +60,8 @@ jobs:
           version: "0.8.17"
           python-version: "3.12"
       - run: uv sync --project .cache/zeta --frozen
+      - run: bun node_modules/playwright/cli.js install --with-deps chromium
+        working-directory: apps/web
       - run: bun test ./scripts/eval*.test.ts
       - run: |
           set +e
@@ -77,6 +79,11 @@ jobs:
               print([(task['task_id'], task['status'], task['checks']) for task in report['tasks'] if not task['pass']])
           raise SystemExit(int(os.environ['STATUS']))
           PY
+      - name: eval setup accepts the baseline achilles revision
+        run: |
+          git fetch --depth=1 origin 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
+          git worktree add --detach .cache/achilles-baseline 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
+          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
       - run: |
           python - <<'PY'
           import json, os, subprocess
@@ -88,6 +95,22 @@ jobs:
               raise AssertionError('judge page-switch harness failure')
           if result.returncode not in (0, 1):
               raise SystemExit(result.returncode)
+
+          env.update({'EVAL_SKIP_CREATE_PAGE': '1', 'REPORT_DIR': '.cache/eval-ci-missing-page'})
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'judge-page-and-annotate'], env=env, timeout=30)
+          report = json.loads((Path('.cache/eval-ci-missing-page') / 'report.json').read_text())
+          task = report['tasks'][0]
+          assert result.returncode == 1
+          assert task['status'] == 'agent_fail', task
+          snapshot = json.loads((Path('.cache/eval-ci-missing-page') / task['transcript']).read_text())
+          assert snapshot['session_history'], snapshot
+
+          env.pop('EVAL_SKIP_CREATE_PAGE')
+          env['REPORT_DIR'] = '.cache/eval-ci-reconnect'
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'reconnect-recovery'], env=env, timeout=30)
+          report = json.loads((Path('.cache/eval-ci-reconnect') / 'report.json').read_text())
+          assert result.returncode == 0, report['tasks'][0]
+          assert report['tasks'][0]['status'] == 'pass'
           PY
       - name: scripted eval forced error cleans up
         run: |
@@ -116,7 +139,6 @@ jobs:
           text = '\n'.join(path.read_text(errors='ignore') for path in root.rglob('*') if path.is_file())
           assert not re.search(r'Bearer\\s+[A-Za-z0-9._~+/=-]{12,}|sk-[A-Za-z0-9_-]{16,}', text, re.I)
           PY
-      - run: bunx playwright install --with-deps chromium
       - run: bun run ../../scripts/real-zeta-gate.ts
         env:
           ZETA_CHECKOUT: ${{ github.workspace }}/.cache/zeta

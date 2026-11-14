@@ -35,11 +35,6 @@ test("schema roundtrip accepts an agent-designed title field", () => {
   expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
 });
 
-test("second-chat unavailable sentinel fails from durable history", () => {
-  const check = { id: "available", type: "history_absent" as const, chat: "chat-b", text: "MCP server achilles is unavailable" };
-  expect(gradeCheck(check, { chats: [{ chat_id: "chat-b", history: "MCP server achilles is unavailable" }] }).pass).toBe(false);
-});
-
 test("page-aware approvals and strict route checks do not accept other pages", () => {
   const t = validateTask({ ...task, checks: [{ id: "approval", type: "count", page: "p", name: "approvals", count: 1 }, { id: "route", type: "page_exists", page: "p", route: "/wanted" }] });
   const failed = gradeTask(t, { pages: [{ id: "p1", alias: "p", route: "/wrong" }], approvals: [{ page_id: "other" }] });
@@ -52,13 +47,13 @@ test("page counts use the resolved id while other collections stay page-owned", 
   expect(gradeCheck({ id: "tools", type: "count", page: "p", name: "tools", count: 1 }, { pages, tools: [{ id: "t1", page_id: "p2" }] }).pass).toBe(false);
 });
 
-test("reserved tool refusal requires the exact current or baseline error", () => {
+test("reserved tool refusal requires target-validator proof and structured name errors when available", () => {
   const check = { id: "refused", type: "refused_tool_name" as const, page: "p", name: "create_tool" }; const pages = [{ id: "p1", alias: "p" }];
-  const calls = [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }];
-  const grade = (data: unknown) => gradeCheck(check, { pages, calls, results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass;
-  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "not one of: create_page,create_tool" })).toBe(true);
-  expect(grade("invalid or reserved tool name")).toBe(true);
-  expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" })).toBe(false);
+  const grade = (data: unknown, valid: boolean) => gradeCheck(check, { pages, calls: [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }], results: [{ call_id: "call-1", page_id: "p1", success: false, data }], bundle_validations: [{ call_id: "call-1", valid }] }).pass;
+  expect(grade("synthetic unstructured failure", true)).toBe(true);
+  expect(grade("synthetic unstructured failure", false)).toBe(false);
+  expect(grade({ code: "invalid_input", path: "/bundle/name", expected: "changed product wording" }, true)).toBe(true);
+  expect(grade({ code: "invalid_input", path: "/bundle/input_schema", expected: "object" }, true)).toBe(false);
 });
 
 test("record-crud list matching is order-independent, distinct, and complete", () => {
@@ -83,13 +78,17 @@ test("reading-list carries one record id through insert, update, and read", () =
   expect(gradeCheck(check, { pages, tool_versions, results: [insertA, updateA, readA] }).pass).toBe(true);
 });
 
-test("exact page records reject extra reconnect, approval, and crud writes", () => {
+test("exact page records reject extra writes and accept task values in an agent-chosen field", () => {
   const pages = [{ id: "p1", alias: "p" }]; const page = (data: object) => ({ page_id: "p1", data });
   const notes = { id: "notes", type: "records_exact" as const, page: "p", value: [{ text: "reconnect note" }] };
   expect(gradeCheck(notes, { pages, records: [page({ text: "reconnect note" })] }).pass).toBe(true);
   expect(gradeCheck(notes, { pages, records: [page({ text: "reconnect note" }), page({ text: "wrong extra note" })] }).pass).toBe(false);
-  const crud = { id: "crud", type: "records_exact" as const, page: "p", value: [{ id: "record-1", status: "done" }, { id: "record-2" }] };
-  expect(gradeCheck(crud, { pages, records: [page({ id: "record-2" }), page({ id: "record-1", status: "done" }), page({ id: "wrong" })] }).pass).toBe(false);
+  const crud = { id: "crud", type: "records_exact" as const, page: "p", value: [["record-1", "done"], ["record-2"]] };
+  const records = [page({ name: "record-2" }), page({ name: "record-1", status: "done" })];
+  expect(gradeCheck(crud, { pages, records }).pass).toBe(true);
+  expect(gradeCheck(crud, { pages, records: [...records, page({ name: "wrong" })] }).pass).toBe(false);
+  const listed = { id: "list", type: "successful_result" as const, page: "p", tool: "achilles__list_records", value: crud.value };
+  expect(gradeCheck(listed, { pages, results: [{ page_id: "p1", tool: listed.tool, success: true, data: records.map(row => row.data) }] }).pass).toBe(true);
 });
 
 test("layout_update requires the original layout and one versioned block", () => {

@@ -1,6 +1,6 @@
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
-export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" };
+export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported"; cap_hit?: boolean };
 export type EvalReport = {
   run_id: string;
   agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
@@ -30,7 +30,7 @@ export function makeReport(input: Omit<EvalReport, "tasks"> & { tasks: EvalRepor
 
 export function aggregateTaskResults(results: Array<{ task_id: string; pass: boolean; score: number; turns: number; tool_calls: number; wall_ms: number }>) {
   const grouped = new Map<string, typeof results>();
-  for (const result of results) if ((result as { status?: string }).status !== "harness_error") grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
+  for (const result of results) if (!["harness_error", "unsupported"].includes((result as { status?: string }).status ?? "")) grouped.set(result.task_id, [...(grouped.get(result.task_id) ?? []), result]);
   return Object.fromEntries([...grouped].map(([task_id, rows]) => [task_id, {
     passes: rows.filter((row) => row.pass).length,
     total: rows.length,
@@ -40,6 +40,8 @@ export function aggregateTaskResults(results: Array<{ task_id: string; pass: boo
     median_turns: median(rows.map((row) => row.turns)),
     median_tool_calls: median(rows.map((row) => row.tool_calls)),
     median_wall_ms: median(rows.map((row) => row.wall_ms)),
+    cap_hits: rows.filter(row => (row as { cap_hit?: boolean }).cap_hit).length,
+    cap_action: rows.filter(row => (row as { cap_hit?: boolean }).cap_hit).length > 1 ? "raise cap" : "",
   }]));
 }
 const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); if (!sorted.length) return 0; const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
@@ -63,14 +65,16 @@ export function reportMarkdown(report: EvalReport): string {
     `totals: ${report.totals?.turns ?? report.tasks.reduce((total, task) => total + task.turns, 0)} turns, ${report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0)} ms wall time`,
     `suite tokens: ${usageText(report.totals?.usage)}`,
     `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`,
+    `unsupported: ${report.tasks.filter(task => task.status === "unsupported").length}`,
+    `cap hits: ${report.tasks.filter(task => task.cap_hit).length}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
-    "", "| task | pass | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: |",
+    "", "| task | status | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors | cap hit |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | --- |",
   ];
   for (const task of report.tasks) {
     const first = task.diagnostics?.first_call_validity ?? {};
-    lines.push(`| ${task.task_id} | ${task.pass ? "pass" : "fail"} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} |`);
+    lines.push(`| ${task.task_id} | ${task.status ?? (task.pass ? "pass" : "agent_fail")} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} | ${task.cap_hit ? "yes" : "no"} |`);
   }
-  lines.push("", "## grouped repeat metrics", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
-  for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.score_min}–${value.score_max} | ${value.median_turns} | ${value.median_tool_calls} | ${value.median_wall_ms} ms |`);
+  lines.push("", "## grouped repeat metrics", "", "unsupported and harness-error runs are excluded from comparable task metrics.", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time | cap hits | action |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
+  for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.score_min}–${value.score_max} | ${value.median_turns} | ${value.median_tool_calls} | ${value.median_wall_ms} ms | ${value.cap_hits} | ${value.cap_action} |`);
   return lines.join("\n") + "\n";
 }

@@ -14,3 +14,13 @@ test("report aggregates pass rate per task and states tools", () => {
   expect(reportJson(report)).toContain('"input_tokens": 20');
   expect(reportJson(report)).toContain("tool_policy");
 });
+
+test("unsupported runs are excluded and repeated cap hits request a higher cap", () => {
+  const rows = [
+    { task_id: "capped", pass: false, score: 0, turns: 4, tool_calls: 1, wall_ms: 1, status: "agent_fail", cap_hit: true },
+    { task_id: "capped", pass: false, score: 0, turns: 4, tool_calls: 1, wall_ms: 1, status: "agent_fail", cap_hit: true },
+    { task_id: "newer", pass: false, score: 0, turns: 0, tool_calls: 0, wall_ms: 0, status: "unsupported" },
+  ];
+  expect(aggregateTaskResults(rows).capped.cap_action).toBe("raise cap");
+  expect(aggregateTaskResults(rows).newer).toBeUndefined();
+});

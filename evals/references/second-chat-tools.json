@@ -47,7 +47,14 @@
         "alias": "shared"
       }
     ],
-    "errors": [],
+    "errors": [
+      {
+        "page_id": "p",
+        "chat_id": "chat-b",
+        "code": -32601,
+        "tool": "achilles__list_notes"
+      }
+    ],
     "chats": [
       {
         "chat_id": "chat-a",
@@ -68,15 +75,6 @@
         "success": true,
         "data": {
           "text": "seeded note"
-        }
-      },
-      {
-        "page_id": "p",
-        "chat_id": "chat-b",
-        "tool": "achilles__list_notes",
-        "success": true,
-        "data": {
-          "text": "wrong note"
         }
       }
     ]

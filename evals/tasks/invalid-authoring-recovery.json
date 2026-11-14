@@ -8,7 +8,7 @@
       "create_mode": true
     }
   ],
-  "agent_turns": 8,
+  "agent_turns": 7,
   "steps": [
     {
       "id": "create",
