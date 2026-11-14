@@ -197,8 +197,8 @@ def build_mcp(store: PageStore):
                             "inspect this page and pages it created; when layout_complete is "
                             "true, layout is the complete stored layout to edit and layout_version "
                             "is the value for update_layout expected_version; when layout_complete "
-                            "is false, "
-                            "do not call update_layout; metric_values reports computed counts by "
+                            "is false, do not call update_layout; metric_values reports computed "
+                            "counts by "
                             "layout block index; legacy pages can inspect only themselves"
                         ),
                         inputSchema=INSPECT_PAGE_SCHEMA,
@@ -226,8 +226,7 @@ def build_mcp(store: PageStore):
                             "REPLACES the whole layout; any block you leave out is deleted. "
                             "First call achilles__inspect_page. If layout_complete is false, do "
                             "not call update_layout. Otherwise, copy its `layout` exactly, change "
-                            "only "
-                            "what the user asked (insert, reorder, edit, or remove blocks), "
+                            "only what the user asked (insert, reorder, edit, or remove blocks), "
                             "and pass the full layout with `layout_version` as expected_version. "
                             "On a version conflict, inspect again and retry. To change another "
                             "page, open that page's chat."
