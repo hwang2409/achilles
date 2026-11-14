@@ -26,7 +26,7 @@ export async function waitForIdleTurn(
 export async function gateTranscript(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
-  requests: () => Array<{ method?: string; params?: { text?: string } }>,
+  requests: () => Array<{ id?: number | string; method?: string; params?: { text?: string; delivery_id?: string }; result?: { accepted?: boolean } }>,
   controlPath: string,
 ) {
   const capture = async (name: string) => {
@@ -125,6 +125,10 @@ export async function gateTranscript(
   const control = JSON.parse(await Bun.file(controlPath).text());
   await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
   await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByText("could not steer: no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
+  if (await field.inputValue() !== "prompt during denied tool turn ending") throw new Error("dropped steer did not keep its draft");
+  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
+  await field.press("Enter");
   await page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 });
   if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
     throw new Error("prompt during turn end was not delivered exactly once");
