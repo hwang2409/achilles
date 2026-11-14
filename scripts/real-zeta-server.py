@@ -19,7 +19,10 @@ from zeta.storage_format import advance
 class BarrierBackend(FakeBackend):
     @staticmethod
     def opening_prompt(messages) -> str | None:
-        latest_user = next((message for message in reversed(messages) if message.role is MessageRole.USER), None)
+        latest_user = next(
+            (message for message in reversed(messages) if message.role is MessageRole.USER),
+            None,
+        )
         if latest_user is None:
             return None
         return next(
