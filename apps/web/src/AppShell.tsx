@@ -214,14 +214,19 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const loadOlder = async () => {
     if (!pageNext || pagesLoading) return;
     setPagesLoading(true);
-    const response = await fetch(`/api/pages?limit=20&before=${encodeURIComponent(pageNext)}`, { cache: "no-store" });
-    if (!response.ok) { setPagesLoading(false); return; }
-    const result = await response.json() as { pages: PageLink[]; next: string | null };
-    const firstPage = result.pages[0];
-    if (firstPage) requestFocus(() => document.querySelector<HTMLAnchorElement>(`[data-page-id="${CSS.escape(firstPage.id)}"]`));
-    setPages((current) => [...(current ?? []), ...result.pages]);
-    setPageNext(result.next);
-    setPagesLoading(false);
+    try {
+      const response = await fetch(`/api/pages?limit=20&before=${encodeURIComponent(pageNext)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`could not load pages (${response.status})`);
+      const result = await response.json() as { pages: PageLink[]; next: string | null };
+      const firstPage = result.pages[0];
+      if (firstPage) requestFocus(() => document.querySelector<HTMLAnchorElement>(`[data-page-id="${CSS.escape(firstPage.id)}"]`));
+      setPages((current) => [...(current ?? []), ...result.pages]);
+      setPageNext(result.next);
+    } catch {
+      setPagesError(true);
+    } finally {
+      setPagesLoading(false);
+    }
   };
   const loadOlderChats = async () => {
     if (!next) return;

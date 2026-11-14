@@ -328,6 +328,35 @@ try {
       },
     },
     {
+      name: "page continuation retry",
+      run: async () => {
+        await reloadShell();
+        const links = page.locator(".page-list a");
+        const showMore = page.getByRole("button", { name: "show more pages" });
+        await showMore.waitFor();
+        const before = await links.count();
+        let fail = true;
+        const failContinuation = async (route: Route) => {
+          if (fail && new URL(route.request().url()).searchParams.has("before")) {
+            fail = false;
+            await route.fulfill({ status: 503, body: "synthetic page continuation failure" });
+          } else await route.continue();
+        };
+        await page.route("**/api/pages?**", failContinuation);
+        await expectBrowserErrors(page, [{ method: "GET", url: `${origin}/api/pages`, status: 503 }], async () => {
+          await showMore.click();
+          await page.getByText("could not load pages", { exact: true }).waitFor();
+        });
+        await page.unroute("**/api/pages?**", failContinuation);
+        await page.getByRole("button", { name: "retry", exact: true }).click();
+        await showMore.waitFor();
+        await showMore.click();
+        await waitFor(async () => (await links.count()) > before, "page continuation after retry");
+        await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "page continuation retry focus");
+        await assertActive("page continuation retry", links.nth(before));
+      },
+    },
+    {
       name: "target removed before commit",
       run: async () => {
         await reloadShell();
@@ -345,7 +374,7 @@ try {
         const showMore = page.getByRole("button", { name: "show more pages" });
         await showMore.waitFor();
         await showMore.click();
-        await seen;
+        await waitFor(async () => { await seen; return true; }, "continuation request was not made");
         const heading = page.locator(".page-list > .list-head");
         await heading.focus();
         await page.keyboard.press("Enter");
