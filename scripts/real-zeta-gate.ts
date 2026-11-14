@@ -712,10 +712,16 @@ try {
   if (!chatTwo) throw new Error("second home chat session id missing");
   const transcriptBeforeDiscovery = await page.locator('[data-part="message"]').count();
   await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
-  await field.fill("list achilles resources, then inspect /reading");
+  const discoveryPrompt = "list achilles resources, then inspect /reading";
+  await field.fill(discoveryPrompt);
   await field.press("Enter");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).inspect_turn_barrier === "held", "scripted inspect turn");
+  const discoverySend = requests().find((frame) => frame.method === "send" && frame.params?.text === discoveryPrompt);
+  if (discoverySend?.params?.session_id !== chatTwo)
+    throw new Error(`new-chat discovery prompt did not start in ${chatTwo}: ${JSON.stringify(discoverySend)}`);
+  zetaProcess.kill("SIGUSR1");
   const inspectApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "inspect_page" });
-  await inspectApproval.waitFor({ timeout: 20_000 });
+  await waitFor(async () => (await inspectApproval.count()) > 0, "inspect_page approval after scripted turn");
   await inspectApproval.getByRole("button", { name: "approve", exact: true }).click();
   await page.getByText("new chat tools complete", { exact: true }).waitFor({ timeout: 20_000 });
   await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
