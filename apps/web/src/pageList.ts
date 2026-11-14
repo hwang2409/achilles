@@ -41,7 +41,7 @@ export function createListOwner<K, T, M>(
     controller = new AbortController();
     if (keyChanged) {
       older = [];
-      update({ ...initial, loading: true });
+      update({ ...state, next: null, loading: true, error: false });
     } else {
       update({ ...state, loading: true });
     }
