@@ -40,6 +40,13 @@ function processesContaining(text: string): number[] {
   });
 }
 
+async function spawnTracked(args: string[], options: Parameters<typeof Bun.spawn>[1]) {
+  const child = Bun.spawn(args, options);
+  const identity = await processIdentity(child.pid);
+  if (!identity) throw new Error(`process ${child.pid} disappeared during startup`);
+  return { child, identity };
+}
+
 async function stop(saved: ProcessIdentity, signal: NodeJS.Signals = "SIGTERM") {
   const current = await processIdentity(saved.pid);
   if (!ownedProcessMatches(saved, current)) return;
@@ -79,8 +86,7 @@ test("stop ownership requires pid, start time, and exact command", () => {
 });
 
 test("cleanup does not signal a reused pid", async () => {
-  const child = Bun.spawn(["sleep", "30"], { stdout: "ignore", stderr: "ignore" });
-  const saved = await processIdentity(child.pid);
+  const { child, identity: saved } = await spawnTracked(["sleep", "30"], { stdout: "ignore", stderr: "ignore" });
   try {
     expect(saved).not.toBeNull();
     await stop({ ...saved!, started: "different start time" });
@@ -173,10 +179,13 @@ process.exit(0);
     FAKE_SERVER_PIDS: serverPids,
     FAKE_PARENT_PID: String(process.pid),
   };
+  const track = async (args: string[], options: Parameters<typeof Bun.spawn>[1]) => {
+    const tracked = await spawnTracked(args, options);
+    spawned.push(tracked.identity);
+    return tracked;
+  };
   const runDev = async (env = baseEnv) => {
-    const child = Bun.spawn(["make", "--silent", "dev"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
-    const identity = await processIdentity(child.pid);
-    if (identity) spawned.push(identity);
+    const { child } = await track(["make", "--silent", "dev"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
     const exitCode = await child.exited;
     return { exitCode, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
   };
@@ -190,9 +199,8 @@ process.exit(0);
     expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
     zetaPid = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")).pid;
     expect(callsAfterFirst.some((args) => args[0] === "mcp" && ["add", "remove"].includes(args[1]) && !args.includes("--help"))).toBe(false);
-    const firstState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
-    const firstIdentity = await processIdentity(firstState.pid);
-    if (firstIdentity) managed.push(firstIdentity);
+    const firstState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8")) as ProcessIdentity & { stamp: string };
+    managed.push(firstState);
     expect(alive(firstState.pid)).toBe(true);
 
     const second = await runDev();
@@ -203,18 +211,15 @@ process.exit(0);
     await writeFile(webStamp, "test-web-stamp-2");
     const third = await runDev();
     expect(third.exitCode, third.stderr).toBe(0);
-    const thirdState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
-    const thirdIdentity = await processIdentity(thirdState.pid);
-    if (thirdIdentity) managed.push(thirdIdentity);
+    const thirdState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8")) as ProcessIdentity & { stamp: string };
+    managed.push(thirdState);
     expect(thirdState.pid).not.toBe(firstState.pid);
     expect(alive(firstState.pid)).toBe(false);
     expect(alive(thirdState.pid)).toBe(true);
     expect(thirdState.stamp).not.toBe(firstState.stamp);
 
     const block = resolve(temp, "block");
-    const held = Bun.spawn(["make", "--silent", "dev"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
-    const heldIdentity = await processIdentity(held.pid);
-    if (heldIdentity) spawned.push(heldIdentity);
+    const { child: held } = await track(["make", "--silent", "dev"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(`${block}.ready`).exists(), "first make dev to hold its lock");
     const lockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     const concurrent = await runDev({ ...baseEnv, FAKE_ZETA_BLOCK: block });
@@ -226,15 +231,13 @@ process.exit(0);
     const waiter = resolve(temp, "waiter.py");
     const waiterReady = resolve(temp, "waiter-ready");
     await writeFile(waiter, `import os\nimport signal\nfrom pathlib import Path\nPath(${JSON.stringify(waiterReady)}).write_text(str(os.getpid()))\nsignal.pause()\n`);
-    const crashed = Bun.spawn(["python3", "scripts/locked.py", "python3", waiter], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    const crashedIdentity = await processIdentity(crashed.pid);
-    if (crashedIdentity) spawned.push(crashedIdentity);
+    const { child: crashed, identity: crashedIdentity } = await track(["python3", "scripts/locked.py", "python3", waiter], { cwd: root, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
     crashedChildPid = Number(await readFile(waiterReady, "utf8"));
     const crashedChildIdentity = await processIdentity(crashedChildPid);
     if (crashedChildIdentity) spawned.push(crashedChildIdentity);
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
-    crashedLockIdentity = crashedIdentity?.pid === crashedLockPid ? crashedIdentity : await processIdentity(crashedLockPid);
+    crashedLockIdentity = crashedIdentity.pid === crashedLockPid ? crashedIdentity : null;
     const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(await rejected.exited).toBe(1);
     expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
@@ -242,16 +245,12 @@ process.exit(0);
     await stop(crashedLockIdentity!, "SIGKILL");
     const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(await recovered.exited, await new Response(recovered.stderr).text()).toBe(0);
-    const crashedChild = await processIdentity(crashedChildPid);
-    if (crashedChild) await stop(crashedChild);
+    await stop(crashedChildIdentity!);
     crashedChildPid = 0;
 
-    const thirdProcess = await processIdentity(thirdState.pid);
-    if (thirdProcess) await stop(thirdProcess);
+    await stop(thirdState);
     await rm(resolve(devCache, "achilles.json"));
-    const foreign = Bun.spawn(["bun", fakeServer, "--port", String(port)], { env: baseEnv, stdout: "ignore", stderr: "ignore" });
-    const foreignIdentity = await processIdentity(foreign.pid);
-    if (foreignIdentity) spawned.push(foreignIdentity);
+    const { child: foreign } = await track(["bun", fakeServer, "--port", String(port)], { env: baseEnv, stdout: "ignore", stderr: "ignore" });
     foreignPid = foreign.pid;
     await waitFor(async () => { try { return (await fetch(`http://127.0.0.1:${port}/`)).ok; } catch { return false; } }, "foreign listener");
     const foreignRun = await runDev();
