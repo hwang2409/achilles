@@ -111,5 +111,5 @@ export function SettingsControl({ serverForcesAsk = false, className = "settings
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
   }, []);
-  return <><button className={className} type="button" onClick={() => setOpen(true)}><span aria-hidden="true">☼</span> settings <kbd>{navigator.platform.includes("Mac") ? "⌘," : "ctrl+,"}</kbd></button><SettingsDialog open={open} onClose={() => setOpen(false)} serverForcesAsk={serverForcesAsk} /></>;
+  return <><button className={className} type="button" onClick={() => setOpen(true)}><span aria-hidden="true">☼</span><span className="settings-label">settings</span><kbd>{navigator.platform.includes("Mac") ? "⌘," : "ctrl+,"}</kbd></button><SettingsDialog open={open} onClose={() => setOpen(false)} serverForcesAsk={serverForcesAsk} /></>;
 }
