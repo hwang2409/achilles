@@ -1208,8 +1208,11 @@ try {
   await page.goto(`${origin}/reading`); await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
-  const readingBody = await page.locator("body").innerText();
-  if (!reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list") || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
+  await waitFor(async () => {
+    reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
+    return reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list")
+      && (await page.locator("body").innerText()).includes("Synthetic Book");
+  }, "reading page inserted book render");
   const homeIdleWrite = page.waitForResponse((response) => {
     if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
