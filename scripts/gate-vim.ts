@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { Page } from "playwright";
+import type { Page, Route } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
@@ -13,11 +13,28 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await page.screenshot({ path: join(screenshotDir, `${name}.png`) });
   };
   if (screenshotDir) await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ vim: true })));
-  await page.reload();
+  const stockField = page.getByRole("textbox", { name: "message", exact: true });
+  await stockField.fill("stock draft");
+  let releaseChunk = () => {};
+  const chunkReleased = new Promise<void>((resolve) => { releaseChunk = resolve; });
+  let heldChunk: Route | null = null;
+  const holdVimChunk = async (route: Route) => { heldChunk = route; await chunkReleased; await route.continue(); };
+  await page.route("**/assets/VimComposer-*.js", holdVimChunk);
+  try {
+    await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ vim: true })));
+    await page.getByRole("button", { name: /create mode/ }).first().click();
+    await waitFor(async () => heldChunk !== null, "lazy vim chunk request");
+    const loadingField = page.getByRole("textbox", { name: "message", exact: true });
+    await loadingField.fill("typed during vim load").catch(() => {});
+    if (!(await loadingField.isDisabled())) throw new Error("vim loading fallback accepted typed input");
+  } finally {
+    releaseChunk();
+    await page.unroute("**/assets/VimComposer-*.js", holdVimChunk);
+  }
   const composer = page.locator('.vim-composer[data-part="composer"]');
-  const field = page.getByRole("textbox", { name: "message" });
+  const field = page.getByRole("textbox", { name: "message", exact: true });
   await composer.waitFor({ state: "visible", timeout: 20_000 });
+  if (await field.textContent() !== "stock draft") throw new Error(`vim did not inherit the stock draft: ${JSON.stringify(await field.textContent())}`);
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   await field.fill("helo");
   await screenshot("insert");
@@ -59,6 +76,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await page.locator('.vim-composer[data-state="read-only"]').waitFor({ state: "visible", timeout: 20_000 });
     await screenshot("connection-lost");
   });
+  const retry = page.getByRole("button", { name: "retry now" });
+  if (await retry.isVisible().catch(() => false)) await retry.click();
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   const reconnectedDraft = await field.textContent();
   if (reconnectedDraft !== "kept draft") throw new Error(`vim reconnect changed the kept draft: ${JSON.stringify(reconnectedDraft)}`);
