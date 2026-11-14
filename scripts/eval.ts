@@ -211,7 +211,11 @@ function scriptedProvider() {
   const server = Bun.serve({ port: 0, async fetch(request) {
     const url = new URL(request.url); if (url.pathname === "/api/show") return Response.json({ model_info: { "qwen2.context_length": 32_768 } }); if (url.pathname !== "/api/chat") return new Response("not found", { status: 404 });
     const body = await request.json() as Record<string, unknown>; requests.push(body); if (Bun.env.EVAL_FORCE_ERROR === "1") return new Response("forced provider error", { status: 500 });
-    const turn = requests.length; const toolCalls = turn === 1 ? [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }] : turn === 2 ? [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }] : [];
+    const turn = requests.length; const prompt = JSON.stringify((body.messages as unknown[]) ?? []);
+    let toolCalls: unknown[] = [];
+    if (prompt.includes("/run-review") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
+    else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
+    else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop" })}\n`, { headers: { "content-type": "application/x-ndjson" } });
   } });
   return { requests, url: `http://127.0.0.1:${server.port}`, close: () => server.stop(true) };
@@ -222,7 +226,7 @@ function catalogProof(requests: Record<string, unknown>[]) {
 }
 function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
   const detail = error as Error & { code?: number; method?: string; sessionId?: string; pageId?: string };
-  return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
+  return { task_id: task.id, status: "harness_error", pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
 }
 
 type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean };
@@ -233,7 +237,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
     options.hidden.push(...hiddenValues(stack.accountHome));
     if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>; }
-    else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider) catalog = catalogProof(provider.requests); result.diagnostics.observed_catalog = catalog;
+    else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider?.requests.length) catalog = catalogProof(provider.requests); result.status = result.pass ? "pass" : "agent_fail"; result.diagnostics.observed_catalog = catalog;
   } catch (error) { failed = true; result = failureResult(task, error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
   if (!stack) return { result: result!, catalog, failed: true };
