@@ -37,15 +37,3 @@ test("page-aware approvals and strict route checks do not accept other pages", (
   const failed = gradeTask(t, { pages: [{ id: "p1", alias: "p", route: "/wrong" }], approvals: [{ page_id: "other" }] });
   expect(failed.checks.every(check => !check.pass)).toBe(true);
 });
-
-test("page counts use the resolved id while other collections stay page-owned", () => {
-  const pages = [{ id: "p1", alias: "p" }, { id: "p2" }];
-  expect(gradeCheck({ id: "pages", type: "count", page: "p", name: "pages", count: 1 }, { pages }).pass).toBe(true);
-  expect(gradeCheck({ id: "tools", type: "count", page: "p", name: "tools", count: 1 }, { pages, tools: [{ id: "t1", page_id: "p2" }] }).pass).toBe(false);
-});
-
-test("reserved tool refusal accepts structured and baseline text errors", () => {
-  const check = { id: "refused", type: "refused_tool_name" as const, page: "p", name: "create_tool" }; const pages = [{ id: "p1", alias: "p" }];
-  const calls = [{ id: "call-1", page_id: "p1", tool: "achilles__create_tool", arguments: { bundle: { name: "create_tool" } } }];
-  for (const data of [{ code: "invalid", path: "bundle.name", expected: "non-reserved" }, "invalid or reserved tool name"]) expect(gradeCheck(check, { pages, calls, results: [{ call_id: "call-1", page_id: "p1", success: false, data }] }).pass).toBe(true);
-});

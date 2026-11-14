@@ -161,25 +161,20 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const onEvent = (event: Record<string, any>) => {
     events.push(event);
     if (event.event === "turn_start" && ++turns > task.agent_turns && !fatal) { fatal = new Error("task model turn limit exceeded"); void abortAll(); }
-    if (event.event !== "approval_request") return;
-    const session = [...sessions.entries()].find(([, value]) => value.id === event.session_id); const requestId = event.data?.request_id ?? event.request_id;
-    if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
-    approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id }); void protocol.approve(session[1].id, String(requestId)).catch(error => { fatal = error; });
   };
   protocol = await connectEvalProtocol(discovery, onEvent); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
     if (sessions.has(chat)) return sessions.get(chat)!; const plan = task.page_plan.find(page => page.alias === alias)!;
     const pageId = plan.source === "created" ? createdPageId(events, plan) : pages.get(alias)!; pages.set(alias, pageId);
     if (plan.source === "created") { const mode = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal); if (!mode.ok) throw new Error(`could not set create mode for ${alias}`); }
-    const binding = await pageBinding(stack, pageId, hidden, signal); const created = await protocol.newSession({ cwd: binding.page.workspace, provider: stack.provider, model: stack.model, approval_mode: task.approval_mode ?? "allow", mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${binding.credential}` } }] });
+    const binding = await pageBinding(stack, pageId, hidden, signal); const created = await protocol.newSession({ cwd: binding.page.workspace, provider: stack.provider, model: stack.model, approval_mode: "allow", mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${binding.credential}` } }] });
     const id = String(created.session?.session_id ?? created.session_id ?? ""); if (!id) throw new Error("new_session returned no session id");
     const registration = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: id }) }, signal); if (!registration.ok) throw new Error(`chat registration failed (${registration.status})`);
     const session = { id, alias, page_id: pageId }; sessions.set(chat, session); return session;
   };
   try {
     for (const step of task.steps) {
-      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new Error("task model turn limit has no remaining turn");
-      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); await protocol.resume(session.id); continue; }
+      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns) throw new Error("task model turn limit has no remaining turn");
       const session = await getSession(step.chat, step.page); await protocol.send(session.id, step.prompt ?? task.prompt!); const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) histories.set(chat, await protocol.sessionHistory(session.id));
