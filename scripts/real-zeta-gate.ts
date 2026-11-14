@@ -730,16 +730,15 @@ try {
     return url.pathname === `/api/pages/${createdPage.id}/records/books`
       && url.searchParams.get("field") === "status"
       && url.searchParams.get("equals") === '"reading"';
-  });
+  }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
   await page.getByText("reading: 1", { exact: true }).waitFor({ timeout: 20000 });
   const detailResponse = await filteredDetailResponse;
-  await detailResponse.finished();
   await page.waitForFunction(() => {
     const text = document.querySelector(".record-detail")?.textContent ?? "";
     return text.includes("Synthetic Book") || text.includes("could not load record");
-  });
+  }, undefined, { timeout: 20000 });
   const filteredDetailText = await page.locator(".record-detail").innerText();
   if (!filteredDetailText.includes("Synthetic Book"))
     throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
@@ -871,6 +870,14 @@ try {
     throw new Error(`stale update_layout did not return a tool error: ${JSON.stringify(afterStaleLayout.tool_results)}`);
   console.log("stale chat update_layout showed a readable version conflict");
 
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".record-detail")?.textContent ?? "").includes(
+        "Synthetic Book",
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
   const layoutBeforeInvalidMetric = await page
     .locator(".layout-blocks")
     .locator(":scope > *")
@@ -887,7 +894,7 @@ try {
     return url.pathname === `/api/pages/${createdPage.id}/records/books`
       && url.searchParams.get("field") === "status"
       && url.searchParams.get("equals") === '"reading"';
-  });
+  }, { timeout: 20000 });
   await updateLayoutApproval
     .nth(invalidLayoutApprovalBefore)
     .getByRole("button", { name: "approve", exact: true })
@@ -906,16 +913,21 @@ try {
     throw new Error(
       `invalid metric update_layout did not return a tool error: ${JSON.stringify(afterInvalidMetric.tool_results)}`,
     );
-  await (await invalidMetricDetailResponse).finished();
-  await page.waitForFunction(() =>
-    (document.querySelector(".record-detail")?.textContent ?? "").includes("Synthetic Book")
+  await invalidMetricDetailResponse;
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".record-detail")?.textContent ?? "").includes(
+        "Synthetic Book",
+      ),
+    undefined,
+    { timeout: 20000 },
   );
   const layoutAfterInvalidMetric = await page
     .locator(".layout-blocks")
     .locator(":scope > *")
     .allTextContents();
   if (JSON.stringify(layoutAfterInvalidMetric) !== JSON.stringify(layoutBeforeInvalidMetric))
-    throw new Error("invalid metric update changed the page layout");
+    throw new Error(`invalid metric update changed the page layout: before=${JSON.stringify(layoutBeforeInvalidMetric)} after=${JSON.stringify(layoutAfterInvalidMetric)}`);
   console.log("invalid metric chat update showed a readable error and kept the layout");
 
   const readingModeOffResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
