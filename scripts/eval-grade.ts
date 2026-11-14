@@ -321,11 +321,13 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const usedField = addedFields.find(field => structurallyContains(use?.arguments, { [field]: spec.new_value }) && structurallyContains(useResult?.data ?? useResult?.result, { [field]: spec.new_value }));
     const newRecord = matchingObjects(useResult?.data ?? useResult?.result, {}).find(row => typeof row.record_id === "string")?.record_id;
     const stored = owned("records").find(row => (row.id ?? row.record_id) === newRecord && row.collection === after?.collection && row.version === spec.to && usedField && structurallyContains(row.data ?? row, { [usedField]: spec.new_value }));
-    const read = results.find(result => result.page_id === page && result.chat_id === check.chat && result.tool === `achilles__${spec.read_tool}` && successful(result) && structurallyContains(result.data ?? result.result, { record_id: spec.legacy_record }) && typeof newRecord === "string" && usedField && structurallyContains(result.data ?? result.result, { record_id: newRecord, [usedField]: spec.new_value }));
+    const read = results.filter(result => result.page_id === page && result.chat_id === check.chat && result.tool === `achilles__${spec.read_tool}` && successful(result)).at(-1);
+    const readData = read?.data ?? read?.result;
+    const readIsValid = structurallyContains(readData, { record_id: spec.legacy_record }) && typeof newRecord === "string" && usedField && structurallyContains(readData, { record_id: newRecord, [usedField]: spec.new_value });
     const legacy = owned("records").find(row => (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
     const initialLegacy = rows(snapshot.initial ?? {}, "records").find(row => (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
     const validation = rows(snapshot, "tool_schema_validations").find(row => row.tool === spec.tool && row.version === spec.to && row.field === usedField);
-    return Boolean(before && after && assignment?.active_version === spec.to && usedField && validation?.number_valid === true && validation.string_valid === false && stored && read && legacy && initialLegacy && sameSeedValue(legacy.data ?? legacy, initialLegacy.data ?? initialLegacy));
+    return Boolean(before && after && assignment?.active_version === spec.to && usedField && validation?.number_valid === true && validation.string_valid === false && stored && readIsValid && legacy && initialLegacy && sameSeedValue(legacy.data ?? legacy, initialLegacy.data ?? initialLegacy));
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
