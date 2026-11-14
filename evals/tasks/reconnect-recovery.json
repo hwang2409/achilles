@@ -1,0 +1,32 @@
+{
+  "id": "reconnect-recovery",
+  "page_plan": [
+    {
+      "alias": "reconnect",
+      "source": "fixture",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 8,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "mutation",
+      "type": "count",
+      "page": "reconnect",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "result",
+      "type": "successful_result",
+      "page": "reconnect"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "reconnect"
+    }
+  ]
+}

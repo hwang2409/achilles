@@ -1,0 +1,42 @@
+{
+  "id": "agent-data-access",
+  "page_plan": [
+    {
+      "alias": "data",
+      "source": "fixture",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 5,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "all-records",
+      "type": "successful_result",
+      "page": "data",
+      "tool": "achilles__list_records",
+      "value": {
+        "id": "record-1"
+      }
+    },
+    {
+      "id": "all-records-2",
+      "type": "successful_result",
+      "page": "data",
+      "tool": "achilles__list_records",
+      "value": {
+        "id": "record-2"
+      }
+    },
+    {
+      "id": "all-records-3",
+      "type": "successful_result",
+      "page": "data",
+      "tool": "achilles__list_records",
+      "value": {
+        "id": "record-3"
+      }
+    }
+  ]
+}

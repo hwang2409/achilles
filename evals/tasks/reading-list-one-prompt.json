@@ -1,0 +1,43 @@
+{
+  "id": "reading-list-one-prompt",
+  "page_plan": [
+    {
+      "alias": "reading",
+      "source": "created",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 20,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "reading"
+    },
+    {
+      "id": "tools",
+      "type": "tool",
+      "page": "reading",
+      "name": "add_book"
+    },
+    {
+      "id": "list",
+      "type": "tool",
+      "page": "reading",
+      "name": "list_books"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "reading"
+    },
+    {
+      "id": "visible-book",
+      "type": "browser_text",
+      "text": "synthetic book"
+    }
+  ],
+  "prompt": "make a page that tracks my reading list"
+}

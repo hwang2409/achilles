@@ -1,0 +1,39 @@
+{
+  "id": "duplicate-prompt-recovery",
+  "page_plan": [
+    {
+      "alias": "existing",
+      "source": "fixture",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 10,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "one-page",
+      "type": "count",
+      "page": "existing",
+      "name": "pages",
+      "count": 1
+    },
+    {
+      "id": "one-tool",
+      "type": "count",
+      "page": "existing",
+      "name": "tools",
+      "count": 1
+    },
+    {
+      "id": "use",
+      "type": "successful_result",
+      "page": "existing"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "existing"
+    }
+  ]
+}

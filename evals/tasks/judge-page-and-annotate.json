@@ -1,0 +1,41 @@
+{
+  "id": "judge-page-and-annotate",
+  "page_plan": [
+    {
+      "alias": "review",
+      "source": "setup",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 18,
+  "judge": {
+    "turns": 2
+  },
+  "steps": [
+    {
+      "id": "annotate",
+      "kind": "annotate",
+      "page": "review",
+      "chat": "review-chat"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "review"
+    },
+    {
+      "id": "annotation",
+      "type": "count",
+      "page": "review",
+      "name": "annotations",
+      "count": 1
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "review"
+    }
+  ]
+}

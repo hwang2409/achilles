@@ -1,0 +1,40 @@
+{
+  "id": "create-and-use-tool-same-chat",
+  "page_plan": [
+    {
+      "alias": "notes",
+      "source": "setup",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 10,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "tool",
+      "type": "tool",
+      "page": "notes",
+      "name": "add_note"
+    },
+    {
+      "id": "use",
+      "type": "successful_result",
+      "page": "notes",
+      "tool": "achilles__add_note"
+    },
+    {
+      "id": "record",
+      "type": "record",
+      "page": "notes",
+      "value": {
+        "text": "synthetic note"
+      }
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "notes"
+    }
+  ]
+}

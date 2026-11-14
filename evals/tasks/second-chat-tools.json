@@ -1,0 +1,40 @@
+{
+  "id": "second-chat-tools",
+  "page_plan": [
+    {
+      "alias": "shared",
+      "source": "fixture",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 8,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "chat-a",
+      "type": "successful_result",
+      "page": "shared",
+      "chat": "chat-a",
+      "tool": "achilles__list_notes",
+      "value": {
+        "text": "seeded note"
+      }
+    },
+    {
+      "id": "chat-b",
+      "type": "successful_result",
+      "page": "shared",
+      "chat": "chat-b",
+      "tool": "achilles__list_notes",
+      "value": {
+        "text": "seeded note"
+      }
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "shared"
+    }
+  ]
+}

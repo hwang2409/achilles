@@ -1,0 +1,39 @@
+{
+  "id": "invalid-authoring-recovery",
+  "page_plan": [
+    {
+      "alias": "authoring",
+      "source": "setup",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 8,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "valid-tool",
+      "type": "tool",
+      "page": "authoring",
+      "name": "safe_tool"
+    },
+    {
+      "id": "no-partial",
+      "type": "count",
+      "page": "authoring",
+      "name": "invalid_tool_versions",
+      "count": 0
+    },
+    {
+      "id": "use",
+      "type": "successful_result",
+      "page": "authoring",
+      "tool": "achilles__safe_tool"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "authoring"
+    }
+  ]
+}

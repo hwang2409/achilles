@@ -1,0 +1,6 @@
+{
+  "pages": [{"id": "page-reading", "alias": "reading", "route": "/reading"}],
+  "tools": [{"id": "tool-add", "page_id": "page-reading", "name": "add_book"}],
+  "records": [],
+  "collections": []
+}

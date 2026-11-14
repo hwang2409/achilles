@@ -1,0 +1,34 @@
+{
+  "id": "approval-once",
+  "page_plan": [
+    {
+      "alias": "approval",
+      "source": "fixture",
+      "bind_chat": true
+    }
+  ],
+  "agent_turns": 6,
+  "judge": null,
+  "steps": [],
+  "checks": [
+    {
+      "id": "approval",
+      "type": "count",
+      "page": "approval",
+      "name": "approvals",
+      "count": 1
+    },
+    {
+      "id": "record",
+      "type": "count",
+      "page": "approval",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "approval"
+    }
+  ]
+}
