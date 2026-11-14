@@ -32,7 +32,7 @@ const cases = [
   { name: "SIGINT", target: "eval-stack", env: {}, signal: "SIGINT", exit: "nonzero" },
   { name: "SIGTERM", target: "eval-stack", env: {}, signal: "SIGTERM", exit: "nonzero" },
   { name: "task failure", target: "eval", env: { EVAL_FORCE_ERROR: "1" }, exit: "nonzero" },
-  { name: "startup failure", target: "eval", env: { EVAL_SETUP_ONLY: "1" }, exit: "nonzero" },
+  { name: "startup failure", target: "eval", env: {}, exit: "nonzero" },
 ] as const;
 
 test("eval lifecycle owner leaves no process group or port behind", async () => {
