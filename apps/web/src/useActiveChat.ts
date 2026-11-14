@@ -549,7 +549,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const current = state; const token = owner.current.token();
     const enabled = !current.page.create_mode;
     if (current.phase === "empty") { setPendingCreateMode(current, enabled); return; }
-    setToggleError(null); setToggling(true);
+    setToggling(true); // a shown refresh notice stays until the retry settles, so a second failure never flickers or stacks
     const result = await modeToggle.current.run({ client, pageId: current.page.id, sessionId: current.sessionId, enabled });
     if (!owner.current.current(token)) return;
     if (result.createMode !== null) updateReady(token, (value) => ({ ...value, page: { ...value.page, create_mode: result.createMode! } }));

@@ -145,6 +145,7 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
   const emptyPage = { ...page, zeta_session_id: null };
   const requests: string[] = [];
   let refreshes = 0;
+  const lastRefresh = deferred<void>();
   Object.assign(globalThis, {
     localStorage: new MemoryStorage(),
     document: { activeElement: null },
@@ -176,6 +177,7 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
       if (method === "mcp_refresh_tools") {
         refreshes += 1;
         if (refreshes <= 2) throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "MCP tools/list timed out after 10s" } });
+        await lastRefresh.promise;
         return { session_id: "fresh", servers: ["achilles"] };
       }
       if (method === "send") return {};
@@ -205,7 +207,13 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
   expect(active.toggleError).toContain("timed out");
   expect([active.toggleBlocked, active.toggling]).toEqual([true, false]);
 
-  await act(async () => { await active.toggle(); });
+  let retried: Promise<void> | null = null;
+  await act(async () => { retried = active.toggle(); });
+  await flushUntil(() => refreshes === 3);
+  expect([active.toggling, active.toggleBlocked]).toEqual([true, true]);
+  expect(active.toggleError).toContain("timed out");
+  lastRefresh.resolve();
+  await act(async () => { await retried; });
   expect([active.toggleError, active.toggleBlocked]).toEqual([null, false]);
   expect(active.state).toMatchObject({ phase: "ready", page: { create_mode: true } });
   expect(requests.filter((method) => method === "mcp_refresh_tools")).toHaveLength(3);
