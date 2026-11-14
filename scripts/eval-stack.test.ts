@@ -40,7 +40,7 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
     try {
       for (let i = 0; i < 1_200 && code === undefined; i++) {
         const rows = processRows(); for (const row of descendants(child.pid!, rows)) { seen.set(row.pid, row); if (/(?:achilles|zeta).*serve/.test(row.command) && row.pid !== row.pgid) seen.set(row.pgid, { pid: row.pgid, ppid: 1, pgid: row.pgid, command: "uv wrapper/group leader" }); for (const match of row.command.matchAll(/(?:--port|--ws)\s+(\d+)/g)) ports.add(Number(match[1])); }
-        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => row.command.includes("bun scripts/eval.ts")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); if (bun && servers.length >= 2) { process.kill(bun.pid, scenario.signal); sent = true; } }
+        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => /(?:^|\/)bun scripts\/eval\.ts/.test(row.command) && !row.command.includes("/bin/sh -c")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); if (bun && servers.length >= 2) { process.kill(bun.pid, scenario.signal); sent = true; } }
         code = await Promise.race([exited, Bun.sleep(50).then(() => undefined)]);
       }
       if (code === undefined) throw new Error(`${scenario.name} did not exit: ${Buffer.concat(output).toString()}`);
@@ -51,7 +51,7 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
       await Bun.sleep(200); const remaining = processRows(); const livePids = [...seen.keys()].filter(pid => remaining.some(row => row.pid === pid)); const ownedPgids = new Set([...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)).map(row => row.pgid)); const livePgids = [...ownedPgids].filter(pgid => remaining.some(row => row.pgid === pgid));
       expect(livePids, `${scenario.name} left pids alive`).toEqual([]); expect(livePgids, `${scenario.name} left process groups alive`).toEqual([]); expect(await Promise.all([...ports].map(portClosed)), `${scenario.name} left ports open`).not.toContain(false);
       const serverRows = [...seen.values()].filter(row => ownedPgids.has(row.pgid)); expect(serverRows.every(row => proof.pgids.includes(row.pgid)), `${scenario.name} owner missed a server process group`).toBe(true); expect(serverRows.every(row => seen.has(row.pid)), `${scenario.name} missed a process-group member`).toBe(true);
-    } finally { if (code === undefined) { try { process.kill(-child.pid!, "SIGKILL"); } catch {} } for (const pgid of new Set([...seen.values()].filter(row => /(?:achilles|zeta).*serve|uv wrapper\/group leader/.test(row.command)).map(row => row.pgid))) { try { process.kill(-pgid, "SIGKILL"); } catch {} } await rm(report, { recursive: true, force: true }); }
+    } finally { if (code === undefined) { for (const pid of [...seen.keys()].reverse()) { try { process.kill(pid, "SIGKILL"); } catch {} } try { process.kill(child.pid!, "SIGKILL"); } catch {} } for (const pgid of new Set([...seen.values()].filter(row => /(?:achilles|zeta).*serve|uv wrapper\/group leader/.test(row.command)).map(row => row.pgid))) { try { process.kill(-pgid, "SIGKILL"); } catch {} } await rm(report, { recursive: true, force: true }); }
   }
 }, 180_000);
 
