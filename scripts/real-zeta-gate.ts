@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, type Route } from "playwright";
+import { chromium, type Locator, type Route } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
@@ -242,25 +242,149 @@ try {
   await new Promise<void>((resolve, reject) => {
     paginationSeed.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`pagination seed exited ${code}`)));
   });
-  await page.reload();
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
-  const initialChatRows = page.locator(".chat-row");
-  if (await initialChatRows.count() !== 50) throw new Error("chat pagination did not show its first 50 rows");
-  await initialChatRows.last().focus();
-  await page.keyboard.press("Tab");
-  const loadOlder = page.getByRole("button", { name: "load 50 older" });
-  if (!(await loadOlder.evaluate((button) => document.activeElement === button))) throw new Error("load older was not keyboard reachable");
-  await page.keyboard.press("Enter");
-  await waitFor(async () => (await initialChatRows.count()) > 50, "older chats");
-  try {
-    await waitFor(async () => await initialChatRows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
-  } catch (error) {
-    const focus = await page.evaluate(() => {
+  const assertActive = async (name: string, target: Locator) => {
+    if (await target.evaluate((element) => document.activeElement === element)) return;
+    const active = await page.evaluate(() => {
       const element = document.activeElement;
       return { tag: element?.tagName, text: element?.textContent?.trim().slice(0, 120), data: element ? Object.fromEntries([...element.attributes].filter((attribute) => attribute.name.startsWith("data-")).map((attribute) => [attribute.name, attribute.value])) : {} };
     });
-    throw new Error(`${error}; pagination focus=${JSON.stringify(focus)}; rows before=50 after=${await initialChatRows.count()}`);
+    throw new Error(`${name} focused ${JSON.stringify(active)}`);
+  };
+  const reloadShell = async () => {
+    await page.reload();
+    await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  };
+  const focusRows: Array<{ name: string; run: () => Promise<void> }> = [
+    {
+      name: "chat load-older success",
+      run: async () => {
+        await reloadShell();
+        const rows = page.locator(".chat-row");
+        await rows.nth(49).waitFor();
+        if (await rows.count() !== 50) throw new Error("chat pagination did not show its first 50 rows");
+        await rows.last().focus();
+        await page.keyboard.press("Tab");
+        const loadOlder = page.getByRole("button", { name: "load 50 older" });
+        await assertActive("chat load-older button", loadOlder);
+        await page.keyboard.press("Enter");
+        await waitFor(async () => (await rows.count()) > 50, "older chats");
+        await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
+        await assertActive("chat load-older success", rows.nth(50));
+      },
+    },
+    {
+      name: "empty older batch",
+      run: async () => {
+        await reloadShell();
+        const search = page.locator(".chat-search input");
+        await search.waitFor();
+        const emptyOlder = async (route: Route) => {
+          const url = new URL(route.request().url());
+          if (url.searchParams.has("before")) await route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
+          else await route.continue();
+        };
+        await page.route("**/api/chats?**", emptyOlder);
+        await page.getByRole("button", { name: "load 50 older" }).click();
+        await page.getByRole("button", { name: "load 50 older" }).waitFor({ state: "detached" });
+        await page.unroute("**/api/chats?**", emptyOlder);
+        const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("q"));
+        await search.fill("older chat 54");
+        await refreshed;
+        await page.locator(".chat-group h2", { hasText: "1 results" }).waitFor();
+        await assertActive("empty older batch later refresh", search);
+      },
+    },
+    {
+      name: "page show-more non-final",
+      run: async () => {
+        await reloadShell();
+        const links = page.locator(".page-list a");
+        const showMore = page.getByRole("button", { name: "show more pages" });
+        await showMore.waitFor();
+        const before = await links.count();
+        await showMore.click();
+        await waitFor(async () => (await links.count()) > before, "non-final page continuation");
+        await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "non-final page continuation focus");
+        if (!(await showMore.count())) throw new Error("non-final page continuation removed show more");
+        await assertActive("page show-more non-final", links.nth(before));
+      },
+    },
+    {
+      name: "page show-more final",
+      run: async () => {
+        await reloadShell();
+        const links = page.locator(".page-list a");
+        const showMore = page.getByRole("button", { name: "show more pages" });
+        await showMore.waitFor();
+        const beforeFirst = await links.count();
+        await showMore.click();
+        await waitFor(async () => (await links.count()) > beforeFirst, "first page continuation before final");
+        const beforeFinal = await links.count();
+        await showMore.click();
+        await waitFor(async () => (await links.count()) > beforeFinal, "final page continuation");
+        await waitFor(async () => await links.nth(beforeFinal).evaluate((link) => document.activeElement === link), "final page continuation focus");
+        if (await showMore.count()) throw new Error("final page continuation kept show more");
+        await assertActive("page show-more final", links.nth(beforeFinal));
+      },
+    },
+    {
+      name: "target removed before commit",
+      run: async () => {
+        await reloadShell();
+        let release!: () => void;
+        let markSeen!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const seen = new Promise<void>((resolve) => { markSeen = resolve; });
+        const holdContinuation = async (route: Route) => {
+          if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          markSeen();
+          await held;
+          await route.continue();
+        };
+        await page.route("**/api/pages?**", holdContinuation);
+        const showMore = page.getByRole("button", { name: "show more pages" });
+        await showMore.waitFor();
+        await showMore.click();
+        await seen;
+        const heading = page.locator(".page-list > .list-head");
+        await heading.focus();
+        await page.keyboard.press("Enter");
+        const continued = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
+        release();
+        await continued;
+        await page.unroute("**/api/pages?**", holdContinuation);
+        await page.keyboard.press("Enter");
+        await waitFor(async () => (await page.locator(".page-list a").count()) > 20, "expanded pages after missing focus target");
+        await assertActive("target removed before commit", heading);
+      },
+    },
+    {
+      name: "drawer open",
+      run: async () => {
+        await reloadShell();
+        await page.setViewportSize({ width: 390, height: 760 });
+        await page.getByRole("button", { name: "open menu" }).click();
+        const first = page.locator(".sidebar").locator("button:not(:disabled), a[href], input:not(:disabled)").first();
+        await waitFor(async () => await first.evaluate((element) => document.activeElement === element), "drawer first focusable focus");
+        await assertActive("drawer open", first);
+      },
+    },
+    {
+      name: "drawer close",
+      run: async () => {
+        const menu = page.getByRole("button", { name: "open menu" });
+        await page.keyboard.press("Escape");
+        await waitFor(async () => await menu.evaluate((element) => document.activeElement === element), "drawer menu button focus restore");
+        await assertActive("drawer close", menu);
+        await page.setViewportSize({ width: 1440, height: 900 });
+      },
+    },
+  ];
+  for (const row of focusRows) {
+    await row.run();
+    console.log(`focus after commit: ${row.name}`);
   }
+  await reloadShell();
   await gateTranscript(page, waitFor);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
