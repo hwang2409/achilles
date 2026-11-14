@@ -68,6 +68,27 @@ jobs:
             echo "forced provider error unexpectedly passed" >&2
             exit 1
           fi
+          python - <<'PY'
+          import json, os, re, socket
+          from pathlib import Path
+          root = Path('.cache/eval-ci-error')
+          report = json.loads((root / 'report.json').read_text())
+          assert report['tasks'] and not report['tasks'][0]['pass']
+          proofs = json.loads((root / 'cleanup.json').read_text())
+          assert proofs and all(p['pids_dead'] and p['ports_closed'] and p['discovery_pid_dead'] and p['discovery_cleaned'] for p in proofs)
+          for proof in proofs:
+              for pid in proof['pids']:
+                  try: os.kill(pid, 0)
+                  except ProcessLookupError: pass
+                  else: raise AssertionError(f'child pid {pid} remains')
+              for port in proof['ports']:
+                  with socket.socket() as probe:
+                      probe.settimeout(0.2)
+                      assert probe.connect_ex(('127.0.0.1', port)) != 0, f'port {port} remains open'
+          assert not list(root.rglob('serve.ws.json'))
+          text = '\n'.join(path.read_text(errors='ignore') for path in root.rglob('*') if path.is_file())
+          assert not re.search(r'Bearer\\s+[A-Za-z0-9._~+/=-]{12,}|sk-[A-Za-z0-9_-]{16,}', text, re.I)
+          PY
       - run: bunx playwright install --with-deps chromium
       - run: bun run ../../scripts/real-zeta-gate.ts
         env:

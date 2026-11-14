@@ -6,15 +6,17 @@ import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protoc
 import { scanArtifactTree, scanSecrets, validateCatalog } from "./eval";
 
 test("turn reservation is command-wide", () => {
-  expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20, judge_turns: 2 }], 2)).toBe(84);
+  expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20 }], 2)).toBe(80);
   expect(() => assertTurnBudget(241)).toThrow("command budget");
 });
 
-test("live turn budget aborts at the cap", async () => {
+test("live turn budget allows the cap and aborts only excess work", async () => {
   let aborts = 0;
   const enforce = enforceTurnBudget(2, async () => { aborts += 1; });
   await enforce({ event: "turn_start" });
-  await expect(enforce({ event: "turn_start" })).rejects.toThrow("limit reached");
+  await enforce({ event: "turn_start" });
+  expect(aborts).toBe(0);
+  await expect(enforce({ event: "turn_start" })).rejects.toThrow("limit exceeded");
   expect(aborts).toBe(1);
 });
 

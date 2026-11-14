@@ -1,5 +1,0 @@
-{
-  "pages": [{"id": "page-shared", "alias": "shared"}],
-  "tools": [{"id": "tool-list", "page_id": "page-shared", "name": "list_notes"}],
-  "records": [{"id": "seed-1", "page_id": "page-shared", "data": {"text": "seeded note"}}]
-}

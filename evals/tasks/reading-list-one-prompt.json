@@ -1,5 +1,6 @@
 {
   "id": "reading-list-one-prompt",
+  "prompt": "make a page that tracks my reading list",
   "page_plan": [
     {
       "alias": "home",
@@ -10,9 +11,9 @@
     {
       "alias": "reading",
       "source": "created",
-      "bind_chat": true,
+      "bind_chat": false,
       "create_mode": false,
-      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
+      "route": "/reading-list"
     }
   ],
   "agent_turns": 20,
@@ -22,45 +23,52 @@
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "make a page that tracks my reading list"
-    },
-    {
-      "id": "verify-page",
-      "kind": "prompt",
-      "page": "reading",
-      "chat": "reading-chat",
-      "prompt": "use the assigned tools to add synthetic book and update its status to finished"
+      "prompt": "create /reading-list titled Reading List with a list block for the books collection and tools add_book (insert), update_book (update), and list_books (list) for that collection"
     }
   ],
   "checks": [
     {
       "id": "page",
       "type": "page_exists",
-      "page": "reading"
+      "page": "reading",
+      "route": "/reading-list"
     },
     {
-      "id": "tools",
+      "id": "add_book",
       "type": "tool",
       "page": "reading",
       "name": "add_book"
     },
     {
-      "id": "list",
+      "id": "update_book",
+      "type": "tool",
+      "page": "reading",
+      "name": "update_book"
+    },
+    {
+      "id": "list_books",
       "type": "tool",
       "page": "reading",
       "name": "list_books"
     },
     {
+      "id": "list-layout",
+      "type": "layout_contains",
+      "page": "reading",
+      "value": {
+        "type": "list"
+      }
+    },
+    {
+      "id": "visible-title",
+      "type": "browser_text",
+      "page": "reading",
+      "text": "Reading List"
+    },
+    {
       "id": "same-page",
       "type": "same_page",
       "page": "reading"
-    },
-    {
-      "id": "visible-book",
-      "type": "browser_text",
-      "text": "synthetic book"
     }
-  ],
-  "prompt": "make a page that tracks my reading list",
-  "judge": null
+  ]
 }

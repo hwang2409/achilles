@@ -2,44 +2,89 @@
   "id": "judge-page-and-annotate",
   "page_plan": [
     {
-      "alias": "review",
-      "source": "setup",
+      "alias": "home",
+      "source": "fixture",
       "bind_chat": true,
       "create_mode": true
+    },
+    {
+      "alias": "review",
+      "source": "created",
+      "bind_chat": true,
+      "create_mode": true,
+      "route": "/run-review"
     }
   ],
   "agent_turns": 18,
-  "judge": {
-    "turns": 2
-  },
   "steps": [
     {
-      "id": "author",
+      "id": "create-review",
       "kind": "prompt",
-      "page": "review",
-      "chat": "review-chat",
-      "prompt": "create an add_annotation insert tool for annotations"
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "create /run-review titled Run Review with a list block for the annotations collection and a detail block for record_id run-002"
     },
     {
       "id": "annotate",
       "kind": "annotate",
       "page": "review",
       "chat": "review-chat",
-      "prompt": "use add_annotation to mark synthetic run-002 as bad"
+      "prompt": "create add_annotation and list_annotations tools on this page, then use add_annotation to record run_id run-002 with verdict bad and list the annotations"
     }
   ],
   "checks": [
     {
       "id": "page",
       "type": "page_exists",
-      "page": "review"
+      "page": "review",
+      "route": "/run-review"
+    },
+    {
+      "id": "add-tool",
+      "type": "tool",
+      "page": "review",
+      "name": "add_annotation"
+    },
+    {
+      "id": "list-tool",
+      "type": "tool",
+      "page": "review",
+      "name": "list_annotations"
     },
     {
       "id": "annotation",
-      "type": "count",
+      "type": "record",
       "page": "review",
-      "name": "records",
-      "count": 1
+      "value": {
+        "run_id": "run-002",
+        "verdict": "bad"
+      }
+    },
+    {
+      "id": "add-result",
+      "type": "successful_result",
+      "page": "review",
+      "tool": "achilles__add_annotation",
+      "value": {
+        "run_id": "run-002",
+        "verdict": "bad"
+      }
+    },
+    {
+      "id": "list-layout",
+      "type": "layout_contains",
+      "page": "review",
+      "value": {
+        "type": "list"
+      }
+    },
+    {
+      "id": "detail-layout",
+      "type": "layout_contains",
+      "page": "review",
+      "value": {
+        "type": "detail"
+      }
     },
     {
       "id": "same-page",

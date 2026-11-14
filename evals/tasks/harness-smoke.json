@@ -2,10 +2,17 @@
   "id": "harness-smoke",
   "page_plan": [
     {
-      "alias": "smoke",
+      "alias": "home",
       "source": "fixture",
       "bind_chat": true,
       "create_mode": true
+    },
+    {
+      "alias": "smoke",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false,
+      "route": "/eval-smoke"
     }
   ],
   "agent_turns": 3,
@@ -13,18 +20,31 @@
     {
       "id": "create",
       "kind": "prompt",
-      "page": "smoke",
+      "page": "home",
       "chat": "smoke-chat",
-      "prompt": "call create_page to create /eval-smoke with title Eval Smoke and a layout containing one text block"
+      "prompt": "call create_page to create /eval-smoke with title Eval Smoke and a layout containing one text block whose text is smoke"
     }
   ],
   "checks": [
     {
+      "id": "page",
+      "type": "page_exists",
+      "page": "smoke",
+      "route": "/eval-smoke"
+    },
+    {
+      "id": "layout",
+      "type": "layout_contains",
+      "page": "smoke",
+      "value": {
+        "text": "smoke"
+      }
+    },
+    {
       "id": "create",
       "type": "successful_result",
-      "page": "smoke",
+      "page": "home",
       "tool": "achilles__create_page"
     }
-  ],
-  "judge": null
+  ]
 }

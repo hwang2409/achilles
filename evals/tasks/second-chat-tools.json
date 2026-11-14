@@ -5,8 +5,7 @@
       "alias": "shared",
       "source": "fixture",
       "bind_chat": true,
-      "create_mode": false,
-      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
+      "create_mode": false
     }
   ],
   "agent_turns": 8,
@@ -69,7 +68,18 @@
       "id": "no-errors",
       "type": "no_error",
       "page": "shared"
+    },
+    {
+      "id": "mcp-available",
+      "type": "history_absent",
+      "chat": "chat-a",
+      "text": "MCP server achilles is unavailable"
+    },
+    {
+      "id": "mcp-available-second",
+      "type": "history_absent",
+      "chat": "chat-b",
+      "text": "MCP server achilles is unavailable"
     }
-  ],
-  "judge": null
+  ]
 }

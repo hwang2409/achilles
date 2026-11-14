@@ -71,7 +71,7 @@ export async function connectEvalProtocol(discovery: { url: string; controller_t
   } catch (error) { client.close(); throw error; }
 }
 
-export function reserveTurns(tasks: Array<{ agent_turns: number; judge_turns?: number }>, repeats: number) { return repeats * tasks.reduce((total, task) => total + task.agent_turns + (task.judge_turns ?? 0), 0); }
+export function reserveTurns(tasks: Array<{ agent_turns: number }>, repeats: number) { return repeats * tasks.reduce((total, task) => total + task.agent_turns, 0); }
 export function assertTurnBudget(reserved: number, max = 240) { if (!Number.isInteger(reserved) || reserved < 0 || reserved > max) throw new Error(`reserved model turns ${reserved} exceed command budget ${max}`); }
 
 export function enforceTurnBudget(limit: number, abort: () => Promise<void>, onTurn?: (count: number) => void) {
@@ -79,6 +79,6 @@ export function enforceTurnBudget(limit: number, abort: () => Promise<void>, onT
   return async (event: Record<string, unknown>) => {
     if (event.event !== "turn_start" || stopped) return;
     count += 1; onTurn?.(count);
-    if (count >= limit) { stopped = true; await abort(); throw new Error("task model turn limit reached"); }
+    if (count > limit) { stopped = true; await abort(); throw new Error("task model turn limit exceeded"); }
   };
 }
