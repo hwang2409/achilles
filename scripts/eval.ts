@@ -90,7 +90,7 @@ function parseHistory(histories: Array<{ chat: string; page_id: string; rows: an
       for (const block of Array.isArray(row.content) ? row.content : []) if (block.type === "tool_use" && block.tool_call?.id) pending.set(block.tool_call.id, block.tool_call);
       if (row.role === "tool_result" && row.tool_result?.tool_call_id) {
         const call = pending.get(row.tool_result.tool_call_id) ?? {}; const text = String(row.tool_result.content ?? ""); let data: unknown = text; try { data = JSON.parse(text); } catch {}
-        const common = { chat_id: history.chat, page_id: history.page_id, tool: call.name, success: row.tool_result.is_error !== true };
+        const common = { call_id: call.id, chat_id: history.chat, page_id: history.page_id, tool: call.name, success: row.tool_result.is_error !== true };
         calls.push({ ...call, ...common }); results.push({ ...common, data });
         if (row.tool_result.is_error === true) errors.push({ ...(data && typeof data === "object" ? data : {}), ...common, message: text });
       } else if (row.event === "error") errors.push({ ...(row.data ?? {}), chat_id: history.chat, page_id: history.page_id });
@@ -98,12 +98,12 @@ function parseHistory(histories: Array<{ chat: string; page_id: string; rows: an
   }
   return { calls, results, errors };
 }
+function pageIdFromResults(results: Array<Record<string, any>>, plan: PagePlan) {
+  for (const value of results) { const data = value.data as Record<string, unknown>; if (value.tool === "achilles__create_page" && value.success && (!plan.route || data?.route === plan.route) && typeof data.page_id === "string") return data.page_id; }
+  throw new Error(`create_page did not return page_id for ${plan.alias}`);
+}
 function createdPageId(events: Record<string, any>[], plan: PagePlan) {
-  for (const event of events) if (event.event === "tool_end") {
-    const value = toolEnd(event); const data = value.data as Record<string, unknown>;
-    if (value.name === "achilles__create_page" && value.success && data?.route === plan.route && typeof data.page_id === "string") return data.page_id;
-  }
-  throw new Error(`create_page did not durably return ${plan.route}`);
+  return pageIdFromResults(events.filter(event => event.event === "tool_end").map(event => { const value = toolEnd(event); return { ...value, tool: value.name }; }), plan);
 }
 async function waitForTerminal(protocol: EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal) {
   for (;;) {
@@ -135,16 +135,17 @@ function relatedPages(before: EvalSnapshot, after: EvalSnapshot, calls: Record<s
   }
   return ids;
 }
-async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, signal: AbortSignal) {
+async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
   if (!task.checks.some(check => check.type === "browser_text")) return [];
   signal.throwIfAborted(); const modulePath = pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
   const { chromium } = await import(modulePath); const browser = await chromium.launch({ headless: true });
   try {
-    const rows = [];
+    const output = [];
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
-      const page = await browser.newPage(); await page.goto(`${stack.achillesOrigin}${plan.route ?? "/"}`, { waitUntil: "networkidle", timeout: 15_000 }); rows.push({ page_id: pages.get(plan.alias), text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
+      const pageId = pages.get(plan.alias); const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
+      const page = await browser.newPage(); await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "networkidle", timeout: 15_000 }); output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
     }
-    return rows;
+    return output;
   } finally { await browser.close(); }
 }
 
@@ -179,14 +180,14 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const step of task.steps) {
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new Error("task model turn limit has no remaining turn");
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent); await protocol.resume(session.id); continue; }
-      const session = await getSession(step.chat, step.page); await protocol.send(session.id, step.prompt!); const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
+      const session = await getSession(step.chat, step.page); await protocol.send(session.id, step.prompt ?? task.prompt!); const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
-    for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) pages.set(plan.alias, createdPageId(events, plan));
+    for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) pages.set(plan.alias, pageIdFromResults(tools.results, plan));
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
-    const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt }));
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, chats, browser: await browserRows(stack, task, pages, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: { status: "unavailable" }, session_history: durable.flatMap(history => history.rows) };
+    const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
+    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: { status: "unavailable" }, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); protocol.close(); }
 }

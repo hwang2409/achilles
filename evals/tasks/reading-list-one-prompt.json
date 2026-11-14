@@ -12,8 +12,7 @@
       "alias": "reading",
       "source": "created",
       "bind_chat": false,
-      "create_mode": false,
-      "route": "/reading-list"
+      "create_mode": false
     }
   ],
   "agent_turns": 20,
@@ -22,16 +21,14 @@
       "id": "creation-prompt",
       "kind": "prompt",
       "page": "home",
-      "chat": "home-chat",
-      "prompt": "create /reading-list titled Reading List with a list block for the books collection and tools add_book (insert), update_book (update), and list_books (list) for that collection"
+      "chat": "home-chat"
     }
   ],
   "checks": [
     {
       "id": "page",
       "type": "page_exists",
-      "page": "reading",
-      "route": "/reading-list"
+      "page": "reading"
     },
     {
       "id": "add_book",
