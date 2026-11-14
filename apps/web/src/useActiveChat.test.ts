@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { attachPage, createAttachmentOwner } from "./useActiveChat";
+import { reduceConnection } from "./zeta/connection";
 
 class MemoryStorage {
   value: string | null = null;
@@ -142,7 +143,9 @@ describe("active chat attachment", () => {
     });
     const owner = createAttachmentOwner();
     try {
-      await attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true)).catch(() => {});
+      const afterTakeover = reduceConnection({ phase: "taking_control", authority: "observer", attempt: 1 }, { type: "takeover_outcome", outcome: "success" });
+      const allowMissingSelected = afterTakeover.phase === "taking_control";
+      await expect(attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true), false, allowMissingSelected)).rejects.toThrow("this chat no longer exists");
       expect(sessions).toBe(0);
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });

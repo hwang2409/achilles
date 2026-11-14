@@ -6,6 +6,7 @@ import { AppShell } from "./AppShell";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
+import { canWrite, useCanWrite, WriteAccessProvider } from "./write-access";
 import "./style.css";
 
 const highlight = createHighlighter();
@@ -27,7 +28,8 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    case "capacity": return state.attempt > 8 ? "could not take control. close the other tab or app, then retry." : "waiting for the other tab or app to close…";
+    case "capacity": return "zeta is in use by another tab or app.";
+    case "takeover_failed": return state.reason === "busy_bound" ? "could not take control. close the other tab or app, then retry." : "could not take control. check the zeta connection, then retry.";
     default: return null;
   }
 }
@@ -36,8 +38,10 @@ export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
-  const readOnly = connectionState.phase === "connected" && connectionState.authority === "observer";
-  const active = useActiveChat(client, connectionState.phase === "connected", readOnly, connectionState.phase === "connected" && connectionState.takingControl === true);
+  const writable = canWrite(connectionState);
+  const attached = connectionState.phase === "connected" || connectionState.phase === "taking_control" || connectionState.phase === "takeover_failed";
+  const readOnly = attached && !writable;
+  const active = useActiveChat(client, attached, writable, connectionState.phase === "taking_control");
   const ready = active.state.phase === "ready" ? active.state : null;
   const store = ready?.lease.store ?? null;
   const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
@@ -94,38 +98,39 @@ export function App() {
   const lastState = waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
-  const connected = connectionState.phase === "connected";
-  const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
+  const approval = writable && client && store ? createApprovalDecider(client, store) : null;
+  const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!writable ? "read-only: another tab or app controls zeta" : !approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const content = <>
-    {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : lastState} toggling={active.toggling || !connected || readOnly} toggle={active.toggle} toggleError={active.toggleError} readOnly={readOnly} />}
-    {readOnly && <div className="connection-banner" role="status"><span>{connection.state.phase === "connected" && connection.state.takingControl ? "waiting for the other tab or app to close…" : "read-only: another tab or app controls this chat."}</span><button onClick={() => connection.takeControl()}>take control</button></div>}
+    {ready && <ChatHeader page={ready.page} sessionId={ready.sessionId} title={ready.title} state={lost ? "offline" : readOnly && lastState === "approval" ? "controller-approval" : lastState} toggling={active.toggling || !writable} toggle={active.toggle} toggleError={active.toggleError} />}
+    {readOnly && <div className="connection-banner" role={connectionState.phase === "takeover_failed" ? "alert" : "status"}><span>{connectionState.phase === "taking_control" ? "waiting for the other tab or app to close…" : connectionState.phase === "takeover_failed" ? connectionFailure(connectionState) : "zeta is in use by another tab or app."}</span><button onClick={() => connectionState.phase === "taking_control" ? connection.cancelTakeControl() : connectionState.phase === "takeover_failed" ? connection.retryNow() : connection.takeControl()}>{connectionState.phase === "taking_control" ? "cancel" : connectionState.phase === "takeover_failed" ? "retry" : "take control"}</button></div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
-    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry saving this chat</button></div>
-      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
+    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" disabled={!writable} onClick={active.retrySaving}>retry saving this chat</button></div>
+      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" disabled={!writable} onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
+      : failure && !lost && !attached ? <ConnectionBanner state={connectionState} connection={connection} />
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
         <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
-        {!readOnly && <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!connected || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>}
+        {!readOnly && <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!writable || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>}
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;
+  return <WriteAccessProvider value={writable}><AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell></WriteAccessProvider>;
 }
 
 function EmptyChat({ page, send, continueWaiting }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void> }) {
+  const writable = useCanWrite();
   const starters = ["make a page that tracks my reading list", "what changed in my repos since yesterday", "continue: grade last night's eval runs"];
-  return <div className="empty-chat"><h1>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
+  return <div className="empty-chat"><h1>new chat on {page.title}</h1><p>a fresh zeta session with the normal tools. turn on create mode to let it make pages and page tools.</p><div className="chat-starters">{starters.map((starter, index) => <button key={starter} disabled={!writable} onClick={() => void (index === 2 ? continueWaiting() : send(starter, { steer: false }, () => {}))}><b>{index + 1}</b><span>{starter}</span>{index === 0 ? <i>create mode</i> : index === 2 ? <i>waiting chat</i> : null}</button>)}</div></div>;
 }
 
-function ChatHeader({ page, sessionId, title, state, toggling, toggle, toggleError, readOnly }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; toggle: () => void; toggleError: string | null; readOnly: boolean }) {
+function ChatHeader({ page, sessionId, title, state, toggling, toggle, toggleError }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; toggle: () => void; toggleError: string | null }) {
   const [overflow, setOverflow] = useState(false);
-  const controls = <>{!readOnly && <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button></>}</>;
-  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading"><strong data-session-id={sessionId ?? undefined}>{title}</strong><span>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div>{toggleError && <p role="alert">{toggleError}</p>}</header>;
+  const writable = useCanWrite();
+  const controls = <>{writable && <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={toggling} onClick={toggle}>{page.create_mode ? "create mode on" : "create mode off"}</button></>}</>;
+  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading"><strong data-session-id={sessionId ?? undefined}>{title}</strong><span>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state === "controller-approval" ? "waiting on the controlling tab" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div>{toggleError && <p role="alert">{toggleError}</p>}</header>;
 }
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {

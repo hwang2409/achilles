@@ -3,6 +3,7 @@ import type { RunEvent } from "@fulcrum/core";
 
 type Status = { session?: { session_id: string } | null; state: "idle" | "running" | "tool"; pending_approvals?: Array<{ request_id: string; tool_call: unknown; delegated: boolean; resolution_pending?: string }>; last_turn_outcome?: { turn_id?: unknown; reason?: unknown } | null };
 type HistoryPage = { messages?: unknown[]; next_offset?: number | null };
+type JoinedHistory = { messages?: unknown[]; status: Status };
 type LoadedPage = { offset: number; rows: unknown[]; nextOffset: number | null };
 
 export async function rebindPage(client: ZetaClient, sessionId: string, binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> }) {
@@ -50,21 +51,29 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
 const terminal = (status: Status): RunEvent[] => status.state === "idle" ? [{ type: "run_end" }] : [{ type: "run_start" }];
+const snapshot = (id: string, rows: unknown[], status: Status) => [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(status)];
+
+async function loadSubscribedSession(client: ZetaClient, id: string): Promise<SessionLease> {
+  return client.replay(id, async () => {
+    const joined = await client.request("session_history_and_subscribe", { session_id: id }) as JoinedHistory;
+    return snapshot(id, joined.messages ?? [], joined.status);
+  });
+}
 
 export async function loadSession(client: ZetaClient, id: string): Promise<SessionLease> {
+  if (client.features?.includes("session_replay_seq")) return loadSubscribedSession(client, id);
   let pages: LoadedPage[] = []; let lease!: SessionLease;
   const page = async (offset: number): Promise<LoadedPage> => { const value = await client.request("session_history", { session_id: id, offset }) as HistoryPage; return { offset, rows: value.messages ?? [], nextOffset: value.next_offset ?? null }; };
   const allRows = () => pages.flatMap((item) => item.rows);
-  const snapshot = (rows: unknown[], status: Status) => [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(status)];
   const loadAll = async () => { pages = []; for (let offset: number | null = 0; offset !== null;) { const next = await page(offset); pages.push(next); offset = next.nextOffset; } };
   const initial = await client.request("status", {}) as Status;
   try {
-    lease = await client.replay(id, async () => { await loadAll(); const status = initial.session?.session_id === id ? initial : await client.request("status", {}) as Status; return snapshot(allRows(), status); }, true);
+    lease = await client.replay(id, async () => { await loadAll(); const status = initial.session?.session_id === id ? initial : await client.request("status", {}) as Status; return snapshot(id, allRows(), status); }, true);
     const revision = client.replayRevision(id); const tail = pages.at(-1);
     if (tail) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tail.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); }
     let status = await client.request("status", {}) as Status;
     while (!client.finishReplay(id, revision)) { const nextRevision = client.replayRevision(id); const tailPage = pages.at(-1); if (tailPage) { const refreshed: LoadedPage[] = []; for (let offset: number | null = tailPage.offset; offset !== null;) { const next = await page(offset); refreshed.push(next); offset = next.nextOffset; } pages.splice(pages.length - 1, 1, ...refreshed); } status = await client.request("status", {}) as Status; if (client.finishReplay(id, nextRevision)) break; }
-    lease.store.resync(snapshot(allRows(), status)); return lease;
+    lease.store.resync(snapshot(id, allRows(), status)); return lease;
   } catch (caught) {
     lease?.release();
     throw caught;

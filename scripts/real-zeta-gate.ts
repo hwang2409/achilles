@@ -691,7 +691,7 @@ try {
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
   await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
-  if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
+  await waitFor(async () => await droppedField.inputValue({ timeout: 500 }).then((value) => value === draft, () => false), "dropped composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
@@ -707,8 +707,7 @@ try {
   }, "zeta reconnect after dropped connection");
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
-  await recoveredField.waitFor({ timeout: 20_000 });
-  if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
+  await waitFor(async () => await recoveredField.inputValue({ timeout: 500 }).then((value) => value === draft, () => false), "reconnected composer draft").catch(async () => { throw new Error(`reconnected composer did not restore: ${redact(await page.locator("body").innerText())}`); });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
   const observerSession = await page.locator("[data-session-id]").getAttribute("data-session-id");
@@ -716,15 +715,27 @@ try {
   const observerPage = await browser.newPage();
   await observerPage.goto(`${origin}/?chat=${encodeURIComponent(observerSession)}`);
   await observerPage.locator(".transcript").waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer attach failed: ${await observerPage.locator("body").innerText()}`); });
-  await observerPage.getByRole("status").filter({ hasText: "read-only" }).waitFor({ timeout: 20_000 });
+  await observerPage.getByRole("status").filter({ hasText: "zeta is in use by another tab or app" }).waitFor({ timeout: 20_000 });
   if (await observerPage.getByRole("textbox", { name: "message" }).count()) throw new Error("observer page exposed a composer");
   if (!(await observerPage.getByRole("status").innerText()).includes("another tab or app")) throw new Error("observer page did not show the controller capacity banner");
+  const controllerOutputs = page.locator('[data-part="message"][data-role="assistant"]');
+  const observerOutputs = observerPage.locator('[data-part="message"][data-role="assistant"]');
+  const controllerOutputBefore = await controllerOutputs.count();
+  const observerOutputBefore = await observerOutputs.count();
+  await recoveredField.fill("observer live message");
+  await recoveredField.press("Enter");
+  await page.getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 });
+  await waitFor(async () => await controllerOutputs.count() > controllerOutputBefore, "controller live output");
+  await observerPage.getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer missed live user message without reload: ${await observerPage.locator("body").innerText()}`); });
+  await waitFor(async () => await observerOutputs.count() > observerOutputBefore, "observer live output").catch(async () => { throw new Error(`observer missed live output without reload: ${await observerPage.locator("body").innerText()}`); });
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "08-observer-read-only-review-1440x900.png"), fullPage: true });
+  await observerPage.getByRole("button", { name: "take control" }).click();
+  await observerPage.getByRole("button", { name: "cancel", exact: true }).waitFor({ timeout: 5_000 });
+  await observerPage.getByText("waiting for the other tab or app to close…", { exact: true }).waitFor({ timeout: 5_000 });
+  await observerPage.getByRole("button", { name: "cancel", exact: true }).click();
+  await observerPage.getByRole("button", { name: "take control", exact: true }).waitFor({ timeout: 5_000 });
   await controllerContext.close();
   page = observerPage;
-  await page.getByRole("button", { name: "take control" }).click();
-  await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`take control failed: ${await page.locator("body").innerText()}`); });
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "09-observer-take-control-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
     zetaProcess.kill("SIGTERM");
