@@ -26,9 +26,20 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
         "title": {"type": "string"},
         "create_mode": {"type": "boolean"},
         "layout": {
-            **LAYOUT_SCHEMA,
-            "description": "The complete stored layout to edit with update_layout.",
+            "description": (
+                "The complete stored layout to edit with update_layout, or null when "
+                "layout_complete is false."
+            ),
+            "anyOf": [LAYOUT_SCHEMA, {"type": "null"}],
         },
+        "layout_complete": {
+            "type": "boolean",
+            "description": (
+                "When false, the layout is too large to return and update_layout must "
+                "not be called."
+            ),
+        },
+        "message": {"type": "string"},
         "layout_version": {
             "type": "integer",
             "minimum": 1,
@@ -60,14 +71,11 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
     },
     "required": [
         "route",
-        "title",
         "create_mode",
         "layout",
+        "layout_complete",
         "layout_version",
         "layout_digest",
-        "metric_values",
-        "tools",
-        "collections",
     ],
     "additionalProperties": False,
 }
@@ -112,6 +120,7 @@ def _inspect_result(value: dict[str, Any]) -> CallToolResult:
     result = {
         **value,
         "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
+        "layout_complete": True,
         "metric_values": list(value["metric_values"]),
         "tools": list(value["tools"]),
         "collections": dict(value["collections"]),
@@ -125,30 +134,18 @@ def _inspect_result(value: dict[str, Any]) -> CallToolResult:
         return CallToolResult(content=[TextContent(type="text", text=encoded)])
 
     result["truncated"] = True
-    original_counts = {
-        "blocks": len(result["layout"]["blocks"]),
-        "metric_values": len(result["metric_values"]),
-        "tools": len(result["tools"]),
-        "collections": len(result["collections"]),
-    }
-    result["omitted"] = {key: 0 for key in original_counts}
-    for key, container in (
-        ("blocks", result["layout"]["blocks"]),
-        ("metric_values", result["metric_values"]),
-        ("tools", result["tools"]),
-        ("collections", result["collections"]),
-    ):
-        while len(serialize().encode()) > _INSPECT_MAX_BYTES and container:
-            if isinstance(container, dict):
-                container.popitem()
-            else:
-                container.pop()
-            result["omitted"][key] = original_counts[key] - len(container)
-    result["title"] = result["title"][:256]
-    encoded = serialize()
-    while len(encoded.encode()) > _INSPECT_MAX_BYTES and result["title"]:
-        result["title"] = result["title"][:-1]
+    result["omitted"] = {}
+    for key in ("metric_values", "tools", "collections", "title"):
+        value = result.pop(key)
+        result["omitted"][key] = len(value) if not isinstance(value, str) else 1
         encoded = serialize()
+        if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
+            return CallToolResult(content=[TextContent(type="text", text=encoded)])
+
+    result["layout"] = None
+    result["layout_complete"] = False
+    result["message"] = "this layout is too large to inspect here; do not call update_layout"
+    encoded = serialize()
     return CallToolResult(content=[TextContent(type="text", text=encoded)])
 
 
@@ -197,9 +194,11 @@ def build_mcp(store: PageStore):
                     Tool(
                         name="inspect_page",
                         description=(
-                            "inspect this page and pages it created; layout is the complete "
-                            "stored layout to edit, layout_version is the value for update_layout "
-                            "expected_version, and metric_values reports computed counts by "
+                            "inspect this page and pages it created; when layout_complete is "
+                            "true, layout is the complete stored layout to edit and layout_version "
+                            "is the value for update_layout expected_version; when layout_complete "
+                            "is false, "
+                            "do not call update_layout; metric_values reports computed counts by "
                             "layout block index; legacy pages can inspect only themselves"
                         ),
                         inputSchema=INSPECT_PAGE_SCHEMA,
@@ -225,8 +224,10 @@ def build_mcp(store: PageStore):
                         name="update_layout",
                         description=(
                             "REPLACES the whole layout; any block you leave out is deleted. "
-                            "First call achilles__inspect_page, copy its `layout` exactly, change "
-                            "only what the user asked (insert, reorder, edit, or remove blocks), "
+                            "First call achilles__inspect_page. If layout_complete is false, do "
+                            "not call update_layout. Otherwise, copy its `layout` exactly, change "
+                            "only "
+                            "what the user asked (insert, reorder, edit, or remove blocks), "
                             "and pass the full layout with `layout_version` as expected_version. "
                             "On a version conflict, inspect again and retry. To change another "
                             "page, open that page's chat."

@@ -109,7 +109,13 @@ def state(root):
     return counts, files
 
 
-def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
+@pytest.mark.parametrize(
+    ("block_title_length", "layout_complete"),
+    [(100, True), (256, False)],
+)
+def test_inspect_page_bounds_large_summary_over_public_mcp(
+    creation_client, block_title_length, layout_complete
+):
     _, store, client, home_headers = creation_client
     tools = []
     blocks = []
@@ -131,7 +137,13 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
                 },
             }
         )
-        blocks.append({"type": "list", "title": "b" * 256, "collection": collection})
+        blocks.append(
+            {
+                "type": "list",
+                "title": "b" * block_title_length,
+                "collection": collection,
+            }
+        )
     created = mcp(
         client,
         home_headers,
@@ -170,7 +182,15 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(creation_client):
     value = json.loads(text)
     assert len(text.encode()) <= 8 * 1024
     assert value["truncated"] is True
-    assert set(value["omitted"]) == {"blocks", "metric_values", "tools", "collections"}
+    if layout_complete:
+        assert len(value["layout"]["blocks"]) == 32
+    assert value["layout_complete"] is layout_complete
+    if not layout_complete:
+        assert value["layout"] is None
+        assert value["message"] == (
+            "this layout is too large to inspect here; do not call update_layout"
+        )
+    assert "blocks" not in value["omitted"]
     assert sum(value["omitted"].values()) > 0
 
 
@@ -770,15 +790,17 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
     assert update_tool["description"] == (
         "REPLACES the whole layout; any block you leave out is deleted. First call "
-        "achilles__inspect_page, copy its `layout` exactly, change only what the user asked "
-        "(insert, reorder, edit, or remove blocks), and pass the full layout with "
+        "achilles__inspect_page. If layout_complete is false, do not call update_layout. "
+        "Otherwise, copy its `layout` exactly, change only what the user asked (insert, "
+        "reorder, edit, or remove blocks), and pass the full layout with "
         "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
         "To change another page, open that page's chat."
     )
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]
-        == "The complete stored layout from achilles__inspect_page; any block you leave out "
-        "is deleted."
+        == "When achilles__inspect_page reports layout_complete true, copy its complete stored "
+        "layout; any block you leave out is deleted. Do not call update_layout when "
+        "layout_complete is false."
     )
     assert (
         update_tool["inputSchema"]["properties"]["expected_version"]["description"]
@@ -790,10 +812,12 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
         in update_tool["inputSchema"]["properties"]["layout"]["properties"]["blocks"]["description"]
     )
     inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
-    assert "layout is the complete stored layout to edit" in inspect_tool["description"]
+    assert "when layout_complete is true" in inspect_tool["description"]
+    assert "when layout_complete is false, do not call update_layout" in inspect_tool["description"]
     assert (
         inspect_tool["outputSchema"]["properties"]["layout"]["description"]
-        == "The complete stored layout to edit with update_layout."
+        == "The complete stored layout to edit with update_layout, or null when "
+        "layout_complete is false."
     )
     assert (
         inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]

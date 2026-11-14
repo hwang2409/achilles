@@ -109,8 +109,9 @@ UPDATE_LAYOUT_SCHEMA = {
         "layout": {
             **LAYOUT_SCHEMA,
             "description": (
-                "The complete stored layout from achilles__inspect_page; any block you "
-                "leave out is deleted."
+                "When achilles__inspect_page reports layout_complete true, copy its complete "
+                "stored layout; any block you leave out is deleted. Do not call update_layout "
+                "when layout_complete is false."
             ),
             "properties": {
                 "blocks": {
