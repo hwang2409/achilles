@@ -3,6 +3,12 @@ import { expectationTokens, gradeCheck, gradeReference, gradeTask, structurallyC
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
+test("static file failures are harness errors, not agent failures", () => {
+  const result = gradeReference(task, { browser: [{ text: "static file not found" }] });
+  expect(result.status).toBe("harness_error");
+  expect(result.pass).toBe(false);
+});
+
 test("a setup task without an initial snapshot is a harness error", () => {
   const setupTask = validateTask({ ...task, setup: { tools: [{ name: "list_records", operation: "list", collection: "records" }], records: [] } });
   const result = gradeReference(setupTask, { pages: [{ id: "home", alias: "p" }], pages_seen: [], results: [], turns: 0 });
