@@ -22,7 +22,7 @@
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "create /run-review titled Run Review with a list block for the annotations collection and a detail block for record_id run-002"
+      "prompt": "create /run-review titled Run Review with a list block whose type is list for the annotations collection and a detail block whose type is detail for record_id run-002"
     },
     {
       "id": "annotate",

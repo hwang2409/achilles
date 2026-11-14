@@ -28,7 +28,7 @@
       "kind": "prompt",
       "page": "reading",
       "chat": "reading-chat",
-      "prompt": "use this page's tools to add a book titled Synthetic Book with status unread, update its status to read, then list the books"
+      "prompt": "use this page's tools to add a book with title Synthetic Book and status unread, update its status to read, then list the books in a block whose type is list"
     }
   ],
   "checks": [

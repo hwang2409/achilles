@@ -1,0 +1,72 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "notes"
+      }
+    ],
+    "tools": [
+      {
+        "page_id": "p",
+        "name": "add_note"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": true,
+        "data": {
+          "text": "synthetic note"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "data": {
+          "text": "synthetic note"
+        }
+      }
+    ],
+    "related_page_ids": [
+      "p"
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "notes"
+      }
+    ],
+    "tools": [
+      {
+        "page_id": "p",
+        "name": "add_note"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": true,
+        "data": {
+          "text": "near miss note"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "data": {
+          "text": "near miss note"
+        }
+      }
+    ],
+    "related_page_ids": [
+      "p"
+    ]
+  }
+}

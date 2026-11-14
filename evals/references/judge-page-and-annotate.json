@@ -1,0 +1,124 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      },
+      {
+        "id": "review",
+        "alias": "review",
+        "route": "/run-review"
+      }
+    ],
+    "tools": [
+      {
+        "page_id": "review",
+        "name": "add_annotation"
+      },
+      {
+        "page_id": "review",
+        "name": "list_annotations"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "review",
+        "tool": "achilles__add_annotation",
+        "success": true,
+        "data": {
+          "run_id": "run-002",
+          "verdict": "bad"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "review",
+        "document": {
+          "blocks": [
+            {
+              "type": "list"
+            },
+            {
+              "type": "detail"
+            }
+          ]
+        }
+      }
+    ],
+    "related_page_ids": [
+      "review"
+    ],
+    "records": [
+      {
+        "page_id": "review",
+        "data": {
+          "run_id": "run-002",
+          "verdict": "bad"
+        }
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      },
+      {
+        "id": "review",
+        "alias": "review",
+        "route": "/run-review"
+      }
+    ],
+    "tools": [
+      {
+        "page_id": "review",
+        "name": "add_annotation"
+      },
+      {
+        "page_id": "review",
+        "name": "list_annotations"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "review",
+        "tool": "achilles__add_annotation",
+        "success": true,
+        "data": {
+          "run_id": "run-002",
+          "verdict": "bad"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "review",
+        "document": {
+          "blocks": [
+            {
+              "type": "list"
+            },
+            {
+              "type": "detail"
+            }
+          ]
+        }
+      }
+    ],
+    "related_page_ids": [
+      "review"
+    ],
+    "records": [
+      {
+        "page_id": "review",
+        "data": {
+          "run_id": "run-003",
+          "verdict": "bad"
+        }
+      }
+    ]
+  }
+}

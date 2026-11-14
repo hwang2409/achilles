@@ -3,8 +3,9 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
-import { gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan } from "./eval-grade";
+import { gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan } from "./eval-grade";
 import { makeReport, reportJson, reportMarkdown } from "./eval-report";
+import { readTranscriptUsage } from "./eval-usage";
 
 export { startEvalStack, TOOL_POLICY } from "./eval-stack";
 export { assertTurnBudget, reserveTurns, REQUIRED_FEATURES, connectEvalProtocol, enforceTurnBudget } from "./eval-protocol";
@@ -201,7 +202,8 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
-    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: { status: "unavailable" }, session_history: durable.flatMap(history => history.rows) };
+    const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
+    const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
@@ -220,7 +222,7 @@ function scriptedProvider() {
     if (prompt.includes("/run-review") && turn === 1) toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
     else if (turn === 1) toolCalls = [{ function: { name: "achilles__create_tool", arguments: { bundle: bundle("add_note", "insert", "notes") } } }];
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
-    return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop" })}\n`, { headers: { "content-type": "application/x-ndjson" } });
+    return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
   } });
   return { requests, url: `http://127.0.0.1:${server.port}`, close: () => server.stop(true) };
 }
@@ -241,7 +243,7 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
     options.hidden.push(...hiddenValues(stack.accountHome));
     if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>; }
-    else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider?.requests.length) catalog = catalogProof(provider.requests); result.status = result.pass ? "pass" : "agent_fail"; result.diagnostics.observed_catalog = catalog;
+    else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider?.requests.length) catalog = catalogProof(provider.requests); if (Bun.env.EVAL_SETUP_ONLY === "1") result.status = "pass"; else result = gradeReference(task, snapshot!); result.diagnostics.observed_catalog = catalog;
   } catch (error) { failed = true; stopSuite = stopsSuite(error); result = failureResult(task, stopSuite ? new Error("suite stopped after an account, login, quota, or secret-scan failure") : error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
   if (!stack) return { result: result!, catalog, failed: true, stop_suite: stopSuite };
