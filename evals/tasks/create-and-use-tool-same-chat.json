@@ -4,12 +4,27 @@
     {
       "alias": "notes",
       "source": "setup",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": true
     }
   ],
   "agent_turns": 10,
-  "judge": null,
-  "steps": [],
+  "steps": [
+    {
+      "id": "create",
+      "kind": "prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "create a page-local add_note insert tool for a notes collection"
+    },
+    {
+      "id": "use",
+      "kind": "prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "use add_note to add exactly one note with text synthetic note"
+    }
+  ],
   "checks": [
     {
       "id": "tool",
@@ -36,5 +51,6 @@
       "type": "same_page",
       "page": "notes"
     }
-  ]
+  ],
+  "judge": null
 }

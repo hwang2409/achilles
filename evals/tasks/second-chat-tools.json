@@ -4,12 +4,46 @@
     {
       "alias": "shared",
       "source": "fixture",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": false,
+      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
     }
   ],
   "agent_turns": 8,
-  "judge": null,
-  "steps": [],
+  "steps": [
+    {
+      "id": "chat-a",
+      "kind": "prompt",
+      "page": "shared",
+      "chat": "chat-a",
+      "prompt": "use list_notes to read the seeded note"
+    },
+    {
+      "id": "chat-b",
+      "kind": "prompt",
+      "page": "shared",
+      "chat": "chat-b",
+      "prompt": "use list_notes to read the seeded note"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_notes",
+        "operation": "list",
+        "collection": "notes"
+      }
+    ],
+    "records": [
+      {
+        "id": "seeded-note",
+        "collection": "notes",
+        "data": {
+          "text": "seeded note"
+        }
+      }
+    ]
+  },
   "checks": [
     {
       "id": "chat-a",
@@ -36,5 +70,6 @@
       "type": "no_error",
       "page": "shared"
     }
-  ]
+  ],
+  "judge": null
 }

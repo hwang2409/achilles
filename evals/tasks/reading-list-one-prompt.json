@@ -2,18 +2,25 @@
   "id": "reading-list-one-prompt",
   "page_plan": [
     {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
       "alias": "reading",
       "source": "created",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": false,
+      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
     }
   ],
   "agent_turns": 20,
-  "judge": null,
   "steps": [
     {
       "id": "creation-prompt",
       "kind": "prompt",
-      "page": "reading",
+      "page": "home",
       "chat": "home-chat",
       "prompt": "make a page that tracks my reading list"
     },
@@ -22,7 +29,7 @@
       "kind": "prompt",
       "page": "reading",
       "chat": "reading-chat",
-      "prompt": "add a synthetic book and update its status"
+      "prompt": "use the assigned tools to add synthetic book and update its status to finished"
     }
   ],
   "checks": [
@@ -54,5 +61,6 @@
       "text": "synthetic book"
     }
   ],
-  "prompt": "make a page that tracks my reading list"
+  "prompt": "make a page that tracks my reading list",
+  "judge": null
 }

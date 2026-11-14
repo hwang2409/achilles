@@ -4,12 +4,49 @@
     {
       "alias": "reconnect",
       "source": "fixture",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": false,
+      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
     }
   ],
   "agent_turns": 8,
-  "judge": null,
-  "steps": [],
+  "steps": [
+    {
+      "id": "write",
+      "kind": "prompt",
+      "page": "reconnect",
+      "chat": "reconnect-chat",
+      "prompt": "use add_note once to add reconnect note"
+    },
+    {
+      "id": "disconnect",
+      "kind": "reconnect",
+      "page": "reconnect",
+      "chat": "reconnect-chat"
+    },
+    {
+      "id": "read",
+      "kind": "prompt",
+      "page": "reconnect",
+      "chat": "reconnect-chat",
+      "prompt": "after reconnect, use list_notes to read the note"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_note",
+        "operation": "insert",
+        "collection": "notes"
+      },
+      {
+        "name": "list_notes",
+        "operation": "list",
+        "collection": "notes"
+      }
+    ],
+    "records": []
+  },
   "checks": [
     {
       "id": "mutation",
@@ -21,12 +58,14 @@
     {
       "id": "result",
       "type": "successful_result",
-      "page": "reconnect"
+      "page": "reconnect",
+      "tool": "achilles__list_notes"
     },
     {
       "id": "no-errors",
       "type": "no_error",
       "page": "reconnect"
     }
-  ]
+  ],
+  "judge": null
 }

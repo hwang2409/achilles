@@ -4,12 +4,32 @@
     {
       "alias": "approval",
       "source": "fixture",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": false,
+      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
     }
   ],
   "agent_turns": 6,
-  "judge": null,
-  "steps": [],
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "write",
+      "kind": "prompt",
+      "page": "approval",
+      "chat": "approval-chat",
+      "prompt": "use add_note once to add a note with text approved note"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_note",
+        "operation": "insert",
+        "collection": "notes"
+      }
+    ],
+    "records": []
+  },
   "checks": [
     {
       "id": "approval",
@@ -30,5 +50,6 @@
       "type": "no_error",
       "page": "approval"
     }
-  ]
+  ],
+  "judge": null
 }

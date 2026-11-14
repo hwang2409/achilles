@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { gradeTask, hostToolsGap, validateTask } from "./eval-grade";
 
-const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true }], agent_turns: 2, judge: null, steps: [], checks: [{ id: "page", type: "page_exists", page: "p" }] };
+const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, judge: null, steps: [], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 test("task schema is closed and page writes need a bound page", () => {
   expect(validateTask(task).id).toBe("x-task");
   expect(() => validateTask({ ...task, extra: true })).toThrow("unknown key");

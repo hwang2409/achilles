@@ -48,23 +48,30 @@ jobs:
         working-directory: apps/web
       - run: bun run build
         working-directory: apps/web
-      - run: EVAL_BACKEND=scripted bun test ./scripts/eval*.test.ts
       - id: zeta-pin
         run: echo "sha=$(tr -d '[:space:]' < zeta.rev)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: hwang2409/zeta
           ref: ${{ steps.zeta-pin.outputs.sha }}
-          path: zeta
+          path: .cache/zeta
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.8.17"
           python-version: "3.12"
-      - run: uv sync --project zeta --frozen
+      - run: uv sync --project .cache/zeta --frozen
+      - run: bun test ./scripts/eval*.test.ts
+      - run: EVAL_BACKEND=scripted REPORT_DIR=.cache/eval-ci-success bun scripts/eval.ts --suite create-and-use-tool-same-chat
+      - name: scripted eval forced error cleans up
+        run: |
+          if EVAL_BACKEND=scripted EVAL_FORCE_ERROR=1 REPORT_DIR=.cache/eval-ci-error bun scripts/eval.ts --suite create-and-use-tool-same-chat; then
+            echo "forced provider error unexpectedly passed" >&2
+            exit 1
+          fi
       - run: bunx playwright install --with-deps chromium
       - run: bun run ../../scripts/real-zeta-gate.ts
         env:
-          ZETA_CHECKOUT: ${{ github.workspace }}/zeta
+          ZETA_CHECKOUT: ${{ github.workspace }}/.cache/zeta
         working-directory: apps/web
 
   macos:

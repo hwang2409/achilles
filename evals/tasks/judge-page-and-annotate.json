@@ -4,7 +4,8 @@
     {
       "alias": "review",
       "source": "setup",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": true
     }
   ],
   "agent_turns": 18,
@@ -13,10 +14,18 @@
   },
   "steps": [
     {
+      "id": "author",
+      "kind": "prompt",
+      "page": "review",
+      "chat": "review-chat",
+      "prompt": "create an add_annotation insert tool for annotations"
+    },
+    {
       "id": "annotate",
       "kind": "annotate",
       "page": "review",
-      "chat": "review-chat"
+      "chat": "review-chat",
+      "prompt": "use add_annotation to mark synthetic run-002 as bad"
     }
   ],
   "checks": [
@@ -29,7 +38,7 @@
       "id": "annotation",
       "type": "count",
       "page": "review",
-      "name": "annotations",
+      "name": "records",
       "count": 1
     },
     {

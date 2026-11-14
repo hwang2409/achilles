@@ -4,12 +4,27 @@
     {
       "alias": "authoring",
       "source": "setup",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": true
     }
   ],
   "agent_turns": 8,
-  "judge": null,
-  "steps": [],
+  "steps": [
+    {
+      "id": "create",
+      "kind": "prompt",
+      "page": "authoring",
+      "chat": "authoring-chat",
+      "prompt": "create one valid safe_tool insert tool for a safe_records collection, correcting any schema issue before submitting it"
+    },
+    {
+      "id": "use",
+      "kind": "prompt",
+      "page": "authoring",
+      "chat": "authoring-chat",
+      "prompt": "use safe_tool successfully"
+    }
+  ],
   "checks": [
     {
       "id": "valid-tool",
@@ -35,5 +50,6 @@
       "type": "same_page",
       "page": "authoring"
     }
-  ]
+  ],
+  "judge": null
 }

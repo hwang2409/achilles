@@ -6,7 +6,8 @@ export type TaskCheck = {
   alias?: string;
   [key: string]: unknown;
 };
-export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean };
+export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; baseline_catalog_gap?: string };
+export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }> };
 export type EvalTask = {
   id: string;
   prompt?: string;
@@ -15,6 +16,8 @@ export type EvalTask = {
   judge: null | { turns: number };
   steps: unknown[];
   checks: TaskCheck[];
+  setup?: TaskSetup;
+  approval_mode?: "allow" | "ask";
 };
 export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>;
@@ -47,20 +50,36 @@ const own = (value: object, keys: string[], where: string) => {
 export function validateTask(value: unknown): EvalTask {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("task must be an object");
   const task = value as Record<string, unknown>;
-  own(task, ["id", "prompt", "page_plan", "agent_turns", "judge", "steps", "checks"], "task");
+  own(task, ["id", "prompt", "page_plan", "agent_turns", "judge", "steps", "checks", "setup", "approval_mode"], "task");
   if (typeof task.id !== "string" || !/^[a-z0-9-]+$/.test(task.id)) throw new Error("task.id must be kebab-case");
   if (task.prompt !== undefined && typeof task.prompt !== "string") throw new Error("task.prompt must be a string");
+  if (task.approval_mode !== undefined && !["allow", "ask"].includes(task.approval_mode as string)) throw new Error("approval_mode must be allow or ask");
   if (!Number.isInteger(task.agent_turns) || (task.agent_turns as number) < 1 || (task.agent_turns as number) > 20) throw new Error("agent_turns must be 1..20");
   if (task.judge !== null && (!task.judge || typeof task.judge !== "object" || Array.isArray(task.judge))) throw new Error("judge must be null or an object");
   if (!Array.isArray(task.page_plan) || task.page_plan.length === 0) throw new Error("page_plan must not be empty");
   if (!Array.isArray(task.steps)) throw new Error("steps must be an array");
+  if (task.setup !== undefined) {
+    if (!task.setup || typeof task.setup !== "object" || Array.isArray(task.setup)) throw new Error("setup must be an object");
+    own(task.setup as object, ["tools", "records"], "setup");
+    const setup = task.setup as TaskSetup;
+    if (!Array.isArray(setup.tools) || !Array.isArray(setup.records)) throw new Error("setup tools and records must be arrays");
+    for (const [i, tool] of setup.tools.entries()) {
+      own(tool, ["name", "operation", "collection"], `setup.tools[${i}]`);
+      if (!/^[a-z][a-z0-9_]*$/.test(tool.name) || !["list", "get", "insert", "update"].includes(tool.operation) || !/^[a-z][a-z0-9_]*$/.test(tool.collection)) throw new Error(`invalid setup.tools[${i}]`);
+    }
+    for (const [i, record] of setup.records.entries()) {
+      own(record, ["id", "collection", "data"], `setup.records[${i}]`);
+      if (typeof record.id !== "string" || typeof record.collection !== "string" || !record.data || typeof record.data !== "object" || Array.isArray(record.data)) throw new Error(`invalid setup.records[${i}]`);
+    }
+  }
   const aliases = new Set<string>();
   for (const [i, item] of (task.page_plan as unknown[]).entries()) {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`page_plan[${i}] must be an object`);
-    own(item as object, ["alias", "source", "bind_chat"], `page_plan[${i}]`);
+    own(item as object, ["alias", "source", "bind_chat", "create_mode", "baseline_catalog_gap"], `page_plan[${i}]`);
     const page = item as PagePlan;
     if (!/^[a-z][a-z0-9-]*$/.test(page.alias) || aliases.has(page.alias)) throw new Error(`invalid page alias ${page.alias}`);
-    if (!["fixture", "setup", "created"].includes(page.source) || typeof page.bind_chat !== "boolean") throw new Error(`invalid page_plan[${i}]`);
+    if (!["fixture", "setup", "created"].includes(page.source) || typeof page.bind_chat !== "boolean" || typeof page.create_mode !== "boolean") throw new Error(`invalid page_plan[${i}]`);
+    if (page.baseline_catalog_gap !== undefined && typeof page.baseline_catalog_gap !== "string") throw new Error(`invalid page_plan[${i}].baseline_catalog_gap`);
     aliases.add(page.alias);
   }
   for (const [i, step] of (task.steps as unknown[]).entries()) {
@@ -120,6 +139,7 @@ export function hostToolsGap(snapshot: EvalSnapshot): boolean {
 
 export type EvalDiagnostics = {
   first_call_validity: Record<string, boolean>;
+  observed_catalog?: string[];
   structured_tool_errors: Array<{ code: unknown; path: unknown; expected: unknown }>;
   unstructured_tool_errors: number;
 };

@@ -4,15 +4,56 @@
     {
       "alias": "data",
       "source": "fixture",
-      "bind_chat": true
+      "bind_chat": true,
+      "create_mode": false,
+      "baseline_catalog_gap": "at baseline 1fe26f7, assigned tools are hidden when create mode is off; this expected product gap should fail the task rather than changing setup"
     }
   ],
   "agent_turns": 5,
-  "judge": null,
-  "steps": [],
+  "steps": [
+    {
+      "id": "read",
+      "kind": "prompt",
+      "page": "data",
+      "chat": "data-chat",
+      "prompt": "use the list_records tool and return all records"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_records",
+        "operation": "list",
+        "collection": "records"
+      }
+    ],
+    "records": [
+      {
+        "id": "record-1",
+        "collection": "records",
+        "data": {
+          "id": "record-1"
+        }
+      },
+      {
+        "id": "record-2",
+        "collection": "records",
+        "data": {
+          "id": "record-2"
+        }
+      },
+      {
+        "id": "record-3",
+        "collection": "records",
+        "data": {
+          "id": "record-3"
+        }
+      }
+    ]
+  },
   "checks": [
     {
-      "id": "all-records",
+      "id": "all-records-1",
       "type": "successful_result",
       "page": "data",
       "tool": "achilles__list_records",
@@ -38,5 +79,6 @@
         "id": "record-3"
       }
     }
-  ]
+  ],
+  "judge": null
 }

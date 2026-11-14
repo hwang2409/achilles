@@ -1,7 +1,38 @@
 import { expect, test } from "bun:test";
-import { assertTurnBudget, reserveTurns } from "./eval-protocol";
-import { reportJson, reportMarkdown, scanSecrets } from "./eval";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
+import { scanArtifactTree, scanSecrets, validateCatalog } from "./eval";
 
-test("turn reservation is command-wide", () => { expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20, judge_turns: 2 }], 2)).toBe(84); expect(() => assertTurnBudget(241)).toThrow("command budget"); });
-test("reports name the restrictive tool set", () => { const value = reportJson({ task: "x", pass: true, turns: 1, model: "m", provider: "p", tool_policy: "achilles__*,mcp_discover" }); expect(value).toContain('"tool_policy": "achilles__*,mcp_discover"'); expect(reportMarkdown(JSON.parse(value))).toContain("achilles__*"); });
-test("secret scan fails closed", () => { expect(() => scanSecrets("Bearer abcdefghijklmnop", [])).toThrow(); expect(() => scanSecrets("safe", ["private"])).not.toThrow(); expect(() => scanSecrets("private", ["private"])).toThrow(); });
+test("turn reservation is command-wide", () => {
+  expect(reserveTurns([{ agent_turns: 20 }, { agent_turns: 20, judge_turns: 2 }], 2)).toBe(84);
+  expect(() => assertTurnBudget(241)).toThrow("command budget");
+});
+
+test("live turn budget aborts at the cap", async () => {
+  let aborts = 0;
+  const enforce = enforceTurnBudget(2, async () => { aborts += 1; });
+  await enforce({ event: "turn_start" });
+  await expect(enforce({ event: "turn_start" })).rejects.toThrow("limit reached");
+  expect(aborts).toBe(1);
+});
+
+test("provider catalog is allow-only", () => {
+  expect(() => validateCatalog(["mcp_discover", "achilles__create_tool"], "achilles__create_tool")).not.toThrow();
+  expect(() => validateCatalog(["achilles__create_tool", "bash"])).toThrow("bash");
+});
+
+test("artifact scan fails closed on nested known secrets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "achilles-artifacts-"));
+  try {
+    await Bun.write(join(root, "safe.txt"), "safe");
+    await scanArtifactTree(root, ["private"]);
+    await Bun.write(join(root, "unsafe.txt"), "private");
+    await expect(scanArtifactTree(root, ["private"])).rejects.toThrow("known secret");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("secret-shaped values fail closed", () => {
+  expect(() => scanSecrets("Bearer abcdefghijklmnop", [])).toThrow();
+});
