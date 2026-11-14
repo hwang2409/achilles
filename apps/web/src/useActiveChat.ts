@@ -30,6 +30,12 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
   };
 }
 
+export function persistUntitledChatTitle(sessionId: string, title: string, onSuccess: () => void): void {
+  void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) })
+    .then((response) => { if (response.ok) onSuccess(); })
+    .catch((error) => console.error("could not update chat title", error));
+}
+
 function attachmentError(caught: unknown): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   return message.includes("MCP server is not a trusted global server: achilles")
@@ -295,9 +301,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     }
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
-    const response = await fetch(`/api/chats/${encodeURIComponent(current.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: nextTitle }) });
-    if (response.ok) updateReady(token, (value) => ({ ...value, title: nextTitle }));
-    if (response.ok) setListRefresh((value) => value + 1);
+    persistUntitledChatTitle(current.sessionId, nextTitle, () => {
+      updateReady(token, (value) => ({ ...value, title: nextTitle }));
+      setListRefresh((value) => value + 1);
+    });
   }, [client, state, updateReady]);
 
   const toggle = useCallback(async () => {

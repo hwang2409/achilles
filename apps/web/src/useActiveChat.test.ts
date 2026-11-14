@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
   value: string | null = null;
@@ -90,6 +90,31 @@ describe("steer delivery confirmation", () => {
     }};
     await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {})).rejects.toThrow("timed out");
     expect(timeoutMs).toBeGreaterThan(0);
+  });
+});
+
+describe("untitled chat delivery", () => {
+  test.each([
+    { name: "title update rejects", fetch: () => Promise.reject(new Error("title failed")) },
+    { name: "title update never resolves", fetch: () => new Promise<Response>(() => {}) },
+  ])("clears the draft once after confirmed send when $name", async ({ fetch: titleFetch }) => {
+    const originalFetch = globalThis.fetch;
+    const originalError = console.error;
+    let draft = "sent text plus new";
+    let clears = 0;
+    let sends = 0;
+    globalThis.fetch = titleFetch as typeof fetch;
+    console.error = () => {};
+    try {
+      sends += 1;
+      draft = draft.slice("sent text".length);
+      clears += 1;
+      persistUntitledChatTitle("session", "sent text", () => {});
+      await Promise.resolve();
+      expect(draft).toBe(" plus new");
+      expect(clears).toBe(1);
+      expect(sends).toBe(1);
+    } finally { globalThis.fetch = originalFetch; console.error = originalError; }
   });
 });
 
