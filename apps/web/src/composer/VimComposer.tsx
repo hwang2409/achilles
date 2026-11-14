@@ -150,7 +150,7 @@ function InteractiveVimComposer(props: ComposerProps) {
       const modeBefore = vimMode(view);
       const action = enterAction({ key: event.key, shiftKey: event.shiftKey, isComposing: event.isComposing, keyCode: event.keyCode, mode: modeBefore });
       if (action !== "ignore") {
-        event.preventDefault(); event.stopImmediatePropagation();
+        event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
         if (action === "submit") submitRef.current();
         else {
           const selection = view.state.selection.main;
@@ -159,11 +159,11 @@ function InteractiveVimComposer(props: ComposerProps) {
         return;
       }
       if (event.isComposing || event.keyCode === 229) return;
-      if (event.key === "Escape" && modeBefore === "normal") { event.preventDefault(); event.stopImmediatePropagation(); view.contentDOM.blur(); return; }
+      if (event.key === "Escape" && modeBefore === "normal") { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); view.contentDOM.blur(); return; }
       if (modeBefore === "insert") { if (event.key === "Escape") queueMicrotask(() => syncVimState(view)); return; }
       const ctrlRedo = event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r";
       const allowed = ctrlRedo || event.key === "Tab" || event.key === "Escape" || /^[0-9ghjklwbeiaIoOAxdcypuvVG$]$/.test(event.key);
-      if (!allowed) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+      if (!allowed) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); return; }
       if (event.key === "y" || (cm?.state.vim?.status ?? "").includes("y")) yankPending = true;
       queueMicrotask(() => syncVimState(view));
     };

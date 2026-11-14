@@ -84,4 +84,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   const reconnectedDraft = await field.textContent();
   if (reconnectedDraft !== "kept draft") throw new Error(`vim reconnect changed the kept draft: ${JSON.stringify(reconnectedDraft)}`);
+  await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ vim: false })));
+  await page.getByRole("button", { name: /create mode/ }).first().click();
+  const restoredStock = page.getByRole("textbox", { name: "message", exact: true });
+  await restoredStock.waitFor({ state: "visible", timeout: 20_000 });
+  if (await restoredStock.inputValue() !== "kept draft") throw new Error("switching vim off changed the kept draft");
 }
