@@ -296,10 +296,10 @@ try {
           const createdChat = new URL(page.url()).searchParams.get("chat");
           if (!createdChat) throw new Error("forced chat refresh did not create a chat");
           await loadOlder.click();
+          releaseFirstPage();
           await waitFor(async () => (await rows.count()) > 50, "older chats");
           await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
           await assertActive("chat load-older success", rows.nth(50));
-          releaseFirstPage();
           await page.locator(`[data-chat-id="${createdChat}"]`).waitFor({ state: "attached" });
           if (await rows.count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
         } finally {
