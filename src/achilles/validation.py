@@ -18,6 +18,10 @@ class ValidationError(ValueError):
         super().__init__(expected)
 
 
+def error_document(exc: ValidationError) -> dict[str, str]:
+    return {"code": exc.code, "path": exc.path, "expected": exc.expected}
+
+
 def _pointer(parts: Sequence[Any], schema: Mapping[str, Any]) -> str:
     safe = []
     current: Mapping[str, Any] = schema
