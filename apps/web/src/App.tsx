@@ -43,13 +43,19 @@ export function App() {
     const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
     const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
     const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
-    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}`;
-  } : () => "idle:0:0:0::0");
+    const toolStates = state.outline.map((item) => {
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
+      return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
+    }).join(",");
+    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
+  } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
   const waiting = Number(approvalCount);
   const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
+  const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
+  const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [fulcrumJumpToLatest, setFulcrumJumpToLatest] = useState(false);
   const transcriptRef = useRef<HTMLElement>(null);
@@ -62,6 +68,16 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
+  useEffect(() => store?.subscribe(() => {
+    for (const item of store.getState().outline) {
+      if (item.kind !== "tool") continue;
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
+      if ((value?.tool_call?.name === "create_page" || value?.tool_call?.name === "achilles__create_page") && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+        completedCreatePages.current.add(item.id);
+        setPageRefreshNonce((current) => current + 1);
+      }
+    }
+  }), [store]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
@@ -112,7 +128,7 @@ export function App() {
         <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!connected || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>
       </RunProvider>}
   </>;
-  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;
+  return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
