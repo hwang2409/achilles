@@ -122,6 +122,25 @@ describe("steer delivery confirmation", () => {
   });
 });
 
+describe("chat state persistence", () => {
+  test("a rejected state write does not become an unhandled rejection", async () => {
+    const source = await Bun.file(new URL("./useActiveChat.ts", import.meta.url)).text();
+    const body = source.match(/const recordLastState = useCallback\(\(lastState: string\) => \{([\s\S]*?)\n  \}, \[state\]\);/)?.[1];
+    expect(body).toBeDefined();
+    const script = `
+      const record = new Function("state", "owner", "setListRefresh", "fetch", "lastState", ${JSON.stringify(body)});
+      let unhandled = 0;
+      process.on("unhandledRejection", () => { unhandled += 1; });
+      record({ phase: "ready", sessionId: "session" }, { current: { token: () => 1, current: () => true } }, () => {}, () => Promise.reject(new Error("achilles stopped")), "idle");
+      setImmediate(() => console.log(JSON.stringify({ unhandled })));
+    `;
+    const child = Bun.spawn(["node", "--eval", script], { stdout: "pipe" });
+    const output = await new Response(child.stdout).text();
+    await child.exited;
+    expect(JSON.parse(output).unhandled).toBe(0);
+  });
+});
+
 describe("untitled chat delivery", () => {
   test.each([
     { name: "title update rejects", fetch: () => Promise.reject(new Error("title failed")) },

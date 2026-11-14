@@ -376,7 +376,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (state.phase !== "ready") return;
     const token = owner.current.token();
     void fetch(`/api/chats/${encodeURIComponent(state.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ last_state: lastState }) })
-      .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); });
+      .then(() => { if (owner.current.current(token)) setListRefresh((value) => value + 1); })
+      .catch(() => {});
   }, [state]);
 
   return { state, selectedId, listRefresh, toggleError, toggling, creationError, focusSessionId, retrySaving, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };

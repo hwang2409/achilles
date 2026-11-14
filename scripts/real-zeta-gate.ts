@@ -142,6 +142,9 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
+  const requestFailures: string[] = [];
+  const consoleErrors: string[] = [];
+  const requestPath = (url: string) => { try { return new URL(url).pathname; } catch { return "<invalid-url>"; } };
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
@@ -149,7 +152,11 @@ try {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
     socket.on("framereceived", (event) => frames.push(String(event.payload)));
   });
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(`${e.message}${requestFailures.length ? `; latest request failure: ${requestFailures.at(-1)}` : ""}${consoleErrors.length ? `; latest console error: ${consoleErrors.at(-1)}` : ""}`));
+  page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${requestPath(request.url())}: ${request.failure()?.errorText ?? "unknown failure"}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
+  });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
   await setupAlert.waitFor({ timeout: 20000 });
@@ -885,10 +892,15 @@ try {
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
   const readingBody = await page.locator("body").innerText();
   if (reconnectPage.layout?.blocks?.[1]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
+  const homeIdleWrite = page.waitForResponse((response) => {
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
+    try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
+  });
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
   await page.locator('[data-part="message"]').first().waitFor({ timeout: 20_000 }).catch(() => { throw new Error("reconnected home did not render prior transcript content"); });
+  if (!(await homeIdleWrite).ok()) throw new Error("home idle state write failed before achilles restart");
   const zetaPidBeforeRestart = JSON.parse(await Bun.file(control).text()).pid;
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
@@ -907,6 +919,10 @@ try {
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
+  const reconnectIdleWrite = page.waitForResponse((response) => {
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterRestart)}`) return false;
+    try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
+  });
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
     const state = JSON.parse(await Bun.file(control).text());
@@ -915,6 +931,7 @@ try {
   await waitFor(async () => (await restartAnnotationApproval.count()) > restartApprovalBefore, "post-restart generated tool approval");
   await restartAnnotationApproval.nth(restartApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await page.getByText("post-reconnect complete", { exact: true }).waitFor({ timeout: 20000 });
+  if (!(await reconnectIdleWrite).ok()) throw new Error("reconnect idle state write failed before achilles restart");
   const postReconnect = JSON.parse(await Bun.file(control).text());
   if (postReconnect.pid !== zetaPidBeforeRestart) throw new Error("zeta pid changed during achilles reconnect");
   if (!postReconnect.schemas.some((schema: string) => schema.startsWith("achilles__"))) throw new Error(`reconnected catalog had no achilles tools: ${JSON.stringify(postReconnect.schemas)}`);
@@ -1080,7 +1097,9 @@ try {
     await page.locator(".sidebar-skeleton").first().waitFor({ timeout: 20_000 });
     await page.getByRole("alert").filter({ hasText: "zeta serve is not running" }).waitFor({ timeout: 20_000 });
     await page.screenshot({ path: join(screenshotDir, "07-first-paint-not-running-review-1440x900.png"), fullPage: true });
-    await Promise.all(heldRequests.map((route) => route.abort().catch(() => {})));
+    const failedRequests = heldRequests.map((route) => page.waitForEvent("requestfailed", (request) => request === route.request()));
+    await Promise.all(heldRequests.map((route) => route.abort()));
+    await Promise.all(failedRequests);
     await page.unroute("**/api/pages**", hold);
     await page.unroute("**/api/chats**", hold);
   }
