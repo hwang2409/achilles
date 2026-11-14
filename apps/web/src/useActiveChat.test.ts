@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
+import { createComposerDelivery } from "./composer/useComposerDelivery";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -378,10 +379,11 @@ describe("chat creation lifecycle", () => {
     { name: "mode-applied record clear fails", failWrite: 9, pendingMode: true },
     { name: "reload after attach failure", fail: "attach", restart: true },
     { name: "duplicate input joins one operation", duplicate: true },
+    { name: "double Enter creates and delivers once", doubleEnter: true },
     { name: "pending create mode is applied before ready", pendingMode: true },
-  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, pendingMode, pendingModeWriteFailure }) => {
+  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, doubleEnter, pendingMode, pendingModeWriteFailure }) => {
     const storage = new MemoryStorage();
-    let sessions = 0; let registrations = 0; let mappings = 0; let attaches = 0; let modes = 0; let publishes = 0; let approval = "ask";
+    let sessions = 0; let registrations = 0; let mappings = 0; let attaches = 0; let modes = 0; let publishes = 0; let deliveries = 0; let approval = "ask";
     let failed = false;
     const reached = deferred<void>();
     const gate = deferred<void>();
@@ -395,6 +397,7 @@ describe("chat creation lifecycle", () => {
       if (method === "session_settings") return { model: "offline", approval_mode: approval };
       if (method === "status") return { state: "idle" };
       if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
+      if (method === "send") { deliveries += 1; return {}; }
       throw new Error(`unexpected ${method}`);
     } };
     const fetcher = (async (resource: string | URL | Request) => {
@@ -420,7 +423,20 @@ describe("chat creation lifecycle", () => {
       async (attached, enabled) => { await step("mode"); modes += 1; expect(enabled).toBe(true); return attached; },
       async () => { await step("publish"); publishes += 1; },
     )!;
-    const first = run();
+    if (doubleEnter) {
+      const delivery = createComposerDelivery({
+        state: "idle",
+        defaultValue: "first draft",
+        onDraftChange() {},
+        onDeliveryConfirm() {},
+        onSubmit: async (text, intent, track) => {
+          const attached = await run();
+          await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", intent.steer, track);
+        },
+      });
+      await Promise.all([delivery.submit(), delivery.submit()]);
+    }
+    const first = doubleEnter ? Promise.resolve({ sessionId: "owned-session" }) : run();
     if (cancel) {
       try {
         await waitBounded(reached.promise, () => gate.resolve(), () => first);
@@ -446,6 +462,7 @@ describe("chat creation lifecycle", () => {
     expect(attaches).toBe(fail === "mode" || fail === "publish" || (failWrite !== undefined && failWrite >= 5) ? 2 : 1);
     expect(publishes).toBe(1);
     expect(modes).toBe(pendingMode ? (failWrite === 8 ? 2 : 1) : 0);
+    expect(deliveries).toBe(doubleEnter ? 1 : 0);
     expect(owner.status("home")).toMatchObject({ pending: null, error: null, createMode: undefined });
   }, CONTROLLED_TIMEOUT_MS + 5_000);
 });
