@@ -55,9 +55,10 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 const bundle = (name: string, operation: string, collection: string) => ({ format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: operation === "list" ? { type: "object", additionalProperties: false } : { type: "object", additionalProperties: true }, output_schema: {}, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } });
 const SETUP_SCRIPT = `
 import json, sys
+from pathlib import Path
 from achilles.pages import PageStore, now
 root, page_id, raw = sys.argv[1:]
-setup = json.loads(raw); store = PageStore(root); store.set_create_mode(page_id, True)
+setup = json.loads(raw); store = PageStore(Path(root)); store.set_create_mode(page_id, True)
 for item in setup.get("tools", []): store.create_tool(page_id, item)
 with store.transaction() as db:
     for item in setup.get("records", []):
@@ -181,7 +182,10 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   try {
     for (const step of task.steps) {
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns) throw new Error("task model turn limit has no remaining turn");
-      const session = await getSession(step.chat, step.page); await protocol.send(session.id, step.prompt ?? task.prompt!); const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
+      const session = await getSession(step.chat, step.page);
+      try { await protocol.send(session.id, step.prompt ?? task.prompt!); }
+      catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; }
+      const terminal = await waitForTerminal(protocol, session.id, terminals.get(session.id) ?? 0, () => fatal, signal); terminals.set(session.id, terminal.count); histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
@@ -212,7 +216,8 @@ function catalogProof(requests: Record<string, unknown>[]) {
   catalogs.forEach(catalog => validateCatalog(catalog)); validateCatalog(catalogs[0] ?? [], "achilles__create_tool"); return [...new Set(catalogs.flat())];
 }
 function failureResult(task: EvalTask, error: unknown, hidden: string[]) {
-  return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(error instanceof Error ? error.message : String(error), hidden) } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
+  const detail = error as Error & { code?: number; method?: string; sessionId?: string; pageId?: string };
+  return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "successful run", actual: "harness error", evidence: { message: redact(detail instanceof Error ? detail.message : String(error), hidden), method: detail.method, code: detail.code, session_id: detail.sessionId, page_id: detail.pageId } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 1 } } as ReturnType<typeof gradeTask>;
 }
 
 type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean };
@@ -221,7 +226,11 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
   const retainedRoot = options.keep ? resolve(new URL(`../.cache/evals/${options.runId}/repeat-${index + 1}`, import.meta.url).pathname) : undefined;
   try {
     stack = await startEvalStack({ achillesDir: options.achillesDir, zetaRev: Bun.env.ZETA_REV, model: options.scripted ? "ollama/qwen3:4b" : Bun.env.MODEL, ollamaBaseUrl: provider?.url, maxTurns: task.agent_turns, signal: options.signal, beforeDelete: root => sanitizeAndScanRoot(root, options.hidden) });
-    options.hidden.push(...hiddenValues(stack.accountHome)); ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); if (provider) catalog = catalogProof(provider.requests); result.diagnostics.observed_catalog = catalog;
+    options.hidden.push(...hiddenValues(stack.accountHome));
+    if (Bun.env.EVAL_SETUP_ONLY === "1") {
+      const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>;
+    } else ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal));
+    if (provider) catalog = catalogProof(provider.requests); result.diagnostics.observed_catalog = catalog;
   } catch (error) { failed = true; result = failureResult(task, error, options.hidden); if (provider?.requests.length) { try { catalog = catalogProof(provider.requests); } catch (catalogError) { result = failureResult(task, catalogError, options.hidden); } } }
   finally { provider?.close(); }
   if (!stack) return { result: result!, catalog, failed: true };
@@ -277,4 +286,7 @@ async function main() {
     }
   } finally { process.off("SIGINT", onSigint); process.off("SIGTERM", onSigterm); if (signalCode) process.exitCode = signalCode; }
 }
-if (import.meta.main) await main();
+if (import.meta.main) {
+  await main();
+  process.exit(process.exitCode ?? 0);
+}

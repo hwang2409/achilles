@@ -61,7 +61,19 @@ jobs:
           python-version: "3.12"
       - run: uv sync --project .cache/zeta --frozen
       - run: bun test ./scripts/eval*.test.ts
-      - run: EVAL_BACKEND=scripted REPORT_DIR=.cache/eval-ci-success bun scripts/eval.ts --suite create-and-use-tool-same-chat
+      - run: EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 TASK=agent-data-access,create-and-use-tool-same-chat,harness-smoke,judge-page-and-annotate,second-chat-tools REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
+      - run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          env = {**os.environ, 'EVAL_BACKEND': 'scripted', 'REPORT_DIR': '.cache/eval-ci-success'}
+          result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'judge-page-and-annotate'], env=env, timeout=30)
+          report = json.loads((Path('.cache/eval-ci-success') / 'report.json').read_text())
+          if any(check['id'] == 'harness' for task in report['tasks'] for check in task['checks']):
+              raise AssertionError('judge page-switch harness failure')
+          if result.returncode not in (0, 1):
+              raise SystemExit(result.returncode)
+          PY
       - name: scripted eval forced error cleans up
         run: |
           if EVAL_BACKEND=scripted EVAL_FORCE_ERROR=1 REPORT_DIR=.cache/eval-ci-error bun scripts/eval.ts --suite create-and-use-tool-same-chat; then
