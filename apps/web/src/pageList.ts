@@ -7,7 +7,7 @@ export type ListState<T, M> = {
   meta: M;
 };
 
-type FetchPage<K, T, M> = (key: K, before: string | null, signal: AbortSignal) => Promise<ListPage<T, M>>;
+type FetchPage<K, T, M> = (key: K, before: string | null, signal: AbortSignal, limit?: number) => Promise<ListPage<T, M>>;
 
 const aborted = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
 
@@ -20,13 +20,14 @@ export function createListOwner<K, T, M>(
   fetchPage: FetchPage<K, T, M>,
   itemKey: (item: T) => string,
   publish: (state: ListState<T, M>) => void,
+  firstPageSize: number,
+  maxPageSize: number,
 ) {
   let state = initial;
   let generation = 0;
   let activeKey: K | undefined;
-  let older: T[] = [];
   let continuation = false;
-  let controller: AbortController | null = null;
+  const controllers = new Set<AbortController>();
 
   const update = (next: ListState<T, M>) => {
     state = next;
@@ -36,42 +37,48 @@ export function createListOwner<K, T, M>(
     const keyChanged = activeKey === undefined || !Object.is(activeKey, key);
     const owned = ++generation;
     activeKey = key;
-    controller?.abort();
+    for (const active of controllers) active.abort();
+    controllers.clear();
     continuation = false;
-    controller = new AbortController();
-    if (keyChanged) {
-      older = [];
-      update({ ...state, next: null, loading: true, error: false });
-    } else {
-      update({ ...state, loading: true });
-    }
+    const controller = new AbortController();
+    controllers.add(controller);
+    const loadedDepth = keyChanged ? 0 : Math.max(firstPageSize, state.items?.length ?? 0);
+    update(keyChanged ? { ...state, next: null, loading: true, error: false } : { ...state, loading: true, error: false });
     try {
-      const result = await fetchPage(key, null, controller.signal);
-      if (owned !== generation) return;
-      const firstKeys = new Set(result.items.map(itemKey));
-      older = older.filter((item) => !firstKeys.has(itemKey(item)));
-      update({ items: [...result.items, ...older], next: older.length ? state.next : result.next, loading: false, error: false, meta: result.meta });
+      const items: T[] = [];
+      let before: string | null = null;
+      let result: ListPage<T, M>;
+      do {
+        const targetDepth = Math.max(loadedDepth, state.items?.length ?? 0);
+        const limit = targetDepth ? Math.min(maxPageSize, targetDepth - items.length) : undefined;
+        result = await fetchPage(key, before, controller.signal, limit);
+        if (owned !== generation) return;
+        items.push(...result.items);
+        before = result.next;
+      } while (before && items.length < Math.max(loadedDepth, state.items?.length ?? 0));
+      update({ items, next: result.next, loading: false, error: false, meta: result.meta });
     } catch (error) {
       if (owned !== generation) return;
-      update({ ...state, loading: false, error: aborted(error) ? state.error : true });
+      const failed = !aborted(error);
+      update({ ...state, items: failed && keyChanged ? null : state.items, next: failed && keyChanged ? null : state.next, loading: false, error: failed ? true : state.error });
     } finally {
-      if (owned === generation) controller = null;
+      controllers.delete(controller);
     }
   };
   const more = async () => {
-    if (activeKey === undefined || state.loading || !state.next || continuation) return null;
+    if (activeKey === undefined || !state.next || continuation) return null;
     const owned = generation;
     const key = activeKey;
     const before = state.next;
     continuation = true;
-    controller = new AbortController();
+    const controller = new AbortController();
+    controllers.add(controller);
     update({ ...state, loading: true });
     try {
       const result = await fetchPage(key, before, controller.signal);
       if (owned !== generation) return null;
       const existing = new Set((state.items ?? []).map(itemKey));
       const accepted = result.items.filter((item) => !existing.has(itemKey(item)));
-      older = [...older, ...accepted];
       update({ items: [...(state.items ?? []), ...accepted], next: result.items.length ? result.next : null, loading: false, error: false, meta: result.meta });
       return accepted[0] ?? null;
     } catch (error) {
@@ -81,15 +88,15 @@ export function createListOwner<K, T, M>(
     } finally {
       if (owned === generation) {
         continuation = false;
-        controller = null;
+        controllers.delete(controller);
       }
     }
   };
   const cancel = () => {
     generation += 1;
     continuation = false;
-    controller?.abort();
-    controller = null;
+    for (const active of controllers) active.abort();
+    controllers.clear();
   };
 
   return { reload, more, cancel };

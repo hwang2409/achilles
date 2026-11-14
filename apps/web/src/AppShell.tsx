@@ -111,28 +111,28 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const pageListOwner = useRef<ListOwner<null, PageLink, null> | null>(null);
   const chatListOwner = useRef<ListOwner<string, Chat, number> | null>(null);
   if (!pageListOwner.current) {
-    pageListOwner.current = createListOwner(initialPageListState, async (_key, before, signal) => {
-      const params = new URLSearchParams({ limit: "20" });
+    pageListOwner.current = createListOwner(initialPageListState, async (_key, before, signal, limit = 20) => {
+      const params = new URLSearchParams({ limit: String(limit) });
       if (before) params.set("before", before);
       const response = await fetch(`/api/pages?${params}`, { cache: "no-store", signal });
       if (!response.ok) throw new Error(`could not load pages (${response.status})`);
       const result = await response.json() as { pages: PageLink[]; next: string | null };
       return { items: result.pages, next: result.next, meta: null };
-    }, (item) => item.id, setPageList);
+    }, (item) => item.id, setPageList, 20, 200);
   }
   if (!chatListOwner.current) {
-    chatListOwner.current = createListOwner(initialChatListState, async (search, before, signal) => {
-      const params = new URLSearchParams({ limit: "50" });
+    chatListOwner.current = createListOwner(initialChatListState, async (search, before, signal, limit = 50) => {
+      const params = new URLSearchParams({ limit: String(limit) });
       if (search) params.set("q", search);
       if (before) params.set("before", before);
       const response = await fetch(`/api/chats?${params}`, { cache: "no-store", signal });
       if (!response.ok) throw new Error(`could not load chats (${response.status})`);
       const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
       return { items: result.chats, next: result.next, meta: result.approval_count };
-    }, (item) => item.session_id, setChatList);
+    }, (item) => item.session_id, setChatList, 50, 200);
   }
-  const chats = chatList.items;
-  const loading = chats === null;
+  const chats = chatList.items ?? [];
+  const loading = chatList.items === null && !chatList.error;
   const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
   const openSettings = (opener: Element | null) => {
     setSettingsOpen((open) => {
@@ -238,7 +238,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span><button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button></div>
-      <button className="new-chat" disabled={loading} onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
+      <button className="new-chat" onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className={`page-list ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`}>
@@ -248,8 +248,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
         </div>
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" onKeyDown={chatListKey}>
-        <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>
-        {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
+        <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={loadOlderChats}>load 50 older</button>}
       </section>
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><kbd>⌘K</kbd></footer>

@@ -279,10 +279,46 @@ try {
         await page.keyboard.press("Tab");
         const loadOlder = page.getByRole("button", { name: "load 50 older" });
         await assertActive("chat load-older button", loadOlder);
-        await page.keyboard.press("Enter");
-        await waitFor(async () => (await rows.count()) > 50, "older chats");
-        await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
-        await assertActive("chat load-older success", rows.nth(50));
+        const loadedIds = new Set(await rows.evaluateAll((values) => values.map((row) => row.getAttribute("data-chat-id"))));
+        let sawHeldFirstPage!: () => void;
+        let releaseFirstPage!: () => void;
+        let publishInsertedChat!: (sessionId: string) => void;
+        const firstPageHeld = new Promise<void>((resolve) => { sawHeldFirstPage = resolve; });
+        const firstPageReleased = new Promise<void>((resolve) => { releaseFirstPage = resolve; });
+        const insertedChatPublished = new Promise<string>((resolve) => { publishInsertedChat = resolve; });
+        const holdRefresh = async (route: Route) => {
+          if (new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          sawHeldFirstPage();
+          await firstPageReleased;
+          const response = await route.fetch();
+          const body = await response.json() as { chats: Array<{ session_id: string }> };
+          const inserted = body.chats.find((chat) => !loadedIds.has(chat.session_id))?.session_id;
+          if (!inserted) throw new Error("forced chat refresh did not return a new chat");
+          publishInsertedChat(inserted);
+          await route.fulfill({ response });
+        };
+        await page.route("**/api/chats?**", holdRefresh);
+        const previousUrl = page.url();
+        try {
+          await page.locator(".new-chat").click();
+          await firstPageHeld;
+          const createdChat = new URL(page.url()).searchParams.get("chat");
+          if (!createdChat) throw new Error("forced chat refresh did not create a chat");
+          await loadOlder.click();
+          await waitFor(async () => (await rows.count()) > 50, "older chats");
+          await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
+          await assertActive("chat load-older success", rows.nth(50));
+          releaseFirstPage();
+          const insertedChat = await insertedChatPublished;
+          if (insertedChat !== createdChat) throw new Error(`forced chat refresh returned ${insertedChat}, expected ${createdChat}`);
+          await page.locator(`[data-chat-id="${insertedChat}"]`).waitFor({ state: "attached" });
+          if (await rows.count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
+        } finally {
+          releaseFirstPage();
+          await page.unroute("**/api/chats?**", holdRefresh);
+        }
+        await page.goto(previousUrl);
+        await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
       },
     },
     {
