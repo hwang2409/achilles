@@ -117,7 +117,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     input: ChatCreationInput,
     attach: (sessionId: string) => Promise<T>,
     applyCreateMode?: (attached: T, enabled: boolean) => Promise<T>,
-    publishReady: (attached: T) => Promise<void> = async () => {},
+    publishReady: (attached: T) => Promise<void> | void = () => {},
     create = true,
   ): Promise<T> | null => {
     contexts.set(input.pageId, input);

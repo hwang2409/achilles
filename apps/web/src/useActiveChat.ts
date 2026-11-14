@@ -108,7 +108,7 @@ export async function attachPage(
   token: number,
   create = false,
   applyCreateMode?: (ready: ReadyState, enabled: boolean) => Promise<ReadyState>,
-  publishReady: (ready: ReadyState) => Promise<void> = async () => {},
+  publishReady: (ready: ReadyState) => Promise<void> | void = () => {},
   forceNew = false,
 ): Promise<EmptyState | ReadyState> {
   let ownsLease = false;
@@ -411,7 +411,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (waiting) selectChat(waiting);
   }, [selectChat]);
 
-  const publishReady = useCallback(async (ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
+  const publishReady = useCallback((ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
     requireCurrent(owner.current, token);
     missingCreation.current = null;
     setCreationPageId(ready.page.id);
@@ -473,6 +473,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
       const focusClaim = claimComposerFocus();
       setCreationPageId(state.page.id);
       try {
+        let handedOff: ReadyState | null = null;
         const attached = await attachPage(
           client,
           keyFromPath(),
@@ -482,9 +483,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
           token,
           true,
           applyPendingCreateMode,
-          (ready) => publishReady(ready, token, true, focusClaim.owns(), false),
+          async (ready) => { handedOff = ready; },
         );
-        if (attached.phase !== "ready") throw new Error("created chat did not attach");
+        if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
+        publishReady(attached, token, true, focusClaim.owns(), false);
         current = attached;
       } finally {
         focusClaim.release();
