@@ -58,7 +58,7 @@ function run(args: string[], cwd = root, capture = false) {
   if (result.exitCode !== 0) throw new Error(`${args.join(" ")} failed${capture ? `: ${result.stderr.toString().trim()}` : ""}`);
   return capture ? result.stdout.toString() : "";
 }
-async function processIdentity(pid: number): Promise<ProcessIdentity | null> {
+export async function processIdentity(pid: number): Promise<ProcessIdentity | null> {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const started = Bun.spawnSync(["ps", "-p", String(pid), "-o", "lstart="]);
   const command = Bun.spawnSync(["ps", "-o", "args=", "-p", String(pid)]);
