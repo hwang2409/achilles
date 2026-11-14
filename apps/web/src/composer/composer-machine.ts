@@ -20,7 +20,7 @@ export type ComposerEffect =
 export type ComposerEvent =
   | { type: "state"; state: ComposerState }
   | { type: "edit"; draft: string }
-  | { type: "submit" }
+  | { type: "submit"; turnRunning: boolean }
   | { type: "track"; attempt: number; deliveryId: string }
   | { type: "confirm"; attempt: number }
   | { type: "reject"; attempt: number; message: string; delivered: boolean }
@@ -46,7 +46,7 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "submit": {
       if (model.sending || !model.draft.trim() || model.state === "running" || model.state === "read-only") return { model };
       const attempt = model.nextAttempt;
-      const steer = model.state === "steerable";
+      const steer = event.turnRunning;
       return {
         model: { ...model, sending: true, error: undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
         effect: { type: "submit", attempt, text: model.draft, steer },

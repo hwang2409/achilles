@@ -35,6 +35,15 @@
 .vim-composer[data-mode="normal"] .cm-fat-cursor,
 .vim-composer[data-mode="visual"] .cm-fat-cursor { background: var(--fulcrum-fg); color: var(--fulcrum-bg); }
 
+.vim-guidance {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.vim-guidance [data-part="composer-status"] { flex: 1; }
+
 .vim-mode-chip {
   flex: none;
   min-width: 62px;
@@ -68,9 +77,9 @@
 }
 
 @container (max-width: 480px) {
-  .vim-mode-chip { order: 1; }
-  .vim-composer [data-part="composer-status"] { order: 2; }
-  .vim-pending { order: 3; }
+  .vim-guidance { flex: 1 0 100%; order: 1; }
+  .vim-guidance [data-part="composer-status"] { flex: 1 1 auto; }
+  .vim-pending { order: 2; }
   .vim-composer [data-part="composer-stop"],
-  .vim-composer [data-part="composer-submit"] { order: 4; }
+  .vim-composer [data-part="composer-submit"] { order: 3; }
 }

@@ -145,11 +145,13 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
-      <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
-      <p data-part="composer-status" data-tone={model.error ? "danger" : message ? "busy" : undefined} title={model.error?.text}>
-        <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
-        <span data-part="composer-message" id={`${id}-message`} role="status">{message}</span>
-      </p>
+      <div className="vim-guidance">
+        <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
+        <p data-part="composer-status" data-tone={model.error ? "danger" : message ? "busy" : undefined} title={model.error?.text}>
+          <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
+          <span data-part="composer-message" id={`${id}-message`} role="status">{message}</span>
+        </p>
+      </div>
       <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
       {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
       <button type="submit" data-part="composer-submit" data-action={steer ? "steer" : "send"} aria-label={steer ? "steer the running turn" : "send message"} aria-disabled={!canSubmit || undefined}>{steer ? "steer" : "send"}</button>

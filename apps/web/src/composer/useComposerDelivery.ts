@@ -78,7 +78,7 @@ export function useComposerDelivery({
 
   const submit = useCallback(() => {
     apply({ type: "state", state: stateRef.current });
-    const effect = apply({ type: "submit" });
+    const effect = apply({ type: "submit", turnRunning: store.getState().turn === "running" });
     if (effect?.type !== "submit") return;
     const { attempt: sendAttempt, text, steer } = effect;
     const track = (nextDeliveryId: string) =>
@@ -106,7 +106,7 @@ export function useComposerDelivery({
         },
       )
       .finally(() => apply({ type: "settle", attempt: sendAttempt }));
-  }, [apply, hasMessageDelivered]);
+  }, [apply, hasMessageDelivered, store]);
   const stop = useCallback(() => {
     const effect = apply({ type: "stop" });
     if (effect?.type !== "stop" || !stopRef.current) return;

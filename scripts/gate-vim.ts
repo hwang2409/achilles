@@ -52,6 +52,13 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const originalSession = await sessionId();
   if (!originalSession) throw new Error("stock composer session id missing");
   let stockField = page.getByRole("textbox", { name: "message", exact: true });
+  const reloadDraft = "draft restored after reload";
+  await stockField.fill(reloadDraft);
+  await page.reload();
+  stockField = page.getByRole("textbox", { name: "message", exact: true });
+  await stockField.waitFor({ state: "visible", timeout: 20_000 });
+  if (await stockField.inputValue() !== reloadDraft) throw new Error(`reload draft row: expected ${JSON.stringify(reloadDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
+  await stockField.fill("");
   await stockField.focus();
   await page.keyboard.press("Meta+b");
   if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
@@ -103,6 +110,19 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
   const vimTypography = await page.locator(".vim-composer .cm-editor").evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
   if (!vimTypography.family.includes("IBM Plex Mono") || vimTypography.size !== "16px") throw new Error(`vim composer ignored code font or size settings: ${JSON.stringify(vimTypography)}`);
+  const hintSize = await composer.locator('[data-part="composer-hint"]').evaluate((element) => getComputedStyle(element).fontSize);
+  if (hintSize !== "15px") throw new Error(`composer guidance did not scale with the 16 px setting: ${hintSize}`);
+  if (screenshotDir) {
+    await page.setViewportSize({ width: 760, height: 900 });
+    const guidanceAligned = await composer.locator(".vim-guidance").evaluate((element) => {
+      const chip = element.querySelector(".vim-mode-chip")?.getBoundingClientRect();
+      const hint = element.querySelector('[data-part="composer-status"]')?.getBoundingClientRect();
+      return Boolean(chip && hint && chip.top < hint.bottom && hint.top < chip.bottom);
+    });
+    if (!guidanceAligned) throw new Error("vim mode chip separated from its hint at 760 px");
+    await screenshot("vim-760");
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
   await field.focus();
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("vim did not start in INSERT");
   await openSettings();
@@ -192,6 +212,11 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   confirmedStock = page.getByRole("textbox", { name: "message", exact: true });
   const afterStockSend = JSON.parse(await Bun.file(control).text());
   if (await confirmedStock.inputValue() !== "" || afterStockSend.request_count !== (beforeStockSend.request_count ?? 0) + 1) throw new Error(`duplicate-send row: expected empty draft and exactly one send, got ${JSON.stringify(await confirmedStock.inputValue())} and ${afterStockSend.request_count - (beforeStockSend.request_count ?? 0)} sends`);
+  await page.reload();
+  confirmedStock = page.getByRole("textbox", { name: "message", exact: true });
+  await confirmedStock.waitFor({ state: "visible", timeout: 20_000 });
+  const afterConfirmedReload = JSON.parse(await Bun.file(control).text());
+  if (await confirmedStock.inputValue() !== "" || afterConfirmedReload.request_count !== afterStockSend.request_count) throw new Error(`confirmed send reload row: expected empty draft and no resend, got ${JSON.stringify(await confirmedStock.inputValue())} and ${afterConfirmedReload.request_count - afterStockSend.request_count} sends`);
 
   await confirmedStock.fill("kept draft");
   await confirmedStock.press("Enter");
