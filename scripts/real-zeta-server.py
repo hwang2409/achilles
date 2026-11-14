@@ -32,6 +32,43 @@ def private_proof_home() -> Path:
     return home
 
 
+def book_tool(name: str, operation: str, description: str) -> dict:
+    properties = {
+        "title": {"type": "string"},
+        "status": {"type": "string"},
+    }
+    schema = {
+        "type": "object",
+        "properties": properties,
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+    if operation == "list":
+        input_schema = {"type": "object", "additionalProperties": False}
+    elif operation == "update":
+        input_schema = {
+            "type": "object",
+            "properties": {"record_id": {"type": "string"}, **properties},
+            "required": ["record_id"],
+            "additionalProperties": False,
+        }
+    else:
+        input_schema = schema
+    return {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": name,
+        "description": description,
+        "input_schema": input_schema,
+        "output_schema": {"type": "object"},
+        "implementation": {
+            "operation": operation,
+            "collection": "books",
+            "data_schema": schema,
+        },
+    }
+
+
 def make_server() -> tuple[ZetaServer, Path, str]:
     home = private_proof_home()
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
@@ -83,22 +120,34 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                     "create",
                     "achilles__create_page",
                     {
-                        "route": "/created",
-                        "title": "created",
+                        "route": "/reading",
+                        "title": "reading list",
                         "layout": {
                             "blocks": [
-                                {
-                                    "type": "list",
-                                    "title": "created list",
-                                    "collection": "synthetic items",
-                                }
+                                {"type": "form", "title": "add book", "tool": "add_book"},
+                                {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
+                        "tools": [
+                            book_tool("add_book", "insert", "add a book"),
+                            book_tool("update_book", "update", "update a book"),
+                            book_tool("list_books", "list", "list books"),
+                        ],
                     },
                 )
             ]
         ),
         ScriptedTurn(content=[TextContent("annotation complete")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "add-book",
+                    "achilles__add_book",
+                    {"title": "Synthetic Book", "status": "reading"},
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("book added")]),
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
