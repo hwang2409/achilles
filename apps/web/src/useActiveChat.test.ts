@@ -45,6 +45,55 @@ function attachmentClient(onRequest?: (method: string, params?: unknown) => void
 const page = (sessionId: string | null) => ({ id: "home", route: "/", title: "home", zeta_session_id: sessionId, workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } });
 
 describe("active chat attachment", () => {
+  test("observer switches to the URL chat and releases the previous subscription", async () => {
+    const originalFetch = globalThis.fetch;
+    const subscriptions: string[] = [];
+    const releases: string[] = [];
+    globalThis.fetch = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("controller-chat"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "read-credential" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = {
+      ...attachmentClient(),
+      features: ["session_replay_seq"],
+      request: async (method: string, params: unknown) => {
+        if (method !== "session_history_and_subscribe") throw new Error(`unexpected ${method}`);
+        const sessionId = (params as { session_id: string }).session_id;
+        subscriptions.push(sessionId);
+        return { messages: [], status: { state: "idle" } };
+      },
+      replay: async (id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() { releases.push(id); } }; },
+    };
+    const owner = createAttachmentOwner();
+    try {
+      await attachPage(client as never, "home", "first", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("first", true), true);
+      const second = await attachPage(client as never, "home", "second", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("second", true), true);
+      expect(subscriptions).toEqual(["first", "second"]);
+      expect(releases).toEqual(["first"]);
+      expect(second.sessionId).toBe("second");
+      expect(second.credential).toBe("read-credential");
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
+  test("observer reports a session that cannot be read", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("missing"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "read-credential" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = { ...attachmentClient(), features: ["session_replay_seq"], request: async () => { throw new Error("not found"); } };
+    const owner = createAttachmentOwner();
+    try {
+      await expect(attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true), true)).rejects.toThrow("not available in read-only view");
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
   test("releases an acquired lease when the attachment becomes stale", async () => {
     const originalFetch = globalThis.fetch;
     let releases = 0; let statusRequests = 0; let reached!: () => void; let release!: () => void;

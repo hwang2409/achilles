@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
+import type { SessionLease } from "@fulcrum/zeta";
 import { AppShell } from "./AppShell";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
@@ -19,6 +20,16 @@ function ComposerSlot({ focus, children }: { focus: boolean; children: ReactNode
   const slot = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus({ preventScroll: true }); }, [focus]);
   return <div ref={slot} style={{ display: "contents" }}>{children}</div>;
+}
+
+function useRunSnapshot(store: SessionLease["store"] | null) {
+  return useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
+    const state = store.getState();
+    const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
+    const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
+    const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
+    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}`;
+  } : () => "idle:0:0:0::0");
 }
 
 function connectionFailure(state: ConnectionState): string | null {
@@ -44,13 +55,7 @@ export function App() {
   const active = useActiveChat(client, attached, writable, connectionState.phase === "taking_control");
   const ready = active.state.phase === "ready" ? active.state : null;
   const store = ready?.lease.store ?? null;
-  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
-    const state = store.getState();
-    const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
-    const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
-    const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
-    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}`;
-  } : () => "idle:0:0:0::0");
+  const snapshot = useRunSnapshot(store);
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
   const waiting = Number(approvalCount);

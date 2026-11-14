@@ -744,6 +744,7 @@ try {
   await observerPage.goto(`${origin}/?chat=${encodeURIComponent(observerSession)}`);
   await observerPage.locator(".transcript").waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer attach failed: ${await observerPage.locator("body").innerText()}`); });
   await observerPage.getByRole("status").filter({ hasText: "zeta is in use by another tab or app" }).waitFor({ timeout: 20_000 });
+  await observerPage.getByRole("cell", { name: "from zeta", exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer record list failed: ${await observerPage.locator("body").innerText()}`); });
   if (await observerPage.getByRole("textbox", { name: "message" }).count()) throw new Error("observer page exposed a composer");
   if (!(await observerPage.getByRole("status").innerText()).includes("another tab or app")) throw new Error("observer page did not show the controller capacity banner");
   const controllerOutputs = page.locator('[data-part="message"][data-role="assistant"]');

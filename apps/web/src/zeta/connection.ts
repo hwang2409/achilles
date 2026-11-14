@@ -36,21 +36,22 @@ const attemptOf = (state: ConnectionState) => ("attempt" in state ? state.attemp
 const hasLiveClient = (state: ConnectionState) => state.phase === "connected" || state.phase === "taking_control" || state.phase === "takeover_failed";
 const lostOf = (state: ConnectionState) => hasLiveClient(state) || ("lost" in state && state.lost);
 
-export function reduceConnection(state: ConnectionState, event: ConnectionEvent): ConnectionState {
+function reduceTakeover(state: ConnectionState, event: Extract<ConnectionEvent, { type: "takeover_started" | "takeover_cancelled" | "takeover_outcome" }>): ConnectionState {
   if (event.type === "takeover_started")
     return (state.phase === "connected" && state.authority === "observer") || state.phase === "takeover_failed" ? { phase: "taking_control", authority: "observer", attempt: 0 } : state;
   if (event.type === "takeover_cancelled")
     return state.phase === "taking_control" ? { phase: "connected", authority: "observer" } : state;
-  if (event.type === "takeover_outcome") {
-    if (state.phase !== "taking_control") return state;
-    if (event.outcome === "success") return { phase: "connected", authority: "controller" };
-    if (event.outcome === "error") return { phase: "takeover_failed", authority: "observer", reason: "error" };
-    const attempt = state.attempt + 1;
-    return attempt > TAKEOVER_RETRY_LIMIT
-      ? { phase: "takeover_failed", authority: "observer", reason: "busy_bound" }
-      : { ...state, attempt };
-  }
+  if (state.phase !== "taking_control") return state;
+  if (event.outcome === "success") return { phase: "connected", authority: "controller" };
+  if (event.outcome === "error") return { phase: "takeover_failed", authority: "observer", reason: "error" };
+  const attempt = state.attempt + 1;
+  return attempt > TAKEOVER_RETRY_LIMIT
+    ? { phase: "takeover_failed", authority: "observer", reason: "busy_bound" }
+    : { ...state, attempt };
+}
 
+export function reduceConnection(state: ConnectionState, event: ConnectionEvent): ConnectionState {
+  if (event.type === "takeover_started" || event.type === "takeover_cancelled" || event.type === "takeover_outcome") return reduceTakeover(state, event);
   const lost = lostOf(state);
   switch (event.type) {
     case "attempt":
@@ -165,27 +166,32 @@ export function createConnection({
     next.onClose(() => { if (client === next) { client = null; send({ type: "closed", now: now() }); } });
     send(takingOver ? { type: "takeover_outcome", outcome: "success" } : { type: "connected", authority });
   };
+  const discardStale = (opened: OpenResult, current: () => boolean) => {
+    if (current()) return false;
+    if (opened.kind === "connected") opened.client.close();
+    return true;
+  };
+  const finishTakeover = (opened: OpenResult) => {
+    if (opened.kind === "connected") return installClient(opened.client, "controller", true);
+    send({ type: "takeover_outcome", outcome: opened.kind === "busy" ? "busy" : "error" });
+    if (state.phase === "taking_control") schedule(backoff(state.attempt));
+  };
+  const finishObserverOpen = (opened: OpenResult) => {
+    if (opened.kind === "connected") return installClient(opened.client, "observer", false);
+    if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
+    if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
+    send({ type: "capacity", now: now() });
+  };
   const finishControllerOpen = async (opened: OpenResult, discovery: ZetaDiscovery, takingOver: boolean, current: () => boolean) => {
-    if (!current()) { if (opened.kind === "connected") opened.client.close(); return; }
-    if (takingOver) {
-      const outcome = opened.kind === "connected" ? "success" : opened.kind === "busy" ? "busy" : "error";
-      if (opened.kind === "connected") installClient(opened.client, "controller", true);
-      else { send({ type: "takeover_outcome", outcome }); if (state.phase === "taking_control") schedule(backoff(state.attempt)); }
-      return;
-    }
+    if (discardStale(opened, current)) return;
+    if (takingOver) return finishTakeover(opened);
     if (opened.kind === "connected") return installClient(opened.client, "controller", false);
-    if (opened.kind !== "busy") {
-      if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
-      if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
-      return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
-    }
+    if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
+    if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
+    if (opened.kind !== "busy") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
     if (!discovery.observer_token) return send({ type: "capacity", now: now() });
     const observer = await openRole(discovery, "observer", connect, helloTimeoutMs);
-    if (!current()) { if (observer.kind === "connected") observer.client.close(); return; }
-    if (observer.kind === "connected") return installClient(observer.client, "observer", false);
-    if (observer.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
-    if (observer.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
-    send({ type: "capacity", now: now() });
+    if (!discardStale(observer, current)) finishObserverOpen(observer);
   };
   const failAttempt = (event: ConnectionEvent, takingOver: boolean) => {
     if (takingOver) send({ type: "takeover_outcome", outcome: "error" });
