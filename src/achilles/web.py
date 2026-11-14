@@ -408,13 +408,25 @@ def create_app() -> Starlette:
         principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            error = ValidationError("", "valid JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        if not isinstance(body, dict):
+            error = ValidationError("", "JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
         try:
             await anyio.to_thread.run_sync(
-                store.rollback_tool, page_id, request.path_params["name"], body["version"]
+                store.rollback_tool,
+                page_id,
+                request.path_params["name"],
+                body.get("version"),
+                body.get("expected_version"),
             )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        except ValidationError as exc:
+            status = 409 if exc.code == "conflict" else 400
+            return JSONResponse({"error": error_document(exc)}, status_code=status)
         await notify_tools_changed(page_id)
         return JSONResponse({"ok": True})
 

@@ -1603,3 +1603,126 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
         "expected": "only properties: layout, expected_version",
     }
     assert store.layout(other_id) == before
+
+
+LAYOUT_V2 = {"blocks": [{"type": "text", "text": "first"}]}
+LAYOUT_V3 = {"blocks": [{"type": "text", "text": "second"}]}
+
+
+def _restore(client, headers, arguments):
+    result = mcp(
+        client, headers, 90, "tools/call", {"name": "restore_version", "arguments": arguments}
+    )
+    return result.get("isError", False), json.loads(result["content"][0]["text"])
+
+
+def _active_tool_version(store):
+    return store.page_tools("home")[0]["version"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "layout",
+        "tool",
+        "stale_layout",
+        "stale_tool",
+        "other_page",
+        "unknown_version",
+        "route_bad_json",
+    ],
+)
+def test_restore_version_guards_over_public_interfaces(creation_client, monkeypatch, case):
+    root, store, client, headers = creation_client
+    store.create_tool("home", bundle())
+    store.create_tool("home", {**bundle(), "description": "insert books v2"})
+    assert store.update_layout("home", LAYOUT_V2, 1)[0] == 2
+    assert store.update_layout("home", LAYOUT_V3, 2)[0] == 3
+    store.create_page("/other", "other", LAYOUT_V2)
+    notified = []
+
+    async def record_list_changed(session):
+        notified.append(session)
+
+    monkeypatch.setattr(
+        "mcp.server.session.ServerSession.send_tool_list_changed", record_list_changed
+    )
+    mcp(client, headers, 80, "tools/list", {})
+    before = state(root)
+    if case == "layout":
+        error, value = _restore(
+            client, headers, {"kind": "layout", "version": 2, "expected_version": 3}
+        )
+        assert not error, value
+        assert (value["version"], value["restored_from"]) == (4, 2)
+        assert store.layout("home") == LAYOUT_V2
+        inspected = mcp(
+            client, headers, 91, "tools/call", {"name": "inspect_page", "arguments": {}}
+        )
+        versions = json.loads(inspected["content"][0]["text"])["layout_versions"]
+        assert [row["version"] for row in versions] == [4, 3, 2]
+        after = state(root)[0]
+        assert after["layout_version"] == before[0]["layout_version"] + 1
+        assert after["audit"] == before[0]["audit"] + 1
+        return
+    if case == "tool":
+        error, value = _restore(
+            client,
+            headers,
+            {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 2},
+        )
+        assert not error, value
+        assert value == {"kind": "tool", "name": "add_book", "version": 1}
+        assert _active_tool_version(store) == 1
+        assert notified, "tools/list_changed was not sent"
+        assert state(root)[0]["audit"] == before[0]["audit"] + 1
+        return
+    if case == "route_bad_json":
+        raw = TestClient(
+            web.create_app(),
+            base_url="http://127.0.0.1:8000",
+            client=("127.0.0.1", 1234),
+            raise_server_exceptions=False,
+        )
+        response = raw.post(
+            "/api/pages/home/tools/add_book/rollback",
+            headers={
+                "authorization": f"Bearer {store.ensure_credential('home')}",
+                "origin": "http://127.0.0.1:8000",
+                "content-type": "application/json",
+            },
+            content=b"{",
+        )
+        assert response.status_code == 400
+        assert state(root) == before
+        return
+    arguments, code, path = {
+        "stale_layout": (
+            {"kind": "layout", "version": 2, "expected_version": 2},
+            "conflict",
+            "/expected_version",
+        ),
+        "stale_tool": (
+            {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 1},
+            "conflict",
+            "/expected_version",
+        ),
+        "other_page": (
+            {"kind": "layout", "route": "/other", "version": 2, "expected_version": 3},
+            "forbidden",
+            "/route",
+        ),
+        "unknown_version": (
+            {"kind": "layout", "version": 99, "expected_version": 3},
+            "not_found",
+            "/version",
+        ),
+    }[case]
+    error, value = _restore(client, headers, arguments)
+    assert error, value
+    assert (value["code"], value["path"]) == (code, path)
+    if case == "other_page":
+        assert value["hint"] == "To change another page, open that page's chat."
+    assert state(root) == before
+    assert store.layout("home") == LAYOUT_V3
+    assert _active_tool_version(store) == 2

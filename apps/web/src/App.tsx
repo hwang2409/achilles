@@ -123,10 +123,10 @@ export function App() {
       if (item.kind !== "tool") continue;
       const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
       const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
         completedCreatePages.current.add(item.id);
         setPageRefreshNonce((current) => current + 1);
-        if (["update_layout", "achilles__update_layout"].includes(name)) void active.refreshPage();
+        if (["update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
       }
     }
   }), [active.refreshPage, store]);
