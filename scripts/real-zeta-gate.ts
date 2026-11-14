@@ -895,7 +895,7 @@ try {
   const homeIdleWrite = page.waitForResponse((response) => {
     if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
-  });
+  }).catch(() => { throw new Error("missing home idle state write before achilles restart"); });
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
@@ -922,7 +922,7 @@ try {
   const reconnectIdleWrite = page.waitForResponse((response) => {
     if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterRestart)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
-  });
+  }).catch(() => { throw new Error("missing reconnect idle state write before achilles restart"); });
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
     const state = JSON.parse(await Bun.file(control).text());
@@ -1097,7 +1097,8 @@ try {
     await page.locator(".sidebar-skeleton").first().waitFor({ timeout: 20_000 });
     await page.getByRole("alert").filter({ hasText: "zeta serve is not running" }).waitFor({ timeout: 20_000 });
     await page.screenshot({ path: join(screenshotDir, "07-first-paint-not-running-review-1440x900.png"), fullPage: true });
-    const failedRequests = heldRequests.map((route) => page.waitForEvent("requestfailed", (request) => request === route.request()));
+    const failedRequests = heldRequests.map((route) => page.waitForEvent("requestfailed", (request) => request === route.request())
+      .catch(() => { throw new Error(`missing request failure for held route ${route.request().method()} ${requestPath(route.request().url())}`); }));
     await Promise.all(heldRequests.map((route) => route.abort()));
     await Promise.all(failedRequests);
     await page.unroute("**/api/pages**", hold);
