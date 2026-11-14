@@ -60,8 +60,12 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("desktop settings escape did not restore opener focus"); });
 
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  if (!await page.evaluate(() => document.activeElement === document.body)) throw new Error("could not blur focus to body");
+  await page.evaluate(() => {
+    document.body.tabIndex = -1;
+    document.body.focus();
+    document.body.removeAttribute("tabindex");
+  });
+  if (!await page.evaluate(() => document.activeElement === document.body)) throw new Error("could not move focus to body");
   await openSettings(page);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "message").catch(() => { throw new Error("body-opened settings escape did not focus the composer"); });
