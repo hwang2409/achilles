@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
-import { assertSetupPreconditions, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup } from "./eval-grade";
+import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup } from "./eval-grade";
 import { makeReport, reportJson, reportMarkdown } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 
@@ -105,23 +105,15 @@ layout = store.layout(page_id)
 if hasattr(store, "inspect_page"):
     summary = store.inspect_page(page_id)
 else:
-    page = store.page(page_id); tools = store.page_tools(page_id)
-    summary = {"layout": {"version": page["active_layout_version"] or 1}, "tools": [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"]} for tool in tools]}
+    page = store.page(page_id); summary = {"layout": {"version": page["active_layout_version"] or 1}}
+tools = store.page_tools(page_id)
+summary["tools"] = [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"], "input_schema": tool["input_schema"]} for tool in tools]
 collections = {item["collection"] for item in setup.get("records", [])}
 print(json.dumps({"inspect": summary, "layout": layout, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
 export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
-  const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
-  const equal = (left: unknown, right: unknown) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
-  const inspect = actual.inspect as Record<string, any> | undefined;
-  if (!inspect) throw new Error("task setup verification returned no page inspection");
-  const expectedTools = setup.tools.map(tool => ({ name: tool.name, operations: [tool.operation], collection: tool.collection }));
-  for (const expected of expectedTools) if (!inspect.tools?.some((tool: Record<string, unknown>) => expected.name === tool.name && expected.collection === tool.collection && equal(expected.operations, tool.operations))) throw new Error(`task setup verification failed for tool ${expected.name}`);
-  if (setup.initial_layout && ((inspect.layout_version ?? inspect.layout?.version) !== 1 || !equal(actual.layout, setup.initial_layout))) throw new Error("task setup verification failed for initial_layout at version 1");
-  for (const expected of setup.records) {
-    const record = actual.records?.[expected.collection]?.find((item: Record<string, unknown>) => item.record_id === expected.id);
-    if (!record || Object.entries(expected.data).some(([key, value]) => !equal(record[key], value))) throw new Error(`task setup verification failed for record ${expected.collection}/${expected.id}`);
-  }
+  const failures = declaredSeedMismatches(setup, actual);
+  if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
 }
 export async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
   const plan = task.page_plan.find(page => page.source !== "created")!;

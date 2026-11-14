@@ -43,7 +43,19 @@
           "page_id": "home",
           "name": "add_note",
           "operation": "insert",
-          "collection": "notes"
+          "collection": "notes",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
         },
         {
           "page_id": "home",
@@ -101,7 +113,19 @@
           "page_id": "home",
           "name": "add_note",
           "operation": "insert",
-          "collection": "notes"
+          "collection": "notes",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
         },
         {
           "page_id": "home",

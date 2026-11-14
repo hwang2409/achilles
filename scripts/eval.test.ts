@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
 import { classifyTaskSupport, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
@@ -16,6 +17,34 @@ test("setup verification accepts old and inspect_page layout shapes", () => {
   const base = { layout: setup.initial_layout, inspect: { tools: [] } };
   expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: { ...setup.initial_layout, version: 1, digest: "old" } } })).not.toThrow();
   expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: setup.initial_layout, layout_version: 1, layout_digest: "new" } })).not.toThrow();
+});
+
+test("every declared seed key is verified before setup and grading", () => {
+  const setup: TaskSetup = { tools: [{ name: "add_note", operation: "insert", collection: "notes", input_schema: { type: "object", required: ["text"] } }], records: [{ id: "note-1", collection: "notes", data: { text: "seeded" } }], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
+  const stored = { tool_versions: [{ page_id: "home", ...setup.tools[0] }], records: [{ page_id: "home", ...setup.records[0] }], layouts: [{ page_id: "home", version: 1, document: setup.initial_layout }] } as Record<string, any>;
+  const taskFor = (seed: TaskSetup) => validateTask({ id: "declared-seeds", page_plan: [{ alias: "p", source: "setup", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "work", kind: "prompt", page: "p", chat: "c", prompt: "work" }], setup: seed, checks: [{ id: "page", type: "page_exists", page: "p" }] });
+  const grade = (seed: TaskSetup, initial: Record<string, any>) => gradeReference(taskFor(seed), { initial, pages: [{ id: "home", alias: "p" }] });
+  const mutations: Array<[string, (state: Record<string, any>) => void]> = [
+    ["tool name", state => { state.tool_versions[0].name = "wrong"; }],
+    ["tool operation", state => { state.tool_versions[0].operation = "list"; }],
+    ["tool collection", state => { state.tool_versions[0].collection = "wrong"; }],
+    ["tool input_schema", state => { state.tool_versions[0].input_schema = { type: "object", required: ["title"] }; }],
+    ["record id", state => { state.records[0].id = "wrong"; }],
+    ["record collection", state => { state.records[0].collection = "wrong"; }],
+    ["record data", state => { state.records[0].data = { text: "wrong" }; }],
+    ["initial_layout", state => { state.layouts[0].document = { blocks: [] }; }],
+  ];
+  for (const [key, mutate] of mutations) {
+    const changed = structuredClone(stored); mutate(changed);
+    expect(() => verifySetup(setup, changed), `${key} setup verification`).toThrow("seed mismatch");
+    expect(grade(setup, changed).status, `${key} grading precondition`).toBe("harness_error");
+  }
+  expect(() => verifySetup(setup, stored)).not.toThrow();
+  expect(grade(setup, stored).status).toBe("pass");
+
+  const withoutSchema = { ...setup, tools: [{ name: "add_note", operation: "insert" as const, collection: "notes" }] };
+  expect(() => verifySetup(withoutSchema, stored), "an undeclared default input_schema is ignored").not.toThrow();
+  expect(grade(withoutSchema, stored).status).toBe("pass");
 });
 
 test("setup seeds an initial layout on a fresh page at version 1", async () => {

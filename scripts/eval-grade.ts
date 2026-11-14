@@ -314,22 +314,36 @@ export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResul
   return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...(failure ? { transition: { field: failure.field, before: failure.before, after: failure.after } } : {}) }, ...(failure ? { reason: failure.reason } : {}) };
 }
 
-export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
-  if (!task.setup) return [];
+const canonicalSeedValue = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalSeedValue) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalSeedValue(item)])) : value;
+const sameSeedValue = (left: unknown, right: unknown) => JSON.stringify(canonicalSeedValue(left)) === JSON.stringify(canonicalSeedValue(right));
+
+export function declaredSeedMismatches(setup: TaskSetup, storedState: EvalSnapshot & Record<string, any>): string[] {
   const failures: string[] = [];
-  for (const expected of task.setup.tools) {
-    const tool = rows(snapshot, "tool_versions").find(row => row.page_id === "home" && row.name === expected.name && row.operation === expected.operation && row.collection === expected.collection);
-    if (!tool) failures.push(`seed missing: tool ${expected.name}`);
+  const inspected = storedState.inspect as Record<string, any> | undefined;
+  const tools = storedState.tool_versions ?? inspected?.tools ?? [];
+  for (const expected of setup.tools) {
+    const tool = tools.find((row: Record<string, any>) => (row.page_id === undefined || row.page_id === "home") && row.name === expected.name);
+    const stored = tool && { ...tool, operation: tool.operation ?? tool.operations?.[0] };
+    if (!stored || Object.entries(expected).some(([key, value]) => !sameSeedValue(stored[key], value))) failures.push(`seed mismatch: tool ${expected.name}`);
   }
-  for (const expected of task.setup.records) {
-    const record = rows(snapshot, "records").find(row => row.page_id === "home" && row.collection === expected.collection && row.id === expected.id && structurallyContains(row.data, expected.data));
-    if (!record) failures.push(`seed missing: record ${expected.collection}/${expected.id}`);
+
+  const records = Array.isArray(storedState.records) ? storedState.records : Object.entries(storedState.records ?? {}).flatMap(([collection, items]) => (items as Array<Record<string, unknown>>).map(item => ({ ...item, id: item.record_id, collection, data: Object.fromEntries(Object.entries(item).filter(([key]) => !["record_id", "revision"].includes(key))) })));
+  for (const expected of setup.records) {
+    const record = records.find((row: Record<string, any>) => (row.page_id === undefined || row.page_id === "home") && (row.id ?? row.record_id) === expected.id && row.collection === expected.collection);
+    const stored = record && { ...record, id: record.id ?? record.record_id, data: record.data ?? Object.fromEntries(Object.keys(expected.data).map(key => [key, record[key]])) };
+    if (!stored || Object.entries(expected).some(([key, value]) => !sameSeedValue(stored[key], value))) failures.push(`seed mismatch: record ${expected.collection}/${expected.id}`);
   }
-  if (task.setup.initial_layout) {
-    const layout = rows(snapshot, "layouts").find(row => row.page_id === "home" && row.version === 1 && structurallyContains(row.document, task.setup!.initial_layout));
-    if (!layout) failures.push("seed missing: initial_layout at version 1");
+
+  if (setup.initial_layout) {
+    const layout = storedState.layouts?.find((row: Record<string, any>) => row.page_id === "home" && row.version === 1)?.document ?? storedState.layout;
+    const version = storedState.layouts ? (layout === undefined ? undefined : 1) : inspected?.layout_version ?? inspected?.layout?.version;
+    if (version !== 1 || !sameSeedValue(layout, setup.initial_layout)) failures.push("seed mismatch: initial_layout at version 1");
   }
   return failures;
+}
+
+export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  return task.setup ? declaredSeedMismatches(task.setup, snapshot) : [];
 }
 function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
   if (!task.setup) return [];
