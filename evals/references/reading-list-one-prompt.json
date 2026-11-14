@@ -112,7 +112,7 @@
     "browser": [
       {
         "page_id": "reading",
-        "text": "Synthetic Book read"
+        "text": "Synthetic Book\tfinished"
       }
     ],
     "related_page_ids": [
@@ -271,7 +271,7 @@
     "browser": [
       {
         "page_id": "reading",
-        "text": "Synthetic Book read"
+        "text": "Synthetic Book\tread"
       }
     ],
     "related_page_ids": [
