@@ -45,6 +45,12 @@
       "type": "successful_result",
       "page": "home",
       "tool": "achilles__create_page"
+    },
+    {
+      "id": "visible",
+      "type": "browser_text",
+      "page": "smoke",
+      "text": "smoke"
     }
   ]
 }

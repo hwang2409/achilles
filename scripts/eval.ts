@@ -204,8 +204,14 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
   try {
     const output = [];
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
-      const pageId = pages.get(plan.alias); const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
-      const page = await browser.newPage(); await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "networkidle", timeout: 15_000 }); output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
+      const pageId = pages.get(plan.alias); if (!pageId) continue;
+      const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
+      const page = await browser.newPage(); await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "networkidle", timeout: 15_000 });
+      try { await page.locator(".connection-state").waitFor({ state: "hidden", timeout: 5_000 }); }
+      catch { const text = await page.locator("body").innerText({ timeout: 10_000 }); throw new Error(`browser could not connect to zeta: ${text}`); }
+      const text = await page.locator("body").innerText({ timeout: 10_000 });
+      if (/(?:connecting to zeta|connection to zeta was lost|zeta serve is not running|zeta rejected this browser connection|zeta is not responding|zeta version is not compatible)/i.test(text)) throw new Error(`browser could not connect to zeta: ${text}`);
+      output.push({ page_id: pageId, text }); await page.close();
     }
     return output;
   } finally { await browser.close(); }
@@ -255,6 +261,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
+    await protocol.close();
     const snapshot: EvalSnapshot = { ...after, ...tools, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows) };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {

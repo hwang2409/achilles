@@ -171,6 +171,12 @@
               "route": "/eval-smoke"
             }
           }
+        ],
+        "browser": [
+          {
+            "page_id": "smoke",
+            "text": "smoke"
+          }
         ]
       }
     },
