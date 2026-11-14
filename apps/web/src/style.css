@@ -36,6 +36,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .page-list { flex: 0 0 auto; margin-top: 14px; border-bottom: 1px solid var(--fulcrum-border); padding-bottom: 8px; }
 .page-list a { display: flex; gap: 14px; padding: 8px 16px; font-size: 13px; }
 .page-list a span { color: var(--fulcrum-muted); }
+.page-list-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; color: var(--fulcrum-muted); font-size: 12px; }
+.page-list-error button { color: var(--fulcrum-accent); }
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
 .chat-group h2 { position: sticky; top: 36px; z-index: 1; margin: 0; padding: 8px 16px 6px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 11px; font-weight: 400; text-transform: lowercase; }

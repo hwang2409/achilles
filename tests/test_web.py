@@ -69,6 +69,43 @@ def chat_client() -> TestClient:
     )
 
 
+def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at,create_mode,credential_hash) "
+            "VALUES(?,?,?,?,?,?,?)",
+            ("reading", "/reading", "reading", "2025-01-01", "2025-01-02", 1, "secret"),
+        )
+        db.execute("UPDATE page SET created_by_page_id='home' WHERE id='reading'")
+        db.execute(
+            "INSERT INTO chat(session_id,page_id,created_at,updated_at) VALUES(?,?,?,?)",
+            ("reading-chat", "reading", "2025-01-01", "2025-01-02"),
+        )
+    client = chat_client()
+    response = client.get("/api/pages")
+    assert response.status_code == 200
+    payload = response.json()
+    assert {page["route"] for page in payload["pages"]} == {"/", "/reading"}
+    reading = next(page for page in payload["pages"] if page["route"] == "/reading")
+    assert reading["chat_count"] == 1
+    assert reading["created_by_route"] == "/"
+    assert not {"credential_hash", "workspace", "zeta_session_id"} & reading.keys()
+    assert client.get("/api/pages?limit=201").status_code == 400
+    assert client.get("/api/pages?limit=invalid").status_code == 400
+    assert client.get("/api/pages", headers={"origin": "http://evil.test"}).status_code == 403
+
+    with store.transaction() as db:
+        for index in range(200):
+            db.execute(
+                "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+                (f"page-{index}", f"/page-{index}", f"page {index}", "2025-02-01", "2025-02-01"),
+            )
+    capped = client.get("/api/pages?limit=200").json()
+    assert len(capped["pages"]) == 200
+    assert capped["truncated"] is True
+
+
 def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     with store.transaction() as db:

@@ -22,6 +22,7 @@ type Props = {
   onNewChat: () => Promise<void>;
   onSelectChat: (chat: Chat) => void;
   refreshKey: number;
+  pageRefreshKey: string;
 };
 
 const pageHref = (route: string) => {
@@ -73,13 +74,16 @@ function Highlight({ value, query }: { value: string; query: string }) {
   return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
 }
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onSelectChat, refreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onSelectChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [chats, setChats] = useState<Chat[] | null>(null);
+  const [pages, setPages] = useState<PageLink[] | null>(null);
+  const [pagesError, setPagesError] = useState(false);
+  const [pagesRetry, setPagesRetry] = useState(0);
   const [next, setNext] = useState<string | null>(null);
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
@@ -114,6 +118,16 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useEffect(() => { setActiveResult(0); }, [search]);
   useEffect(() => { const media = matchMedia("(max-width: 759px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (narrow && drawer) requestAnimationFrame(() => firstFocusable(sidebar.current)?.focus()); }, [drawer, narrow]);
+  useEffect(() => {
+    let live = true;
+    const load = () => void fetch("/api/pages?limit=200", { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) throw new Error(`could not load pages (${response.status})`);
+      const result = await response.json() as { pages: PageLink[]; truncated: boolean };
+      if (live) { setPages(result.pages); setPagesError(false); }
+    }).catch(() => { if (live) setPagesError(true); });
+    const settle = setTimeout(load, 0);
+    return () => { live = false; clearTimeout(settle); };
+  }, [pageRefreshKey, pagesRetry]);
   useEffect(() => {
     let live = true;
     const params = new URLSearchParams({ limit: "50" });
@@ -151,12 +165,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [loading, onNewChat, settingsOpen]);
 
-  const pages = useMemo(() => {
-    const values = new Map<string, PageLink>();
-    if (page) values.set(page.id, page);
-    for (const chat of chats ?? []) values.set(chat.page_id, { id: chat.page_id, route: chat.page_route, title: chat.page_title });
-    return [...values.values()];
-  }, [chats, page]);
+  const pageRows = pages ?? [];
   const waitingTotal = Math.max(waiting, approvalCount);
   const groups = useMemo(() => {
     const values = new Map<string, Chat[]>();
@@ -189,8 +198,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className="page-list">
-        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pages.length}</b></button>
-        {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}
+        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pagesError ? "!" : pages === null ? "" : pageRows.length}</b></button>
+        {pagesError ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => { setPagesError(false); setPagesRetry((value) => value + 1); }}>retry</button></div> : pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && pageRows.map((item) => <a key={item.id} href={pageHref(item.route)}><span>/</span>{item.title}</a>)}
       </section>
       <section className="chat-list" id="chat-search-results">
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>

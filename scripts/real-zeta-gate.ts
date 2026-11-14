@@ -309,6 +309,12 @@ try {
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > annotationCompleteBefore, "create page completion");
+  const readingLink = page.locator('.page-list a[href="/reading"]');
+  await readingLink.waitFor({ timeout: 20000 });
+  await readingLink.click();
+  await page.waitForURL(`${origin}/reading`);
+  await page.goto(origin);
+  await field.waitFor({ timeout: 20000 });
   const createdPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   const homeInspect = await homeMcp(11, "tools/call", {
     name: "inspect_page",

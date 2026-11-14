@@ -188,6 +188,18 @@ def create_app() -> Starlette:
             return JSONResponse({"session_id": actual}, status_code=409)
         return JSONResponse({"session_id": actual})
 
+    async def pages(request):
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        try:
+            limit = int(request.query_params.get("limit", "200"))
+        except ValueError as exc:
+            raise HTTPException(400, "limit must be an integer") from exc
+        if not 1 <= limit <= 200:
+            raise HTTPException(400, "limit must be between 1 and 200")
+        rows, truncated = await anyio.to_thread.run_sync(store.pages, limit)
+        return JSONResponse({"pages": rows, "truncated": truncated})
+
     async def chats(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
@@ -313,6 +325,7 @@ def create_app() -> Starlette:
         lifespan=mcp_lifespan,
         routes=[
             Route("/api/zeta/discovery", _discovery),
+            Route("/api/pages", pages),
             Route("/api/chats", chats),
             Route("/api/chats/{session_id}", patch_chat, methods=["PATCH"]),
             Route("/api/pages/{id}/chats", register_chat, methods=["POST"]),

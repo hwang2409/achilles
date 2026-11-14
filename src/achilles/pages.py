@@ -349,6 +349,31 @@ class PageStore:
             raise KeyError(page_id)
         return row
 
+    def pages(self, limit: int = 200) -> tuple[list[dict[str, Any]], bool]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT p.id,p.route,p.title,p.created_at,p.updated_at,p.create_mode,"
+                "creator.route AS created_by_route,COUNT(c.session_id) AS chat_count "
+                "FROM page p LEFT JOIN page creator ON creator.id=p.created_by_page_id "
+                "LEFT JOIN chat c ON c.page_id=p.id "
+                "GROUP BY p.id ORDER BY p.created_at ASC,p.id ASC LIMIT ?",
+                (limit + 1,),
+            ).fetchall()
+        truncated = len(rows) > limit
+        return [
+            {
+                "id": row["id"],
+                "route": row["route"],
+                "title": row["title"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "create_mode": bool(row["create_mode"]),
+                "chat_count": row["chat_count"],
+                "created_by_route": row["created_by_route"],
+            }
+            for row in rows[:limit]
+        ], truncated
+
     def chats(
         self,
         limit: int,
