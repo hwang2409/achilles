@@ -4,7 +4,7 @@ import type { Page, Route } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
-type RequestFrame = { id?: number | string; method?: string; params?: { text?: string }; result?: { accepted?: boolean }; error?: { code?: number } };
+type RequestFrame = { id?: number | string; method?: string; params?: { text?: string; delivery_id?: string }; result?: { accepted?: boolean }; error?: { code?: number } };
 
 export async function gateVim(page: Page, control: string, waitFor: WaitFor, whileDisconnected: WhileDisconnected, requests: () => RequestFrame[]) {
   const screenshotDir = process.env.VIM_SCREENSHOT_DIR;
@@ -238,15 +238,27 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const delayedSteer = requests().slice(delayedBeforeSteer).find((request) => request.method === "steer");
   if (delayedSteer?.params?.text !== "steer while running")
     throw new Error(`delayed turn did not send a steer request: ${JSON.stringify(requests().slice(delayedBeforeSteer))}`);
-  await waitFor(async () => requests().some((frame) => frame.id === delayedSteer.id && (frame.result || frame.error)), "delayed steer response");
-  if (await confirmedStock.inputValue() !== "") {
-    await page.getByText("no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
-    if (await confirmedStock.inputValue() !== "steer while running") throw new Error("rejected delayed steer did not keep its draft");
-    await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
-    await confirmedStock.fill("steer while running");
-    await confirmedStock.locator('xpath=ancestor::*[@data-part="composer"]').getByRole("button", { name: "send message" }).click();
+  await waitFor(async () => requests().slice(delayedBeforeSteer).some((frame) => frame.id === delayedSteer.id && (frame.result || frame.error)), "delayed steer response");
+  const delayedSteerResponse = requests().slice(delayedBeforeSteer).find((frame) => frame.id === delayedSteer.id && (frame.result || frame.error));
+  const delayedDraft = await confirmedStock.inputValue();
+  if (delayedSteerResponse?.error) {
+    if (delayedDraft !== "steer while running") throw new Error(`rejected delayed steer changed its draft: ${JSON.stringify(delayedDraft)}`);
+    await waitFor(async () => requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running"), "delayed steer fallback send");
+    const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
+    if (fallbackSend?.params?.delivery_id !== delayedSteer.params?.delivery_id) throw new Error("delayed steer fallback did not reuse its delivery id");
+    await waitFor(async () => JSON.parse(await Bun.file(control).text()).fallback_send_barrier === "held", "processed fallback send before its response");
+    const heldControl = JSON.parse(await Bun.file(control).text());
+    await Bun.write(control, JSON.stringify({ ...heldControl, release_fallback_send_barrier: true }));
+    await waitFor(async () => requests().slice(delayedBeforeSteer).some((frame) => frame.id === fallbackSend.id && frame.result), "delayed steer fallback response");
+  } else if (delayedSteerResponse?.result) {
+    const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
+    if (fallbackSend) throw new Error(`successful delayed steer also sent a fallback: ${JSON.stringify(fallbackSend)}`);
+    if (delayedDraft !== "" && delayedDraft !== "steer while running") throw new Error(`successful delayed steer changed its draft: ${JSON.stringify(delayedDraft)}`);
+  } else {
+    throw new Error(`delayed steer had no response: ${JSON.stringify(delayedSteerResponse)}`);
   }
   await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed message to clear its draft");
+  if (delayedSteerResponse.result && requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running")) throw new Error("successful delayed steer sent a fallback before clearing its draft");
   await confirmedStock.fill("kept draft");
   if (await stopButton.isVisible().catch(() => false)) await stopButton.focus();
   else await confirmedStock.focus();

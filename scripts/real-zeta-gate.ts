@@ -753,7 +753,12 @@ try {
   }
   if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("stuck steer did not keep its draft");
   const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
-  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
+  const lateStatuses = lateStatusRequests.map((request) => {
+    const frames = requests();
+    return frames.slice(frames.indexOf(request) + 1).find((frame) =>
+      frame.id === request.id && frame.result?.delivery_id === lateSteer.params.delivery_id && frame.result?.status
+    )?.result.status;
+  }).filter(Boolean);
   if (!lateStatuses.length || lateStatuses.some((status) => status !== "queued"))
     throw new Error(`late steer status was not stuck queued: ${JSON.stringify(lateStatuses)}`);
   const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
