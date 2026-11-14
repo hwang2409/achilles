@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { failureResult, productCapabilities, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unsupportedResult, validateCatalog, validateReservedBundles } from "./eval";
+import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
@@ -42,14 +42,9 @@ test("capability probe keeps an unrelated internal ImportError as a harness_erro
     await Bun.write(join(root, "achilles", "__init__.py"), "");
     await Bun.write(join(root, "achilles", "tools.py"), "from achilles import unrelated\n");
     await Bun.write(join(root, "achilles", "unrelated.py"), 'raise ImportError("unrelated dependency broke")\n');
-    try {
-      await productCapabilities({ run: targetRun(root), achillesDir: root } as never);
-      throw new Error("broken target unexpectedly passed");
-    } catch (error) {
-      const result = failureResult(task, error, []);
-      expect(result.status).toBe("harness_error");
-      expect(result.checks[0].evidence).toEqual(expect.objectContaining({ message: expect.stringContaining("unrelated dependency broke") }));
-    }
+    const result = await classifyTaskSupport({ run: targetRun(root), achillesDir: root } as never, task, []);
+    expect(result?.status).toBe("harness_error");
+    expect(result?.checks[0].evidence).toEqual(expect.objectContaining({ message: expect.stringContaining("unrelated dependency broke") }));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

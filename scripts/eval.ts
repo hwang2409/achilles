@@ -297,6 +297,12 @@ export function failureResult(task: EvalTask, error: unknown, hidden: string[]) 
 export function unsupportedResult(task: EvalTask, missing: string[]) {
   return { task_id: task.id, status: "unsupported", pass: false, score: 0, checks: [{ id: "capability", pass: false, expected: task.requires, actual: [...(task.requires ?? []).filter(item => !missing.includes(item))], evidence: { missing } }], turns: 0, wall_ms: 0, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 } } as ReturnType<typeof gradeTask>;
 }
+export async function classifyTaskSupport(stack: EvalStack, task: EvalTask, hidden: string[]) {
+  try {
+    const capabilities = await productCapabilities(stack); const missing = (task.requires ?? []).filter(capability => !capabilities.has(capability));
+    return missing.length ? unsupportedResult(task, missing) : undefined;
+  } catch (error) { return failureResult(task, error, hidden); }
+}
 
 type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean; stop_suite?: boolean };
 async function runRepeat(task: EvalTask, index: number, options: { scripted: boolean; achillesDir?: string; keep: boolean; runId: string; signal: AbortSignal; hidden: string[] }): Promise<RepeatResult> {
@@ -307,8 +313,8 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     options.hidden.push(...hiddenValues(stack.accountHome));
     if (Bun.env.EVAL_SETUP_ONLY === "1") { const started = Date.now(); await preparePage(stack, task, options.signal); snapshot = await databaseSnapshot(stack); result = { task_id: task.id, pass: true, score: 100, checks: [], turns: 0, wall_ms: Date.now() - started, tool_calls: 0, approvals: 0, usage: "unavailable", host_tools_gap: false, diagnostics: { first_call_validity: {}, structured_tool_errors: [], unstructured_tool_errors: 0 }, status: "pass" } as ReturnType<typeof gradeTask>; }
     else {
-      const capabilities = await productCapabilities(stack); const missing = (task.requires ?? []).filter(capability => !capabilities.has(capability));
-      if (missing.length) { result = unsupportedResult(task, missing); snapshot = await databaseSnapshot(stack); }
+      const classification = await classifyTaskSupport(stack, task, options.hidden);
+      if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }
       else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); }
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
