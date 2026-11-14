@@ -141,6 +141,25 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
+                    "discover-resources",
+                    "mcp_discover",
+                    {"action": "resources", "server": "achilles"},
+                )
+            ]
+        ),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "inspect-after-discovery",
+                    "achilles__inspect_page",
+                    {"route": "/reading"},
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("new chat tools complete")]),
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
                     "add-book",
                     "achilles__add_book",
                     {"title": "Synthetic Book", "status": "reading"},
