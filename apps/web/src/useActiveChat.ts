@@ -129,11 +129,12 @@ async function createControllerSession(client: ZetaClient, metadata: ReadMetadat
 async function finishControllerAttachment(metadata: ReadMetadata, session: OpenedSession, selectedChat: Chat | null, lease: SessionLease, owner: AttachmentOwner, token: number): Promise<Attachment> {
   const { page, credential } = metadata;
   try {
+    const serverApprovalMode = page.approval_mode ?? null;
     page.approval_mode = session.approvalMode;
     const title = session.name?.trim() || selectedChat?.title?.trim() || (await findChat(session.id))?.title?.trim() || "untitled chat"; requireCurrent(owner, token);
     if (session.name?.trim() && session.name.trim() !== selectedChat?.title?.trim())
       void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-    return { page, serverApprovalMode: page.approval_mode ?? null, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
+    return { page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
   } catch (caught) { owner.release(token); throw caught; }
 }
 
