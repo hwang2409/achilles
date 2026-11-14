@@ -129,7 +129,7 @@ export function createConnection({
     const next = reduceConnection(state, event);
     if (next === state) return;
     state = next;
-    if ("retryAt" in state) schedule(state.retryAt - now());
+    if ("retryAt" in state && !(state.phase === "capacity" && state.attempt > 8)) schedule(state.retryAt - now());
     listeners.forEach((listener) => listener());
   };
   const schedule = (ms: number) => {

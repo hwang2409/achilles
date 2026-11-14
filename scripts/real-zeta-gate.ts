@@ -79,6 +79,7 @@ try {
     ZETA_PROOF_CWD: cwd,
     ZETA_PROOF_CONTROL: control,
     ZETA_PROOF_ORIGIN: origin,
+    ZETA_PROOF_APPROVAL_GRACE: "2",
     ACHILLES_APPROVAL: "ask",
   };
   let zetaProcess = start(

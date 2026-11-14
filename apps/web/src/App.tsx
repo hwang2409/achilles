@@ -27,7 +27,7 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    case "capacity": return "zeta is in use by another tab or app. close it, or take control here, then retry.";
+    case "capacity": return state.attempt > 8 ? "could not take control. close the other tab or app, then retry." : "waiting for the other tab or app to close…";
     default: return null;
   }
 }
