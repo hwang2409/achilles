@@ -23,6 +23,15 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await settingsDialog.getByRole("button", { name: "esc" }).click();
     await settingsDialog.waitFor({ state: "hidden", timeout: 10_000 });
   };
+  const setComposerTypography = async () => {
+    await openSettings();
+    await settingsDialog.waitFor({ state: "visible", timeout: 10_000 });
+    await settingsDialog.getByRole("group", { name: "UI font" }).getByRole("button", { name: "IBM Plex Sans" }).click();
+    await settingsDialog.getByRole("group", { name: "code font" }).getByRole("button", { name: "IBM Plex Mono" }).click();
+    await settingsDialog.getByRole("group", { name: "font size" }).getByRole("button", { name: "16" }).click();
+    await settingsDialog.getByRole("button", { name: "esc" }).click();
+    await settingsDialog.waitFor({ state: "hidden", timeout: 10_000 });
+  };
   const withDeadline = async <T>(promise: Promise<T>, label: string) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -60,6 +69,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   stockField = page.getByRole("textbox", { name: "message", exact: true });
   if (await stockField.inputValue() !== multilineStockDraft) throw new Error(`stock remount row: expected ${JSON.stringify(multilineStockDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
 
+  await setComposerTypography();
+  const plainTypography = await stockField.evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
+  if (!plainTypography.family.includes("IBM Plex Sans") || plainTypography.size !== "16px") throw new Error(`plain composer ignored UI font or size settings: ${JSON.stringify(plainTypography)}`);
   await screenshot("plain-after");
   await stockField.fill("first\n\n  third");
   let releaseChunk = () => {};
@@ -89,6 +101,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await composer.waitFor({ state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "first\n\n  third") throw new Error(`vim did not preserve the multiline stock draft: ${JSON.stringify(await vimDraft())}`);
   await page.locator('.vim-composer[data-state="idle"]').waitFor({ state: "visible", timeout: 20_000 });
+  const vimTypography = await page.locator(".vim-composer .cm-editor").evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
+  if (!vimTypography.family.includes("IBM Plex Mono") || vimTypography.size !== "16px") throw new Error(`vim composer ignored code font or size settings: ${JSON.stringify(vimTypography)}`);
   await field.focus();
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("vim did not start in INSERT");
   await openSettings();

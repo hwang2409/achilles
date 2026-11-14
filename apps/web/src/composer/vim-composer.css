@@ -8,6 +8,7 @@
   background: transparent;
   color: inherit;
   font: inherit;
+  font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 .vim-composer .cm-editor.cm-focused { outline: none; }
