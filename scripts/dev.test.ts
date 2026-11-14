@@ -145,7 +145,8 @@ if [ "$2" = "--help" ] || [ "$3" = "--help" ]; then echo "add show remove --scop
 if [ "$1" = "serve" ]; then touch "$FAKE_ZETA_STARTED"; exit 1; fi
 exit 0
 `);
-  await chmod(resolve(bin, "zeta"), 0o755);
+  await writeFile(resolve(bin, "uv"), "#!/bin/sh\nexit 1\n");
+  await Promise.all(["uv", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
   for (const state of ["achilles.json", "zeta-serve.json", "lock"]) {
     if (await Bun.file(resolve(devCache, state)).exists()) throw new Error("refusing to replace existing make dev state");
   }
