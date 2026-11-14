@@ -56,7 +56,10 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         ),
         ScriptedTurn(
             content=[
-                TextContent(f"stream line {index:03d}: enough content to overflow the transcript viewport\n")
+                TextContent(
+                    f"stream line {index:03d}: "
+                    + "enough content to overflow the transcript viewport\n"
+                )
                 for index in range(120)
             ],
             tool_calls=[ToolCall("stream-proof-read", "read", {"path": str(cwd / "fixture.txt")})],
