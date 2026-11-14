@@ -738,6 +738,9 @@ try {
   await waitFor(async () => await recoveredField.inputValue({ timeout: 500 }).then((value) => value === draft, () => false), "reconnected composer draft").catch(async () => { throw new Error(`reconnected composer did not restore: ${redact(await page.locator("body").innerText())}`); });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
+  const previousControllerSession = new URL(page.url()).searchParams.get("chat");
+  await page.keyboard.press("Meta+Shift+O");
+  await waitFor(() => Promise.resolve(new URL(page.url()).searchParams.get("chat") !== previousControllerSession), "fresh observer-gate chat");
   const observerSession = new URL(page.url()).searchParams.get("chat");
   if (!observerSession) throw new Error("controller page lost its active chat before observer gate");
   const observerPage = await browser.newPage();
@@ -768,6 +771,9 @@ try {
   await controllerContext.close();
   await observerPage.getByRole("button", { name: "retry", exact: true }).click();
   const takeoverField = observerPage.getByRole("textbox", { name: "message", exact: true });
+  const replaceMissingChat = observerPage.locator(".full-state").getByRole("button", { name: "new chat", exact: true });
+  await Promise.race([takeoverField.waitFor({ timeout: 20_000 }), replaceMissingChat.waitFor({ timeout: 20_000 })]);
+  if (await replaceMissingChat.isVisible()) await replaceMissingChat.click();
   await takeoverField.waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover retry did not gain control: ${await observerPage.locator("body").innerText()}`); });
   await waitFor(async () => (await observerPage.locator(".run-state").innerText()).includes("idle"), "takeover retry idle");
   await takeoverField.fill("takeover retry message");
