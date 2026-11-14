@@ -15,6 +15,8 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   if (unnamedControls.length) throw new Error(`settings controls have no accessible name: ${unnamedControls.join(", ")}`);
   await page.getByRole("switch", { name: "vim mode" }).waitFor();
   await page.getByRole("switch", { name: "auto-approve default" }).waitFor();
+  const switchSizes = await page.getByRole("switch").evaluateAll((switches) => switches.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
+  if (switchSizes.some(({ width, height }) => width !== 38 || height < 24)) throw new Error(`settings switches have the wrong target size: ${JSON.stringify(switchSizes)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
   await page.getByRole("option", { name: /gruvbox-light/ }).click();
   await page.getByRole("button", { name: "IBM Plex Sans" }).click();
