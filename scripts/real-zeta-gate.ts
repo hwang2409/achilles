@@ -719,7 +719,7 @@ try {
   await gateVim(page, control, waitFor, async (check) => {
     const previousPid = JSON.parse(await Bun.file(control).text()).pid;
     try {
-      await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
+      await expectBrowserErrors(page, [], async () => {
         zetaProcess.kill("SIGTERM");
         if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta shutdown timeout during vim read-only gate");
         await check();
