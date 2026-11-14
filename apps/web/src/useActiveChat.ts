@@ -30,6 +30,12 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
   };
 }
 
+export function persistUntitledChatTitle(sessionId: string, title: string, onSuccess: () => void): void {
+  void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) })
+    .then((response) => { if (response.ok) onSuccess(); })
+    .catch((error) => console.error("could not update chat title", error));
+}
+
 function attachmentError(caught: unknown, context: "loading" | "creation" = "loading"): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   if (message === "Failed to fetch" || message === "Load failed") return `achilles is unavailable while ${context === "creation" ? "creating the chat" : "loading the chat"}.`;
@@ -177,6 +183,58 @@ class PendingCreationError extends Error {
 
 const NO_CREATION = { pending: null, error: null };
 
+type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" | "unknown"; outcome?: "queued" | "delivered" | "dropped" };
+
+async function waitForIdle(client: Pick<ZetaClient, "request">, sessionId: string, deadline: number) {
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("turn did not become idle before resend");
+    const result = await client.request("status", { session_id: sessionId }, { timeoutMs: Math.min(1_000, remaining) });
+    if (result && typeof result === "object" && (result as { state?: string }).state === "idle") return;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+  }
+}
+
+export async function confirmSteerDelivery(
+  client: Pick<ZetaClient, "request">,
+  sessionId: string,
+  text: string,
+  deliveryId: string,
+  track: (id: string) => void,
+  deadlineMs = 15_000,
+): Promise<string> {
+  const deadline = Date.now() + deadlineMs;
+  let id = deliveryId;
+  track(id);
+  let resent = false;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("steer delivery confirmation timed out");
+    let result: unknown;
+    try {
+      result = await client.request("delivery_status", { delivery_id: id }, { timeoutMs: Math.min(1_000, remaining) });
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+    if (!result || typeof result !== "object") throw new Error("invalid steer delivery status");
+    const status = result as DeliveryStatus;
+    const outcome = status.status === "evicted" ? status.outcome : status.status;
+    if (outcome === "delivered") return id;
+    if (outcome === "dropped") {
+      if (resent) throw new Error("steer delivery was dropped after resend");
+      resent = true;
+      await waitForIdle(client, sessionId, deadline);
+      id = crypto.randomUUID();
+      track(id);
+      await client.request("send", { session_id: sessionId, text, delivery_id: id }, { timeoutMs: Math.min(1_000, Math.max(1, deadline - Date.now())) });
+      continue;
+    }
+    if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
+      throw new Error(`steer delivery status: ${status.status}`);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+  }
+}
+
 function chatCreationContext(state: State, client: ZetaClient) {
   if (state.phase === "ready" && state.credential) return { route: state.page.route === "/" ? "/" : state.page.route, input: { client, pageId: state.page.id, credential: state.credential, cwd: state.page.workspace, mode: creationApprovalMode(state.serverApprovalMode, getSettings().autoApproveDefault) } };
   return null;
@@ -300,13 +358,25 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, can
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
     if (!canWrite || !client || state.phase !== "ready") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
-    const delivery_id = crypto.randomUUID(); track(delivery_id);
-    await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+    let delivery_id: string = crypto.randomUUID();
+    if (!intent.steer) track(delivery_id);
+    try {
+      await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
+      if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
+    } catch (error) {
+      // A stale turn view can race its server-side turn end. send queues the same draft instead of losing it.
+      if (!intent.steer || !(error instanceof Error) || !error.message.includes("no turn is running")) throw error;
+      await waitForIdle(client, current.sessionId, Date.now() + 15_000);
+      delivery_id = crypto.randomUUID(); track(delivery_id);
+      await client.request("send", { session_id: current.sessionId, text, delivery_id });
+      delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
+    }
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
-    const response = await fetch(`/api/chats/${encodeURIComponent(current.sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: nextTitle }) });
-    if (response.ok) updateReady(token, (value) => ({ ...value, title: nextTitle }));
-    if (response.ok) setListRefresh((value) => value + 1);
+    persistUntitledChatTitle(current.sessionId, nextTitle, () => {
+      updateReady(token, (value) => ({ ...value, title: nextTitle }));
+      setListRefresh((value) => value + 1);
+    });
   }, [canWrite, client, state, updateReady]);
 
   const toggle = useCallback(async () => {

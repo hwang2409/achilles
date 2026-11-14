@@ -26,6 +26,8 @@ export async function waitForIdleTurn(
 export async function gateTranscript(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
+  requests: () => Array<{ method?: string; params?: { text?: string } }>,
+  controlPath: string,
 ) {
   const capture = async (name: string) => {
     if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${name}`, fullPage: true });
@@ -112,7 +114,24 @@ export async function gateTranscript(
   await waitFor(async () => await distanceFromBottom() <= 4, "jump to latest for this turn");
   const approval = page.locator('[data-part="approval"][data-state="pending"]').filter({ hasText: "read" });
   await approval.getByRole("button", { name: "deny", exact: true }).click();
+  await waitFor(async () => (JSON.parse(await Bun.file(controlPath).text()).turn_barrier ?? null) === "held", "held end-of-turn barrier");
+  const beforeBarrierSends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending").length;
+  await field.fill("prompt during denied tool turn ending");
+  await field.press("Enter");
+  await waitFor(async () => requests().some((frame) => frame.method === "steer" && frame.params?.text === "prompt during denied tool turn ending"), "steer request during held turn");
+  const steerFrame = requests().find((frame) => frame.method === "steer" && frame.params?.text === "prompt during denied tool turn ending");
+  if (!steerFrame?.params?.delivery_id) throw new Error("held steer frame did not include a delivery id");
+  const control = JSON.parse(await Bun.file(controlPath).text());
+  await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
   await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 });
+  if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
+    throw new Error("prompt during turn end was not delivered exactly once");
+  const newTurnSends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending");
+  if (newTurnSends.length - beforeBarrierSends !== 1) throw new Error(`prompt during turn end used ${newTurnSends.length - beforeBarrierSends} new-turn sends instead of one after the held steer`);
+  const sendFrame = newTurnSends.at(-1);
+  if (!sendFrame?.params?.delivery_id) throw new Error("new-turn send frame did not include a delivery id");
+  if (sendFrame.params.delivery_id === steerFrame.params.delivery_id) throw new Error("new-turn send reused the held steer delivery id");
   await waitForIdleTurn(page, waitFor);
 
   await field.fill("stream text only lines to overflow");

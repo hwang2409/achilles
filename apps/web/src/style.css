@@ -91,8 +91,12 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .transcript table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
 html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript :is(code, pre) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.transcript :is([data-part="md-code-inline"], [data-part="md-code-block"]) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
-.main-pane > [data-part="composer"], .main-pane > div[data-part="composer"] { flex: 0 0 auto; width: min(880px, calc(100% - 48px)); margin: 12px auto 20px; }
+.main-pane > [data-part="composer"], .main-pane > div[data-part="composer"] { flex: 0 0 auto; width: min(880px, calc(100% - 48px)); margin: 12px auto 20px; font: var(--achilles-ui-size, 14px) / 1.55 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
+.main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
+.main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
 .empty-chat { position: absolute; z-index: 1; inset-inline: max(24px, calc((100% - 880px) / 2)); margin: min(20vh, 180px) auto 32px; max-width: 880px; }
 .empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; font-size: clamp(24px, 4vw, 36px); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .empty-chat p { max-width: 68ch; color: var(--fulcrum-muted); line-height: 1.7; }

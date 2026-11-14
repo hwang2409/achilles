@@ -1,0 +1,85 @@
+.vim-composer [data-part="composer-field"] {
+  display: block;
+  min-height: calc(1.55em + 2 * var(--inset));
+}
+
+.vim-composer .cm-editor {
+  max-height: calc(10 * 1.55em + var(--inset));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.vim-composer .cm-editor.cm-focused { outline: none; }
+.vim-composer .cm-scroller { overflow: auto; font: inherit; }
+.vim-composer .cm-content {
+  min-height: calc(1.55em + 2 * var(--inset));
+  padding: var(--inset);
+  caret-color: var(--fulcrum-accent);
+  font: inherit;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vim-composer .cm-line { padding: 0; }
+.vim-composer [data-part="composer-field"][data-empty="true"] .cm-content::before {
+  position: absolute;
+  color: var(--fulcrum-muted);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+.vim-composer .cm-cursor { border-left-color: var(--fulcrum-accent); }
+.vim-composer .cm-selectionBackground,
+.vim-composer .cm-content ::selection { background: var(--fulcrum-accent) !important; color: var(--fulcrum-bg) !important; }
+.vim-composer[data-mode="normal"] .cm-fat-cursor,
+.vim-composer[data-mode="visual"] .cm-fat-cursor { background: var(--fulcrum-fg); color: var(--fulcrum-bg); }
+
+.vim-guidance {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.vim-guidance [data-part="composer-status"] { flex: 1; }
+
+.vim-mode-chip {
+  flex: none;
+  min-width: 62px;
+  height: 20px;
+  padding: 0 8px;
+  color: var(--fulcrum-bg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  letter-spacing: .08em;
+}
+.vim-mode-chip[data-mode="insert"] { background: var(--fulcrum-ok); }
+.vim-mode-chip[data-mode="normal"] { background: var(--fulcrum-accent); }
+.vim-mode-chip[data-mode="visual"] { background: var(--fulcrum-tok-function); }
+.vim-composer:not([data-focused]) { --rail: var(--fulcrum-muted); }
+.vim-composer:not([data-focused]) .cm-fat-cursor,
+.vim-composer:not([data-focused]) .cm-cursor { display: none; }
+.vim-composer:not([data-focused]) .vim-mode-chip {
+  border: 1px solid var(--fulcrum-border);
+  background: transparent;
+  color: var(--fulcrum-muted);
+  line-height: 18px;
+}
+.vim-pending {
+  flex: none;
+  min-width: 3ch;
+  color: var(--fulcrum-fg);
+  font-size: 12px;
+  text-align: right;
+}
+
+@container (max-width: 480px) {
+  .vim-guidance { flex: 1 0 100%; order: 1; }
+  .vim-guidance [data-part="composer-status"] { flex: 1 1 auto; }
+  .vim-pending { order: 2; }
+  .vim-composer [data-part="composer-stop"],
+  .vim-composer [data-part="composer-submit"] { order: 3; }
+}

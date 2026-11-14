@@ -7,6 +7,7 @@ import { controlSnapshot, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
+import { gateVim } from "./gate-vim";
 
 import { expectBrowserErrors } from "./browser-errors";
 
@@ -427,7 +428,7 @@ try {
     console.log(`focus after commit: ${row.name}`);
   }
   await reloadShell();
-  await gateTranscript(page, waitFor);
+  await gateTranscript(page, waitFor, requests, control);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests(), approvalModeResponse);
@@ -935,6 +936,20 @@ try {
   await gateSettings(page, origin);
   await gateCreationApprovalDefaults(page, requests, approvalModeResponse);
 
+  await gateVim(page, control, waitFor, async (check) => {
+    const previousPid = JSON.parse(await Bun.file(control).text()).pid;
+    try {
+      await expectBrowserErrors(page, [], async () => {
+        zetaProcess.kill("SIGTERM");
+        if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta shutdown timeout during vim read-only gate");
+        await check();
+      });
+    } finally {
+      zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
+      await waitFor(async () => JSON.parse(await Bun.file(control).text()).pid !== previousPid, "zeta restart after vim read-only gate");
+    }
+  }, requests);
+
   const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   await page.goto(`${origin}/?chat=${first}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
@@ -1049,7 +1064,7 @@ try {
   await observerPage.goto(`${origin}/?chat=${encodeURIComponent(observerSession)}`);
   await observerPage.getByRole("status").filter({ hasText: "zeta is in use by another tab or app" }).waitFor({ timeout: 20_000 });
   if (await observerPage.getByRole("textbox", { name: "message" }).count()) throw new Error("observer page exposed a composer");
-  if (!(await observerPage.getByRole("status").innerText()).includes("another tab or app")) throw new Error("observer page did not show the controller capacity banner");
+  if (!(await observerPage.getByRole("status").filter({ hasText: "another tab or app" }).innerText()).includes("another tab or app")) throw new Error("observer page did not show the controller capacity banner");
   const controllerOutputs = page.locator('[data-part="message"][data-role="assistant"]');
   const observerOutputs = observerPage.locator('[data-part="message"][data-role="assistant"]');
   const controllerOutputBefore = await controllerOutputs.count();

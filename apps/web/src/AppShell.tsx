@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
+import { isEditableTarget } from "./keyboard";
 import { createPageListOwner, initialPageListState, type PageLink, type PageListOwner } from "./pageList";
 import { useCanWrite } from "./write-access";
 
@@ -48,6 +49,10 @@ const restorableFocus = (...candidates: Array<Element | null>) => candidates.fin
   const style = getComputedStyle(element);
   return (element.tabIndex >= 0 || element.matches(nativelyFocusable)) && style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
 }) ?? null;
+
+export const restoreFocus = (...candidates: Array<Element | null>) => {
+  restorableFocus(...candidates)?.focus();
+};
 
 function useFocusAfterCommit() {
   const pending = useRef<(() => HTMLElement | null) | null>(null);
@@ -174,7 +179,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
       if (canWrite && !loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (canWrite && !loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
-      if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
+      if (isEditableTarget(event)) return;
+      if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [canWrite, loading, onNewChat, onToggleCreateMode, settingsOpen]);
