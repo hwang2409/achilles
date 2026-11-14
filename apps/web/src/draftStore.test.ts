@@ -45,6 +45,7 @@ describe("draft store", () => {
       ]);
       tabA.subscribe("chat-1", () => values.set("chat-1", tabA.get("chat-1")));
       tabA.set("chat-1", "already sent");
+      tabB.get("chat-1");
       tabA.clear("chat-1");
       tabB.set("chat-2", "other draft");
       expect(tabA.get("chat-1")).toBe("");

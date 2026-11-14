@@ -98,7 +98,23 @@ export function createDraftStore(): DraftStore {
       if (text && new TextEncoder().encode(text).byteLength <= MAX_DRAFT_BYTES) {
         const value = { text, updatedAt: Date.now() };
         drafts.set(sessionId, value);
-        try { target?.setItem(PREFIX + sessionId, JSON.stringify(value)); } catch { /* keep the in-memory draft */ }
+        try {
+          target?.setItem(PREFIX + sessionId, JSON.stringify(value));
+          if (target) {
+            const entries: [string, StoredDraft][] = [];
+            for (let index = 0; index < target.length; index += 1) {
+              const key = target.key(index);
+              if (!key?.startsWith(PREFIX)) continue;
+              const stored = parse(target.getItem(key));
+              if (stored) entries.push([key.slice(PREFIX.length), stored]);
+            }
+            entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+            for (const [oldSessionId] of entries.slice(MAX_DRAFTS)) {
+              target.removeItem(PREFIX + oldSessionId);
+              if (oldSessionId !== sessionId) drafts.delete(oldSessionId);
+            }
+          }
+        } catch { /* keep the in-memory draft */ }
       } else {
         if (text) drafts.set(sessionId, { text, updatedAt: Date.now() });
         else drafts.delete(sessionId);

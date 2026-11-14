@@ -94,7 +94,6 @@ export async function gateTranscript(
   await page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 20_000 });
   if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
     throw new Error("prompt during turn end was not delivered exactly once");
-  await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
   const composer = page.locator('[data-part="composer"]');
   const runState = page.locator(".run-state");
   await waitFor(

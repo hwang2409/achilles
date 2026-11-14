@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
-import { attachPage, createAttachmentOwner } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner } from "./useActiveChat";
 
 class MemoryStorage {
   value: string | null = null;
@@ -42,6 +42,56 @@ function attachmentClient(onRequest?: (method: string, params?: unknown) => void
 }
 
 const page = (sessionId: string | null) => ({ id: "home", route: "/", title: "home", zeta_session_id: sessionId, workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } });
+
+describe("steer delivery confirmation", () => {
+  test.each([
+    { name: "delivered", statuses: [{ status: "delivered" }], sends: 0 },
+    { name: "dropped then resend", statuses: [{ status: "dropped" }, { status: "delivered" }], sends: 1 },
+    { name: "evicted delivered", statuses: [{ status: "evicted", outcome: "delivered" }], sends: 0 },
+    { name: "evicted dropped then resend", statuses: [{ status: "evicted", outcome: "dropped" }, { status: "delivered" }], sends: 1 },
+  ])("confirms $name", async ({ statuses, sends }) => {
+    const requests: string[] = [];
+    const ids: string[] = [];
+    const client = { request: async (method: string, params: { delivery_id?: string }) => {
+      requests.push(method);
+      if (method === "delivery_status") return statuses.shift();
+      if (method === "send") return { accepted: true, delivery_id: params.delivery_id };
+      throw new Error(`unexpected ${method}`);
+    }};
+    const result = await confirmSteerDelivery(client as never, "session", "text", "initial", (id) => ids.push(id));
+    expect(result).toBe(ids.at(-1));
+    expect(requests.filter((method) => method === "send")).toHaveLength(sends);
+    expect(new Set(ids).size).toBe(sends + 1);
+  });
+
+  test.each([
+    { name: "unknown", statuses: [{ status: "unknown" }], error: "unknown" },
+    { name: "evicted without outcome", statuses: [{ status: "evicted" }], error: "evicted" },
+  ])("keeps the draft on $name", async ({ statuses, error }) => {
+    const client = { request: async () => statuses.shift() };
+    await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {}, 5_000)).rejects.toThrow(error);
+  });
+
+  test("keeps the draft when queued past the deadline", async () => {
+    const originalNow = Date.now;
+    let now = 100;
+    Date.now = () => now;
+    try {
+      const client = { request: async () => { now = 102; return { status: "queued" }; } };
+      await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {}, 1)).rejects.toThrow("timed out");
+    } finally { Date.now = originalNow; }
+  });
+
+  test("keeps the draft when a status request times out", async () => {
+    let timeoutMs = 0;
+    const client = { request: async (_method: string, _params: unknown, options?: { timeoutMs?: number }) => {
+      timeoutMs = options?.timeoutMs ?? 0;
+      throw new Error("request timed out");
+    }};
+    await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {})).rejects.toThrow("timed out");
+    expect(timeoutMs).toBeGreaterThan(0);
+  });
+});
 
 describe("active chat attachment", () => {
   test("releases an acquired lease when the attachment becomes stale", async () => {

@@ -142,6 +142,47 @@ class PendingCreationError extends Error {
 
 const NO_CREATION = { pending: null, error: null };
 
+type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" | "unknown"; outcome?: "queued" | "delivered" | "dropped" };
+
+export async function confirmSteerDelivery(
+  client: Pick<ZetaClient, "request">,
+  sessionId: string,
+  text: string,
+  deliveryId: string,
+  track: (id: string) => void,
+  deadlineMs = 5_000,
+): Promise<string> {
+  const deadline = Date.now() + deadlineMs;
+  let id = deliveryId;
+  track(id);
+  let resent = false;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("steer delivery confirmation timed out");
+    let result: unknown;
+    try {
+      result = await client.request("delivery_status", { delivery_id: id }, { timeoutMs: Math.min(1_000, remaining) });
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+    if (!result || typeof result !== "object") throw new Error("invalid steer delivery status");
+    const status = result as DeliveryStatus;
+    const outcome = status.status === "evicted" ? status.outcome : status.status;
+    if (outcome === "delivered") return id;
+    if (outcome === "dropped") {
+      if (resent) throw new Error("steer delivery was dropped after resend");
+      resent = true;
+      id = crypto.randomUUID();
+      track(id);
+      await client.request("send", { session_id: sessionId, text, delivery_id: id }, { timeoutMs: Math.min(1_000, Math.max(1, deadline - Date.now())) });
+      continue;
+    }
+    if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
+      throw new Error(`steer delivery status: ${status.status}`);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+  }
+}
+
 export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
   const [state, setState] = useState<State>({ phase: "loading" });
@@ -240,26 +281,17 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
     if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
-    let delivery_id = crypto.randomUUID(); track(delivery_id);
+    let delivery_id: string = crypto.randomUUID();
+    if (!intent.steer) track(delivery_id);
     try {
       await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
-      if (intent.steer) {
-        for (let attempt = 0; attempt < 100; attempt++) {
-          const status = await client.request("delivery_status", { delivery_id }) as { status?: string };
-          if (status.status === "delivered") break;
-          if (status.status === "dropped") {
-            delivery_id = crypto.randomUUID(); track(delivery_id);
-            await client.request("send", { session_id: current.sessionId, text, delivery_id });
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-      }
+      if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
     } catch (error) {
       // A stale turn view can race its server-side turn end. send queues the same draft instead of losing it.
       if (!intent.steer || !(error instanceof Error) || !error.message.includes("no turn is running")) throw error;
       delivery_id = crypto.randomUUID(); track(delivery_id);
       await client.request("send", { session_id: current.sessionId, text, delivery_id });
+      if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
     }
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);

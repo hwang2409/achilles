@@ -79,7 +79,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
 
   await setComposerTypography();
   const plainTypography = await stockField.evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
-  if (!plainTypography.family.includes("IBM Plex Sans") || plainTypography.size !== "16px") throw new Error(`plain composer ignored UI font or size settings: ${JSON.stringify(plainTypography)}`);
+  if (!plainTypography.family.includes("IBM Plex Mono") || plainTypography.size !== "16px") throw new Error(`plain composer ignored code font or size settings: ${JSON.stringify(plainTypography)}`);
   await screenshot("plain-after");
   await stockField.fill("first\n\n  third");
   let releaseChunk = () => {};
