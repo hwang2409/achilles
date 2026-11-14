@@ -1,6 +1,6 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { startEvalStack, TOOL_POLICY } from "./eval-stack";
+import { startEvalStack, TOOL_POLICY, type EvalStack } from "./eval-stack";
 import { connectEvalProtocol, REQUIRED_FEATURES } from "./eval-protocol";
 import { assertTurnBudget, reserveTurns } from "./eval-protocol";
 
@@ -11,6 +11,7 @@ export type { EvalStackConfig, EvalStack } from "./eval-stack";
 export type EvalTask = { id: string; agent_turns: number; judge_turns?: number; prompts?: string[] };
 export type EvalResult = { task: string; pass: boolean; turns: number; model: string; provider: string; tool_policy: string; error?: string };
 
+const SMOKE_PROMPT = "Call the Achilles create_page tool now with route /eval-smoke, title Eval Smoke, and a layout containing one text block whose text is smoke. Do not only describe the call.";
 const secrets = (value: string, hidden: string[]) => hidden.reduce((text, secret) => secret ? text.replaceAll(secret, "[REDACTED]") : text, value);
 export function scanSecrets(value: string, hidden: string[] = []): void {
   if (hidden.some(secret => secret && value.includes(secret))) throw new Error("artifact contains a known secret");
@@ -20,9 +21,65 @@ export function scanSecrets(value: string, hidden: string[] = []): void {
 export function reportJson(result: EvalResult) { return JSON.stringify({ ...result, tool_policy: result.tool_policy }, null, 2) + "\n"; }
 export function reportMarkdown(result: EvalResult) { return `# achilles eval: ${result.task}\n\n- result: ${result.pass ? "pass" : "fail"}\n- model: ${result.provider}/${result.model}\n- tool set: \`${result.tool_policy}\`\n- observed turns: ${result.turns}\n${result.error ? `- error: ${result.error}\n` : ""}`; }
 
-async function scriptedHello() {
-  const server = Bun.serve<{ ok: boolean }>({ port: 0, fetch(request, server) { if (server.upgrade(request, { data: { ok: true } })) return; return new Response("not found", { status: 404 }); }, websocket: { message(socket, raw) { const request = JSON.parse(String(raw)); if (request.method === "hello" && (request.jsonrpc !== "2.0" || request.params?.protocol_version !== "1.1")) throw new Error("scripted hello did not negotiate protocol 1.1"); if (request.method === "hello") socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { capabilities: { requests: REQUIRED_FEATURES } } })); else if (request.method === "new_session") socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { session: { session_id: "scripted-session" } } })); else if (request.method === "send") { socket.send(JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "turn_start", session_id: "scripted-session", data: { turn: 1 } } })); socket.send(JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "tool_result", session_id: "scripted-session", data: { name: "achilles__list_notes", is_error: false, content: [{ text: "seeded note" }] } } })); socket.send(JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event: "served_turn_end", session_id: "scripted-session" } })); socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} })); } else if (request.method === "session_history") socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { messages: [{ role: "tool", name: "achilles__list_notes", is_error: false, content: "seeded note" }], next_offset: null } })); }, open() {}, close() {} } });
-  try { const events: Record<string, unknown>[] = []; const client = await connectEvalProtocol({ url: `ws://127.0.0.1:${server.port}`, controller_token: "scripted-token" }, event => events.push(event)); const session = await client.newSession({ cwd: "/private/page", mcp_bindings: [{ server: "achilles", headers: { Authorization: "Bearer synthetic-page-token" } }] }); const id = String((session.session as { session_id: string }).session_id); await client.send(id, "list the notes on this page"); const history = await client.sessionHistory(id); if (!events.some(event => event.event === "turn_start") || !events.some(event => event.event === "served_turn_end")) throw new Error("scripted harness did not observe turn boundaries"); if (!events.some(event => event.event === "tool_result" && (event.data as { name?: string; is_error?: boolean })?.name?.startsWith("achilles__") && !(event.data as { is_error?: boolean }).is_error)) throw new Error("scripted harness did not observe a successful bound achilles tool result"); if (!history.some(row => JSON.stringify(row).includes("achilles__list_notes"))) throw new Error("scripted history lacks bound achilles tool result"); client.close(); } finally { server.stop(true); }
+async function runBoundSmoke(stack: EvalStack) {
+  const discovery = await fetch(`${stack.achillesOrigin}/api/zeta/discovery`).then(response => response.json()) as { url: string; controller_token: string };
+  const page = await fetch(`${stack.achillesOrigin}/api/pages/home`).then(response => response.json()) as { workspace: string };
+  const createMode = await fetch(`${stack.achillesOrigin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+  if (!createMode.ok) throw new Error(`could not enable create mode (${createMode.status})`);
+  const credential = await fetch(`${stack.achillesOrigin}/api/pages/home/credential`).then(response => response.json()) as { credential: string };
+  const events: Record<string, unknown>[] = [];
+  const protocol = await connectEvalProtocol(discovery, event => events.push(event));
+  try {
+    const session = await protocol.newSession({ cwd: page.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential.credential}` } }] });
+    const sessionId = (session.session?.session_id ?? session.session_id) as string;
+    if (!sessionId) throw new Error("new_session returned no session id");
+    await fetch(`${stack.achillesOrigin}/api/pages/home/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) });
+    await protocol.send(sessionId, SMOKE_PROMPT);
+    const deadline = Date.now() + 90_000;
+    while (!events.some(event => event.event === "agent_end")) {
+      if (Date.now() >= deadline) {
+        const turns = events.filter(event => event.event === "turn_start").length;
+        throw new Error(turns ? "provider turn did not finish within 90s" : "no provider turn started within 90s; inspect the scrubbed zeta serve log");
+      }
+      await Bun.sleep(100);
+    }
+    const successful = events.find(event => event.event === "tool_end" && (event.tool_call as { name?: string })?.name?.startsWith("achilles__") && !(event.tool_result as { is_error?: boolean })?.is_error);
+    if (!successful) throw new Error("smoke completed without a successful achilles tool result");
+    return { events, history: await protocol.sessionHistory(sessionId) };
+  } finally { protocol.close(); }
+}
+
+async function scriptedSmoke() {
+  const requests: Record<string, unknown>[] = [];
+  const provider = Bun.serve({ port: 0, async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/show") return Response.json({ model_info: { "qwen2.context_length": 32_768 } });
+    if (url.pathname !== "/api/chat") return new Response("not found", { status: 404 });
+    const body = await request.json() as Record<string, unknown>;
+    requests.push(body);
+    const turn = requests.length;
+    const toolCalls = turn === 1 ? [
+      { function: { name: "mcp_discover", arguments: { action: "search", query: "" } } },
+      { function: { name: "mcp_discover", arguments: { action: "search", query: "list_notes" } } },
+    ] : turn === 2 ? [
+      { function: { name: "achilles__create_page", arguments: { route: "/eval-smoke", title: "Eval Smoke", layout: { blocks: [{ type: "text", text: "smoke" }] } } } },
+    ] : [];
+    return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop" })}\n`, { headers: { "content-type": "application/x-ndjson" } });
+  } });
+  let stack: EvalStack | undefined;
+  try {
+    stack = await startEvalStack({ model: "ollama/qwen3:4b", ollamaBaseUrl: `http://127.0.0.1:${provider.port}`, maxTurns: 3 });
+    const observed = await runBoundSmoke(stack);
+    const firstTools = ((requests[0]?.tools ?? []) as { function?: { name?: string } }[]).map(tool => tool.function?.name);
+    if (!firstTools.includes("achilles__create_page")) throw new Error(`model-visible catalog lacks achilles tools: ${firstTools.join(", ")}`);
+    const secondMessages = JSON.stringify(requests[1]?.messages ?? []);
+    if (!secondMessages.includes("achilles__create_page") || !secondMessages.includes("No matching MCP tools.")) throw new Error("scripted discovery did not observe the bound catalog and the expected missing list_notes tool");
+    if (!observed.history.some(row => JSON.stringify(row).includes("achilles__create_page"))) throw new Error("scripted history lacks the achilles tool result");
+    return observed.events.filter(event => event.event === "turn_start").length;
+  } finally {
+    await stack?.close();
+    provider.stop(true);
+  }
 }
 
 async function main() {
@@ -30,26 +87,11 @@ async function main() {
   const repeats = Math.max(1, Number(Bun.env.N ?? "1"));
   const task: EvalTask = { id: taskId, agent_turns: 3 };
   assertTurnBudget(reserveTurns([task], repeats));
-  if (Bun.env.EVAL_BACKEND === "scripted") await scriptedHello();
-  const stack = Bun.env.EVAL_BACKEND === "scripted" ? null : await startEvalStack({ achillesDir: Bun.env.ACHILLES_DIR, model: Bun.env.MODEL, keep: Bun.env.KEEP_EVAL === "1" });
+  const scripted = Bun.env.EVAL_BACKEND === "scripted";
+  const stack = scripted ? null : await startEvalStack({ achillesDir: Bun.env.ACHILLES_DIR, model: Bun.env.MODEL, maxTurns: task.agent_turns, keep: Bun.env.KEEP_EVAL === "1" });
   const result: EvalResult = { task: task.id, pass: true, turns: 0, provider: stack?.provider ?? "scripted", model: stack?.model ?? "offline", tool_policy: TOOL_POLICY };
-  if (stack && Bun.env.EVAL_BACKEND !== "scripted") {
-    const discovery = await fetch(`${stack.achillesOrigin}/api/zeta/discovery`).then(response => response.json()) as { url: string; controller_token: string };
-    const page = await fetch(`${stack.achillesOrigin}/api/pages/home`).then(response => response.json()) as { workspace: string };
-    const credential = await fetch(`${stack.achillesOrigin}/api/pages/home/credential`).then(response => response.json()) as { credential: string };
-    const events: Record<string, unknown>[] = [];
-    const protocol = await connectEvalProtocol(discovery, event => events.push(event));
-    try {
-      const session = await protocol.newSession({ cwd: page.workspace, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential.credential}` } }] });
-      const sessionId = (session.session?.session_id ?? session.session_id) as string;
-      if (!sessionId) throw new Error("new_session returned no session id");
-      await fetch(`${stack.achillesOrigin}/api/pages/home/chats`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) });
-      await protocol.send(sessionId, "list the notes on this page");
-      const deadline = Date.now() + 90_000;
-      while (!events.some(event => event.event === "served_turn_end")) { if (Date.now() >= deadline) { const turns = events.filter(event => event.event === "turn_start").length; throw new Error(turns ? "provider turn did not finish within 90s" : "no provider turn started within 90s; inspect the scrubbed zeta serve log"); } await Bun.sleep(100); }
-      result.turns = events.filter(event => event.event === "turn_start").length;
-    } finally { protocol.close(); }
-  }
+  if (scripted) result.turns = await scriptedSmoke();
+  else if (stack) result.turns = (await runBoundSmoke(stack)).events.filter(event => event.event === "turn_start").length;
   const runId = `${Date.now()}-${process.pid}`;
   const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("..", import.meta.url).pathname, "evals/reports", runId));
   try { await mkdir(output, { recursive: true }); scanSecrets(reportJson(result)); await Bun.write(join(output, "report.json"), reportJson(result)); await Bun.write(join(output, "report.md"), reportMarkdown(result)); if (stack) console.log(JSON.stringify({ achilles: stack.achillesOrigin, model: `${stack.provider}/${stack.model}`, tool_policy: TOOL_POLICY, report: output, retained_state: stack.root })); }
