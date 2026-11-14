@@ -1,0 +1,99 @@
+{
+  "id": "update-layout-from-page-chat",
+  "page_plan": [
+    {
+      "alias": "records",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "add-block",
+      "kind": "prompt",
+      "page": "records",
+      "chat": "records-chat",
+      "prompt": "add a block to this page that shows a list of the page's records"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_records",
+        "operation": "list",
+        "collection": "records"
+      }
+    ],
+    "records": [
+      {
+        "id": "record-1",
+        "collection": "records",
+        "data": {
+          "title": "Synthetic record"
+        }
+      }
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Records dashboard"
+        },
+        {
+          "type": "detail",
+          "title": "Featured record",
+          "fields": [
+            "title"
+          ]
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "layout-updated",
+      "type": "layout_update",
+      "page": "records",
+      "value": {
+        "original": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Records dashboard"
+            },
+            {
+              "type": "detail",
+              "title": "Featured record",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
+        },
+        "added": {
+          "type": "list",
+          "collection": "records"
+        },
+        "version": 2
+      }
+    },
+    {
+      "id": "result",
+      "type": "successful_result",
+      "page": "records",
+      "tool": "achilles__update_layout"
+    },
+    {
+      "id": "no-unrecovered-errors",
+      "type": "no_unrecovered_error",
+      "page": "records"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "records"
+    }
+  ]
+}
