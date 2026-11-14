@@ -399,14 +399,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (waiting) selectChat(waiting);
   }, [selectChat]);
 
-  const publishReady = useCallback(async (ready: ReadyState, token: number, replace = false) => {
+  const publishReady = useCallback(async (ready: ReadyState, token: number, replace = false, focus = false) => {
     requireCurrent(owner.current, token);
     missingCreation.current = null;
     setCreationPageId(ready.page.id);
     setListRefresh((value) => value + 1);
     const route = routeWithChat(ready.page.route === "/" ? "/" : ready.page.route, ready.sessionId);
     if (replace) history.replaceState({}, "", route); else history.pushState({}, "", route);
-    setFocusSessionId(ready.sessionId);
+    if (focus) setFocusSessionId(ready.sessionId);
     setSelectedId(ready.sessionId);
     setState(ready);
   }, []);
@@ -428,9 +428,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (!context) return;
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
+    const focusOwner = document.activeElement;
     setState({ phase: "loading" });
     try {
-      await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token), true);
+      await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, document.activeElement === focusOwner), true);
     } catch (caught) {
       if (!creation.current.status(context.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     }
@@ -455,6 +456,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const token = owner.current.token();
     let current = state.phase === "ready" ? state : null;
     if (!current) {
+      const focusOwner = document.activeElement;
       setCreationPageId(state.page.id);
       const attached = await attachPage(
         client,
@@ -465,7 +467,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
         token,
         true,
         applyPendingCreateMode,
-        (ready) => publishReady(ready, token, true),
+        (ready) => publishReady(ready, token, true, document.activeElement === focusOwner || (focusOwner !== null && !focusOwner.isConnected && document.activeElement === document.body)),
       );
       if (attached.phase !== "ready") throw new Error("created chat did not attach");
       current = attached;
