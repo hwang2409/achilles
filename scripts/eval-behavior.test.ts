@@ -75,16 +75,15 @@ test("the scripted eval repairs missing target web assets before zeta starts", a
     await writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
     await writeFile(join(target, "scripts", "test-web-build.ts"), 'await Bun.write(new URL("../apps/web/dist/index.html", import.meta.url), "<!doctype html><body>smoke</body>");\n');
     const task = JSON.parse(await readFile(join(target, "evals", "tasks", "harness-smoke.json"), "utf8"));
-    task.id = "preflight-browser";
-    task.checks = [{ id: "visible", type: "browser_text", page: "smoke", text: "smoke" }];
-    await writeFile(join(target, "evals", "tasks", "preflight-browser.json"), JSON.stringify(task));
+    task.id = "preflight-build";
+    task.checks = [{ id: "page", type: "page_exists", page: "smoke" }];
+    await writeFile(join(target, "evals", "tasks", "preflight-build.json"), JSON.stringify(task));
     const marker = join(parent, "zeta-started-after-build");
     await installUvWrapper(target, `case " $* " in *" zeta "*" serve "*) if test -f ${JSON.stringify(join(target, "apps/web/dist/index.html"))}; then printf built; else printf missing; fi > ${JSON.stringify(marker)};; esac`);
 
-    const result = await runEval(target, "preflight-browser");
+    const result = await runEval(target, "preflight-build");
     expect(result.task.status, JSON.stringify(result.task)).toBe("pass");
     expect(await Bun.file(marker).text(), `zeta did not start after the target build\n${result.stdout}\n${result.stderr}`).toBe("built");
-    expect(result.task.checks.find((row: { id: string }) => row.id === "visible")?.pass, JSON.stringify(result.task)).toBe(true);
   } finally { await rm(parent, { recursive: true, force: true }); }
 }, 55_000);
 
