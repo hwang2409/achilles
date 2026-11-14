@@ -36,12 +36,17 @@ const chatHref = (chat: Chat) => {
   return `${url.pathname}${url.search}`;
 };
 const titleOf = (chat: Chat) => chat.title?.trim() || "untitled chat";
-const focusable = "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
+const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
+const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
-const isVisible = (element: HTMLElement | null) => {
-  if (!element?.isConnected) return false;
-  const rect = element.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+const restoreFocus = (...candidates: Array<Element | null>) => {
+  const target = candidates.find((element): element is HTMLElement => {
+    if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement || !element.isConnected || element.matches("[disabled], :disabled") || element.closest("[inert], [aria-hidden='true']")) return false;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return (element.tabIndex >= 0 || element.matches(nativelyFocusable)) && style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+  });
+  target?.focus();
 };
 
 function groupLabel(value: string) {
@@ -82,20 +87,25 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 759px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
-  const settingsOpener = useRef<HTMLElement>(null);
+  const settingsOpener = useRef<Element>(null);
   const loading = chats === null;
-  const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); };
-  const openSettings = (opener: HTMLElement | null) => {
-    if (!settingsOpen) settingsOpener.current = opener;
-    setSettingsOpen(true);
+  const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => restoreFocus(menuButton.current)); };
+  const openSettings = (opener: Element | null) => {
+    setSettingsOpen((open) => {
+      if (!open) settingsOpener.current = opener;
+      return true;
+    });
   };
   const closeSettings = () => {
     if (!settingsOpen) return;
     setSettingsOpen(false);
     requestAnimationFrame(() => {
-      const opener = settingsOpener.current;
-      const target = isVisible(opener) ? opener : drawer ? firstFocusable(sidebar.current) : document.querySelector<HTMLElement>(".main-pane [aria-label='message']");
-      target?.focus();
+      restoreFocus(
+        settingsOpener.current,
+        drawer ? firstFocusable(sidebar.current) : null,
+        document.querySelector(".main-pane textarea[aria-label='message']"),
+        document.querySelector(".settings-button"),
+      );
       settingsOpener.current = null;
     });
   };
@@ -134,7 +144,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof HTMLElement ? document.activeElement : null); }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
