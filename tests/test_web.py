@@ -101,9 +101,11 @@ def test_page_tool_catalog_and_invoke_share_executor_and_auth(monkeypatch, tmp_p
         ).status_code
         == 404
     )
-    assert client.get("/api/pages/home/tools").status_code == 403
+    anonymous_catalog = client.get("/api/pages/home/tools")
+    assert anonymous_catalog.status_code == 200
+    assert anonymous_catalog.json() == catalog.json()
     other_headers = {"authorization": f"Bearer {other_token}"}
-    assert client.get("/api/pages/home/tools", headers=other_headers).status_code == 403
+    assert client.get("/api/pages/home/tools", headers=other_headers).json() == catalog.json()
     assert (
         client.post(
             "/api/pages/home/tools/add_note/invoke",
@@ -376,6 +378,57 @@ def chat_client() -> TestClient:
         client=("127.0.0.1", 1234),
         headers={"host": "127.0.0.1:5190", "origin": "http://127.0.0.1:5190"},
     )
+
+
+def test_page_index_is_safe_bounded_and_origin_protected(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO page(id,route,title,created_at,updated_at,create_mode,credential_hash) "
+            "VALUES(?,?,?,?,?,?,?)",
+            ("reading", "/reading", "reading", "2025-01-01", "2025-01-02", 1, "secret"),
+        )
+        db.execute("UPDATE page SET created_by_page_id='home' WHERE id='reading'")
+        db.execute(
+            "INSERT INTO chat(session_id,page_id,created_at,updated_at) VALUES(?,?,?,?)",
+            ("reading-chat", "reading", "2025-01-01", "2025-01-02"),
+        )
+    client = chat_client()
+    response = client.get("/api/pages")
+    assert response.status_code == 200
+    payload = response.json()
+    assert {page["route"] for page in payload["pages"]} == {"/", "/reading"}
+    reading = next(page for page in payload["pages"] if page["route"] == "/reading")
+    assert reading["chat_count"] == 1
+    assert reading["created_by_route"] == "/"
+    assert not {"credential_hash", "workspace", "zeta_session_id"} & reading.keys()
+    assert client.get("/api/pages?limit=201").status_code == 400
+    assert client.get("/api/pages?limit=invalid").status_code == 400
+    limited = client.get("/api/pages?limit=1")
+    assert limited.status_code == 200
+    assert len(limited.json()["pages"]) == 1
+    assert client.get("/api/pages", headers={"origin": "http://evil.test"}).status_code == 403
+
+    with store.transaction() as db:
+        for index in range(199):
+            db.execute(
+                "INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+                (
+                    f"page-{index}",
+                    f"/page-{index}",
+                    f"page {index}",
+                    "2025-02-01",
+                    "2099-03-01" if index == 198 else "2025-02-01",
+                ),
+            )
+    capped = client.get("/api/pages?limit=200").json()
+    assert len(capped["pages"]) == 200
+    assert capped["pages"][0]["id"] == "page-198"
+    assert capped["pages"][0]["updated_at"] >= capped["pages"][-1]["updated_at"]
+    assert capped["next"]
+    remainder = client.get(f"/api/pages?limit=200&before={capped['next']}").json()
+    assert len(remainder["pages"]) == 1
+    assert remainder["next"] is None
 
 
 def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:

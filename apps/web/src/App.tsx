@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type Renderers } from "@fulcrum/react";
-import type { SessionLease } from "@fulcrum/zeta";
 import { AppShell } from "./AppShell";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
@@ -20,16 +19,6 @@ function ComposerSlot({ focus, children }: { focus: boolean; children: ReactNode
   const slot = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus({ preventScroll: true }); }, [focus]);
   return <div id="message-composer" ref={slot} style={{ display: "contents" }}>{children}</div>;
-}
-
-function useRunSnapshot(store: SessionLease["store"] | null) {
-  return useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
-    const state = store.getState();
-    const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
-    const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
-    const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
-    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}`;
-  } : () => "idle:0:0:0::0");
 }
 
 function connectionFailure(state: ConnectionState): string | null {
@@ -52,15 +41,27 @@ export function App() {
   const writable = canWrite(connectionState);
   const attached = connectionState.phase === "connected" || connectionState.phase === "taking_control" || connectionState.phase === "takeover_failed";
   const readOnly = attached && !writable;
-  const active = useActiveChat(client, attached, writable, connectionState.phase === "taking_control");
+  const active = useActiveChat(client, attached, writable, writable && connectionState.phase === "taking_control");
   const ready = active.state.phase === "ready" ? active.state : null;
   const store = ready?.lease.store ?? null;
-  const snapshot = useRunSnapshot(store);
+  const snapshot = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store ? () => {
+    const state = store.getState();
+    const completedTurns = state.turn === "idle" ? state.turns.length : Math.max(0, state.turns.length - 1);
+    const completedTools = state.outline.reduce((count, item) => { if (item.kind !== "tool") return count; const value = store.getItem(item.id); return count + (value?.type === "tool" && !value.active ? 1 : 0); }, 0);
+    const approvals = state.outline.reduce((count, item) => count + (store.getItem(item.id)?.type === "approval" && !(store.getItem(item.id) as { ended?: unknown }).ended ? 1 : 0), 0);
+    const toolStates = state.outline.map((item) => {
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; version?: number } | undefined;
+      return `${item.id}:${value?.active ?? "missing"}:${value?.is_error ?? false}:${value?.version ?? 0}`;
+    }).join(",");
+    return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
+  } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
   const refreshKey = `${completedTurns}:${completedTools}`;
   const waiting = Number(approvalCount);
   const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
+  const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
+  const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [fulcrumJumpToLatest, setFulcrumJumpToLatest] = useState(false);
   const transcriptRef = useRef<HTMLElement>(null);
@@ -73,6 +74,16 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
+  useEffect(() => store?.subscribe(() => {
+    for (const item of store.getState().outline) {
+      if (item.kind !== "tool") continue;
+      const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
+      if ((value?.tool_call?.name === "create_page" || value?.tool_call?.name === "achilles__create_page") && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+        completedCreatePages.current.add(item.id);
+        setPageRefreshNonce((current) => current + 1);
+      }
+    }
+  }), [store]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
@@ -118,12 +129,12 @@ export function App() {
       : failure && !lost && !attached ? <ConnectionBanner state={connectionState} connection={connection} />
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
-        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} refreshKey={refreshKey} />)}</div>}
+        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
         <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector<HTMLElement>('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
         {!readOnly && <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId}>{!writable || !client ? <Composer state="read-only" reason="send is off until zeta is back" onSubmit={send} placeholder="message zeta" /> : <Composer state={turn === "running" ? "steerable" : "idle"} onSubmit={send} onStop={() => client.request("abort", { session_id: ready.sessionId })} placeholder="message zeta" />}</ComposerSlot>}
       </RunProvider>}
   </>;
-  return <WriteAccessProvider value={writable}><AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell></WriteAccessProvider>;
+  return <WriteAccessProvider value={writable}><AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell></WriteAccessProvider>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
@@ -150,13 +161,21 @@ function ConnectionBanner({ state, connection, compact = false }: { state: Conne
   return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{text}{"attempt" in state && ` · tried ${state.attempt} times`}</p><h1>{state.phase === "not_running" ? "start zeta, and this page connects by itself." : text}</h1>{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
 }
 
-function LayoutBlock({ block, pageId, refreshKey }: { block: Record<string, unknown>; pageId: string; refreshKey: string }) {
+function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string | null; refreshKey: string }) {
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
   if (block.type === "list") return <RecordList title={String(block.title)} collection={String(block.collection)} pageId={pageId} refreshKey={refreshKey} />;
   if (block.type === "detail") return <p>{String(block.title)}: {Array.isArray(block.fields) ? block.fields.join(", ") : ""}</p>;
-  if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
+  if (block.type === "form") return <ToolForm title={String(block.title)} tool={String(block.tool)} pageId={pageId} credential={credential} />;
   return null;
+}
+
+type PageTool = { name: string; input_schema: { properties?: Record<string, { type?: string; title?: string }> }; version: number };
+function ToolForm({ title, tool: toolName, pageId, credential }: { title: string; tool: string; pageId: string; credential: string | null }) {
+  const [tool, setTool] = useState<PageTool | null>(null); const [error, setError] = useState<string | null>(null); const [submitting, setSubmitting] = useState(false);
+  useEffect(() => { let live = true; void fetch(`/api/pages/${pageId}/tools`, { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load form (${response.status})`); const catalog = await response.json() as { tools?: PageTool[] }; const found = catalog.tools?.find((entry) => entry.name === toolName); if (!found) throw new Error("assigned tool is unavailable"); if (live) { setTool(found); setError(null); } }).catch((caught) => { if (live) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [pageId, toolName]);
+  const fields = Object.entries(tool?.input_schema.properties ?? {});
+  return <form className="page-form" onSubmit={(event) => { event.preventDefault(); if (!credential || !tool) return; const form = event.currentTarget; const values = new FormData(form); const argumentsValue = Object.fromEntries(fields.map(([name, schema]) => [name, schema.type === "integer" || schema.type === "number" ? Number(values.get(name)) : values.get(name)])); setSubmitting(true); setError(null); void fetch(`/api/pages/${pageId}/tools/${encodeURIComponent(tool.name)}/invoke`, { method: "POST", headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" }, body: JSON.stringify({ arguments: argumentsValue, version: tool.version }) }).then((response) => { if (!response.ok) throw new Error(`could not submit form (${response.status})`); form.reset(); }).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught))).finally(() => setSubmitting(false)); }}><h2>{title}</h2>{fields.map(([name, schema]) => <label key={name}><span>{schema.title ?? name.replaceAll("_", " ")}</span><input name={name} type={schema.type === "integer" || schema.type === "number" ? "number" : "text"} disabled={!credential || submitting} /></label>)}<button type="submit" disabled={!credential || !tool || submitting}>{submitting ? "submitting…" : title}</button>{error && <p role="alert">{error}</p>}</form>;
 }
 function RecordList({ title, collection, pageId, refreshKey }: { title: string; collection: string; pageId: string; refreshKey: string }) {
   const [records, setRecords] = useState<Record<string, unknown>[]>([]); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const requestSequence = useRef(0);
