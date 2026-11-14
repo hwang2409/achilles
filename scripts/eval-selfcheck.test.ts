@@ -46,6 +46,10 @@ test("tool-version schema evidence uses the product validator", async () => {
   const snapshot = { tool_versions: schemas.map(([name, schema], index) => ({ name, version: 2, input_schema: { type: "object", properties: { title: { type: "string" }, rating: schema }, required: ["title"], additionalProperties: false }, tool_id: `tool-${index}` })) };
   const calls = schemas.map(([name]) => ({ tool: `achilles__${name}`, arguments: { title: "Dune", rating: 5 } }));
   const result = await validateToolVersionSchemas(stack as never, snapshot, calls);
+  if (!Bun.which("uv")) {
+    expect(result.tool_schema_validation_error).toContain("product schema validation failed");
+    return;
+  }
   expect(result.tool_schema_validation_error).toBeUndefined();
   expect(result.tool_schema_validations?.map(row => [row.tool, row.number_valid, row.string_valid])).toEqual([
     ["empty", true, true],
