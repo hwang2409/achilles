@@ -25,7 +25,43 @@
           ]
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "record-1",
+          "collection": "records",
+          "data": {
+            "id": "record-1"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "record-2",
+          "collection": "records",
+          "data": {
+            "id": "record-2"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "record-3",
+          "collection": "records",
+          "data": {
+            "id": "record-3"
+          }
+        }
+      ]
+    }
   },
   "bad": {
     "pages": [
@@ -50,6 +86,42 @@
           ]
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_records",
+          "operation": "list",
+          "collection": "records"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "record-1",
+          "collection": "records",
+          "data": {
+            "id": "record-1"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "record-2",
+          "collection": "records",
+          "data": {
+            "id": "record-2"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "record-3",
+          "collection": "records",
+          "data": {
+            "id": "record-3"
+          }
+        }
+      ]
+    }
   }
 }

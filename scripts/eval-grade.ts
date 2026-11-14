@@ -1,11 +1,12 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "layout_update" | "no_unrecovered_error";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "detail_selects" | "layout_update" | "no_unrecovered_error";
   required?: boolean;
   page?: string;
   chat?: string;
   name?: string;
   value?: unknown;
+  collection?: string;
   transition?: { before: string[]; after: string[] };
   count?: number;
   text?: string;
@@ -23,11 +24,12 @@ export type EvalSnapshot = {
   errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
   reconnects?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
+  initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "layout_update", "no_unrecovered_error"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "detail_selects", "layout_update", "no_unrecovered_error"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -76,7 +78,8 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "operations" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => ["insert", "update", "list", "get"].includes(String(value))))) throw new Error(`checks[${i}] needs operation kinds`);
   if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
-  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "layout_update"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "layout_update"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (check.type === "detail_selects" && (typeof check.value !== "string" || !identifier(check.collection))) throw new Error(`checks[${i}] needs a collection and string value`);
   if (check.type === "records_exact" && !Array.isArray(check.value)) throw new Error(`checks[${i}] needs a record array`);
   if (check.type === "schema_roundtrip" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string"))) throw new Error(`checks[${i}] needs string values`);
   if (check.type === "updated_record") {
@@ -92,7 +95,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "transition", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -107,7 +110,7 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "type", // fixed discriminator in every layout block
   "collection", // fixed data-source field in list and detail blocks
 ]);
-const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip"]);
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "detail_selects"]);
 function nestedTokens(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
@@ -214,7 +217,8 @@ function matchValueRows(actual: unknown, expected: string[][]) {
 }
 
 type GradeContext = { check: TaskCheck; snapshot: EvalSnapshot; page: unknown; owned(type: keyof EvalSnapshot): Array<Record<string, unknown>> };
-type TransitionFailure = { reason: string; field: string; before: unknown; after: unknown };
+type CheckFailure = { reason: string; field?: string; before?: unknown; after?: unknown };
+type TransitionFailure = CheckFailure & { field: string; before: unknown; after: unknown };
 const normalizeTransitionValue = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, "");
 const transitionFailure = (reason: string, field: string, before: unknown, after: unknown): TransitionFailure => ({ reason, field, before, after });
 const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
@@ -295,6 +299,34 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),
   same_page: ({ snapshot, page }) => (snapshot.related_page_ids?.length ?? 0) > 0 && snapshot.related_page_ids!.every(id => id === page),
   layout_contains: ({ check, owned }) => owned("layouts").some(row => structurallyContains(row.document, check.value)),
+  detail_selects: ({ check, owned }) => {
+    const layouts = owned("layouts").sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0));
+    const blocks = (layouts.at(-1)?.document as { blocks?: unknown[] } | undefined)?.blocks;
+    const details = Array.isArray(blocks) ? blocks.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && !Array.isArray(block) && (block as Record<string, unknown>).type === "detail")) : [];
+    if (!details.length) return { reason: "no detail block" } satisfies CheckFailure;
+    let failure: CheckFailure = { reason: "no supported detail selector" };
+    for (const detail of details) {
+      if (detail.collection !== check.collection) { failure = { reason: `detail collection ${JSON.stringify(detail.collection)} is not ${JSON.stringify(check.collection)}` }; continue; }
+      const records = owned("records").filter(record => record.collection === check.collection);
+      const equality = ["filter", "where"].find(key => detail[key] && typeof detail[key] === "object" && !Array.isArray(detail[key])) as "filter" | "where" | undefined;
+      let selected: Array<Record<string, unknown>>; let selector: string;
+      if (equality) {
+        const value = detail[equality] as Record<string, unknown>; const field = value.field; const equals = value.equals;
+        selector = `${equality} ${JSON.stringify(value)}`;
+        selected = typeof field === "string" && "equals" in value ? records.filter(record => (record.data as Record<string, unknown> | undefined)?.[field] === equals) : [];
+      } else {
+        const key = ["record_id", "record"].find(candidate => typeof detail[candidate] === "string");
+        if (!key) continue;
+        const id = detail[key] as string; selector = `${key}=${JSON.stringify(id)}`;
+        selected = records.filter(record => record.id === id || record.record_id === id);
+      }
+      if (selected.length !== 1) { failure = { reason: `${selector} matches ${selected.length} records` }; continue; }
+      const data = selected[0].data;
+      if (data && typeof data === "object" && !Array.isArray(data) && Object.values(data).some(value => value === check.value)) return true;
+      failure = { reason: `${selector} selects a record without ${JSON.stringify(check.value)}` };
+    }
+    return failure;
+  },
   layout_update: ({ check, snapshot, page }) => {
     const expected = check.value as { original: { blocks: unknown[] }; added: unknown; version: number };
     const layouts = rows(snapshot, "layouts");
@@ -308,9 +340,50 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
 export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResult {
   const expected = check.value ?? check.count ?? check.text ?? true; const page = expectedPageId(snapshot, check.page); const owned = (type: keyof EvalSnapshot) => rows(snapshot, type).filter(row => row.page_id === page || row.pageId === page);
   const result = CHECK_GRADERS[check.type]({ check, snapshot, page, owned });
-  const failure = result && typeof result === "object" && "reason" in result ? result as TransitionFailure : undefined;
+  const failure = result && typeof result === "object" && "reason" in result ? result as CheckFailure : undefined;
   const pass = failure ? false : ["count", "approval"].includes(check.type) ? result === expected : Boolean(result);
-  return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...(failure ? { transition: { field: failure.field, before: failure.before, after: failure.after } } : {}) }, ...(failure ? { reason: failure.reason } : {}) };
+  const transition = failure?.field === undefined ? {} : { transition: { field: failure.field, before: failure.before, after: failure.after } };
+  return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...transition }, ...(failure ? { reason: failure.reason } : {}) };
+}
+
+const canonicalSeedValue = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalSeedValue) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalSeedValue(item)])) : value;
+const sameSeedValue = (left: unknown, right: unknown) => JSON.stringify(canonicalSeedValue(left)) === JSON.stringify(canonicalSeedValue(right));
+
+export function declaredSeedMismatches(setup: TaskSetup, storedState: EvalSnapshot & Record<string, any>): string[] {
+  const failures: string[] = [];
+  const inspected = storedState.inspect as Record<string, any> | undefined;
+  const tools = storedState.tool_versions ?? inspected?.tools ?? [];
+  for (const expected of setup.tools) {
+    const tool = tools.find((row: Record<string, any>) => (row.page_id === undefined || row.page_id === "home") && row.name === expected.name);
+    const stored = tool && { ...tool, operation: tool.operation ?? tool.operations?.[0] };
+    if (!stored || Object.entries(expected).some(([key, value]) => !sameSeedValue(stored[key], value))) failures.push(`seed mismatch: tool ${expected.name}`);
+  }
+
+  const records = Array.isArray(storedState.records) ? storedState.records : Object.entries(storedState.records ?? {}).flatMap(([collection, items]) => (items as Array<Record<string, unknown>>).map(item => ({ ...item, id: item.record_id, collection, data: Object.fromEntries(Object.entries(item).filter(([key]) => !["record_id", "revision"].includes(key))) })));
+  for (const expected of setup.records) {
+    const record = records.find((row: Record<string, any>) => (row.page_id === undefined || row.page_id === "home") && (row.id ?? row.record_id) === expected.id && row.collection === expected.collection);
+    const stored = record && { ...record, id: record.id ?? record.record_id, data: record.data ?? Object.fromEntries(Object.keys(expected.data).map(key => [key, record[key]])) };
+    if (!stored || Object.entries(expected).some(([key, value]) => !sameSeedValue(stored[key], value))) failures.push(`seed mismatch: record ${expected.collection}/${expected.id}`);
+  }
+
+  if (setup.initial_layout) {
+    const layout = storedState.layouts?.find((row: Record<string, any>) => row.page_id === "home" && row.version === 1)?.document ?? storedState.layout;
+    const version = storedState.layouts ? (layout === undefined ? undefined : 1) : inspected?.layout_version ?? inspected?.layout?.version;
+    if (version !== 1 || !sameSeedValue(layout, setup.initial_layout)) failures.push("seed mismatch: initial_layout at version 1");
+  }
+  return failures;
+}
+
+export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  return task.setup ? declaredSeedMismatches(task.setup, snapshot) : [];
+}
+function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  if (!task.setup) return [];
+  return snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"];
+}
+export function assertSetupPreconditions(task: EvalTask, snapshot: EvalSnapshot) {
+  const failures = setupPreconditionFailures(task, snapshot);
+  if (failures.length) throw new Error(`task grader preconditions failed: ${failures.join(", ")}`);
 }
 
 export function hostToolsGap(snapshot: EvalSnapshot): boolean {
@@ -325,12 +398,14 @@ export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
   return { first_call_validity, structured_tool_errors: structured.map(row => ({ code: row.code, path: row.path, expected: row.expected })), unstructured_tool_errors: errors.length - structured.length };
 }
 export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
+  const preconditions = setupFailures(task, snapshot);
+  if (preconditions.length) return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "grader preconditions", actual: preconditions, evidence: { initial: snapshot.initial } }], turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
   const checks = task.checks.map(check => gradeCheck(check, snapshot)); const required = checks.filter((_, i) => task.checks[i].required !== false);
   const score = Math.round((checks.filter(result => result.pass).length / checks.length) * 100);
   return { task_id: task.id, pass: required.every(result => result.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
 }
 
 export function gradeReference(task: EvalTask, snapshot: EvalSnapshot) {
-  const result = gradeTask(task, snapshot);
-  return { ...result, status: result.pass ? "pass" as const : "agent_fail" as const };
+  const result = gradeTask(task, snapshot); const preconditions = setupFailures(task, snapshot);
+  return { ...result, status: preconditions.length ? "harness_error" as const : result.pass ? "pass" as const : "agent_fail" as const };
 }

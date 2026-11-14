@@ -36,7 +36,36 @@
           "text": "reconnect note"
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_note",
+          "operation": "insert",
+          "collection": "notes",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "page_id": "home",
+          "name": "list_notes",
+          "operation": "list",
+          "collection": "notes"
+        }
+      ],
+      "records": []
+    }
   },
   "bad": {
     "pages": [
@@ -77,6 +106,35 @@
           "text": "wrong reconnect text"
         }
       }
-    ]
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_note",
+          "operation": "insert",
+          "collection": "notes",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "page_id": "home",
+          "name": "list_notes",
+          "operation": "list",
+          "collection": "notes"
+        }
+      ],
+      "records": []
+    }
   }
 }

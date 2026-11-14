@@ -1,15 +1,93 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { classifyTaskSupport, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
+import { classifyTaskSupport, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
   const process = Bun.spawn(python, { cwd, env: { ...Bun.env, PYTHONPATH: [join(target, "src"), target].join(delimiter) }, stdout: "pipe", stderr: "pipe" });
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
+
+test("setup verification accepts old and inspect_page layout shapes", () => {
+  const setup = { tools: [], records: [], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
+  const base = { layout: setup.initial_layout, inspect: { tools: [] } };
+  expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: { ...setup.initial_layout, version: 1, digest: "old" } } })).not.toThrow();
+  expect(() => verifySetup(setup, { ...base, inspect: { tools: [], layout: setup.initial_layout, layout_version: 1, layout_digest: "new" } })).not.toThrow();
+});
+
+test("every declared seed key is verified before setup and grading", () => {
+  const setup: TaskSetup = { tools: [{ name: "add_note", operation: "insert", collection: "notes", input_schema: { type: "object", required: ["text"] } }], records: [{ id: "note-1", collection: "notes", data: { text: "seeded" } }], initial_layout: { blocks: [{ type: "text", text: "seeded" }] } };
+  const stored = { tool_versions: [{ page_id: "home", ...setup.tools[0] }], records: [{ page_id: "home", ...setup.records[0] }], layouts: [{ page_id: "home", version: 1, document: setup.initial_layout }] } as Record<string, any>;
+  const taskFor = (seed: TaskSetup) => validateTask({ id: "declared-seeds", page_plan: [{ alias: "p", source: "setup", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "work", kind: "prompt", page: "p", chat: "c", prompt: "work" }], setup: seed, checks: [{ id: "page", type: "page_exists", page: "p" }] });
+  const grade = (seed: TaskSetup, initial: Record<string, any>) => gradeReference(taskFor(seed), { initial, pages: [{ id: "home", alias: "p" }] });
+  const mutations: Array<[string, (state: Record<string, any>) => void]> = [
+    ["tool name", state => { state.tool_versions[0].name = "wrong"; }],
+    ["tool operation", state => { state.tool_versions[0].operation = "list"; }],
+    ["tool collection", state => { state.tool_versions[0].collection = "wrong"; }],
+    ["tool input_schema", state => { state.tool_versions[0].input_schema = { type: "object", required: ["title"] }; }],
+    ["record id", state => { state.records[0].id = "wrong"; }],
+    ["record collection", state => { state.records[0].collection = "wrong"; }],
+    ["record data", state => { state.records[0].data = { text: "wrong" }; }],
+    ["initial_layout", state => { state.layouts[0].document = { blocks: [] }; }],
+  ];
+  for (const [key, mutate] of mutations) {
+    const changed = structuredClone(stored); mutate(changed);
+    expect(() => verifySetup(setup, changed), `${key} setup verification`).toThrow("seed mismatch");
+    expect(grade(setup, changed).status, `${key} grading precondition`).toBe("harness_error");
+  }
+  expect(() => verifySetup(setup, stored)).not.toThrow();
+  expect(grade(setup, stored).status).toBe("pass");
+
+  const withoutSchema = { ...setup, tools: [{ name: "add_note", operation: "insert" as const, collection: "notes" }] };
+  expect(() => verifySetup(withoutSchema, stored), "an undeclared default input_schema is ignored").not.toThrow();
+  expect(grade(withoutSchema, stored).status).toBe("pass");
+});
+
+test("setup seeds an initial layout on a fresh page at version 1", async () => {
+  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-layout-setup-"));
+  try {
+    const source = await readFile(join(target, "scripts/eval.ts"), "utf8"); const script = source.match(/(?:export )?const SETUP_SCRIPT = `([\s\S]*?)`;/)?.[1];
+    expect(script).toBeDefined();
+    const layout = { blocks: [{ type: "text", text: "seeded dashboard" }] }; const setup = { tools: [], records: [], initial_layout: layout };
+    const seeded = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", script!, root, "home", JSON.stringify(setup)], target);
+    expect(seeded.exitCode, seeded.stderr).toBe(0);
+    expect(() => verifySetup(setup, JSON.parse(seeded.stdout))).not.toThrow();
+    const inspected = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", "import json,sys; from pathlib import Path; from achilles.pages import PageStore; store=PageStore(Path(sys.argv[1])); summary=store.inspect_page('home'); print(json.dumps({'layout':store.layout('home'),'version':summary.get('layout_version',summary['layout'].get('version'))}))", root], target);
+    expect(inspected.exitCode, inspected.stderr).toBe(0);
+    expect(JSON.parse(inspected.stdout)).toEqual({ layout, version: 1 });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("turn cap report preserves the seeded initial snapshot", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
+  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-turn-cap-"));
+  const taskId = "turn-cap-seeded-snapshot"; const taskPath = join(target, "evals/tasks", `${taskId}.json`); let child: ReturnType<typeof Bun.spawn> | undefined;
+  const layout = { blocks: [{ type: "text", text: "Seeded dashboard" }] }; const record = { id: "seed-1", collection: "notes", data: { text: "Seeded note" } };
+  try {
+    await Bun.write(taskPath, JSON.stringify({ id: taskId, page_plan: [{ alias: "seeded", source: "setup", bind_chat: true, create_mode: true }], agent_turns: 1, steps: [{ id: "use-turn", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "keep using tools" }, { id: "exhaust", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "continue" }], setup: { tools: [], records: [record], initial_layout: layout }, checks: [{ id: "seeded-record", type: "record", page: "seeded", value: record.data }] }));
+    const revision = (await readFile(join(target, "zeta.rev"), "utf8")).trim(); const warmZeta = join(target, ".cache/zeta"); const runnerZeta = join(target, ".cache", `zeta-${revision}`);
+    if (await Bun.file(join(warmZeta, ".git/HEAD")).exists() && !await Bun.file(join(runnerZeta, ".git/HEAD")).exists()) await symlink(warmZeta, runnerZeta, "dir").catch(error => { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; });
+    if (!await Bun.file(join(target, ".venv/bin/achilles")).exists()) { const synced = await targetRun(target)("uv", ["sync", "--project", target, "--frozen"], target); expect(synced.exitCode, synced.stderr).toBe(0); }
+    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
+    const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
+    const exitCode = await Promise.race([child.exited, Bun.sleep(28_500).then(() => { throw new Error("scripted eval exceeded 28.5 seconds"); })]);
+    expect(exitCode, `${await stdout}\n${await stderr}`).toBe(1);
+    const report = JSON.parse(await readFile(join(root, "report.json"), "utf8")); const result = report.tasks[0];
+    const snapshot = JSON.parse(await readFile(join(root, result.transcript), "utf8"));
+    expect(snapshot.initial, "turn-cap snapshot must retain initial setup").toBeDefined();
+    expect(snapshot.initial.layouts).toContainEqual(expect.objectContaining({ page_id: "home", version: 1, document: layout }));
+    expect(snapshot.initial?.records).toContainEqual(expect.objectContaining({ page_id: "home", ...record }));
+    expect(result).toEqual(expect.objectContaining({ status: "agent_fail", cap_hit: true }));
+    expect(JSON.stringify(result.checks)).not.toContain("setup precondition unverifiable");
+  } finally {
+    if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(500)]); }
+    await rm(taskPath, { force: true }); await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
