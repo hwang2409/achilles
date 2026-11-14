@@ -9,9 +9,31 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
-from zeta.protocol.types import TextContent, ToolCall
+from zeta.protocol.types import MessageRole, TextContent, ToolCall
+from zeta.providers.completion import owned_completion
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
+
+
+class RestartBackend:
+    def __init__(self, resume_turns, cursor_turn, request_serializer):
+        self.resume = FakeBackend(resume_turns, request_serializer=request_serializer)
+        self.cursor = FakeBackend([cursor_turn], request_serializer=request_serializer)
+
+    @owned_completion
+    async def complete(self, messages, tool_schemas):
+        cursor_prompt = any(
+            message.role is MessageRole.USER
+            and any(
+                isinstance(block, TextContent) and block.text == "start cursor stream"
+                for block in message.content
+            )
+            for message in messages
+        )
+        backend = self.cursor if cursor_prompt else self.resume
+        stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
+        async for event in stream:
+            yield event
 
 
 def private_proof_home() -> Path:
@@ -201,9 +223,6 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             delay=0.03,
         ),
     ]
-    if restarting_turn:
-        # Resume the interrupted tool turn, then hold the cursor-stream turn open.
-        turns = [*turns[:2], turns[-1]]
 
     def record_request(messages, tool_schemas):
         document = json.loads(control.read_text())
@@ -237,7 +256,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
         control.chmod(0o600)
         return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()
 
-    backend = FakeBackend(turns, request_serializer=record_request)
+    backend = (
+        RestartBackend(turns[:2], turns[-1], record_request)
+        if restarting_turn
+        else FakeBackend(turns, request_serializer=record_request)
+    )
     return (
         ZetaServer(
             home=home,
