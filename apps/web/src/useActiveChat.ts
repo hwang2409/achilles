@@ -161,6 +161,32 @@ type DeliveryStatus = { status: "queued" | "delivered" | "dropped" | "evicted" |
 // Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
 const STUCK_STEER_WAIT_MS = 15_000;
 
+const TURN_RUNNING = -32004;
+const NO_TURN = -32005;
+const errorCode = (error: unknown) => (error as { code?: unknown } | null)?.code;
+
+export async function deliverChatMessage(
+  client: Pick<ZetaClient, "request">,
+  sessionId: string,
+  text: string,
+  deliveryId: string,
+  steer: boolean,
+  track: (id: string) => void,
+): Promise<"send" | "steer"> {
+  const first: "send" | "steer" = steer ? "steer" : "send";
+  let used = first;
+  try {
+    await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId });
+  } catch (error) {
+    if (errorCode(error) !== (steer ? NO_TURN : TURN_RUNNING)) throw error;
+    used = steer ? "send" : "steer";
+    await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId });
+  }
+  if (used === "steer") await confirmSteerDelivery(client, sessionId, text, deliveryId, track);
+  else track(deliveryId);
+  return used;
+}
+
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
   _sessionId: string,
@@ -307,10 +333,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
   const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
     if (!client || state.phase !== "ready") throw new Error("zeta is not connected");
     const current = state; const token = owner.current.token();
-    let delivery_id: string = crypto.randomUUID();
-    if (!intent.steer) track(delivery_id);
-    await client.request(intent.steer ? "steer" : "send", { session_id: current.sessionId, text, delivery_id });
-    if (intent.steer) delivery_id = await confirmSteerDelivery(client, current.sessionId, text, delivery_id, track);
+    const delivery_id = crypto.randomUUID();
+    await deliverChatMessage(client, current.sessionId, text, delivery_id, intent.steer, track);
     if (!owner.current.current(token) || current.title !== "untitled chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {
