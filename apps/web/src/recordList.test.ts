@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { RecordList } from "./App";
+import { LayoutBlock, RecordList } from "./App";
 
 type Deferred = { promise: Promise<Response>; resolve: (response: Response) => void };
 
@@ -72,7 +72,23 @@ describe("RecordList", () => {
     }
   });
 
-  test("keeps rows on refresh, resets identity, and ignores stale responses", async () => {
+  test("resets rows when the layout page identity changes", async () => {
+    holdFetches();
+    const block = { type: "list", title: props.title, collection: props.collection };
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(React.createElement(LayoutBlock, { block, pageId: props.pageId, credential: props.credential, refreshKey: props.refreshKey })); });
+    try {
+      await settle(calls[0], [{ record_id: "book-1", title: "The Dispossessed" }]);
+
+      await act(async () => renderer.update(React.createElement(LayoutBlock, { block, pageId: "page-two", credential: props.credential, refreshKey: props.refreshKey })));
+      expect(text(renderer)).toContain("loading records…");
+      expect(text(renderer)).not.toContain("The Dispossessed");
+    } finally {
+      await act(async () => renderer.unmount());
+    }
+  });
+
+  test("keeps rows on refresh and ignores stale responses", async () => {
     holdFetches();
     const renderer = await render(props);
     try {
@@ -87,17 +103,11 @@ describe("RecordList", () => {
       expect(text(renderer)).toContain("The Dispossessed");
       expect(text(renderer)).not.toContain("loading records…");
 
-      const nextPage = { ...props, pageId: "page-two", refreshKey: "0:2" };
-      await act(async () => renderer.update(React.createElement(RecordList, { key: "page-two:books", ...nextPage })));
-      expect(text(renderer)).toContain("loading records…");
-      expect(text(renderer)).not.toContain("The Dispossessed");
-
-      await act(async () => renderer.update(React.createElement(RecordList, { key: "page-two:books", ...nextPage, refreshKey: "0:3" })));
-      await settle(calls[4], [{ record_id: "book-2", title: "A Wizard of Earthsea" }]);
-      await settle(calls[3], [{ record_id: "stale", title: "Old row" }]);
+      await act(async () => renderer.update(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:3" })));
+      await settle(calls[3], [{ record_id: "book-2", title: "A Wizard of Earthsea" }]);
+      await settle(calls[2], [{ record_id: "stale", title: "Old row" }]);
       expect(text(renderer)).toContain("A Wizard of Earthsea");
       expect(text(renderer)).not.toContain("Old row");
-      await settle(calls[2], []);
     } finally {
       await act(async () => renderer.unmount());
     }
