@@ -361,12 +361,11 @@ try {
       run: async () => {
         await reloadShell();
         let release!: () => void;
-        let markSeen!: () => void;
+        let seen = false;
         const held = new Promise<void>((resolve) => { release = resolve; });
-        const seen = new Promise<void>((resolve) => { markSeen = resolve; });
         const holdContinuation = async (route: Route) => {
           if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
-          markSeen();
+          seen = true;
           await held;
           await route.continue();
         };
@@ -374,7 +373,7 @@ try {
         const showMore = page.getByRole("button", { name: "show more pages" });
         await showMore.waitFor();
         await showMore.click();
-        await waitFor(async () => { await seen; return true; }, "continuation request was not made");
+        await waitFor(async () => seen, "continuation request was not made");
         const heading = page.locator(".page-list > .list-head");
         await heading.focus();
         await page.keyboard.press("Enter");

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
+import { createPageListOwner, initialPageListState, type PageLink, type PageListOwner } from "./pageList";
 
 export type Chat = {
   session_id: string;
@@ -12,7 +13,6 @@ export type Chat = {
   last_state: "idle" | "running" | "approval" | "failed" | null;
 };
 
-type PageLink = { id: string; route: string; title: string };
 type Props = {
   page: PageLink | null;
   sessionId: string | null;
@@ -89,12 +89,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [chats, setChats] = useState<Chat[] | null>(null);
-  const [pages, setPages] = useState<PageLink[] | null>(null);
-  const [pagesError, setPagesError] = useState(false);
-  const [pagesRetry, setPagesRetry] = useState(0);
+  const [pageList, setPageList] = useState(initialPageListState);
   const [next, setNext] = useState<string | null>(null);
-  const [pageNext, setPageNext] = useState<string | null>(null);
-  const [pagesLoading, setPagesLoading] = useState(false);
   const [approvalCount, setApprovalCount] = useState(0);
   const [activeResult, setActiveResult] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -104,6 +100,14 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const chatList = useRef<HTMLElement>(null);
   const settingsOpener = useRef<Element>(null);
   const requestFocus = useFocusAfterCommit();
+  const pageListOwner = useRef<PageListOwner | null>(null);
+  if (!pageListOwner.current) {
+    pageListOwner.current = createPageListOwner((before, signal) => {
+      const params = new URLSearchParams({ limit: "20" });
+      if (before) params.set("before", before);
+      return fetch(`/api/pages?${params}`, { cache: "no-store", signal });
+    }, setPageList);
+  }
   const loading = chats === null;
   const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
   const openSettings = (opener: Element | null) => {
@@ -131,20 +135,10 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   useEffect(() => { setActiveResult(0); }, [search]);
   useEffect(() => { const media = matchMedia("(max-width: 760px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => {
-    const controller = new AbortController();
-    let live = true;
-    const load = () => {
-      setPagesLoading(true);
-      void fetch("/api/pages?limit=20", { cache: "no-store", signal: controller.signal }).then(async (response) => {
-        if (!response.ok) throw new Error(`could not load pages (${response.status})`);
-        const result = await response.json() as { pages: PageLink[]; next: string | null };
-        if (live) { setPages(result.pages); setPageNext(result.next); setPagesError(false); }
-      }).catch((error) => { if (live && !(error instanceof DOMException && error.name === "AbortError")) setPagesError(true); })
-        .finally(() => { if (live) setPagesLoading(false); });
-    };
-    const settle = setTimeout(load, 0);
-    return () => { live = false; clearTimeout(settle); controller.abort(); };
-  }, [pageRefreshKey, pagesRetry]);
+    const owner = pageListOwner.current!;
+    void owner.reload();
+    return owner.cancel;
+  }, [pageRefreshKey]);
   useEffect(() => {
     let live = true;
     const params = new URLSearchParams({ limit: "50" });
@@ -183,7 +177,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [loading, onNewChat, onToggleCreateMode, settingsOpen]);
 
-  const pageRows = pages ?? [];
+  const pageRows = pageList.pages ?? [];
   const waitingTotal = Math.max(waiting, approvalCount);
   const groups = useMemo(() => {
     const values = new Map<string, Chat[]>();
@@ -212,21 +206,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     if (event.key === "Enter") { event.preventDefault(); select(chats[activeResult] ?? chats[0]); }
   };
   const loadOlder = async () => {
-    if (!pageNext || pagesLoading) return;
-    setPagesLoading(true);
-    try {
-      const response = await fetch(`/api/pages?limit=20&before=${encodeURIComponent(pageNext)}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`could not load pages (${response.status})`);
-      const result = await response.json() as { pages: PageLink[]; next: string | null };
-      const firstPage = result.pages[0];
-      if (firstPage) requestFocus(() => document.querySelector<HTMLAnchorElement>(`[data-page-id="${CSS.escape(firstPage.id)}"]`));
-      setPages((current) => [...(current ?? []), ...result.pages]);
-      setPageNext(result.next);
-    } catch {
-      setPagesError(true);
-    } finally {
-      setPagesLoading(false);
-    }
+    const firstPage = await pageListOwner.current!.more();
+    if (firstPage) requestFocus(() => document.querySelector<HTMLAnchorElement>(`[data-page-id="${CSS.escape(firstPage.id)}"]`));
   };
   const loadOlderChats = async () => {
     if (!next) return;
@@ -251,9 +232,9 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className={`page-list ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`}>
-        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pagesError ? "!" : pages === null ? "" : pageNext ? "20+" : pageRows.length}</b></button>
+        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pageList.error ? "!" : pageList.pages === null ? "" : pageList.next ? "20+" : pageRows.length}</b></button>
         <div className="page-list-scroll">
-          {pagesError ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => { setPagesError(false); setPagesRetry((value) => value + 1); }}>retry</button></div> : pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageNext && <button className="load-older" onClick={() => void loadOlder()}>show more pages</button>}</>}
+          {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload()}>retry</button></div> : pageList.pages === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={() => void loadOlder()}>show more pages</button>}</>}
         </div>
       </section>
       <section ref={chatList} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" onKeyDown={chatListKey}>
