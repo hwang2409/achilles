@@ -26,7 +26,7 @@ export async function waitForIdleTurn(
 export async function gateTranscript(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
-  requests: () => Array<{ id?: number | string; method?: string; params?: { text?: string; delivery_id?: string }; result?: { accepted?: boolean } }>,
+  requests: () => Array<{ id?: number | string; method?: string; params?: { text?: string; delivery_id?: string }; result?: { accepted?: boolean }; error?: { code?: number; message?: string } }>,
   controlPath: string,
 ) {
   const capture = async (name: string) => {
@@ -73,8 +73,28 @@ export async function gateTranscript(
   await capture("markdown-rendered-1440x900.png");
 
   await waitForIdleTurn(page, waitFor);
+  const startControl = JSON.parse(await Bun.file(controlPath).text());
+  await Bun.write(controlPath, JSON.stringify({ ...startControl, hold_turn_start: true }));
   await field.fill("stream enough lines to overflow");
   await field.press("Enter");
+  await waitFor(async () => JSON.parse(await Bun.file(controlPath).text()).turn_start_barrier === "held", "held turn-start event");
+  await field.fill("prompt during turn starting");
+  await field.press("Enter");
+  await waitFor(async () => {
+    const frames = requests();
+    const sent = frames.find((frame) => frame.method === "send" && frame.params?.text === "prompt during turn starting");
+    const sentIndex = sent ? frames.indexOf(sent) : -1;
+    return frames.some((frame) => frame.method === "steer" && frame.params?.text === "prompt during turn starting") ||
+      Boolean(sent && frames.slice(sentIndex + 1).some((frame) => frame.id === sent.id));
+  }, "turn-start delivery decision");
+  const startingSend = requests().find((frame) => frame.method === "send" && frame.params?.text === "prompt during turn starting");
+  const startingSteer = requests().find((frame) => frame.method === "steer" && frame.params?.text === "prompt during turn starting");
+  if (!startingSend?.params?.delivery_id || !startingSteer?.params?.delivery_id)
+    throw new Error("turn-start fallback did not retry the rejected send as a steer");
+  if (startingSend.params.delivery_id !== startingSteer.params.delivery_id)
+    throw new Error("turn-start fallback did not reuse its delivery id");
+  const heldStartControl = JSON.parse(await Bun.file(controlPath).text());
+  await Bun.write(controlPath, JSON.stringify({ ...heldStartControl, release_turn_start_barrier: true }));
   const stream = messages.filter({ hasText: "stream line 000" });
   await waitFor(async () => await stream.count() === 1, "streaming reply for this turn");
   await stream.last().evaluate((message) => {
@@ -125,18 +145,16 @@ export async function gateTranscript(
   const control = JSON.parse(await Bun.file(controlPath).text());
   await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
   await page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 });
-  await page.getByText("no turn is running", { exact: true }).waitFor({ timeout: 20_000 });
-  if (await field.inputValue() !== "prompt during denied tool turn ending") throw new Error("dropped steer did not keep its draft");
-  await page.locator(".run-state").getByText("idle", { exact: true }).waitFor({ timeout: 20_000 });
-  await field.press("Enter");
+  await waitFor(async () => requests().some((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending"), "turn-end fallback send");
   await page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 });
   if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
     throw new Error("prompt during turn end was not delivered exactly once");
+  if (await field.inputValue() !== "") throw new Error("turn-end fallback did not clear its confirmed draft");
   const newTurnSends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending");
-  if (newTurnSends.length - beforeBarrierSends !== 1) throw new Error(`prompt during turn end used ${newTurnSends.length - beforeBarrierSends} new-turn sends instead of one after the held steer`);
+  if (newTurnSends.length - beforeBarrierSends !== 1) throw new Error(`prompt during turn end used ${newTurnSends.length - beforeBarrierSends} fallback sends instead of one`);
   const sendFrame = newTurnSends.at(-1);
-  if (!sendFrame?.params?.delivery_id) throw new Error("new-turn send frame did not include a delivery id");
-  if (sendFrame.params.delivery_id === steerFrame.params.delivery_id) throw new Error("new-turn send reused the held steer delivery id");
+  if (!sendFrame?.params?.delivery_id) throw new Error("turn-end fallback send did not include a delivery id");
+  if (sendFrame.params.delivery_id !== steerFrame.params.delivery_id) throw new Error("turn-end fallback did not reuse its delivery id");
   await waitForIdleTurn(page, waitFor);
 
   await field.fill("stream text only lines to overflow");

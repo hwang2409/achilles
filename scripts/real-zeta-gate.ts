@@ -291,10 +291,39 @@ try {
         await page.keyboard.press("Tab");
         const loadOlder = page.getByRole("button", { name: "load 50 older" });
         await assertActive("chat load-older button", loadOlder);
-        await page.keyboard.press("Enter");
-        await waitFor(async () => (await rows.count()) > 50, "older chats");
-        await waitFor(async () => await rows.nth(50).evaluate((row) => document.activeElement === row), "first newly loaded chat row focus");
-        await assertActive("chat load-older success", rows.nth(50));
+        const boundaryChat = await rows.last().getAttribute("data-chat-id");
+        if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
+        let firstPageHeld = false;
+        let releaseFirstPage!: () => void;
+        const firstPageReleased = new Promise<void>((resolve) => { releaseFirstPage = resolve; });
+        const holdRefresh = async (route: Route) => {
+          if (new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          firstPageHeld = true;
+          await firstPageReleased;
+          await route.continue();
+        };
+        await page.route("**/api/chats?**", holdRefresh);
+        const previousUrl = page.url();
+        try {
+          await page.locator(".new-chat").click();
+          await waitFor(async () => firstPageHeld, "held chat refresh first page");
+          const createdChat = new URL(page.url()).searchParams.get("chat");
+          if (!createdChat) throw new Error("forced chat refresh did not create a chat");
+          await loadOlder.click();
+          releaseFirstPage();
+          await waitFor(async () => (await rows.count()) > 50, "older chats");
+          const boundary = page.locator(`[data-chat-id="${boundaryChat}"]`);
+          const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
+          await waitFor(async () => await boundary.evaluate((row) => row.nextElementSibling === document.activeElement), "first newly loaded chat row focus");
+          await assertActive("chat load-older success", firstNewlyLoaded);
+          await page.locator(`[data-chat-id="${createdChat}"]`).waitFor({ state: "attached" });
+          if (await rows.count() <= 50) throw new Error("chat refresh discarded older rows after forced order");
+        } finally {
+          releaseFirstPage();
+          await page.unroute("**/api/chats?**", holdRefresh);
+        }
+        await page.goto(previousUrl);
+        await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
       },
     },
     {
@@ -379,6 +408,36 @@ try {
         await waitFor(async () => (await links.count()) > before, "page continuation after retry");
         await waitFor(async () => await links.nth(before).evaluate((link) => document.activeElement === link), "page continuation retry focus");
         await assertActive("page continuation retry", links.nth(before));
+      },
+    },
+    {
+      name: "focus moved before commit",
+      run: async () => {
+        await reloadShell();
+        let release!: () => void;
+        let seen = false;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const holdContinuation = async (route: Route) => {
+          if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
+          seen = true;
+          await held;
+          await route.continue();
+        };
+        await page.route("**/api/pages?**", holdContinuation);
+        const links = page.locator(".page-list a");
+        const before = await links.count();
+        const search = page.locator(".chat-search input");
+        try {
+          await page.getByRole("button", { name: "show more pages" }).click();
+          await waitFor(async () => seen, "held continuation before moving focus");
+          await search.focus();
+          release();
+          await waitFor(async () => (await links.count()) > before, "held continuation rows published");
+          await assertActive("focus moved before commit", search);
+        } finally {
+          release();
+          await page.unroute("**/api/pages?**", holdContinuation);
+        }
       },
     },
     {
@@ -753,7 +812,12 @@ try {
   }
   if (await field.inputValue() !== "repeat that layout update with the old version") throw new Error("stuck steer did not keep its draft");
   const lateStatusRequests = requests().filter((frame) => frame.method === "delivery_status" && frame.params?.delivery_id === lateSteer.params.delivery_id);
-  const lateStatuses = lateStatusRequests.map((request) => requests().find((frame) => frame.id === request.id && frame.result?.status)?.result.status).filter(Boolean);
+  const lateStatuses = lateStatusRequests.map((request) => {
+    const frames = requests();
+    return frames.slice(frames.indexOf(request) + 1).find((frame) =>
+      frame.id === request.id && frame.result?.delivery_id === lateSteer.params.delivery_id && frame.result?.status
+    )?.result.status;
+  }).filter(Boolean);
   if (!lateStatuses.length || lateStatuses.some((status) => status !== "queued"))
     throw new Error(`late steer status was not stuck queued: ${JSON.stringify(lateStatuses)}`);
   const lateSteerRequests = requests().filter((frame) => frame.method === "steer" && frame.params?.text === "repeat that layout update with the old version");
