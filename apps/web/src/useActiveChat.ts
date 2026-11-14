@@ -12,6 +12,18 @@ type EmptyState = PageAttachment & { phase: "empty" };
 type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState;
 
+function claimComposerFocus() {
+  const owner = document.activeElement;
+  let moved = false;
+  const markMoved = () => { moved = true; };
+  addEventListener("pointerdown", markMoved, true);
+  addEventListener("focusin", markMoved, true);
+  return {
+    owns: () => !moved && (document.activeElement === owner || (owner !== null && !owner.isConnected && document.activeElement === document.body)),
+    release: () => { removeEventListener("pointerdown", markMoved, true); removeEventListener("focusin", markMoved, true); },
+  };
+}
+
 export function createAttachmentOwner(release: (lease: SessionLease) => void = (lease) => lease.release()) {
   let attempt = 0;
   let identity: string | null = null;
@@ -428,19 +440,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     if (!context) return;
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
-    const focusOwner = document.activeElement;
-    let focusMoved = false;
-    const markFocusMoved = () => { focusMoved = true; };
-    addEventListener("pointerdown", markFocusMoved, true);
-    addEventListener("focusin", markFocusMoved, true);
+    const focusClaim = claimComposerFocus();
     setState({ phase: "loading" });
     try {
-      await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, !focusMoved && document.activeElement === focusOwner), true);
+      await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, focusClaim.owns()), true);
     } catch (caught) {
       if (!creation.current.status(context.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     } finally {
-      removeEventListener("pointerdown", markFocusMoved, true);
-      removeEventListener("focusin", markFocusMoved, true);
+      focusClaim.release();
     }
   }, [applyPendingCreateMode, client, publishReady, state]);
 
@@ -463,11 +470,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     const token = owner.current.token();
     let current = state.phase === "ready" ? state : null;
     if (!current) {
-      const focusOwner = document.activeElement;
-      let focusMoved = false;
-      const markFocusMoved = () => { focusMoved = true; };
-      addEventListener("pointerdown", markFocusMoved, true);
-      addEventListener("focusin", markFocusMoved, true);
+      const focusClaim = claimComposerFocus();
       setCreationPageId(state.page.id);
       try {
         const attached = await attachPage(
@@ -479,13 +482,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
           token,
           true,
           applyPendingCreateMode,
-          (ready) => publishReady(ready, token, true, !focusMoved && (document.activeElement === focusOwner || (focusOwner !== null && !focusOwner.isConnected && document.activeElement === document.body))),
+          (ready) => publishReady(ready, token, true, focusClaim.owns()),
         );
         if (attached.phase !== "ready") throw new Error("created chat did not attach");
         current = attached;
       } finally {
-        removeEventListener("pointerdown", markFocusMoved, true);
-        removeEventListener("focusin", markFocusMoved, true);
+        focusClaim.release();
       }
     }
     const delivery_id = crypto.randomUUID();
