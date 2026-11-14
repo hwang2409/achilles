@@ -7,6 +7,7 @@ from starlette.testclient import TestClient
 
 import achilles.web as web
 from achilles.pages import PageStore
+from achilles.tools import derived_output_schema
 
 
 def bundle(name="add_book", operation="insert"):
@@ -372,6 +373,15 @@ def test_create_tool_rejects_wrong_output_and_derives_usable_result(creation_cli
     }
 
     generated = bundle(name="add_derived_book")
+    generated["implementation"]["data_schema"]["properties"]["details"] = {
+        "type": "object",
+        "properties": {"author": {"type": "string"}, "year": {"type": "integer"}},
+        "required": ["author", "year"],
+        "additionalProperties": False,
+    }
+    generated["output_schema"], _ = derived_output_schema(generated)
+    generated["output_schema"]["required"].reverse()
+    generated["output_schema"]["properties"]["details"]["required"].reverse()
     created = mcp(
         client,
         headers,

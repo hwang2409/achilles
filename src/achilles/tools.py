@@ -105,6 +105,17 @@ def _derived_output_expectation(operation: str) -> str:
     return f"derived {operation} result: record with required record_id and revision"
 
 
+def _normalize_required_order(value: Any, required: bool = False) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _normalize_required_order(child, key == "required") for key, child in value.items()
+        }
+    if isinstance(value, list):
+        normalized = [_normalize_required_order(child) for child in value]
+        return sorted(normalized) if required else normalized
+    return value
+
+
 def validate_bundle(
     bundle: Any, prefix: str = "", *, reject_conflicting_output: bool = False
 ) -> dict[str, Any]:
@@ -125,7 +136,9 @@ def validate_bundle(
         ):
             raise ValidationError(f"{prefix}/input_schema", "required integer property: revision")
     output_schema, _ = derived_output_schema(bundle)
-    if reject_conflicting_output and bundle.get("output_schema", output_schema) != output_schema:
+    if reject_conflicting_output and _normalize_required_order(
+        bundle.get("output_schema", output_schema)
+    ) != _normalize_required_order(output_schema):
         operation = bundle["implementation"]["operation"]
         raise ValidationError(f"{prefix}/output_schema", _derived_output_expectation(operation))
     bundle = {**bundle, "output_schema": output_schema}

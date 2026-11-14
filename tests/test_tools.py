@@ -200,15 +200,21 @@ def test_legacy_tool_uses_derived_output_schema_at_call_time(tmp_path):
             "properties": {"id": {"type": "string"}},
             "required": ["id"],
         }
+        stored_digest = bundle_digest(legacy)
         db.execute(
-            "UPDATE tool_version SET bundle=? WHERE tool_id=? AND version=?",
-            (json.dumps(legacy), row["tool_id"], row["version"]),
+            "UPDATE tool_version SET digest=?, bundle=? WHERE tool_id=? AND version=?",
+            (stored_digest, json.dumps(legacy), row["tool_id"], row["version"]),
         )
 
     result = call_record(store, "home", "annotate_trace", {"text": "legacy"}, 1)
     assert result["text"] == "legacy"
     assert result["record_id"]
     assert result["revision"] == 1
+    with store.transaction() as db:
+        audit_digest = db.execute(
+            "SELECT version_digest FROM audit WHERE action='invoke:annotate_trace'"
+        ).fetchone()["version_digest"]
+    assert audit_digest == stored_digest
 
 
 def test_generated_tool_versions_and_page_scope(tmp_path):
