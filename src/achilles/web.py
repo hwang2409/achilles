@@ -208,7 +208,9 @@ def create_app() -> Starlette:
             raise HTTPException(400, str(exc)) from exc
         has_more = len(rows) > limit
         rows = rows[:limit]
-        next_cursor = _chat_cursor(rows[-1]["updated_at"], rows[-1]["session_id"]) if has_more else None
+        next_cursor = (
+            _chat_cursor(rows[-1]["updated_at"], rows[-1]["session_id"]) if has_more else None
+        )
         approval_count = await anyio.to_thread.run_sync(store.approval_count)
         return JSONResponse({"chats": rows, "next": next_cursor, "approval_count": approval_count})
 
