@@ -599,6 +599,19 @@ try {
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
   await page.goto(`${origin}/reading`);
   await field.waitFor({ timeout: 20000 });
+  await page.getByText("legacy: 7", { exact: true }).waitFor();
+  await page.getByText("reading: 0", { exact: true }).waitFor();
+  const desktopViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const metricBoxes = await page.locator(".layout-metric").evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { top: box.top, width: box.width };
+    }),
+  );
+  if (metricBoxes.length !== 2 || metricBoxes[0].top !== metricBoxes[1].top || metricBoxes.some((box) => box.width > 172))
+    throw new Error(`390px metrics did not render two per row: ${JSON.stringify(metricBoxes)}`);
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   const readingSessionId = await homeSessionId();
   if (!readingSessionId || readingSessionId === first)
     throw new Error("reading page did not get its own zeta session");
@@ -613,6 +626,7 @@ try {
   });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await bookAdded.waitFor({ timeout: 20000 });
+  await page.getByText("reading: 1", { exact: true }).waitFor({ timeout: 20000 });
   const readingModeResponse = page.waitForResponse((response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
@@ -627,7 +641,7 @@ try {
   await page.getByText("layout updated", { exact: true }).waitFor({ timeout: 20000 });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
-    return blocks[0] === "layout updated without reload" && blocks[1]?.includes("books");
+    return blocks[0] === "layout updated without reload" && blocks[1] === "legacy: 7" && blocks[2] === "reading: 1" && blocks[3]?.includes("books");
   }, "open page layout re-render after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
@@ -884,7 +898,7 @@ try {
   reconnectPage = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (reconnectPage.zeta_session_id !== readingSessionId) throw new Error("reading page session changed after reopen");
   const readingBody = await page.locator("body").innerText();
-  if (reconnectPage.layout?.blocks?.[1]?.type !== "list" || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
+  if (!reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list") || !readingBody.includes("Synthetic Book")) throw new Error("reading page list did not render its inserted book");
   await page.goto(origin);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20000 });
   await page.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });

@@ -201,6 +201,14 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "form", "title": "add book", "tool": "add_book"},
+                                {"type": "metric", "label": "legacy", "value": "7"},
+                                {
+                                    "type": "metric",
+                                    "label": "reading",
+                                    "collection": "books",
+                                    "count": True,
+                                    "where": {"field": "status", "equals": "reading"},
+                                },
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },
@@ -252,6 +260,14 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "text", "text": "layout updated without reload"},
+                                {"type": "metric", "label": "legacy", "value": "7"},
+                                {
+                                    "type": "metric",
+                                    "label": "reading",
+                                    "collection": "books",
+                                    "count": True,
+                                    "where": {"field": "status", "equals": "reading"},
+                                },
                                 {"type": "list", "title": "books", "collection": "books"},
                             ]
                         },

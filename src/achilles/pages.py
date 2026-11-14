@@ -15,6 +15,10 @@ from typing import Any
 from .tools import TOOL_BUNDLE_SCHEMA, bundle_digest, canonical_bundle, validate_bundle
 from .validation import ValidationError, validate_schema
 
+_COLLECTION_KEY_PATTERN = TOOL_BUNDLE_SCHEMA["properties"]["implementation"]["properties"][
+    "collection"
+]["pattern"]
+
 _LAYOUT_BLOCK_SCHEMA = {
     "oneOf": [
         {
@@ -61,6 +65,29 @@ _LAYOUT_BLOCK_SCHEMA = {
                 "value": {"type": "string"},
             },
             "required": ["type", "label", "value"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "metric"},
+                "label": {"type": "string"},
+                "collection": {"type": "string"},
+                "count": {"const": True},
+                "where": {
+                    "type": "object",
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "pattern": _COLLECTION_KEY_PATTERN,
+                        },
+                        "equals": {"type": ["string", "number", "boolean", "null"]},
+                    },
+                    "required": ["field", "equals"],
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["type", "label", "collection", "count"],
             "additionalProperties": False,
         },
     ]
@@ -307,10 +334,37 @@ class PageStore:
         document = json.loads(row[2]) if row[2] else {"blocks": []}
         return row[0], row[1], document
 
+    @staticmethod
+    def _computed_layout(
+        db: sqlite3.Connection, page_id: str, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        for block in document.get("blocks", []):
+            if block.get("type") != "metric" or block.get("count") is not True:
+                continue
+            where = block.get("where")
+            if where is None:
+                count = db.execute(
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=?",
+                    (page_id, block["collection"]),
+                ).fetchone()[0]
+            else:
+                count = db.execute(
+                    "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? "
+                    "AND json_extract(document, ?) IS json_extract(?, '$')",
+                    (
+                        page_id,
+                        block["collection"],
+                        f'$."{where["field"]}"',
+                        json.dumps(where["equals"]),
+                    ),
+                ).fetchone()[0]
+            block["value"] = count
+        return document
+
     def layout(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             active = self._active_layout(db, page_id)
-        return active[2] if active else {"blocks": []}
+            return self._computed_layout(db, page_id, active[2]) if active else {"blocks": []}
 
     def inspect_page(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
@@ -319,6 +373,7 @@ class PageStore:
                 raise KeyError(page_id)
             active = self._active_layout(db, page_id)
             assert active is not None
+            active = (active[0], active[1], self._computed_layout(db, page_id, active[2]))
             counts = db.execute(
                 "SELECT collection, COUNT(*) FROM page_record WHERE page_id=? GROUP BY collection",
                 (page_id,),
@@ -335,7 +390,16 @@ class PageStore:
                 "blocks": [
                     {
                         key: block[key]
-                        for key in ("type", "title", "tool", "collection")
+                        for key in (
+                            "type",
+                            "title",
+                            "tool",
+                            "label",
+                            "value",
+                            "collection",
+                            "count",
+                            "where",
+                        )
                         if key in block
                     }
                     for block in document.get("blocks", [])
