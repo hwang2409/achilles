@@ -3,13 +3,21 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles } from "./eval";
+import { classifyTaskSupport, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, unresolvedDeliveryError, validateCatalog, validateReservedBundles } from "./eval";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
   const python = command === "uv" && args[0] === "run" && !Bun.which("uv") ? args.slice(args.indexOf("python")) : [command, ...args];
   const process = Bun.spawn(python, { cwd, env: { ...Bun.env, PYTHONPATH: [join(target, "src"), target].join(delimiter) }, stdout: "pipe", stderr: "pipe" });
   return { exitCode: await process.exited, stdout: await new Response(process.stdout).text(), stderr: await new Response(process.stderr).text() };
 };
+
+test("queued delivery timeout becomes a harness error with structured evidence", () => {
+  const error = unresolvedDeliveryError([{ event: "delivery_status", data: { delivery_id: "delivery-7", status: "queued" } }], true);
+  expect(error?.message).toBe("zeta: delivery delivery-7 never resolved");
+  expect(error?.delivery_id).toBe("delivery-7");
+  expect(error?.delivery_status).toBe("queued");
+  expect(unresolvedDeliveryError([{ event: "delivery_status", data: { delivery_id: "delivery-7", status: "queued" } }], false)).toBeUndefined();
+});
 
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
