@@ -14,6 +14,27 @@ from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 
+def write_control(path: Path, document: dict) -> None:
+    payload = json.dumps(document).encode()
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp")
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = -1
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def private_proof_home() -> Path:
     raw = os.environ.get("ZETA_HOME")
     worktree = os.environ.get("ZETA_PROOF_WORKTREE")
@@ -228,8 +249,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             for message in messages
             if message.tool_result is not None
         ]
-        control.write_text(json.dumps(document))
-        control.chmod(0o600)
+        write_control(control, document)
         return json.dumps({"messages": len(messages), "schemas": document["schemas"]}).encode()
 
     backend = FakeBackend(turns, request_serializer=record_request)
@@ -252,18 +272,15 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     await server.start()
     websocket = server._websocket
     assert websocket is not None and websocket.controller_token is not None
-    control.write_text(
-        json.dumps(
-            {
-                "port": websocket.port,
-                "token": websocket.controller_token,
-                "pending_session": pending_session,
-                "pid": os.getpid(),
-            }
-        ),
-        encoding="utf-8",
+    write_control(
+        control,
+        {
+            "port": websocket.port,
+            "token": websocket.controller_token,
+            "pending_session": pending_session,
+            "pid": os.getpid(),
+        },
     )
-    control.chmod(0o600)
     try:
         await server.serve_forever()
     finally:
