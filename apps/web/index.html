@@ -1,1 +1,36 @@
-<div id="root"></div><script type="module" src="/src/main.tsx"></script>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        const defaults = { v: 1, theme: "auto", uiFont: "jetbrains-mono", codeFont: "jetbrains-mono", size: 14, density: "comfortable", vim: false, autoApproveDefault: true };
+        const themes = ["auto", "gruvbox-dark", "gruvbox-light", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "github-dark", "github-light", "one-dark"];
+        const uiFonts = { "jetbrains-mono": '"JetBrains Mono",ui-monospace,monospace', "ibm-plex-sans": '"IBM Plex Sans",system-ui,sans-serif', inter: '"Inter",system-ui,sans-serif', system: "system-ui,sans-serif" };
+        const codeFonts = { "jetbrains-mono": '"JetBrains Mono",ui-monospace,monospace', "ibm-plex-mono": '"IBM Plex Mono",ui-monospace,monospace', "system-mono": "ui-monospace,SFMono-Regular,Consolas,monospace" };
+        let saved = {};
+        try { const value = JSON.parse(localStorage.getItem("achilles-settings") || "{}"); if (value && typeof value === "object" && !Array.isArray(value)) saved = value; } catch {}
+        const settings = {
+          ...defaults,
+          theme: themes.includes(saved.theme) ? saved.theme : defaults.theme,
+          uiFont: Object.hasOwn(uiFonts, saved.uiFont) ? saved.uiFont : defaults.uiFont,
+          codeFont: Object.hasOwn(codeFonts, saved.codeFont) ? saved.codeFont : defaults.codeFont,
+          size: [13, 14, 15, 16].includes(saved.size) ? saved.size : defaults.size,
+          density: ["comfortable", "compact"].includes(saved.density) ? saved.density : defaults.density,
+          vim: typeof saved.vim === "boolean" ? saved.vim : defaults.vim,
+          autoApproveDefault: typeof saved.autoApproveDefault === "boolean" ? saved.autoApproveDefault : defaults.autoApproveDefault,
+        };
+        const queryTheme = new URLSearchParams(location.search).get("theme");
+        const theme = themes.includes(queryTheme) ? queryTheme : settings.theme;
+        if (theme !== "auto") document.documentElement.dataset.fulcrumTheme = theme;
+        document.documentElement.dataset.density = settings.density;
+        document.documentElement.style.setProperty("--achilles-ui-font", uiFonts[settings.uiFont]);
+        document.documentElement.style.setProperty("--achilles-code-font", codeFonts[settings.codeFont]);
+        document.documentElement.style.setProperty("--achilles-ui-size", settings.size + "px");
+      })();
+    </script>
+    <title>achilles</title>
+  </head>
+  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+</html>
