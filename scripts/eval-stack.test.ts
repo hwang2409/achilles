@@ -17,6 +17,11 @@ function descendants(root: number, rows: ProcessRow[]) {
   while (changed) { changed = false; for (const row of rows) if (ids.has(row.ppid) && !ids.has(row.pid)) { ids.add(row.pid); changed = true; } }
   return rows.filter(row => ids.has(row.pid) && row.pid !== root);
 }
+function runnerAncestor(descendant: ProcessRow, rows: ProcessRow[]) {
+  const byPid = new Map(rows.map(row => [row.pid, row])); let child = descendant; let current = descendant; let parent: ProcessRow | undefined;
+  while ((parent = byPid.get(current.ppid))) { child = current; current = parent; }
+  return /(?:^|\/)(?:ba|z)?sh$/.test(current.executable) ? child : current;
+}
 function portClosed(port: number) {
   return new Promise<boolean>(resolve => { const socket = createConnection({ host: "127.0.0.1", port }); socket.setTimeout(500); socket.once("connect", () => { socket.destroy(); resolve(false); }); socket.once("error", () => resolve(true)); socket.once("timeout", () => { socket.destroy(); resolve(true); }); });
 }
@@ -39,8 +44,8 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
     const exited = new Promise<number>(resolve => child.once("exit", code => resolve(code ?? -1))); let sent = false; let runnerPid: number | undefined; let timedOut = false; let code: number | undefined;
     try {
       for (let i = 0; i < (scenario.name === "SIGINT" ? 300 : 600) && code === undefined; i++) {
-        const rows = processRows(); for (const row of descendants(child.pid!, rows)) { seen.set(row.pid, row); for (const match of row.command.matchAll(/(?:--port|--ws)\s+(\d+)/g)) ports.add(Number(match[1])); }
-        if (scenario.signal && !sent) { const bun = [...seen.values()].find(row => /(?:^|\/)bun$/.test(row.executable) && row.command.includes("scripts/eval.ts")); const servers = [...seen.values()].filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const ready = scenario.name === "SIGINT" ? [...seen.values()].some(row => row.command.includes(`${marker}/uv sync`) || row.command.includes("sleep 60")) : servers.length >= 2; if (bun && ready) { runnerPid = bun.pid; process.kill(bun.pid, scenario.signal); sent = true; } }
+        const rows = processRows(); const active = descendants(child.pid!, rows); for (const row of active) { seen.set(row.pid, row); for (const match of row.command.matchAll(/(?:--port|--ws)\s+(\d+)/g)) ports.add(Number(match[1])); }
+        if (scenario.signal && !sent) { const servers = active.filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const ready = scenario.name === "SIGINT" ? active.find(row => row.command.includes(`${marker}/uv sync`)) : servers.length >= 2 ? servers[0] : undefined; if (ready) { const bun = runnerAncestor(ready, active); runnerPid = bun.pid; process.kill(bun.pid, scenario.signal); sent = true; } }
         code = await Promise.race([exited, Bun.sleep(50).then(() => undefined)]);
       }
       if (code === undefined) { timedOut = true; if (runnerPid) process.kill(runnerPid, "SIGKILL"); process.kill(child.pid!, "SIGKILL"); code = await Promise.race([exited, Bun.sleep(2000).then(() => undefined)]); }
