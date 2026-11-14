@@ -99,7 +99,6 @@ async function rejectBeforeDeadline(
   connecting: Promise<unknown>,
   controller: AbortController,
   cleanup: () => void,
-  deadlineMs = 10_000,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -122,7 +121,7 @@ async function rejectBeforeDeadline(
       } catch (cleanupError) {
         reject(cleanupError);
       }
-    }, deadlineMs);
+    }, 10_000);
   });
   try {
     return await Promise.race([
