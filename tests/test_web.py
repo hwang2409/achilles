@@ -98,6 +98,10 @@ def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
     assert [row["session_id"] for row in second_rows] == ["b", "a"]
     assert first_rows[0]["page_route"] == "/notes"
     assert first_rows[0]["page_title"] == "notes"
+    client.patch("/api/chats/a", json={"last_state": "approval"})
+    filtered = client.get("/api/chats?limit=1&q=chat%20d").json()
+    assert [row["session_id"] for row in filtered["chats"]] == ["d"]
+    assert filtered["approval_count"] == 1
     assert client.get("/api/chats?limit=201").status_code == 400
     assert client.get("/api/chats?limit=invalid").status_code == 400
     assert client.get("/api/chats?before=missing").status_code == 400

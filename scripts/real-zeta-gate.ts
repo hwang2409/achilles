@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Route } from "playwright";
 import { controlSnapshot, diagnostic } from "./gate-diagnostics";
-import { gateSettings } from "./gate-settings";
+import { gateShell } from "./gate-shell";
+import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -18,6 +19,8 @@ const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
 const port = 5200 + Math.floor(Math.random() * 1000);
 const origin = `http://127.0.0.1:${port}`;
+const screenshotDir = process.env.SCREENSHOT_DIR;
+if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
 const secrets: string[] = [];
@@ -129,6 +132,7 @@ try {
   const page = await browser.newPage();
   const errors: string[] = [];
   let ignoreBrowserErrors = false;
+  let expectingRegistrationFailures = false;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
@@ -138,7 +142,9 @@ try {
     if (!ignoreBrowserErrors) errors.push(e.message);
   });
   page.on("console", (m) => {
-    if (m.type() === "error" && !ignoreBrowserErrors) errors.push(m.text());
+    if (m.type() !== "error") return;
+    if (expectingRegistrationFailures && m.text().includes("the server responded with a status of 503")) return;
+    if (!ignoreBrowserErrors) errors.push(m.text());
   });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
@@ -212,12 +218,7 @@ try {
     throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
-  if (approvalModeResponse("session_settings", first) !== "ask")
-    throw new Error("replacement session did not report ask settings");
-  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === first))
-    throw new Error("ask-mode replacement session sent a no-op set_settings frame");
-  if (await page.getByLabel("auto-approve", { exact: true }).count())
-    throw new Error("ask-mode session showed the auto-approve marker");
+  await assertServerAskWins(page, first, requests(), approvalModeResponse);
   const assistantReady = page.getByText("assistant ready", { exact: true });
   const assistantReadyBefore = await assistantReady.count();
   const approval = page.locator('[data-part="approval"][data-state="pending"]');
@@ -230,6 +231,14 @@ try {
   const approvalCompleteBefore = await approvalComplete.count();
   await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+  const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  const second = await gateShell(page, first, waitFor);
+  if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
+    throw new Error("hostile chat query reached zeta resume");
+  await assertServerAskWins(page, second, requests(), approvalModeResponse);
+  const firstSetSettingsAfterReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  if (firstSetSettingsAfterReopen !== firstSetSettingsBeforeReopen)
+    throw new Error("reopening an ask chat under an ask server sent set_settings");
   const credential = (
     await Bun.file(join(achillesHome, "credentials/home")).text()
   ).trim();
@@ -266,7 +275,7 @@ try {
   const toggleResult = await toggleResponse;
   if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
   await page.getByRole("button", { name: "create mode on", exact: true }).waitFor();
-  if ((await page.locator("header button").getAttribute("aria-pressed")) !== "true")
+  if ((await page.getByRole("button", { name: "create mode on" }).getAttribute("aria-pressed")) !== "true")
     throw new Error("create mode toggle did not show on");
   await homeMcp(1, "initialize", {
     protocolVersion: "2025-03-26",
@@ -490,12 +499,6 @@ try {
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
-  const askDefaultPage = await homeMcp(16, "tools/call", {
-    name: "create_page",
-    arguments: { route: "/ask-default", title: "ask default", layout: { blocks: [] } },
-  });
-  if (askDefaultPage.result?.isError || (await fetch(`${origin}/api/pages/ask-default`)).status !== 200)
-    throw new Error(`could not create ask-default gate page: ${JSON.stringify(askDefaultPage)}`);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -545,7 +548,7 @@ try {
   if (await homeSessionId() !== homeAfterRestart) throw new Error("reload changed home session id");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeReload) throw new Error("reload created a second zeta session");
   if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("reloaded ask-mode session did not report ask settings");
-  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
+  if (await page.getByLabel("auto-approve").count()) throw new Error("reloaded ask-mode session showed the auto-approve marker");
   const beforeReconnect = JSON.parse(await Bun.file(control).text());
   await field.fill("post-reconnect catalog"); await field.press("Enter");
   await waitFor(async () => {
@@ -573,12 +576,6 @@ try {
 
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
-  const staleAskDefault = start(
-    "uv",
-    ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-ask-default' WHERE id='ask-default'\"); db.commit(); db.close()"],
-    env,
-  );
-  await new Promise<void>((resolve, reject) => staleAskDefault.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`ask-default seed exited ${code}`))));
   app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: "allow" });
   await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "allow-mode achilles restart");
   await page.goto(`${origin}/allow`);
@@ -586,7 +583,7 @@ try {
   await allowField.waitFor({ timeout: 20000 });
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
-  await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
+  await page.getByLabel("auto-approve").waitFor({ state: "visible" });
   if (approvalModeResponse("set_settings", allowSession) !== "allow")
     throw new Error("allow-mode session settings were not applied");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
@@ -608,33 +605,88 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
-
-  await page.evaluate(() => localStorage.setItem("achilles-settings", JSON.stringify({ v: 1, autoApproveDefault: false })));
-  const newSessionsBeforeAskDefault = requests().filter((frame) => frame.method === "new_session").length;
-  await page.goto(`${origin}/ask-default`);
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
-  const askDefaultSession = await homeSessionId();
-  if (!askDefaultSession) throw new Error("ask-default page session id missing");
-  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsBeforeAskDefault + 1)
-    throw new Error("stale ask-default session did not create exactly one replacement");
-  if (approvalModeResponse("session_settings", askDefaultSession) !== "ask")
-    throw new Error("stale-id replacement did not use the ask default");
-  if (requests().some((frame) => frame.method === "set_settings" && frame.params?.session_id === askDefaultSession))
-    throw new Error("ask-default replacement sent a set_settings frame");
-  if (await page.getByLabel("auto-approve", { exact: true }).count())
-    throw new Error("ask-default replacement showed the auto-approve marker");
-  const askSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === askDefaultSession).length;
-  await page.reload();
-  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
-  if (await homeSessionId() !== askDefaultSession) throw new Error("reload changed ask-default session id");
-  if (approvalModeResponse("session_settings", askDefaultSession) !== "ask")
-    throw new Error("reloaded user-created ask chat did not stay ask");
-  const askSetSettingsAfterReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === askDefaultSession).length;
-  if (askSetSettingsAfterReload !== askSetSettingsBeforeReload)
-    throw new Error("reloading a user-created ask chat sent set_settings");
-  if (await page.getByLabel("auto-approve", { exact: true }).count())
-    throw new Error("reloaded user-created ask chat showed the auto-approve marker");
   await gateSettings(page, origin);
+  await gateCreationApprovalDefaults(page, requests, approvalModeResponse);
+
+  const firstSetSettingsBeforeAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  await page.goto(`${origin}/?chat=${first}`);
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  if (await page.getByLabel("auto-approve").count()) throw new Error("user ask chat reopened under allow showed auto-approve");
+  const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
+  if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
+    throw new Error("reopening a user ask chat under an allow server sent set_settings");
+
+  await page.goto(`${origin}/allow?chat=${allowSession}`);
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  let registerFailures = 0;
+  expectingRegistrationFailures = true;
+  await page.route("**/api/pages/*/chats", async (route) => {
+    if (registerFailures < 2) { registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
+    else await route.continue();
+  });
+  const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
+  await page.getByRole("button", { name: "new chat" }).click();
+  const retryRegistration = page.getByRole("button", { name: "retry saving this chat" });
+  await retryRegistration.waitFor({ timeout: 20_000 });
+  const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
+  if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)
+    throw new Error("failed chat registration did not retain exactly one new zeta session");
+  await page.unroute("**/api/pages/*/chats");
+  await retryRegistration.click();
+  await waitFor(async () => {
+    const current = await homeSessionId();
+    return Boolean(current && current !== allowSession);
+  }, "orphan chat retry");
+  if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsAfterFailure)
+    throw new Error("retrying an orphaned chat created another zeta session");
+  await page.waitForTimeout(1_000);
+
+  const draft = "this draft must remain after zeta disconnects";
+  const droppedField = page.getByRole("textbox", { name: "message" });
+  await droppedField.fill(draft);
+  await page.keyboard.press("Meta+b");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
+  zetaProcess.kill("SIGTERM");
+  if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
+  await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+  if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
+  if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
+  if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
+  const droppedPid = zetaProcess.pid;
+  zetaProcess = start(
+    "uv",
+    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
+    env,
+  );
+  await waitFor(async () => {
+    try { return JSON.parse(await Bun.file(control).text()).pid !== droppedPid; }
+    catch { return false; }
+  }, "zeta reconnect after dropped connection");
+  await page.getByRole("button", { name: "retry now" }).click();
+  const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
+  await recoveredField.waitFor({ timeout: 20_000 });
+  if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
+
+  if (screenshotDir) {
+    zetaProcess.kill("SIGTERM");
+    if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
+    const heldRequests: Route[] = [];
+    const hold = (route: Route) => { heldRequests.push(route); };
+    ignoreBrowserErrors = true;
+    await page.route("**/api/pages**", hold);
+    await page.route("**/api/chats**", hold);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(".sidebar-skeleton").first().waitFor({ timeout: 20_000 });
+    await page.getByRole("alert").filter({ hasText: "zeta serve is not running" }).waitFor({ timeout: 20_000 });
+    await page.screenshot({ path: join(screenshotDir, "07-first-paint-not-running-review-1440x900.png"), fullPage: true });
+    await Promise.all(heldRequests.map((route) => route.abort().catch(() => {})));
+    await page.unroute("**/api/pages**", hold);
+    await page.unroute("**/api/chats**", hold);
+    ignoreBrowserErrors = false;
+  }
+
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");

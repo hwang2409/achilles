@@ -7,7 +7,7 @@ const openSettings = async (page: Page) => {
 };
 
 export async function gateSettings(page: Page, origin: string): Promise<void> {
-  const screenshots = process.env.SETTINGS_SCREENSHOT_DIR;
+  const screenshots = process.env.SETTINGS_SCREENSHOT_DIR ?? process.env.SCREENSHOT_DIR;
   await page.setViewportSize({ width: 1440, height: 900 });
   if (screenshots) await page.screenshot({ path: `${screenshots}/default.png` });
   await openSettings(page);
@@ -15,12 +15,12 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   if (unnamedControls.length) throw new Error(`settings controls have no accessible name: ${unnamedControls.join(", ")}`);
   await page.getByRole("switch", { name: "vim mode" }).waitFor();
   await page.getByRole("switch", { name: "auto-approve default" }).waitFor();
-  if (screenshots) await page.screenshot({ path: `${screenshots}/dialog.png` });
+  if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
   await page.getByRole("option", { name: /gruvbox-light/ }).click();
   await page.getByRole("button", { name: "IBM Plex Sans" }).click();
   if (await theme(page) !== "gruvbox-light") throw new Error("gruvbox-light did not apply live");
   await page.getByRole("button", { name: "esc" }).click();
-  if (screenshots) await page.screenshot({ path: `${screenshots}/gruvbox-light-plex-sans.png` });
+  if (screenshots) await page.screenshot({ path: `${screenshots}/12-gruvbox-light-plex-sans.png` });
 
   await page.reload();
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
@@ -41,4 +41,50 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
   console.log("settings gate passed: live theme, persistence, query override, and reset");
+}
+
+type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };
+type ApprovalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => string | undefined;
+
+const sessionId = (page: Page) => page.locator("[data-session-id]").getAttribute("data-session-id");
+const settingsWrites = (frames: Frame[], id: string) => frames.filter((frame) => frame.method === "set_settings" && frame.params?.session_id === id).length;
+
+export async function assertServerAskWins(page: Page, id: string, frames: Frame[], approvalModeResponse: ApprovalModeResponse): Promise<void> {
+  if (approvalModeResponse("session_settings", id) !== "ask") throw new Error("server-forced ask session did not report ask settings");
+  if (settingsWrites(frames, id)) throw new Error("server-forced ask session sent a no-op set_settings frame");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("server-forced ask session showed the auto-approve marker");
+}
+
+export async function gateCreationApprovalDefaults(page: Page, frames: () => Frame[], approvalModeResponse: ApprovalModeResponse): Promise<void> {
+  const initial = await sessionId(page);
+  await page.getByRole("button", { name: "new chat" }).click();
+  await page.waitForFunction((previous) => document.querySelector("[data-session-id]")?.getAttribute("data-session-id") !== previous, initial);
+  const allowId = await sessionId(page);
+  if (!allowId || approvalModeResponse("set_settings", allowId) !== "allow") throw new Error("default-on new chat did not use allow mode");
+  await page.getByLabel("auto-approve", { exact: true }).waitFor({ state: "visible" });
+
+  await openSettings(page);
+  const approvalDefault = page.getByRole("switch", { name: "auto-approve default" });
+  if (await approvalDefault.getAttribute("aria-checked") !== "true") throw new Error("auto-approve default was not on after reset");
+  await approvalDefault.click();
+  await page.getByRole("button", { name: "esc" }).click();
+
+  await page.getByRole("button", { name: "new chat" }).click();
+  await page.waitForFunction((previous) => document.querySelector("[data-session-id]")?.getAttribute("data-session-id") !== previous, allowId);
+  const askId = await sessionId(page);
+  if (!askId || approvalModeResponse("session_settings", askId) !== "ask") throw new Error("default-off new chat did not use ask mode");
+  if (settingsWrites(frames(), askId)) throw new Error("default-off new chat sent a set_settings frame");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("default-off new chat showed the auto-approve marker");
+
+  await openSettings(page);
+  await page.getByRole("switch", { name: "auto-approve default" }).click();
+  await page.getByRole("button", { name: "esc" }).click();
+  const writesBeforeReopen = settingsWrites(frames(), askId);
+  await page.reload();
+  await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
+  if (await sessionId(page) !== askId) throw new Error("reopening after changing the default changed the chat id");
+  if (approvalModeResponse("session_settings", askId) !== "ask") throw new Error("reopening after changing the default changed ask mode");
+  if (settingsWrites(frames(), askId) !== writesBeforeReopen) throw new Error("reopening after changing the default sent set_settings");
+  if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reopened ask chat showed the auto-approve marker");
+  console.log("settings approval gate passed: default allow, default ask, and reopen preservation");
 }

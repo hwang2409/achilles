@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, loadSession, openHomeSession } from "./session";
+import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -28,35 +28,60 @@ describe("applyApprovalMode", () => {
 });
 
 describe("openHomeSession", () => {
-  test("preserves the approval mode of a resumed session", async () => {
-    const methods: string[] = [];
-    const client = { request: async (method: string) => {
-      methods.push(method);
-      if (method === "resume") return {};
-      if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
-      throw new Error(`unexpected ${method}`);
-    } };
-
-    expect(await openHomeSession(client as never, "existing", "token", "/tmp", "allow", false)).toMatchObject({ id: "existing", approvalMode: "ask" });
-    expect(methods).toEqual(["resume", "session_settings"]);
+  test("chooses the creation mode from the server and default", () => {
+    expect(creationApprovalMode("allow")).toBe("allow");
+    expect(creationApprovalMode("allow", false)).toBe("ask");
+    expect(creationApprovalMode("ask")).toBe("ask");
   });
 
-  test("applies the selected default to a stale session replacement", async () => {
+  test("reports a missing resumed chat without creating a replacement", async () => {
     const methods: string[] = [];
     const client = { request: async (method: string) => {
       methods.push(method);
-      if (method === "resume") throw { data: { code: "session_not_found" } };
-      if (method === "new_session") return { session: { session_id: "replacement" } };
+      throw { data: { code: "session_not_found" } };
+    } };
+
+    await expect(openHomeSession(client as never, "missing", "credential", "/tmp", "allow")).rejects.toBeInstanceOf(SessionNotFoundError);
+    expect(methods).toEqual(["resume"]);
+  });
+
+  test("preserves a resumed chat mode when the server does not force ask", async () => {
+    const methods: string[] = [];
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      if (method === "resume") return { session: { name: "existing" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
       throw new Error(`unexpected ${method}`);
     } };
 
-    expect(await openHomeSession(client as never, "stale", "token", "/tmp", "ask", false)).toMatchObject({ id: "replacement", approvalMode: "ask" });
-    expect(methods).toEqual(["resume", "new_session", "session_settings"]);
+    const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow");
+    expect(result.approvalMode).toBe("ask");
+    expect(methods).toEqual(["resume", "session_settings"]);
   });
 });
 
 describe("loadSession", () => {
+  test("releases an acquired lease when replay finalization fails", async () => {
+    let statusRequests = 0;
+    let releases = 0;
+    const client = {
+      request: async (method: string) => {
+        if (method === "session_history") return { messages: [], next_offset: null };
+        statusRequests += 1;
+        if (statusRequests > 1) throw new Error("status failed after acquire");
+        return { session: { session_id: "s" }, state: "idle" };
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => {
+        await refresh();
+        return { store: { resync() {} }, release() { releases += 1; } };
+      },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
+    await expect(loadSession(client as never, "s")).rejects.toThrow("status failed after acquire");
+    expect(releases).toBe(1);
+  });
+
   test("reconciles a tail event that arrives during refresh", async () => {
     let revision = 0;
     let historyRequests = 0;

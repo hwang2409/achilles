@@ -3,6 +3,6 @@ import { App } from "./App";
 import "@fulcrum/react/styles.css";
 import "@fulcrum/react/themes.css";
 import "./fonts.css";
-import "./style.css";
-
+const theme = new URLSearchParams(location.search).get("theme");
+if (theme) document.documentElement.dataset.fulcrumTheme = theme;
 createRoot(document.getElementById("root")!).render(<App />);
