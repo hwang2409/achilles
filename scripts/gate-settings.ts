@@ -105,8 +105,22 @@ export async function gateSettings(page: Page, origin: string): Promise<void> {
   await page.keyboard.press("Escape");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${origin}/allow`);
+  await page.getByRole("button", { name: "open menu" }).click();
+  const sidebar = page.locator(".sidebar");
+  const controls = sidebar.locator("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
+  await controls.first().waitFor();
+  await controls.last().focus();
+  await page.keyboard.press("Tab");
+  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer Tab escaped the sidebar");
+  await controls.first().focus();
+  await page.keyboard.press("Shift+Tab");
+  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer reverse Tab escaped the sidebar");
+  if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
+  await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1440, height: 900 });
-  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, and focus return");
+  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, focus return, and drawer focus wrap");
 }
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };
@@ -152,20 +166,5 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   if (approvalModeResponse("session_settings", askId) !== "ask") throw new Error("reopening after changing the default changed ask mode");
   if (settingsWrites(frames(), askId) !== writesBeforeReopen) throw new Error("reopening after changing the default sent set_settings");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reopened ask chat showed the auto-approve marker");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${origin}/allow`);
-  await page.getByRole("button", { name: "open menu" }).click();
-  const sidebar = page.locator(".sidebar");
-  const controls = sidebar.locator("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
-  await controls.first().waitFor();
-  await controls.last().focus();
-  await page.keyboard.press("Tab");
-  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer Tab escaped the sidebar");
-  await controls.first().focus();
-  await page.keyboard.press("Shift+Tab");
-  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer reverse Tab escaped the sidebar");
-  if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
-  await page.keyboard.press("Escape");
-  await page.setViewportSize({ width: 1440, height: 900 });
-  console.log("settings approval gate passed: default allow, default ask, reopen preservation, and drawer focus wrap");
+  console.log("settings approval gate passed: default allow, default ask, and reopen preservation");
 }
