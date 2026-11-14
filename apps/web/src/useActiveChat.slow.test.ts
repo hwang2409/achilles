@@ -1,6 +1,7 @@
+// @vitest-environment happy-dom
 import { afterEach, expect, test } from "bun:test";
-import { createElement } from "react";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act, createElement } from "react";
+import { render, type RenderResult } from "@testing-library/react";
 import { useActiveChat } from "./useActiveChat";
 
 const EXPECTED_ATTACH_SLOW_MS = 15_000;
@@ -13,12 +14,18 @@ const originalGlobals = {
   fetch: globalThis.fetch,
   IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
 };
-let mounted: ReactTestRenderer | null = null;
+let mounted: RenderResult | null = null;
+
+// happy-dom defines location/history/localStorage as getter-only accessors, so a plain
+// assignment throws; override each property descriptor instead of using Object.assign.
+function setGlobals(values: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+}
 
 afterEach(async () => {
   if (mounted) await act(async () => { mounted?.unmount(); });
   mounted = null;
-  Object.assign(globalThis, originalGlobals);
+  setGlobals(originalGlobals);
 });
 
 class MemoryStorage implements Storage {
@@ -90,7 +97,7 @@ async function flushUntil(done: () => boolean) {
 
 test("a slow attachment can retry without accepting its late answer", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  Object.assign(globalThis, {
+  setGlobals({
     localStorage: new MemoryStorage(),
     location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
     history: { pushState() {}, replaceState() {} },
@@ -111,9 +118,9 @@ test("a slow attachment can retry without accepting its late answer", async () =
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
   const Harness = () => { active = useActiveChat(slowClient as never, true, clock as never); return null; };
-  let renderer!: ReactTestRenderer;
+  let renderer!: RenderResult;
 
-  await act(async () => { renderer = create(createElement(Harness)); mounted = renderer; });
+  await act(async () => { renderer = render(createElement(Harness)); mounted = renderer; });
   await flushUntil(() => slowClient.resumes === 1);
   expect(active.attachSlow ?? false).toBe(false);
   await act(async () => { clock.advance(EXPECTED_ATTACH_SLOW_MS); });
@@ -131,7 +138,7 @@ test("a slow attachment can retry without accepting its late answer", async () =
   const normalClock = new ManualClock();
   const normalClient = client();
   const NormalHarness = () => { active = useActiveChat(normalClient as never, true, normalClock as never); return null; };
-  await act(async () => { renderer = create(createElement(NormalHarness)); mounted = renderer; });
+  await act(async () => { renderer = render(createElement(NormalHarness)); mounted = renderer; });
   await flushUntil(() => active.state.phase === "ready");
   await act(async () => { normalClock.advance(EXPECTED_ATTACH_SLOW_MS); });
   expect(active.attachSlow).toBe(false);
