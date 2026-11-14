@@ -12,6 +12,7 @@ class FakeWebSocket {
   static socketConstructions = 0;
   static closeCalls = 0;
   static holdOpen = false;
+  static lastSocket: FakeWebSocket | undefined;
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSING = 2;
@@ -25,6 +26,7 @@ class FakeWebSocket {
 
   constructor(_url: string | URL, _protocols?: string | string[]) {
     FakeWebSocket.socketConstructions += 1;
+    FakeWebSocket.lastSocket = this;
     if (!FakeWebSocket.holdOpen) queueMicrotask(() => {
       this.readyState = FakeWebSocket.OPEN;
       this.emit("open", new Event("open"));
@@ -66,12 +68,54 @@ function installFakeWebSocket(errorCode = -32001) {
   FakeWebSocket.socketConstructions = 0;
   FakeWebSocket.closeCalls = 0;
   FakeWebSocket.holdOpen = false;
+  FakeWebSocket.lastSocket = undefined;
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
 }
 
 afterEach(() => { globalThis.WebSocket = originalWebSocket; });
 
 const discovery = { url: "ws://eval.invalid", controller_token: "synthetic-token" };
+
+async function resolveBeforeDeadline<T>(operation: string, promise: Promise<T>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${operation} timed out`)), 1_000);
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function rejectBeforeDeadline(
+  operation: string,
+  connecting: Promise<unknown>,
+  controller: AbortController,
+  cleanup: () => void,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${operation} timed out`);
+      controller.abort(error);
+      cleanup();
+      void connecting.catch(() => {});
+      reject(error);
+    }, 10_000);
+  });
+  try {
+    return await Promise.race([
+      connecting.then(
+        () => { throw new Error(`${operation} unexpectedly resolved`); },
+        error => error,
+      ),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 test("reconnect waits for the previous controller claim to clear", async () => {
   installFakeWebSocket();
@@ -119,7 +163,9 @@ test("reconnect aborts during a pending capacity backoff without another connect
   let waitResolved = false;
   let releaseWait!: () => void;
   let waitStartedResolve!: () => void;
+  let waitFinishedResolve!: () => void;
   const waitStarted = new Promise<void>(resolve => { waitStartedResolve = resolve; });
+  const waitFinished = new Promise<void>(resolve => { waitFinishedResolve = resolve; });
   const connecting = connectEvalProtocol(discovery, undefined, {
     retryCapacity: true,
     signal: controller.signal,
@@ -127,16 +173,19 @@ test("reconnect aborts during a pending capacity backoff without another connect
       waitStartedResolve();
       await new Promise<void>(resolve => { releaseWait = resolve; });
       waitResolved = true;
+      waitFinishedResolve();
     },
   });
 
-  await Promise.race([waitStarted, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("backoff did not start")), 1_000))]);
+  await resolveBeforeDeadline("capacity backoff start", waitStarted);
   expect(FakeWebSocket.socketConstructions).toBe(1);
   controller.abort(reason);
-  await expect(connecting).rejects.toBe(reason);
+  expect(await rejectBeforeDeadline("capacity-backoff cancellation", connecting, controller, releaseWait)).toBe(reason);
   expect(waitResolved).toBe(false);
-  expect(FakeWebSocket.socketConstructions).toBe(1);
   releaseWait();
+  await resolveBeforeDeadline("capacity backoff finish", waitFinished);
+  await new Promise<void>(resolve => queueMicrotask(resolve));
+  expect(FakeWebSocket.socketConstructions).toBe(1);
 });
 
 test("reconnect aborts while the socket is opening and closes it", async () => {
@@ -148,7 +197,12 @@ test("reconnect aborts while the socket is opening and closes it", async () => {
 
   expect(FakeWebSocket.socketConstructions).toBe(1);
   controller.abort(reason);
-  await expect(connecting).rejects.toBe(reason);
+  expect(await rejectBeforeDeadline(
+    "opening-socket cancellation",
+    connecting,
+    controller,
+    () => FakeWebSocket.lastSocket?.close(),
+  )).toBe(reason);
   expect(FakeWebSocket.closeCalls).toBeGreaterThan(0);
   expect(FakeWebSocket.socketConstructions).toBe(1);
 });
