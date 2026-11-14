@@ -62,13 +62,20 @@ jobs:
       - run: uv sync --project .cache/zeta --frozen
       - run: bun test ./scripts/eval*.test.ts
       - run: |
+          set +e
           EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
-          python - <<'PY'
-          import json
+          status=$?
+          set -e
+          STATUS=$status python - <<'PY'
+          import json, os
           from pathlib import Path
           expected = sorted(path.stem for path in Path('evals/tasks').glob('*.json'))
-          actual = sorted(task['task_id'] for task in json.loads(Path('.cache/eval-ci-setup/report.json').read_text())['tasks'])
+          report = json.loads(Path('.cache/eval-ci-setup/report.json').read_text())
+          actual = sorted(task['task_id'] for task in report['tasks'])
           assert actual == expected, (actual, expected)
+          if int(os.environ['STATUS']):
+              print([(task['task_id'], task['status'], task['checks']) for task in report['tasks'] if not task['pass']])
+          raise SystemExit(int(os.environ['STATUS']))
           PY
       - run: |
           python - <<'PY'
