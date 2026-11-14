@@ -1038,9 +1038,11 @@ try {
     if (!record || !transcript || record.y + record.height > transcript.y)
       throw new Error(`${label} observer record overlapped the transcript: record=${JSON.stringify(record)} transcript=${JSON.stringify(transcript)}`);
   };
+  await observerPage.setViewportSize({ width: 1440, height: 900 });
   await assertObserverPageBlocks("desktop");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "09-observer-page-records-form-1440x900.png"), fullPage: true });
   await observerPage.setViewportSize({ width: 390, height: 844 });
+  await observerPage.waitForFunction(() => { const sidebar = document.querySelector(".sidebar")?.getBoundingClientRect(); return Boolean(sidebar && sidebar.right <= 0); });
   await assertObserverPageBlocks("mobile");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "10-observer-page-records-form-390x844.png"), fullPage: true });
   await observerPage.setViewportSize({ width: 1440, height: 900 });
