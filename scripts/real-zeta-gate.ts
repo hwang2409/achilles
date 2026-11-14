@@ -8,6 +8,8 @@ import { gateShell } from "./gate-shell";
 import { gateTranscript } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 
+import { expectBrowserErrors } from "./browser-errors";
+
 const root = new URL("..", import.meta.url).pathname;
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -132,67 +134,14 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
-  let expectedNotFoundNavigation = false;
-  let expectedNotFoundResponse = false;
-  let expectedNotFoundConsoleError = false;
-  let expectingRegistrationFailures = false;
-  let registrationFailureUrl: string | null = null;
-  let registrationFailureResponse = false;
-  let registrationFailureConsoleError = false;
-  let expectingDiscoveryFailure = false;
-  let discoveryFailureResponse = false;
-  let discoveryFailureConsoleError = false;
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
+  const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => frames.push(String(event.payload)));
     socket.on("framereceived", (event) => frames.push(String(event.payload)));
   });
-  page.on("response", (response) => {
-    const request = response.request();
-    if (
-      expectedNotFoundNavigation &&
-      request.method() === "GET" &&
-      response.status() === 404 &&
-      response.url() === expectedNotFoundUrl
-    ) expectedNotFoundResponse = true;
-    if (
-      expectingRegistrationFailures &&
-      request.method() === "POST" &&
-      response.status() === 503 &&
-      response.url() === registrationFailureUrl
-    ) registrationFailureResponse = true;
-    if (
-      expectingDiscoveryFailure &&
-      request.method() === "GET" &&
-      response.status() === 503 &&
-      response.url() === `${origin}/api/zeta/discovery`
-    ) discoveryFailureResponse = true;
-  });
   page.on("pageerror", (e) => errors.push(e.message));
-  page.on("console", (m) => {
-    if (m.type() !== "error") return;
-    const expectedRegistration = expectingRegistrationFailures && registrationFailureResponse &&
-      !registrationFailureConsoleError && m.text().includes("503");
-    if (expectedRegistration) {
-      registrationFailureConsoleError = true;
-      return;
-    }
-    const expectedDiscovery = expectingDiscoveryFailure && discoveryFailureResponse &&
-      !discoveryFailureConsoleError && m.text().includes("503");
-    if (expectedDiscovery) {
-      discoveryFailureConsoleError = true;
-      return;
-    }
-    const expected = expectedNotFoundNavigation && expectedNotFoundResponse &&
-      !expectedNotFoundConsoleError && m.location().url === expectedNotFoundUrl &&
-      m.text().includes("404");
-    if (expected) {
-      expectedNotFoundConsoleError = true;
-      return;
-    }
-    errors.push(m.text());
-  });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
   await setupAlert.waitFor({ timeout: 20000 });
@@ -200,9 +149,6 @@ try {
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
   const firstZetaPid = zetaProcess.pid;
-  expectingDiscoveryFailure = true;
-  discoveryFailureResponse = false;
-  discoveryFailureConsoleError = false;
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) {
     zetaProcess.kill("SIGKILL");
@@ -229,7 +175,6 @@ try {
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
   await page.locator(".transcript").waitFor({ state: "visible" });
-  expectingDiscoveryFailure = false;
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id");
   const first = await homeSessionId();
@@ -268,17 +213,15 @@ try {
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
   await assertServerAskWins(page, first, requests(), approvalModeResponse);
-  expectedNotFoundNavigation = true;
-  expectedNotFoundResponse = false;
-  expectedNotFoundConsoleError = false;
-  await page.goto(`${origin}/not-a-real-page`);
+  await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
+    await page.goto(`${origin}/not-a-real-page`);
   await page.getByRole("alert").filter({ hasText: "page not found" }).waitFor({ timeout: 20_000 });
   await page.getByRole("button", { name: "new chat", exact: true }).click();
   await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
+  });
   const unknownRouteSession = await homeSessionId();
   if (!unknownRouteSession || unknownRouteSession === first) throw new Error("unknown-route new chat did not create a new session");
   if (!(await page.locator(".empty-chat").count())) throw new Error("unknown-route new chat did not show an empty chat");
-  expectedNotFoundNavigation = false;
   await page.goto(`${origin}/?chat=${first}`);
   await page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 20_000 });
   const assistantReady = page.getByText("assistant ready", { exact: true });
@@ -747,22 +690,22 @@ try {
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await page.getByRole("textbox", { name: "message" }).waitFor({ timeout: 20_000 });
   let registerFailures = 0;
-  expectingRegistrationFailures = true;
-  registrationFailureUrl = null;
-  registrationFailureResponse = false;
-  registrationFailureConsoleError = false;
-  await page.route("**/api/pages/*/chats", async (route) => {
-    if (registerFailures < 2) { registerFailures += 1; registrationFailureUrl ??= route.request().url(); await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
+  const registrationExpected = [{ method: "POST", url: "", status: 503 }];
+
+  await page.route("**/api/**", async (route) => {
+    if (registerFailures < 2 && route.request().url().endsWith("/chats")) { registrationExpected.forEach((item) => { item.url ||= route.request().url(); }); registerFailures += 1; await route.fulfill({ status: 503, body: "synthetic registration failure" }); }
     else await route.continue();
   });
   const newSessionsBeforeOrphan = requests().filter((frame) => frame.method === "new_session").length;
-  await page.getByRole("button", { name: "new chat" }).click();
+  await expectBrowserErrors(page, registrationExpected, async () => {
+    await page.getByRole("button", { name: "new chat" }).click();
+  });
   const retryRegistration = page.getByRole("button", { name: "retry creating chat" });
   await retryRegistration.waitFor({ timeout: 20_000 });
   const newSessionsAfterFailure = requests().filter((frame) => frame.method === "new_session").length;
   if (newSessionsAfterFailure !== newSessionsBeforeOrphan + 1)
     throw new Error("failed chat registration did not retain exactly one new zeta session");
-  await page.unroute("**/api/pages/*/chats");
+  await page.unroute("**/api/**");
   await retryRegistration.click();
   await waitFor(async () => {
     const current = await homeSessionId();
@@ -777,12 +720,11 @@ try {
   await droppedField.fill(draft);
   await page.keyboard.press("Meta+b");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
-  expectingDiscoveryFailure = true;
-  discoveryFailureResponse = false;
-  discoveryFailureConsoleError = false;
-  zetaProcess.kill("SIGTERM");
-  if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
-  await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+  await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
+    zetaProcess.kill("SIGTERM");
+    if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
+    await page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }).waitFor({ timeout: 20_000 });
+  });
   if (await droppedField.inputValue() !== draft) throw new Error("dropped connection discarded the composer draft");
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
@@ -800,7 +742,6 @@ try {
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await recoveredField.waitFor({ timeout: 20_000 });
-  expectingDiscoveryFailure = false;
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 

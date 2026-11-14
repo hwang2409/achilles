@@ -88,6 +88,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const chatList = useRef<HTMLElement>(null);
   const settingsOpener = useRef<Element>(null);
   const loading = chats === null;
   const closeDrawer = () => { setDrawer(false); requestAnimationFrame(() => restoreFocus(menuButton.current)); };
@@ -167,12 +168,13 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
   const chatListKey = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (!["Home", "End", "ArrowDown", "ArrowUp"].includes(event.key)) return;
     const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(".chat-row")];
     if (!rows.length) return;
     event.preventDefault();
     const current = rows.indexOf(document.activeElement as HTMLElement);
-    rows[(current + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length].focus();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1 : current < 0 ? (event.key === "ArrowDown" ? 0 : rows.length - 1) : current + (event.key === "ArrowDown" ? 1 : -1);
+    if (next >= 0 && next < rows.length) rows[next].focus();
   };
   const searchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (!search || !chats?.length) return;
@@ -183,10 +185,15 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     if (!next) return;
     const params = new URLSearchParams({ limit: "50", before: next });
     if (search) params.set("q", search);
+    const existingCount = chats?.length ?? 0;
     const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
     if (!response.ok) return;
     const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
     setChats((current) => [...(current ?? []), ...result.chats]);
+    requestAnimationFrame(() => {
+      const rows = chatList.current?.querySelectorAll<HTMLElement>(".chat-row");
+      rows?.[existingCount]?.focus() ?? chatList.current?.querySelector<HTMLElement>(".load-older")?.focus();
+    });
     setApprovalCount(result.approval_count);
     setNext(result.chats.length ? result.next : null);
   };
@@ -203,7 +210,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
         <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pages.length}</b></button>
         {loading ? <SidebarSkeleton count={2} /> : pagesOpen && pages.map((item) => <a key={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}
       </section>
-      <section className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" onKeyDown={chatListKey}>
+      <section ref={chatList} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chats?.length ?? ""}</b></div>
         {chats === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
         {next && <button className="load-older" onClick={loadOlder}>load 50 older</button>}
