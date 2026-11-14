@@ -3,6 +3,7 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView } from "@codemirror/view";
 import { useRunStore, type ComposerProps } from "@fulcrum/react";
 import { getCM, Vim, vim } from "@replit/codemirror-vim";
+import { isEditableTarget } from "../keyboard";
 import { createComposerModel, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
 import "./vim-composer.css";
 
@@ -17,25 +18,26 @@ function vimMode(view: EditorView): Mode {
   return state?.visualMode ? "visual" : state?.insertMode ? "insert" : "normal";
 }
 
-function isTextField(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'));
-}
+type VimComposerProps = ComposerProps & { onDraftChange: (text: string) => void };
 
-function useComposerDelivery({ state, defaultValue, onSubmit, onStop }: ComposerProps) {
+function useComposerDelivery({ state, defaultValue, onSubmit, onStop, onDraftChange }: VimComposerProps) {
   const [model, setModel] = useState(() => createComposerModel(defaultValue ?? "", state));
   const modelRef = useRef(model);
   const submitRef = useRef(onSubmit);
   const stopRef = useRef(onStop);
   const stateRef = useRef(state);
+  const draftChangeRef = useRef(onDraftChange);
   const store = useRunStore();
   submitRef.current = onSubmit;
   stopRef.current = onStop;
   stateRef.current = state;
+  draftChangeRef.current = onDraftChange;
 
   const apply = useCallback((event: ComposerEvent) => {
     const result = transition(modelRef.current, event);
     modelRef.current = result.model;
     setModel(result.model);
+    if (event.type === "edit" || event.type === "confirm") draftChangeRef.current(result.model.draft);
     return result.effect;
   }, []);
   useLayoutEffect(() => { apply({ type: "state", state }); }, [apply, state]);
@@ -78,11 +80,11 @@ function useComposerDelivery({ state, defaultValue, onSubmit, onStop }: Composer
 }
 
 /** A CodeMirror-backed composer with the same delivery contract as Fulcrum's Composer. */
-export function VimComposer(props: ComposerProps) {
+export function VimComposer(props: VimComposerProps) {
   return <InteractiveVimComposer {...props} />;
 }
 
-function InteractiveVimComposer(props: ComposerProps) {
+function InteractiveVimComposer(props: VimComposerProps) {
   const { state, reason, label = "message", placeholder, defaultValue = "", className, onStop } = props;
   const id = useId();
   const host = useRef<HTMLDivElement>(null);
@@ -175,7 +177,7 @@ function InteractiveVimComposer(props: ComposerProps) {
     syncVimState(view);
 
     const onPageKeyDown = (event: KeyboardEvent) => {
-      if (modelRef.current.state === "read-only" || focusedRef.current || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTextField(event.target)) return;
+      if (modelRef.current.state === "read-only" || focusedRef.current || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event)) return;
       if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
       if (event.key === "i" || event.key === "Enter") {
         event.preventDefault(); view.focus();
@@ -206,7 +208,7 @@ function InteractiveVimComposer(props: ComposerProps) {
   }, []);
 
   return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
-    <div data-part="composer-field" data-empty={!model.draft || undefined} ref={host} />
+    <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
       <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
       <p data-part="composer-status" data-tone={model.error ? "danger" : message ? "busy" : undefined} title={model.error?.text}>

@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Approval, Composer, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell } from "./AppShell";
+import { draftStore } from "./draftStore";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
@@ -15,17 +16,20 @@ function vimEnabled() {
   catch { return false; }
 }
 
-function ComposerSlot({ focus, vim, props }: { focus: boolean; vim: boolean; props: ComposerProps }) {
+function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
   const slot = useRef<HTMLDivElement>(null);
-  const draft = useRef("");
+  const previousVim = useRef(vim);
+  const storedDraft = draftStore.get(sessionId);
+  const draft = vim && !previousVim.current ? slot.current?.querySelector<HTMLTextAreaElement>("textarea")?.value ?? storedDraft : storedDraft;
+  useLayoutEffect(() => {
+    if (vim && !previousVim.current) draftStore.set(sessionId, draft);
+    previousVim.current = vim;
+  }, [draft, sessionId, vim]);
   useLayoutEffect(() => { if (focus) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
-  const captureDraft = (event: FormEvent<HTMLDivElement>) => {
-    const field = event.target;
-    if (field instanceof HTMLTextAreaElement) draft.current = field.value;
-    else if (field instanceof HTMLElement && field.getAttribute("role") === "textbox") draft.current = field.textContent ?? "";
-  };
-  const composer = vim ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...props} defaultValue={draft.current} /></Suspense> : <Composer {...props} defaultValue={draft.current} />;
-  return <div ref={slot} style={{ display: "contents" }} onInput={captureDraft}>{composer}</div>;
+  const composer = vim
+    ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...props} defaultValue={draft} onDraftChange={(text) => draftStore.set(sessionId, text)} /></Suspense>
+    : <Composer {...props} defaultValue={draft} />;
+  return <div ref={slot} style={{ display: "contents" }}>{composer}</div>;
 }
 
 function VimLoading() {
@@ -88,7 +92,7 @@ export function App() {
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
         <section className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={active.send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} />{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</section>
-        <ComposerSlot key={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={vimEnabled()} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: active.send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: active.send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
+        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={vimEnabled()} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: active.send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: active.send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
       </RunProvider>}
   </>;
   return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;

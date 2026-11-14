@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { isEditableTarget } from "./keyboard";
 
 export type Chat = {
   session_id: string;
@@ -91,10 +92,11 @@ export function AppShell({ page, sessionId, waiting, children, onNewChat, onSele
   }, [refreshKey, search]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (isEditableTarget(event)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (event.key === "Escape" && drawer) { event.preventDefault(); setDrawer(false); requestAnimationFrame(() => menuButton.current?.focus()); }
-      if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
+      if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [drawer, loading, onNewChat]);
