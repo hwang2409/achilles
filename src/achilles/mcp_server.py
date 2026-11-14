@@ -172,6 +172,12 @@ def _inspect_error() -> CallToolResult:
     return _safe_error(ValidationError("", "authorized page", "forbidden"))
 
 
+def _with_note(result: dict[str, Any], note: str | None) -> dict[str, Any]:
+    if note:
+        result["note"] = note
+    return result
+
+
 def _validate_create(name: str, args: Any) -> None:
     schema = {
         "create_page": CREATE_PAGE_SCHEMA,
@@ -349,15 +355,16 @@ def build_mcp(store: PageStore):
                         page["id"],
                         args.get("tools"),
                     )
-                    result = {
-                        "page_id": created["id"],
-                        "route": created["route"],
-                        "digest": digest,
-                        "existing": existing,
-                        "detail_filter_matches": detail_summary,
-                    }
-                    if note:
-                        result["note"] = note
+                    result = _with_note(
+                        {
+                            "page_id": created["id"],
+                            "route": created["route"],
+                            "digest": digest,
+                            "existing": existing,
+                            "detail_filter_matches": detail_summary,
+                        },
+                        note,
+                    )
                 elif params.name == "update_layout":
                     version, digest, detail_summary = await anyio.to_thread.run_sync(
                         store.update_layout,
@@ -374,9 +381,7 @@ def build_mcp(store: PageStore):
                     created, digest, note = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
-                    result = {**created, "digest": digest}
-                    if note:
-                        result["note"] = note
+                    result = _with_note({**created, "digest": digest}, note)
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
