@@ -109,6 +109,23 @@ def state(root):
     return counts, files
 
 
+def install_layout(store, page_id, version, layout):
+    encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO layout_version VALUES(?,?,?,?,?)",
+            (page_id, version, f"synthetic-{version}", encoded, "synthetic"),
+        )
+        db.execute(
+            "UPDATE page SET active_layout_version=?,updated_at=? WHERE id=?",
+            (version, "synthetic", page_id),
+        )
+        db.execute(
+            "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+            (page_id, "update_layout", f"synthetic-{version}", "synthetic"),
+        )
+
+
 @pytest.mark.parametrize(
     ("block_title_length", "layout_complete"),
     [(100, True), (256, False)],
@@ -151,10 +168,19 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(
         "tools/call",
         {
             "name": "create_page",
-            "arguments": request(tools=tools, layout={"blocks": blocks}),
+            "arguments": request(
+                tools=tools,
+                layout={
+                    "blocks": [
+                        {**block, "title": "b" * min(block_title_length, 100)} for block in blocks
+                    ]
+                },
+            ),
         },
     )
     page_id = json.loads(created["content"][0]["text"])["page_id"]
+    if not layout_complete:
+        install_layout(store, page_id, 2, {"blocks": blocks})
     with store.transaction() as db:
         for index in range(32):
             db.execute(
@@ -188,7 +214,7 @@ def test_inspect_page_bounds_large_summary_over_public_mcp(
     if not layout_complete:
         assert value["layout"] is None
         assert value["message"] == (
-            "this layout is too large to inspect here; do not call update_layout"
+            "do not change this page; tell the user it is too large to edit from chat"
         )
     assert "blocks" not in value["omitted"]
     assert sum(value["omitted"].values()) > 0
@@ -912,6 +938,137 @@ def test_detail_filter_validation_through_public_tools(
         assert value["layout"] == layout
 
 
+def test_update_layout_refuses_page_too_large_to_inspect(creation_client):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    install_layout(store, "home", 2, large_layout)
+
+    inspected = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {}},
+    )
+    value = json.loads(inspected["content"][0]["text"])
+    assert value["layout"] is None
+    assert value["layout_complete"] is False
+
+    before = state(store.root)
+    refused = mcp(
+        client,
+        home_headers,
+        3,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
+        },
+    )
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "inspect_page result no larger than 8192 bytes",
+        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
+    }
+    assert store.layout("home") == large_layout
+    assert state(store.root) == before
+
+
+def test_update_layout_guard_is_atomic_with_write(creation_client, monkeypatch):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    original = PageStore.update_layout
+    installed = False
+
+    def interleaved_update(self, page_id, layout, expected_version):
+        nonlocal installed
+        if not installed:
+            installed = True
+            install_layout(PageStore(self.root), page_id, 2, large_layout)
+        return original(self, page_id, layout, expected_version)
+
+    monkeypatch.setattr(PageStore, "update_layout", interleaved_update)
+    refused = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": {"blocks": []}, "expected_version": 2},
+        },
+    )
+
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"])["code"] == "layout_too_large"
+    assert store.layout("home") == large_layout
+    with store._connect() as db:
+        assert (
+            db.execute("SELECT active_layout_version FROM page WHERE id='home'").fetchone()[0] == 2
+        )
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM layout_version WHERE page_id='home' AND version=3"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_update_layout_refuses_new_layout_too_large_to_inspect(creation_client):
+    _, store, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    before = state(store.root)
+
+    refused = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": large_layout, "expected_version": 1},
+        },
+    )
+
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "inspect_page result no larger than 8192 bytes",
+        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
+    }
+    assert store.inspect_page("home")["layout_version"] == 1
+    assert state(store.root) == before
+
+
+def test_create_page_refuses_layout_too_large_to_inspect(creation_client):
+    root, _, client, home_headers = creation_client
+    large_layout = {"blocks": [{"type": "text", "text": "x" * 300} for _ in range(32)]}
+    before = state(root)
+
+    refused = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(layout=large_layout),
+        },
+    )
+
+    assert refused["isError"] is True
+    assert json.loads(refused["content"][0]["text"]) == {
+        "code": "layout_too_large",
+        "path": "/layout",
+        "expected": "inspect_page result no larger than 8192 bytes",
+        "hint": "Keep the page smaller, e.g. use fewer or shorter blocks.",
+    }
+    assert state(root) == before
+
+
 def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_client):
     _, store, client, home_headers = creation_client
     created = mcp(
@@ -932,8 +1089,9 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     assert update_tool["inputSchema"] == UPDATE_LAYOUT_SCHEMA
     assert update_tool["description"] == (
         "REPLACES the whole layout; any block you leave out is deleted. First call "
-        "achilles__inspect_page. If layout_complete is false, do not call update_layout. "
-        "Otherwise, copy its `layout` exactly, change only what the user asked (insert, "
+        "achilles__inspect_page. If layout_complete is false, do not change the page; tell "
+        "the user it is too large to edit from chat. Otherwise, copy its `layout` exactly, "
+        "change only what the user asked (insert, "
         "reorder, edit, or remove blocks), and pass the full layout with "
         "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
         "To change another page, open that page's chat. A detail block can select records with "
@@ -944,8 +1102,8 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]
         == "When achilles__inspect_page reports layout_complete true, copy its complete stored "
-        "layout; any block you leave out is deleted. Do not call update_layout when "
-        "layout_complete is false."
+        "layout; any block you leave out is deleted. When layout_complete is false, do not "
+        "change the page; tell the user it is too large to edit from chat."
     )
     assert (
         update_tool["inputSchema"]["properties"]["expected_version"]["description"]
@@ -958,11 +1116,19 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
     )
     inspect_tool = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
     assert "when layout_complete is true" in inspect_tool["description"]
-    assert "when layout_complete is false, do not call update_layout" in inspect_tool["description"]
+    assert (
+        "when layout_complete is false, do not change the page and tell the user it is too large "
+        "to edit from chat" in inspect_tool["description"]
+    )
     assert (
         inspect_tool["outputSchema"]["properties"]["layout"]["description"]
         == "The complete stored layout to edit with update_layout, or null when "
         "layout_complete is false."
+    )
+    assert (
+        inspect_tool["outputSchema"]["properties"]["layout_complete"]["description"]
+        == "When false, do not change the page; tell the user the page is too large to edit "
+        "from chat."
     )
     assert (
         inspect_tool["outputSchema"]["properties"]["layout_version"]["description"]

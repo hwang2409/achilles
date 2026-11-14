@@ -9,7 +9,13 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from .pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, UPDATE_LAYOUT_SCHEMA, PageStore
+from .pages import (
+    CREATE_PAGE_SCHEMA,
+    LAYOUT_SCHEMA,
+    UPDATE_LAYOUT_SCHEMA,
+    PageStore,
+    bounded_inspect,
+)
 from .records import call_record
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
@@ -35,8 +41,8 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
         "layout_complete": {
             "type": "boolean",
             "description": (
-                "When false, the layout is too large to return and update_layout must "
-                "not be called."
+                "When false, do not change the page; tell the user the page is too large "
+                "to edit from chat."
             ),
         },
         "message": {"type": "string"},
@@ -79,7 +85,6 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
     ],
     "additionalProperties": False,
 }
-_INSPECT_MAX_BYTES = 8 * 1024
 
 
 def _token(context):
@@ -117,35 +122,7 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
 
 
 def _inspect_result(value: dict[str, Any]) -> CallToolResult:
-    result = {
-        **value,
-        "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
-        "layout_complete": True,
-        "metric_values": list(value["metric_values"]),
-        "tools": list(value["tools"]),
-        "collections": dict(value["collections"]),
-    }
-
-    def serialize() -> str:
-        return json.dumps(result, sort_keys=True, separators=(",", ":"))
-
-    encoded = serialize()
-    if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
-        return CallToolResult(content=[TextContent(type="text", text=encoded)])
-
-    result["truncated"] = True
-    result["omitted"] = {}
-    for key in ("metric_values", "tools", "collections", "title"):
-        value = result.pop(key)
-        result["omitted"][key] = len(value) if not isinstance(value, str) else 1
-        encoded = serialize()
-        if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
-            return CallToolResult(content=[TextContent(type="text", text=encoded)])
-
-    result["layout"] = None
-    result["layout_complete"] = False
-    result["message"] = "this layout is too large to inspect here; do not call update_layout"
-    encoded = serialize()
+    _, encoded = bounded_inspect(value)
     return CallToolResult(content=[TextContent(type="text", text=encoded)])
 
 
@@ -197,7 +174,8 @@ def build_mcp(store: PageStore):
                             "inspect this page and pages it created; when layout_complete is "
                             "true, layout is the complete stored layout to edit and layout_version "
                             "is the value for update_layout expected_version; when layout_complete "
-                            "is false, do not call update_layout; metric_values reports computed "
+                            "is false, do not change the page and tell the user it is too large to "
+                            "edit from chat; metric_values reports computed "
                             "counts by "
                             "layout block index; legacy pages can inspect only themselves"
                         ),
@@ -232,7 +210,8 @@ def build_mcp(store: PageStore):
                         description=(
                             "REPLACES the whole layout; any block you leave out is deleted. "
                             "First call achilles__inspect_page. If layout_complete is false, do "
-                            "not call update_layout. Otherwise, copy its `layout` exactly, change "
+                            "not change the page; tell the user it is too large to edit from chat. "
+                            "Otherwise, copy its `layout` exactly, change "
                             "only what the user asked (insert, reorder, edit, or remove blocks), "
                             "and pass the full layout with `layout_version` as expected_version. "
                             "On a version conflict, inspect again and retry. To change another "
