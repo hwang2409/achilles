@@ -1,6 +1,34 @@
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential/i;
 
-type FrameSummary = { direction: "received" | "sent"; method?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
+type FrameSummary = { direction: "received" | "sent"; method?: string; event?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
+
+type AsyncMethod = (...args: never[]) => Promise<unknown>;
+
+export type GateWait = {
+  <T>(operation: () => Promise<T>): Promise<T>;
+  playwright<T extends object, K extends keyof T>(
+    owner: T,
+    method: K,
+    ...args: T[K] extends (...args: infer A) => Promise<unknown> ? A : never
+  ): T[K] extends (...args: never[]) => Promise<infer R> ? Promise<R> : never;
+};
+
+export function createGateWait(
+  frames: () => readonly FrameSummary[],
+  control: () => Promise<string>,
+): GateWait {
+  const wait = async <T>(operation: () => Promise<T>) => {
+    try {
+      return await operation();
+    } catch (error) {
+      throw new Error(`${error}; websocket frames=${JSON.stringify(frames())}; backend catalog=${await control()}`);
+    }
+  };
+  return Object.assign(wait, {
+    playwright: (owner: object, method: PropertyKey, ...args: never[]) =>
+      wait(() => (owner[method as keyof typeof owner] as AsyncMethod).apply(owner, args)),
+  }) as GateWait;
+}
 
 export function createFrameRing(limit = 20) {
   const frames: FrameSummary[] = [];
@@ -8,12 +36,13 @@ export function createFrameRing(limit = 20) {
   return {
     record(socket: number, direction: FrameSummary["direction"], payload: string) {
       try {
-        const frame = JSON.parse(payload) as { error?: { code?: number | string }; id?: number | string; method?: string; params?: { delivery_id?: string }; result?: { status?: string } };
+        const frame = JSON.parse(payload) as { error?: { code?: number | string }; id?: number | string; method?: string; params?: { delivery_id?: string; event?: string }; result?: { status?: string } };
         const key = frame.id === undefined ? undefined : `${socket}:${frame.id}`;
         const request = key === undefined ? undefined : pending.get(key);
         const summary = Object.fromEntries(Object.entries({
           direction,
           method: frame.method ?? request?.method,
+          event: frame.method === "event" ? frame.params?.event : undefined,
           delivery_id: frame.params?.delivery_id ?? request?.delivery_id,
           status: frame.result?.status,
           error_code: frame.error?.code,
@@ -61,7 +90,7 @@ export const controlSnapshot = (text: string, secrets: readonly string[] = []): 
   try {
     const value = JSON.parse(text);
     const allowed = Object.fromEntries(
-      ["request_count", "last_message", "schemas", "returned_tool_calls", "pid"].flatMap(
+      ["request_count", "last_message", "schemas", "returned_tool_calls", "pid", "turn_start_barrier", "release_turn_start_barrier", "turn_barrier", "release_turn_barrier", "inspect_turn_barrier"].flatMap(
         (key) => (key in value ? [[key, value[key]]] : []),
       ),
     );
