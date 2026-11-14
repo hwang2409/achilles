@@ -102,7 +102,8 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("stream-proof-read", "read", {"path": str(cwd / "fixture.txt")})],
             delay=0.03,
         ),
-        ScriptedTurn(content=[TextContent("end-of-turn followup complete")], delay=0.2),
+        ScriptedTurn(content=[TextContent("stream tool complete")], delay=0.2),
+        ScriptedTurn(content=[TextContent("end-of-turn followup complete")]),
         ScriptedTurn(
             content=[
                 TextContent(
