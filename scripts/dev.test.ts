@@ -127,6 +127,67 @@ test("cleanup does not signal a reused pid", async () => {
   }
 });
 
+test("an old zeta fails before owned serve startup but remains valid for attach", async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), "achilles-old-zeta-test-"));
+  const bin = resolve(temp, "bin");
+  const home = resolve(temp, "home");
+  const achillesHome = resolve(temp, "achilles-home");
+  const calls = resolve(temp, "calls");
+  const started = resolve(temp, "started");
+  const webStamp = resolve(root, ".cache/web-build.stamp");
+  const devCache = resolve(root, ".cache/dev");
+  const oldWebStamp = await Bun.file(webStamp).exists() ? await readFile(webStamp) : null;
+  await mkdir(bin, { recursive: true });
+  await writeFile(resolve(bin, "zeta"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_ZETA_CALLS"
+if [ "$1 $2" = "serve --help" ]; then echo "--ws --ws-origin"; exit 0; fi
+if [ "$2" = "--help" ] || [ "$3" = "--help" ]; then echo "add show remove --scope --json --url"; exit 0; fi
+if [ "$1" = "serve" ]; then touch "$FAKE_ZETA_STARTED"; exit 1; fi
+exit 0
+`);
+  await writeFile(resolve(bin, "uv"), "#!/bin/sh\nexit 1\n");
+  await Promise.all(["uv", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
+  for (const state of ["achilles.json", "zeta-serve.json", "lock"]) {
+    if (await Bun.file(resolve(devCache, state)).exists()) throw new Error("refusing to replace existing make dev state");
+  }
+  await mkdir(resolve(root, ".cache"), { recursive: true });
+  await writeFile(webStamp, "old-zeta-test-web-stamp");
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    HOME: temp,
+    ZETA_HOME: home,
+    ACHILLES_HOME: achillesHome,
+    ACHILLES_DEV_SKIP_BUILD: "1",
+    FAKE_ZETA_CALLS: calls,
+    FAKE_ZETA_STARTED: started,
+  };
+  const runDev = async (extra: Record<string, string> = {}) => {
+    const { child } = await spawnTracked(["bun", "scripts/dev.ts"], { cwd: root, env: { ...env, ...extra }, stdout: "pipe", stderr: "pipe" });
+    const exitCode = await child.exited;
+    return { exitCode, stderr: await new Response(child.stderr).text() };
+  };
+
+  try {
+    const owned = await runDev();
+    expect(owned.exitCode).not.toBe(0);
+    expect(owned.stderr).toContain("zeta too old: update zeta or set ACHILLES_ZETA_DISCOVERY to attach\nminimum zeta: 8f4b469\n");
+    expect(owned.stderr).toContain("uv tool upgrade zeta, then restart zeta sessions");
+    expect(await Bun.file(started).exists()).toBe(false);
+    expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);
+    expect(await Bun.file(home).exists()).toBe(false);
+
+    const attached = await runDev({ ACHILLES_ZETA_DISCOVERY: resolve(temp, "missing-serve.json") });
+    expect(attached.exitCode).not.toBe(0);
+    expect(attached.stderr).not.toContain("zeta too old:");
+    expect(attached.stderr).toContain("ACHILLES_ZETA_DISCOVERY does not name a live zeta serve");
+    expect((await readFile(calls, "utf8")).match(/^serve --help$/gm)).toHaveLength(1);
+  } finally {
+    if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("the real dev entry preserves MCP wiring and owns its process lifecycle", async () => {
   const temp = await mkdtemp(resolve(tmpdir(), "achilles-dev-test-"));
   const home = resolve(temp, "home");
@@ -175,6 +236,11 @@ if (process.env.FAKE_ZETA_BLOCK && args[0] === "mcp" && args[1] === "--help") {
   writeFileSync(process.env.FAKE_ZETA_BLOCK + ".ready", "ready");
   while (!existsSync(process.env.FAKE_ZETA_BLOCK + ".release")) await Bun.sleep(20);
 }
+if (args.includes("--help")) {
+  if (args[0] === "serve") console.log(process.env.FAKE_ZETA_OLD ? "--ws --ws-origin" : "--ws --ws-origin --ws-discovery");
+  else console.log("add show remove --scope --json --url");
+  process.exit(0);
+}
 if (args[0] === "serve") {
   const ws = Number(args[args.indexOf("--ws") + 1]);
   const origins = args.reduce<string[]>((values, arg, index) => arg === "--ws-origin" ? [...values, args[index + 1]] : values, []);
@@ -192,7 +258,6 @@ if (args[0] === "serve") {
   await new Promise(() => {});
   clearInterval(watchdog);
 }
-if (args.includes("--help")) { console.log("add show remove --scope --json --url"); process.exit(0); }
 if (args[0] === "mcp" && args[1] === "show") {
   console.log(JSON.stringify({ config: { transport: "streamable-http", url: process.env.FAKE_MCP_URL } })); process.exit(0);
 }
@@ -229,7 +294,7 @@ process.exit(0);
     expect(first.exitCode, first.stderr).toBe(0);
     expect(first.stdout).toContain("mcp.json: unchanged");
     const callsAfterFirst = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
-    const startedServe = callsAfterFirst.find((args) => args[0] === "serve");
+    const startedServe = callsAfterFirst.find((args) => args[0] === "serve" && !args.includes("--help"));
     expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
     expect(startedServe?.[startedServe.indexOf("--ws-discovery") + 1]).toBe(resolve(achillesHome, "run/serve.json"));
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
@@ -246,7 +311,7 @@ process.exit(0);
     const secondState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
     expect(secondState.pid).toBe(firstState.pid);
     const callsAfterSecond = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
-    expect(callsAfterSecond.filter((args) => args[0] === "serve")).toHaveLength(1);
+    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(1);
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
 
     const ownedDiscovery = resolve(achillesHome, "run/serve.json");
