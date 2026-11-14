@@ -66,7 +66,17 @@ _FIXED_EXPECTATIONS = {
 }
 
 
-def _expected(error: JsonSchemaError) -> str:
+def _required_name(error: JsonSchemaError) -> str | None:
+    required = error.validator_value
+    instance = error.instance
+    if not isinstance(required, Sequence) or isinstance(required, (str, bytes)):
+        return None
+    if not isinstance(instance, Mapping):
+        return None
+    return next((name for name in required if name not in instance), None)
+
+
+def _expected(error: JsonSchemaError, required_name: str | None = None) -> str:
     keyword = error.validator
     rule = error.validator_value
     if keyword in _FIXED_EXPECTATIONS:
@@ -82,7 +92,11 @@ def _expected(error: JsonSchemaError) -> str:
     if keyword == "pattern":
         return f"pattern {rule}"
     if keyword == "required":
-        return "required property"
+        return (
+            f"required property: {required_name}"
+            if isinstance(required_name, str) and _SAFE_KEY.fullmatch(required_name)
+            else "required property"
+        )
     if keyword in {"type", "minLength", "maxLength", "minItems", "maxItems"}:
         return f"{keyword}: {rule}"
     if keyword == "not":
@@ -94,5 +108,9 @@ def _expected(error: JsonSchemaError) -> str:
 def validate_schema(instance: Any, schema: Mapping[str, Any], prefix: str = "") -> None:
     error = next(iter(Draft202012Validator(schema).iter_errors(instance)), None)
     if error is not None:
-        path = prefix.rstrip("/") + _pointer(tuple(error.absolute_path), schema)
-        raise ValidationError(path, _expected(error))
+        required_name = _required_name(error) if error.validator == "required" else None
+        pointer_parts = tuple(error.absolute_path)
+        if isinstance(required_name, str) and _SAFE_KEY.fullmatch(required_name):
+            pointer_parts += (required_name,)
+        path = prefix.rstrip("/") + _pointer(pointer_parts, schema)
+        raise ValidationError(path, _expected(error, required_name))
