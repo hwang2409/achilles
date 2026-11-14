@@ -11,7 +11,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from .pages import CREATE_PAGE_SCHEMA, PageStore
 from .records import call_record
-from .tools import CREATE_TOOL_SCHEMA
+from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA
 from .validation import ValidationError, error_document, validate_schema
 
 INSPECT_PAGE_SCHEMA = {
@@ -206,7 +206,7 @@ def build_mcp(store: PageStore):
         args = params.arguments or {}
         if params.name == "inspect_page":
             return await inspect_page(page, args)
-        if params.name in {"create_page", "create_tool"}:
+        if params.name in BUILTIN_TOOL_NAMES:
             if not page["create_mode"]:
                 return CallToolResult(
                     isError=True,
