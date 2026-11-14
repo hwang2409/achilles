@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { gradeCheck, gradeTask, structurallyContains, validateTask } from "./eval-grade";
+import { expectationTokens, gradeCheck, gradeTask, structurallyContains, validateTask } from "./eval-grade";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -9,6 +9,26 @@ test("task schema is closed and count checks name real collections", () => {
   expect(() => validateTask({ ...task, checks: [{ id: "missing", type: "count", page: "p", name: "invalid_tool_versions", count: 0 }] })).toThrow("known collection");
   expect(validateTask({ ...task, prompt: "one source", steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a" }] }).prompt).toBe("one source");
   expect(() => validateTask({ ...task, prompt: "duplicate" })).toThrow("prompt source");
+});
+
+test("task expectation lint rejects undeclared record keys and literals", () => {
+  const task = { id: "lint-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 1, steps: [{ id: "do", kind: "prompt", page: "p", chat: "c", prompt: "do work with wanted" }], setup: { tools: [{ name: "add_note", operation: "insert", collection: "notes" }], records: [] }, checks: [{ id: "record", type: "records_exact", page: "p", value: [{ text: "undocumented literal" }] }] };
+  expect(() => validateTask(task)).toThrow("without a prompt quote or declared schema");
+  expect(() => validateTask({ ...task, checks: [{ id: "record", type: "record", page: "p", value: { type: "wanted" } }] })).toThrow('expects "type"');
+});
+
+test("expectation tokens cover each literal-bearing check shape", () => {
+  const cases = [
+    [{ id: "page", type: "page_exists", page: "p", route: "/wanted" }, ["/wanted"]],
+    [{ id: "count", type: "count", page: "p", name: "records", count: 1 }, ["records"]],
+    [{ id: "tool", type: "tool", page: "p", name: "add_note" }, ["add_note"]],
+    [{ id: "approval", type: "approval", page: "p", tool: "achilles__add_note", count: 1 }, ["add_note"]],
+    [{ id: "record", type: "record", page: "p", value: { text: "wanted" } }, ["text", "wanted"]],
+    [{ id: "browser", type: "browser_text", page: "p", text: "visible" }, ["visible"]],
+    [{ id: "layout", type: "layout_contains", page: "p", value: { type: "list" } }, ["type", "list"]],
+    [{ id: "layout-update", type: "layout_update", page: "p", value: { original: { blocks: [] }, added: { type: "list" }, version: 2 } }, ["original", "blocks", "added", "type", "list", "version"]],
+  ] as const;
+  for (const [check, expected] of cases) expect(expectationTokens(check as never), check.type).toEqual(expected);
 });
 
 test("same-page grading rejects empty and wrong-page evidence", () => {
@@ -35,8 +55,33 @@ test("schema roundtrip accepts an agent-designed title field", () => {
   expect(gradeCheck(check, { ...snapshot, tool_versions: [{ ...version, data_schema: { type: "object", properties: { text: { type: "string" } } } }] }).pass).toBe(false);
 });
 
+const readingTransition = { id: "update", type: "updated_record" as const, page: "p", chat: "c", value: "Synthetic Book", transition: { before: ["unread", "want_to_read"], after: ["read", "finished"] } };
+const readingSnapshot = (inserted: Record<string, string>, final: Record<string, string>) => {
+  const pages = [{ id: "p1", alias: "p" }];
+  const properties = Object.fromEntries(Object.keys(inserted).filter(field => field !== "record_id").map(field => [field, { type: "string" }]));
+  const schema = { type: "object", properties };
+  const tool_versions = ["insert", "update", "list"].map(operation => ({ page_id: "p1", name: `${operation}_book`, collection: "books", operation, data_schema: schema }));
+  const result = (operation: string, data: object) => ({ page_id: "p1", chat_id: "c", tool: `achilles__${operation}_book`, success: true, data });
+  return { pages, tool_versions, results: [result("insert", inserted), result("update", final), result("list", { records: [final] })] };
+};
+
+test("reading transition accepts schema-shaped want_to_read to finished and unread to read", () => {
+  expect(gradeCheck(readingTransition, readingSnapshot({ record_id: "book-1", title: "Synthetic Book", progress: "want_to_read" }, { record_id: "book-1", title: "Synthetic Book", progress: "finished" })).pass).toBe(true);
+  expect(gradeCheck(readingTransition, readingSnapshot({ record_id: "book-1", title: "Synthetic Book", state: "unread" }, { record_id: "book-1", title: "Synthetic Book", state: "read" })).pass).toBe(true);
+});
+
+test("reading transition rejects unrelated, unmapped, identity, and split field changes", () => {
+  const grade = (inserted: Record<string, string>, final: Record<string, string>) => gradeCheck(readingTransition, readingSnapshot(inserted, final));
+  expect(grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread", format: "paper" }, { record_id: "book-1", title: "Synthetic Book", progress: "unread", format: "ebook" }).pass, "an unrelated format change is not the requested transition").toBe(false);
+  const unmapped = grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread" }, { record_id: "book-1", title: "Synthetic Book", progress: "bogus" });
+  expect(unmapped.pass, "an unmapped final value is not the requested transition").toBe(false);
+  expect(unmapped.reason).toBe("unmapped_after_value: progress=unread->bogus");
+  expect(grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread" }, { record_id: "book-1", title: "Other", progress: "read" }).pass, "changing the identity cannot satisfy the transition").toBe(false);
+  expect(grade({ record_id: "book-1", title: "Synthetic Book", progress: "unread", completion: "pending" }, { record_id: "book-1", title: "Synthetic Book", progress: "unread", completion: "read" }).pass, "before and after values must use one field").toBe(false);
+});
+
 test("page-aware approvals and strict route checks do not accept other pages", () => {
-  const t = validateTask({ ...task, checks: [{ id: "approval", type: "count", page: "p", name: "approvals", count: 1 }, { id: "route", type: "page_exists", page: "p", route: "/wanted" }] });
+  const t = validateTask({ ...task, steps: [{ ...task.steps[0], prompt: "work on /wanted" }], checks: [{ id: "approval", type: "count", page: "p", name: "approvals", count: 1 }, { id: "route", type: "page_exists", page: "p", route: "/wanted" }] });
   const failed = gradeTask(t, { pages: [{ id: "p1", alias: "p", route: "/wrong" }], approvals: [{ page_id: "other" }] });
   expect(failed.checks.every(check => !check.pass)).toBe(true);
 });
@@ -67,7 +112,7 @@ test("record-crud list matching is order-independent, distinct, and complete", (
 
 test("reading-list carries one record id through insert, update, and read", () => {
   const pages = [{ id: "p1", alias: "p" }]; const final = { title: "Synthetic Book", status: "read" };
-  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: { before: ["Synthetic Book", "unread"], after: ["Synthetic Book", "read"] } };
+  const check = { id: "updated", type: "updated_record" as const, page: "p", chat: "reading-chat", value: "Synthetic Book", transition: { before: ["unread"], after: ["read"] } };
   const data_schema = { type: "object", properties: { title: { type: "string" }, status: { type: "string" } } };
   const tool_versions = [{ page_id: "p1", name: "add_book", collection: "books", operation: "insert", data_schema }, { page_id: "p1", name: "update_book", collection: "books", operation: "update", data_schema }, { page_id: "p1", name: "list_books", collection: "books", operation: "list", data_schema }];
   const result = (tool: string, record_id: string, data: object) => ({ page_id: "p1", chat_id: "reading-chat", tool, success: true, data: { ...data, record_id } });
