@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createHighlighter } from "@fulcrum/highlight";
+import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
@@ -9,7 +11,11 @@ import { createConnection, type Connection, type ConnectionState } from "./zeta"
 import { useActiveChat, type Page } from "./useActiveChat";
 import "./style.css";
 
-const renderers: Renderers = { message: ({ id }) => <Message id={id} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
+const highlight = createHighlighter();
+addEventListener("pagehide", () => highlight.dispose(), { once: true });
+const fences: Fences = {};
+const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
+const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
 
 function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
@@ -61,11 +67,42 @@ export function App() {
   const refreshKey = `${completedTurns}:${completedTools}`;
   const waiting = Number(approvalCount);
   const previousTurn = useRef(turn);
+  const [followRequest, setFollowRequest] = useState(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [fulcrumJumpToLatest, setFulcrumJumpToLatest] = useState(false);
+  const transcriptRef = useRef<HTMLElement>(null);
+  const send: typeof active.send = (...args) => {
+    setFollowRequest((value) => value + 1);
+    return active.send(...args);
+  };
 
   useEffect(() => {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
+  useEffect(() => {
+    if (ready?.sessionId) setFollowRequest((value) => value + 1);
+  }, [ready?.sessionId]);
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
+    if (!scroll) return;
+    let contentHeight = scroll.scrollHeight;
+    const update = () => {
+      const grew = scroll.scrollHeight > contentHeight;
+      setFulcrumJumpToLatest(Boolean(transcript?.querySelector('[data-part="jump-to-latest-lane"] [data-part="jump-to-latest"]')));
+      if (scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 4) setShowJumpToLatest(false);
+      else if (grew) setShowJumpToLatest(true);
+      contentHeight = scroll.scrollHeight;
+    };
+    scroll.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(scroll);
+    if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
+    const mutations = new MutationObserver(update);
+    mutations.observe(scroll, { subtree: true, childList: true, characterData: true });
+    return () => { scroll.removeEventListener("scroll", update); observer.disconnect(); mutations.disconnect(); };
+  }, [ready?.sessionId, outlineLength]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
     if (previous === "running" && turn === "idle") void active.settleApprovalMode();
@@ -87,8 +124,9 @@ export function App() {
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !ready || !store ? <div className="full-state"><p role="status">loading chat…</p></div>
       : <RunProvider store={store}>
-        <section className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={active.send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} />{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</section>
-        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: active.send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: active.send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
+        {ready.page.layout.blocks.length > 0 && <div className="layout-blocks">{ready.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={ready.page.id} credential={ready.credential} refreshKey={refreshKey} />)}</div>}
+        <section ref={transcriptRef} className="transcript">{Number(outlineLength) === 0 && <EmptyChat page={ready.page} send={send} continueWaiting={active.continueWaitingChat} />}<Timeline renderers={appRenderers} virtual followRequest={followRequest} />{showJumpToLatest && !fulcrumJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <ComposerSlot key={ready.sessionId} sessionId={ready.sessionId} focus={active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={!connected || !client ? { state: "read-only", reason: "send is off until zeta is back", onSubmit: send, placeholder: "message zeta" } : { state: turn === "running" ? "steerable" : "idle", onSubmit: send, onStop: () => client.request("abort", { session_id: ready.sessionId }), placeholder: "message zeta" }} />
       </RunProvider>}
   </>;
   return <AppShell page={ready?.page ?? null} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={ready?.serverApprovalMode === "ask"} onNewChat={active.newChat} onSelectChat={active.selectChat} refreshKey={active.listRefresh}>{content}</AppShell>;

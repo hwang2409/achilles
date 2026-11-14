@@ -45,6 +45,37 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("proof-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("approval complete")]),
+        ScriptedTurn(
+            content=[
+                TextContent(
+                    "# Rendered markdown\n\n## Structured reply\n\n"
+                    "* first item\n* second item\n\n"
+                    "```python\nvalue = 42\nprint(value)\n```"
+                )
+            ]
+        ),
+        ScriptedTurn(
+            content=[
+                TextContent(
+                    f"stream line {index:03d}: "
+                    + "enough content to overflow the transcript viewport\n"
+                )
+                for index in range(120)
+            ],
+            tool_calls=[ToolCall("stream-proof-read", "read", {"path": str(cwd / "fixture.txt")})],
+            delay=0.03,
+        ),
+        ScriptedTurn(content=[TextContent("stream tool complete")]),
+        ScriptedTurn(
+            content=[
+                TextContent(
+                    f"text-only line {index:03d}: "
+                    "enough content to overflow the transcript viewport\n"
+                )
+                for index in range(120)
+            ],
+            delay=0.03,
+        ),
         ScriptedTurn(content=[TextContent("catalog ready")]),
         ScriptedTurn(
             tool_calls=[
