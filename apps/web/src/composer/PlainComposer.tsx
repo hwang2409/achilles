@@ -27,6 +27,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const group = useRef<HTMLDivElement>(null);
   const focusLost = useRef(false);
+  const stopFocused = useRef(false);
   const { model, edit, submit, stop } = useComposerDelivery(props);
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
@@ -72,14 +73,14 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
     return () => {
-      if (document.activeElement !== button) return;
+      if (document.activeElement !== button && !stopFocused.current) return;
       focusLost.current = true;
-      restoreFocus(input.current);
     };
   }, []);
   useLayoutEffect(() => {
     if (!focusLost.current) return;
     focusLost.current = false;
+    stopFocused.current = false;
     restoreFocus(input.current, group.current);
   });
 
@@ -159,6 +160,8 @@ export function PlainComposer(props: ComposerAdapterProps) {
             data-action="stop"
             aria-label="stop the running turn"
             aria-disabled={model.stopping || undefined}
+            onFocus={() => { stopFocused.current = true; }}
+            onBlur={(event) => { if (event.relatedTarget) stopFocused.current = false; }}
             onClick={stop}
           >
             {model.stopping ? "stopping" : "stop"}
