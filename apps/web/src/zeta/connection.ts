@@ -59,6 +59,7 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
     case "connected":
       return { phase: "connected", authority: event.authority };
     case "closed":
+      if (state.phase === "taking_control" || state.phase === "takeover_failed") return { ...state };
       return hasLiveClient(state) ? { phase: "dropped", attempt: 1, retryAt: event.now + backoff(1), lost: true } : state;
     default: {
       if (state.phase !== "connecting") return state;

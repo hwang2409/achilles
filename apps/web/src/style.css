@@ -24,6 +24,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .brand-mark::after { content: ""; position: absolute; width: 11px; height: 11px; left: 5px; top: 5px; background: color-mix(in srgb, var(--fulcrum-accent) 55%, white); }
 .new-chat, .chat-search { flex: 0 0 40px; margin: 12px 16px 0; display: flex; align-items: center; gap: 10px; padding: 0 10px; }
 .new-chat { justify-content: flex-start; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.new-chat:disabled { color: var(--fulcrum-muted); border-color: var(--fulcrum-border); background: transparent; cursor: not-allowed; opacity: .65; }
 .new-chat kbd { margin-left: auto; font-size: 10px; }
 .chat-search { border: 1px solid var(--fulcrum-border); }
 .chat-search > span { color: var(--fulcrum-muted); font-size: 20px; }
@@ -90,9 +91,11 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .chat-starters button { width: 100%; min-height: 52px; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--fulcrum-border); text-align: left; }
 .chat-starters b { color: var(--fulcrum-accent); }
 .chat-starters i { color: var(--fulcrum-muted); font-style: normal; font-size: 12px; }
+.chat-starters button:disabled { color: var(--fulcrum-muted); cursor: not-allowed; opacity: .65; }
+.chat-starters button:disabled b { color: inherit; }
 .connection-banner { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-left: 2px solid var(--fulcrum-accent); border-bottom: 1px solid var(--fulcrum-border); padding: 8px 24px; color: var(--fulcrum-fg); background: var(--fulcrum-surface); font-size: 12px; }
 .connection-banner[role="alert"] { border-left-color: var(--fulcrum-danger); background: color-mix(in srgb, var(--fulcrum-danger) 8%, transparent); }
-.connection-banner button { min-width: max-content; padding: 6px 10px; white-space: nowrap; }
+.connection-banner button { min-width: max-content; min-height: 40px; padding: 6px 10px; white-space: nowrap; }
 .full-state { flex: 1; display: grid; place-content: center; padding: 32px; }
 .connection-state { display: block; width: min(720px, 100%); margin: auto; }
 .connection-state > p { color: var(--fulcrum-muted); }

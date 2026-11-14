@@ -99,45 +99,57 @@ async function attachObserver(client: ZetaClient, metadata: ReadMetadata, owner:
   return { page, serverApprovalMode: page.approval_mode ?? null, sessionId, lease, credential, pendingApprovalMode: null, title: selectedChat?.title?.trim() || "untitled chat" };
 }
 
-async function attachController(client: ZetaClient, metadata: ReadMetadata, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, allowMissingSelected: boolean): Promise<Attachment> {
-  const { page, selectedId, credential } = metadata;
-  if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
-  const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
-  let resumedCreation: PendingChat | null;
-  try { resumedCreation = await creation.resume(creationInput); }
-  catch (caught) { throw new PendingCreationError(caught, creationInput); }
+type OpenedSession = Awaited<ReturnType<typeof openHomeSession>>;
+
+async function resumeCreation(creation: ChatCreationOwner, input: ChatCreationInput) {
+  try { return await creation.resume(input); }
+  catch (caught) { throw new PendingCreationError(caught, input); }
+}
+
+async function openControllerSession(client: ZetaClient, metadata: ReadMetadata, input: ChatCreationInput, sessionId: string | null, allowMissingSelected: boolean): Promise<OpenedSession | undefined> {
+  if (!sessionId) return;
+  try { return await openHomeSession(client, sessionId, metadata.credential, metadata.page.workspace, metadata.page.approval_mode); }
+  catch (caught) {
+    if (!(caught instanceof SessionNotFoundError)) throw caught;
+    if (metadata.selectedId && !allowMissingSelected) throw new MissingChatError(input, metadata.page.route === "/" ? "/" : metadata.page.route);
+  }
+}
+
+async function createControllerSession(client: ZetaClient, metadata: ReadMetadata, input: ChatCreationInput, creation: ChatCreationOwner, owner: AttachmentOwner, token: number): Promise<OpenedSession> {
+  const mappingInput = { ...input, mapExpectedSessionId: metadata.page.zeta_session_id };
+  let created: PendingChat;
+  try { created = await creation.create(mappingInput); }
+  catch (caught) { throw new PendingCreationError(caught, mappingInput); }
   requireCurrent(owner, token);
-  const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
-  if (selectedId && !allowMissingSelected && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
-  const serverApprovalMode = page.approval_mode ?? null;
-  let sessionId = selectedId ?? resumedCreation?.mappedSessionId ?? metadata.sessionId;
-  let session: Awaited<ReturnType<typeof openHomeSession>> | undefined;
-  if (sessionId) {
-    try { session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); }
-    catch (caught) {
-      if (!(caught instanceof SessionNotFoundError)) throw caught;
-      if (selectedId && !allowMissingSelected) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
-    }
-    requireCurrent(owner, token);
-  }
-  if (!session) {
-    const mappingInput = { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
-    let created: PendingChat;
-    try { created = await creation.create(mappingInput); }
-    catch (caught) { throw new PendingCreationError(caught, mappingInput); }
-    requireCurrent(owner, token);
-    sessionId = created.mappedSessionId ?? created.sessionId;
-    session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); requireCurrent(owner, token);
-  }
-  const lease = await loadSession(client, session.id);
-  if (!owner.accept(token, lease)) throw new StaleAttachment();
+  const sessionId = created.mappedSessionId ?? created.sessionId;
+  const session = await openHomeSession(client, sessionId, metadata.credential, metadata.page.workspace, metadata.page.approval_mode); requireCurrent(owner, token);
+  return session;
+}
+
+async function finishControllerAttachment(metadata: ReadMetadata, session: OpenedSession, selectedChat: Chat | null, lease: SessionLease, owner: AttachmentOwner, token: number): Promise<Attachment> {
+  const { page, credential } = metadata;
   try {
     page.approval_mode = session.approvalMode;
     const title = session.name?.trim() || selectedChat?.title?.trim() || (await findChat(session.id))?.title?.trim() || "untitled chat"; requireCurrent(owner, token);
     if (session.name?.trim() && session.name.trim() !== selectedChat?.title?.trim())
       void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-    return { page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
+    return { page, serverApprovalMode: page.approval_mode ?? null, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
   } catch (caught) { owner.release(token); throw caught; }
+}
+
+async function attachController(client: ZetaClient, metadata: ReadMetadata, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, allowMissingSelected: boolean): Promise<Attachment> {
+  const { page, selectedId, credential } = metadata;
+  if (!supportsFeature(client, "session_mcp_bindings")) throw new Error("this zeta does not support page tools");
+  const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
+  const resumedCreation = await resumeCreation(creation, creationInput); requireCurrent(owner, token);
+  const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
+  if (selectedId && !allowMissingSelected && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
+  const targetSessionId = selectedId ?? resumedCreation?.mappedSessionId ?? metadata.sessionId;
+  const session = await openControllerSession(client, metadata, creationInput, targetSessionId, allowMissingSelected) ?? await createControllerSession(client, metadata, creationInput, creation, owner, token);
+  requireCurrent(owner, token);
+  const lease = await loadSession(client, session.id);
+  if (!owner.accept(token, lease)) throw new StaleAttachment();
+  return finishControllerAttachment(metadata, session, selectedChat, lease, owner, token);
 }
 
 export async function attachPage(client: ZetaClient, key: string, selectedId: string | null, owner: AttachmentOwner, creation: ChatCreationOwner, token: number, readOnly = false, allowMissingSelected = false): Promise<Attachment> {

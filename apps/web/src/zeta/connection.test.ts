@@ -31,6 +31,14 @@ describe("takeover state", () => {
     ["success", taking(3), { type: "takeover_outcome", outcome: "success" } as const, { phase: "connected", authority: "controller" }],
     ["cancel", taking(3), { type: "takeover_cancelled" } as const, { phase: "connected", authority: "observer" }],
   ])("handles %s", (_name, state, event, expected) => expect(reduceConnection(state, event)).toEqual(expected));
+
+  test("starts a new takeover after failure and observer disconnect", () => {
+    const failed = reduceConnection(taking(5), { type: "takeover_outcome", outcome: "busy" });
+    const disconnected = reduceConnection(failed, { type: "closed", now: 0 });
+    const retrying = reduceConnection(disconnected, { type: "takeover_started" });
+    expect(retrying).toEqual(taking(0));
+    expect(reduceConnection(retrying, { type: "takeover_outcome", outcome: "success" })).toEqual({ phase: "connected", authority: "controller" });
+  });
 });
 
 describe("controller capacity", () => {

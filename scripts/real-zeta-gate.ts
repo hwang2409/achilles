@@ -763,7 +763,15 @@ try {
   await observerPage.getByText("waiting for the other tab or app to close…", { exact: true }).waitFor({ timeout: 5_000 });
   await observerPage.getByRole("button", { name: "cancel", exact: true }).click();
   await observerPage.getByRole("button", { name: "take control", exact: true }).waitFor({ timeout: 5_000 });
+  await observerPage.getByRole("button", { name: "take control", exact: true }).click();
+  await observerPage.getByRole("button", { name: "retry", exact: true }).waitFor({ timeout: 25_000 });
   await controllerContext.close();
+  await observerPage.getByRole("button", { name: "retry", exact: true }).click();
+  const takeoverField = observerPage.getByRole("textbox", { name: "message", exact: true });
+  await takeoverField.waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`takeover retry did not gain control: ${await observerPage.locator("body").innerText()}`); });
+  await takeoverField.fill("takeover retry message");
+  await takeoverField.press("Enter");
+  await observerPage.getByText("takeover retry message", { exact: true }).waitFor({ timeout: 20_000 });
   page = observerPage;
 
   if (screenshotDir) {
