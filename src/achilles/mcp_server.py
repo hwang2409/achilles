@@ -9,7 +9,13 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from .pages import CREATE_PAGE_SCHEMA, LAYOUT_SCHEMA, UPDATE_LAYOUT_SCHEMA, PageStore
+from .pages import (
+    CREATE_PAGE_SCHEMA,
+    LAYOUT_SCHEMA,
+    UPDATE_LAYOUT_SCHEMA,
+    PageStore,
+    bounded_inspect,
+)
 from .records import call_record
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
@@ -79,7 +85,6 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
     ],
     "additionalProperties": False,
 }
-_INSPECT_MAX_BYTES = 8 * 1024
 
 
 def _token(context):
@@ -116,40 +121,8 @@ def _safe_error(exc: ValidationError) -> CallToolResult:
     )
 
 
-def _bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    result = {
-        **value,
-        "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
-        "layout_complete": True,
-        "metric_values": list(value["metric_values"]),
-        "tools": list(value["tools"]),
-        "collections": dict(value["collections"]),
-    }
-
-    def serialize() -> str:
-        return json.dumps(result, sort_keys=True, separators=(",", ":"))
-
-    encoded = serialize()
-    if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
-        return result, encoded
-
-    result["truncated"] = True
-    result["omitted"] = {}
-    for key in ("metric_values", "tools", "collections", "title"):
-        omitted = result.pop(key)
-        result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
-        encoded = serialize()
-        if len(encoded.encode()) <= _INSPECT_MAX_BYTES:
-            return result, encoded
-
-    result["layout"] = None
-    result["layout_complete"] = False
-    result["message"] = "do not change this page; tell the user it is too large to edit from chat"
-    return result, serialize()
-
-
 def _inspect_result(value: dict[str, Any]) -> CallToolResult:
-    _, encoded = _bounded_inspect(value)
+    _, encoded = bounded_inspect(value)
     return CallToolResult(content=[TextContent(type="text", text=encoded)])
 
 
@@ -321,16 +294,6 @@ def build_mcp(store: PageStore):
                         "existing": existing,
                     }
                 elif params.name == "update_layout":
-                    current = await anyio.to_thread.run_sync(store.inspect_page, page["id"])
-                    bounded, _ = _bounded_inspect(current)
-                    if not bounded["layout_complete"]:
-                        raise ValidationError(
-                            "/layout",
-                            "current layout small enough to inspect",
-                            "layout_too_large",
-                            "Do not change the page. Tell the user it is too large to edit "
-                            "from chat.",
-                        )
                     version, digest = await anyio.to_thread.run_sync(
                         store.update_layout,
                         page["id"],
