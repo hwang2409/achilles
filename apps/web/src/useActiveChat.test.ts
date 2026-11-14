@@ -103,6 +103,33 @@ describe("active chat attachment", () => {
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
+  test("reconnect clears a publish error after attaching the completed creation", async () => {
+    const originalFetch = globalThis.fetch;
+    const storage = new MemoryStorage();
+    let mappingAttempts = 0; let creationError: string | null = null;
+    globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page(null));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return new Response(null, { status: 200 });
+      if (url === "/api/pages/home/session" && init?.method === "PUT") return new Response(null, { status: ++mappingAttempts === 1 ? 503 : 200 });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const owner = createAttachmentOwner();
+    const creation = createChatCreationOwner(storage);
+    const client = attachmentClient();
+    try {
+      await attachPage(client as never, "home", null, owner, creation, owner.begin("first", true)).catch((caught) => { creationError = String(caught); });
+      expect(creationError).toContain("could not save session mapping");
+
+      const attached = await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true));
+      if ((attached as typeof attached & { completedCreation?: boolean }).completedCreation) creationError = null;
+      expect(creationError).toBeNull();
+      expect(attached.sessionId).toBe("created-on-zeta");
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
   test("a selected missing chat is stable and never creates a replacement", async () => {
     const originalFetch = globalThis.fetch;
     let sessions = 0;

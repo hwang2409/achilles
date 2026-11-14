@@ -6,7 +6,7 @@ import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner
 import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./zeta/session";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
-type Attachment = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null; title: string };
+type Attachment = { page: Page; serverApprovalMode: string | null; sessionId: string; lease: SessionLease; credential: string; pendingApprovalMode: string | null; title: string; completedCreation: boolean };
 type ReadyState = Attachment & { phase: "ready" };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | ReadyState;
 type RetryCreation = { input: ChatCreationInput; route: string; pending: PendingChat };
@@ -116,7 +116,7 @@ export async function attachPage(client: ZetaClient, key: string, selectedId: st
     const title = session.name?.trim() || selectedChat?.title?.trim() || (await findChat(session.id))?.title?.trim() || "untitled chat"; requireCurrent(owner, token);
     if (session.name?.trim() && session.name.trim() !== selectedChat?.title?.trim())
       void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-    return { page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
+    return { page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title, completedCreation: resumedCreation !== null };
   } catch (caught) {
     if (ownsLease) owner.release(token);
     throw caught;
@@ -161,6 +161,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean) {
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token).then((next) => {
       if (!owner.current.current(token)) return;
+      if (next.completedCreation) { retryCreation.current = null; setOrphanError(null); }
       setState({ phase: "ready", ...next });
     }).catch((caught) => {
       if (caught instanceof PendingCreationError && caught.pending && owner.current.current(token)) {
