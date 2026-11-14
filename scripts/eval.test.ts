@@ -56,7 +56,7 @@ test("setup seeds an initial layout on a fresh page at version 1", async () => {
     const seeded = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", script!, root, "home", JSON.stringify(setup)], target);
     expect(seeded.exitCode, seeded.stderr).toBe(0);
     expect(() => verifySetup(setup, JSON.parse(seeded.stdout))).not.toThrow();
-    const inspected = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", "import json,sys; from pathlib import Path; from achilles.pages import PageStore; store=PageStore(Path(sys.argv[1])); print(json.dumps({'layout':store.layout('home'),'version':store.inspect_page('home')['layout']['version']}))", root], target);
+    const inspected = await targetRun(target)("uv", ["run", "--project", target, "python", "-c", "import json,sys; from pathlib import Path; from achilles.pages import PageStore; store=PageStore(Path(sys.argv[1])); summary=store.inspect_page('home'); print(json.dumps({'layout':store.layout('home'),'version':summary.get('layout_version',summary['layout'].get('version'))}))", root], target);
     expect(inspected.exitCode, inspected.stderr).toBe(0);
     expect(JSON.parse(inspected.stdout)).toEqual({ layout, version: 1 });
   } finally { await rm(root, { recursive: true, force: true }); }
