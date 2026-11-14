@@ -1,0 +1,84 @@
+{
+  "good": {
+    "pages": [{ "id": "p", "alias": "reading" }],
+    "tool_versions": [{ "page_id": "p", "name": "list_books", "operation": "list", "collection": "books" }],
+    "records": [
+      { "page_id": "p", "id": "b1", "collection": "books", "data": { "title": "A", "status": "done" } },
+      { "page_id": "p", "id": "b2", "collection": "books", "data": { "title": "B", "status": "done" } },
+      { "page_id": "p", "id": "b3", "collection": "books", "data": { "title": "C", "status": "reading" } }
+    ],
+    "layouts": [
+      { "page_id": "p", "version": 1, "document": { "blocks": [{ "type": "list", "title": "Books", "collection": "books" }] } },
+      { "page_id": "p", "version": 2, "document": { "blocks": [
+        { "type": "metric", "label": "Completed", "collection": "books", "count": true, "where": { "field": "status", "equals": "done" } },
+        { "type": "list", "title": "Books", "collection": "books" }
+      ] } }
+    ],
+    "calls": [
+      { "id": "inspect-1", "page_id": "p", "tool": "achilles__inspect_page", "arguments": {} },
+      { "id": "update-1", "page_id": "p", "tool": "achilles__update_layout", "arguments": { "layout": { "blocks": [
+        { "type": "metric", "label": "Completed", "collection": "books", "count": true, "where": { "field": "status", "equals": "done" } },
+        { "type": "list", "title": "Books", "collection": "books" }
+      ] }, "expected_version": 1 } },
+      { "id": "inspect-2", "page_id": "p", "tool": "achilles__inspect_page", "arguments": {} }
+    ],
+    "results": [
+      { "page_id": "p", "tool": "achilles__inspect_page", "call_id": "inspect-1", "success": true, "data": { "layout_version": 1, "layout": { "blocks": [{ "type": "list", "title": "Books", "collection": "books" }] }, "metric_values": [] } },
+      { "page_id": "p", "tool": "achilles__update_layout", "call_id": "update-1", "success": true, "data": { "version": 2 } },
+      { "page_id": "p", "tool": "achilles__inspect_page", "call_id": "inspect-2", "success": true, "data": { "layout_version": 2, "layout": { "blocks": [
+        { "type": "metric", "label": "Completed", "collection": "books", "count": true, "where": { "field": "status", "equals": "done" } },
+        { "type": "list", "title": "Books", "collection": "books" }
+      ] }, "metric_values": [{ "block": 0, "value": 2 }] } }
+    ],
+    "related_page_ids": ["p"],
+    "initial": {
+      "tool_versions": [{ "page_id": "home", "name": "list_books", "operation": "list", "collection": "books" }],
+      "records": [
+        { "page_id": "home", "id": "b1", "collection": "books", "data": { "title": "A", "status": "done" } },
+        { "page_id": "home", "id": "b2", "collection": "books", "data": { "title": "B", "status": "done" } },
+        { "page_id": "home", "id": "b3", "collection": "books", "data": { "title": "C", "status": "reading" } }
+      ],
+      "layouts": [{ "page_id": "home", "version": 1, "document": { "blocks": [{ "type": "list", "title": "Books", "collection": "books" }] } }]
+    }
+  },
+  "bad": {
+    "pages": [{ "id": "p", "alias": "reading" }],
+    "tool_versions": [{ "page_id": "p", "name": "list_books", "operation": "list", "collection": "books" }],
+    "records": [
+      { "page_id": "p", "id": "b1", "collection": "books", "data": { "title": "A", "status": "done" } },
+      { "page_id": "p", "id": "b2", "collection": "books", "data": { "title": "B", "status": "done" } },
+      { "page_id": "p", "id": "b3", "collection": "books", "data": { "title": "C", "status": "reading" } }
+    ],
+    "layouts": [
+      { "page_id": "p", "version": 1, "document": { "blocks": [{ "type": "list", "title": "Books", "collection": "books" }] } },
+      { "page_id": "p", "version": 2, "document": { "blocks": [
+        { "type": "metric", "label": "Done books", "value": "2" },
+        { "type": "list", "title": "Books", "collection": "books" }
+      ] } }
+    ],
+    "calls": [
+      { "id": "update-1", "page_id": "p", "tool": "achilles__update_layout", "arguments": { "layout": { "blocks": [
+        { "type": "metric", "label": "Done books", "value": "2" },
+        { "type": "list", "title": "Books", "collection": "books" }
+      ] }, "expected_version": 1 } },
+      { "id": "inspect-1", "page_id": "p", "tool": "achilles__inspect_page", "arguments": {} }
+    ],
+    "results": [
+      { "page_id": "p", "tool": "achilles__update_layout", "call_id": "update-1", "success": true, "data": { "version": 2 } },
+      { "page_id": "p", "tool": "achilles__inspect_page", "call_id": "inspect-1", "success": true, "data": { "layout_version": 2, "layout": { "blocks": [
+        { "type": "metric", "label": "Done books", "value": "2" },
+        { "type": "list", "title": "Books", "collection": "books" }
+      ] }, "metric_values": [] } }
+    ],
+    "related_page_ids": ["p"],
+    "initial": {
+      "tool_versions": [{ "page_id": "home", "name": "list_books", "operation": "list", "collection": "books" }],
+      "records": [
+        { "page_id": "home", "id": "b1", "collection": "books", "data": { "title": "A", "status": "done" } },
+        { "page_id": "home", "id": "b2", "collection": "books", "data": { "title": "B", "status": "done" } },
+        { "page_id": "home", "id": "b3", "collection": "books", "data": { "title": "C", "status": "reading" } }
+      ],
+      "layouts": [{ "page_id": "home", "version": 1, "document": { "blocks": [{ "type": "list", "title": "Books", "collection": "books" }] } }]
+    }
+  }
+}
