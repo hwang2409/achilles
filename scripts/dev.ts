@@ -223,7 +223,7 @@ async function zetaUpgradeCommand() {
     try {
       const receipt = await readFile(resolve(toolDir, "uv-receipt.toml"), "utf8");
       const checkout = receipt.match(/(?:editable|(?<!install-)path) = "([^"]+)"/)?.[1];
-      if (checkout) return `git -C ${shellQuote(checkout)} pull`;
+      if (checkout) return `git -C ${shellQuote(checkout)} pull --ff-only`;
     } catch {}
   }
   return "uv tool upgrade zeta";
@@ -238,18 +238,22 @@ async function prerequisites() {
   for (const command of ["bun", "uv", "git", "zeta"]) {
     if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) throw new Error(`missing ${command}: ${fixes[command]}`);
   }
-  await mkdir(home, { recursive: true });
-  const checks: [string[], string[]][] = [
-    [["zeta", "mcp", "--help"], ["add", "show", "remove"]],
-    [["zeta", "mcp", "show", "--help"], ["--scope", "--json"]],
-    [["zeta", "mcp", "add", "--help"], ["--scope", "--url"]],
-    [["zeta", "mcp", "remove", "--help"], ["--scope"]],
+  const checks: [string[], string[], "serve" | "mcp"][] = [
+    [["zeta", "mcp", "--help"], ["add", "show", "remove"], "mcp"],
+    [["zeta", "mcp", "show", "--help"], ["--scope", "--json"], "mcp"],
+    [["zeta", "mcp", "add", "--help"], ["--scope", "--url"], "mcp"],
+    [["zeta", "mcp", "remove", "--help"], ["--scope"], "mcp"],
   ];
-  for (const [args, required] of checks) {
-    const result = Bun.spawnSync(args, { cwd: home, env: { ...process.env, PWD: home } });
+  if (!process.env.ACHILLES_ZETA_DISCOVERY) checks.unshift([["zeta", "serve", "--help"], ["--ws", "--ws-origin", "--ws-discovery"], "serve"]);
+  for (const [args, required, kind] of checks) {
+    const result = Bun.spawnSync(args, { cwd: root, env: { ...process.env, PWD: root } });
     const help = `${result.stdout.toString()}${result.stderr.toString()}`;
-    if (result.exitCode !== 0 || required.some((value) => !help.includes(value))) throw new Error(`missing zeta mcp: ${await zetaUpgradeCommand()}`);
+    if (result.exitCode === 0 && required.every((value) => help.includes(value))) continue;
+    const upgrade = await zetaUpgradeCommand();
+    if (kind === "serve") throw new Error(`zeta too old: update zeta or set ACHILLES_ZETA_DISCOVERY to attach\nminimum zeta: 8f4b469\n${upgrade}, then restart zeta sessions`);
+    throw new Error(`missing zeta mcp: ${upgrade}`);
   }
+  await mkdir(home, { recursive: true });
 }
 async function dev() {
   await prerequisites();
