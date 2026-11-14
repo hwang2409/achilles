@@ -862,17 +862,15 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
 
 @pytest.mark.parametrize("writer", ["create_page", "update_layout"])
 @pytest.mark.parametrize(
-    ("field_filter", "expect_error"),
+    "field_filter",
     [
-        ({"field": "title", "equals": "the book"}, False),
-        ({"field": "missing", "equals": "the book"}, True),
-        ({"field": "run_id", "equals": "run-002"}, True),
-        (None, False),
+        {"field": "title", "equals": "the book"},
+        {"field": "missing", "equals": "the book"},
+        {"field": "run_id", "equals": "run-002"},
+        None,
     ],
 )
-def test_detail_filter_validation_through_public_tools(
-    creation_client, writer, field_filter, expect_error
-):
+def test_detail_filter_validation_through_public_tools(creation_client, writer, field_filter):
     _, store, client, home_headers = creation_client
     detail = {
         "type": "detail",
@@ -914,28 +912,137 @@ def test_detail_filter_validation_through_public_tools(
             },
         )
 
-    assert bool(result.get("isError")) is expect_error
-    if expect_error:
-        assert json.loads(result["content"][0]["text"]) == {
-            "code": "invalid_input",
-            "path": "/layout/blocks/0/filter/field",
-            "expected": "field in collection schema",
-            "hint": (
-                "Use a field listed in the assigned tool's "
-                "implementation.data_schema.properties, or add it there."
+    assert not result.get("isError")
+    page_id = page_id or json.loads(created["content"][0]["text"])["page_id"]
+    inspected = mcp(
+        client,
+        home_headers,
+        5,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"page_id": page_id}},
+    )
+    value = json.loads(inspected["content"][0]["text"])
+    assert value["layout"] == layout
+
+
+@pytest.mark.parametrize(
+    ("records", "field_filter", "expected"),
+    [
+        ([{"run_id": "run-002"}], {"field": "run_id", "equals": "run-002"}, {"matched": 1}),
+        (
+            [{"run_id": "run-002"}, {"run_id": "run-002"}, {"run_id": "run-003"}],
+            {"field": "run_id", "equals": "run-002"},
+            {"matched": 2},
+        ),
+        (
+            [{"run_id": "run-002"}],
+            {"field": "record_id", "equals": "run-002"},
+            {
+                "matched": 0,
+                "hint": "no record has record_id = run-002; did you mean run_id?",
+            },
+        ),
+        (
+            [{"run_id": "run-003"}],
+            {"field": "run_id", "equals": "run-002"},
+            {"matched": 0, "hint": "no record has run_id = run-002"},
+        ),
+        (
+            [{"run_id": "run-003"}],
+            {"field": "missing", "equals": "run-002"},
+            {
+                "matched": 0,
+                "hint": (
+                    "no record has missing = run-002; missing is not in the books collection schema"
+                ),
+            },
+        ),
+        (
+            [],
+            {"field": "run_id", "equals": "run-002"},
+            {"matched": 0, "hint": "no record has run_id = run-002"},
+        ),
+    ],
+    ids=["one", "several", "suggestion", "no-suggestion", "unknown-field", "empty"],
+)
+def test_detail_filter_match_results_through_public_mcp(
+    creation_client, records, field_filter, expected
+):
+    _, store, client, home_headers = creation_client
+    data_schema = {
+        "type": "object",
+        "properties": {"run_id": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    detail = {
+        "type": "detail",
+        "title": "run",
+        "collection": "books",
+        "fields": ["run_id"],
+        "filter": field_filter,
+    }
+    run_bundle = bundle(name="add_run")
+    run_bundle["input_schema"] = data_schema
+    run_bundle["implementation"]["data_schema"] = data_schema
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {
+            "name": "create_page",
+            "arguments": request(
+                tools=[run_bundle],
+                layout={"blocks": [detail]},
             ),
-        }
-    else:
-        page_id = page_id or json.loads(created["content"][0]["text"])["page_id"]
-        inspected = mcp(
-            client,
-            home_headers,
-            5,
-            "tools/call",
-            {"name": "inspect_page", "arguments": {"page_id": page_id}},
-        )
-        value = json.loads(inspected["content"][0]["text"])
-        assert value["layout"] == layout
+        },
+    )
+    created_value = json.loads(created["content"][0]["text"])
+    initial_hint = f"no record has {field_filter['field']} = run-002"
+    if field_filter["field"] != "run_id":
+        initial_hint += f"; {field_filter['field']} is not in the books collection schema"
+    assert created_value["detail_filter_matches"] == [
+        {"block": 0, "matched": 0, "hint": initial_hint}
+    ]
+    page_id = created_value["page_id"]
+    with store.transaction() as db:
+        for index, document in enumerate(records):
+            db.execute(
+                "INSERT INTO page_record(page_id,collection,record_id,version,document,"
+                "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    page_id,
+                    "books",
+                    f"record-{index}",
+                    1,
+                    json.dumps(document),
+                    f"{index}",
+                    f"{index}",
+                ),
+            )
+    store.set_create_mode(page_id, True)
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    updated = mcp(
+        client,
+        page_headers,
+        4,
+        "tools/call",
+        {
+            "name": "update_layout",
+            "arguments": {"layout": {"blocks": [detail]}, "expected_version": 1},
+        },
+    )
+    update_value = json.loads(updated["content"][0]["text"])
+    assert update_value["detail_filter_matches"] == [{"block": 0, **expected}]
+    inspected = mcp(
+        client,
+        home_headers,
+        5,
+        "tools/call",
+        {"name": "inspect_page", "arguments": {"page_id": page_id}},
+    )
+    inspect_value = json.loads(inspected["content"][0]["text"])
+    assert inspect_value["detail_filter_matches"] == [{"block": 0, **expected}]
 
 
 def test_update_layout_refuses_page_too_large_to_inspect(creation_client):
@@ -1096,8 +1203,10 @@ def test_update_layout_catalog_is_page_bound_and_create_mode_gated(creation_clie
         "`layout_version` as expected_version. On a version conflict, inspect again and retry. "
         "To change another page, open that page's chat. A detail block can select records with "
         'collection and filter, for example {"field":"run_id","equals":"run-002"}; use a '
-        "field from the collection's assigned tool schema. It shows the highest creation time, "
-        "with ties resolved by highest record id; without a filter it shows field labels only."
+        "field from the collection's assigned tool schema. The result reports how many records "
+        "the filter matches and gives a repair hint for zero matches. It shows the highest "
+        "creation time, with ties resolved by highest record id; without a filter it shows "
+        "field labels only."
     )
     assert (
         update_tool["inputSchema"]["properties"]["layout"]["description"]

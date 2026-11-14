@@ -52,6 +52,20 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
             "description": "The value to pass as update_layout expected_version.",
         },
         "layout_digest": {"type": ["string", "null"]},
+        "detail_filter_matches": {
+            "type": "array",
+            "description": "Match count and repair hint for each filtered detail block.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "block": {"type": "integer", "minimum": 0},
+                    "matched": {"type": "integer", "minimum": 0},
+                    "hint": {"type": "string"},
+                },
+                "required": ["block", "matched"],
+                "additionalProperties": False,
+            },
+        },
         "metric_values": {
             "type": "array",
             "items": {
@@ -175,9 +189,10 @@ def build_mcp(store: PageStore):
                             "true, layout is the complete stored layout to edit and layout_version "
                             "is the value for update_layout expected_version; when layout_complete "
                             "is false, do not change the page and tell the user it is too large to "
-                            "edit from chat; metric_values reports computed "
-                            "counts by "
-                            "layout block index; legacy pages can inspect only themselves"
+                            "edit from chat; metric_values reports computed counts and "
+                            "detail_filter_matches reports filtered detail match counts and "
+                            "repair hints, both by layout block index; legacy pages can inspect "
+                            "only themselves"
                         ),
                         inputSchema=INSPECT_PAGE_SCHEMA,
                         outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
@@ -188,9 +203,10 @@ def build_mcp(store: PageStore):
                             "create a page; available only in create mode. A detail block can "
                             "select records with collection and filter, for example "
                             '{"field":"run_id","equals":"run-002"}; use a field from the '
-                            "collection's assigned tool schema. It shows the highest creation "
-                            "time, with ties resolved by highest record id; without a filter it "
-                            "shows field labels only."
+                            "collection's assigned tool schema. The result reports how many "
+                            "records the filter matches and gives a repair hint for zero matches. "
+                            "It shows the highest creation time, with ties resolved by highest "
+                            "record id; without a filter it shows field labels only."
                         ),
                         inputSchema=CREATE_PAGE_SCHEMA,
                     ),
@@ -218,9 +234,10 @@ def build_mcp(store: PageStore):
                             "page, open that page's chat. A detail block can select records with "
                             "collection and filter, for example "
                             '{"field":"run_id","equals":"run-002"}; use a field from the '
-                            "collection's assigned tool schema. It shows the highest creation "
-                            "time, with ties resolved by highest record id; without a filter it "
-                            "shows field labels only."
+                            "collection's assigned tool schema. The result reports how many "
+                            "records the filter matches and gives a repair hint for zero matches. "
+                            "It shows the highest creation time, with ties resolved by highest "
+                            "record id; without a filter it shows field labels only."
                         ),
                         inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),
@@ -313,6 +330,11 @@ def build_mcp(store: PageStore):
                         store.create_tool, page["id"], args["bundle"], "/bundle"
                     )
                     result = {**created, "digest": digest}
+                if params.name in {"create_page", "update_layout"}:
+                    result_page_id = result.get("page_id", page["id"])
+                    summary = await anyio.to_thread.run_sync(store.inspect_page, result_page_id)
+                    if summary["detail_filter_matches"]:
+                        result["detail_filter_matches"] = summary["detail_filter_matches"]
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:

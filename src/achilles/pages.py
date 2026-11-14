@@ -142,6 +142,7 @@ UPDATE_LAYOUT_SCHEMA = {
     "additionalProperties": False,
 }
 INSPECT_MAX_BYTES = 8 * 1024
+DETAIL_SUGGESTION_RECORD_LIMIT = 200
 
 CREATE_PAGE_SCHEMA = {
     "type": "object",
@@ -169,6 +170,7 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
         "layout": {**value["layout"], "blocks": list(value["layout"]["blocks"])},
         "layout_complete": True,
         "metric_values": list(value["metric_values"]),
+        "detail_filter_matches": list(value["detail_filter_matches"]),
         "tools": list(value["tools"]),
         "collections": dict(value["collections"]),
     }
@@ -182,7 +184,7 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
     result["truncated"] = True
     result["omitted"] = {}
-    for key in ("metric_values", "tools", "collections", "title"):
+    for key in ("metric_values", "detail_filter_matches", "tools", "collections", "title"):
         omitted = result.pop(key)
         result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
         encoded = serialize()
@@ -231,7 +233,6 @@ def validate_layout(
     assigned_tools: set[str] | None = None,
     assigned_collections: set[str] | None = None,
     prefix: str = "",
-    collection_fields: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
@@ -262,20 +263,6 @@ def validate_layout(
                     '"implementation":{"operation":"list",'
                     '"collection":"collection_name","data_schema":{"type":'
                     '"object","properties":{}}}}. A simple inferred input_schema is fine.'
-                ),
-            )
-        if (
-            block["type"] == "detail"
-            and "filter" in block
-            and collection_fields is not None
-            and block["filter"]["field"] not in collection_fields.get(block["collection"], set())
-        ):
-            raise ValidationError(
-                f"{prefix}/blocks/{index}/filter/field",
-                "field in collection schema",
-                hint=(
-                    "Use a field listed in the assigned tool's "
-                    "implementation.data_schema.properties, or add it there."
                 ),
             )
     return layout
@@ -316,6 +303,71 @@ def _json_scalar_match(
 def validate_record_filter(value: Any) -> dict[str, Any]:
     validate_schema(value, _EQUALITY_FILTER_SCHEMA)
     return value
+
+
+def _same_json_scalar(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    return type(left) is type(right) and left == right
+
+
+def _filter_value_text(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+def detail_filter_result(
+    db: sqlite3.Connection,
+    page_id: str,
+    collection: str,
+    field_filter: dict[str, Any],
+    collection_fields: set[str],
+) -> dict[str, Any]:
+    field_filter = validate_record_filter(field_filter)
+    field = field_filter["field"]
+    expected = field_filter["equals"]
+    predicate, parameters = _json_scalar_match(field, expected)
+    matched = db.execute(
+        "SELECT COUNT(*) FROM page_record WHERE page_id=? AND collection=? AND " + predicate,
+        (page_id, collection, *parameters),
+    ).fetchone()[0]
+    result: dict[str, Any] = {"matched": matched}
+    if matched:
+        return result
+
+    hint = f"no record has {field} = {_filter_value_text(expected)}"
+    # shortcut: suggestions inspect the newest 200 records, raise the cap only with evidence.
+    rows = db.execute(
+        "SELECT document FROM page_record WHERE page_id=? AND collection=? "
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        (page_id, collection, DETAIL_SUGGESTION_RECORD_LIMIT),
+    ).fetchall()
+    documents = [json.loads(row[0]) for row in rows]
+    candidate_fields = set(collection_fields)
+    for document in documents:
+        candidate_fields.update(document)
+    suggestion = next(
+        (
+            candidate
+            for candidate in sorted(candidate_fields - {field})
+            if any(
+                candidate in document and _same_json_scalar(document[candidate], expected)
+                for document in documents
+            )
+        ),
+        None,
+    )
+    if suggestion is not None:
+        hint += f"; did you mean {suggestion}?"
+    elif field not in collection_fields:
+        hint += f"; {field} is not in the {collection} collection schema"
+    result["hint"] = hint
+    return result
 
 
 class PageStore:
@@ -532,6 +584,7 @@ class PageStore:
         page: Any,
         active: tuple[int, str | None, dict[str, Any]],
         metric_values: list[dict[str, Any]],
+        detail_filter_matches: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         collections: dict[str, int],
     ) -> dict[str, Any]:
@@ -544,6 +597,7 @@ class PageStore:
             "layout_version": version,
             "layout_digest": digest,
             "metric_values": metric_values,
+            "detail_filter_matches": detail_filter_matches,
             "tools": [
                 {
                     "name": tool["name"],
@@ -584,10 +638,26 @@ class PageStore:
             (page_id,),
         ).fetchall()
         tools = self._page_tools(db, page_id)
+        collection_fields = _collection_fields(tools)
+        detail_filter_matches = [
+            {
+                "block": index,
+                **detail_filter_result(
+                    db,
+                    page_id,
+                    block["collection"],
+                    block["filter"],
+                    collection_fields.get(block["collection"], set()),
+                ),
+            }
+            for index, block in enumerate(document.get("blocks", []))
+            if block.get("type") == "detail" and "filter" in block
+        ]
         return self._inspect_projection(
             row,
             (version, digest, document),
             metric_values,
+            detail_filter_matches,
             tools,
             {collection: count for collection, count in counts},
         )
@@ -802,7 +872,6 @@ class PageStore:
             {bundle["name"] for bundle in bundles},
             {bundle["implementation"]["collection"] for bundle in bundles},
             "/layout",
-            _collection_fields(bundles),
         )
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
@@ -850,6 +919,20 @@ class PageStore:
                             {"block": index, "value": 0}
                             for index, block in enumerate(layout["blocks"])
                             if block.get("type") == "metric" and block.get("count") is True
+                        ],
+                        [
+                            {
+                                "block": index,
+                                **detail_filter_result(
+                                    db,
+                                    "",
+                                    block["collection"],
+                                    block["filter"],
+                                    _collection_fields(bundles).get(block["collection"], set()),
+                                ),
+                            }
+                            for index, block in enumerate(layout["blocks"])
+                            if block.get("type") == "detail" and "filter" in block
                         ],
                         [
                             {**bundle, "version": 1}
@@ -979,7 +1062,6 @@ class PageStore:
                 {tool["name"] for tool in tools},
                 {bundle["implementation"]["collection"] for bundle in bundles},
                 "/layout",
-                _collection_fields(bundles),
             )
             if expected_version != active_version:
                 raise ValidationError(
