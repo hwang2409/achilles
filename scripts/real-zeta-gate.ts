@@ -1401,7 +1401,11 @@ try {
   }, "orphan chat retry");
   if (requests().filter((frame) => frame.method === "new_session").length !== newSessionsAfterFailure)
     throw new Error("retrying an orphaned chat created another zeta session");
-  await page.waitForTimeout(1_000);
+  await waitFor(async () => {
+    const current = await homeSessionId();
+    const attached = await page.locator("[data-session-id]").getAttribute("data-session-id");
+    return Boolean(current && attached === current && new URL(page.url()).searchParams.get("chat") === current);
+  }, "orphan chat ui attachment");
 
   const draft = "this draft must remain after zeta disconnects";
   const droppedField = page.getByRole("textbox", { name: "message" });
