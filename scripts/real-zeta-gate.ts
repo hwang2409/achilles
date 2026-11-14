@@ -815,9 +815,9 @@ try {
   const observerOutputBefore = await observerOutputs.count();
   await recoveredField.fill("observer live message", { timeout: 20_000 }).catch(async () => { throw new Error(`controller lost its composer after observer attach: ${await page.locator("body").innerText()}`); });
   await recoveredField.press("Enter");
-  await page.getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 });
+  await page.locator(".transcript").getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 });
   await waitFor(async () => await controllerOutputs.count() > controllerOutputBefore, "controller live output");
-  await observerPage.getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer missed live user message without reload: ${await observerPage.locator("body").innerText()}`); });
+  await observerPage.locator(".transcript").getByText("observer live message", { exact: true }).waitFor({ timeout: 20_000 }).catch(async () => { throw new Error(`observer missed live user message without reload: ${await observerPage.locator("body").innerText()}`); });
   await waitFor(async () => await observerOutputs.count() > observerOutputBefore, "observer live output").catch(async () => { throw new Error(`observer missed live output without reload: ${await observerPage.locator("body").innerText()}`); });
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "08-observer-read-only-review-1440x900.png"), fullPage: true });
   await observerPage.getByRole("button", { name: "take control" }).click();
