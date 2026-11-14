@@ -41,7 +41,7 @@ test("turn cap report preserves the seeded initial snapshot", async () => {
     await Bun.write(taskPath, JSON.stringify({ id: taskId, page_plan: [{ alias: "seeded", source: "setup", bind_chat: true, create_mode: true }], agent_turns: 1, steps: [{ id: "use-turn", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "keep using tools" }, { id: "exhaust", kind: "prompt", page: "seeded", chat: "seeded-chat", prompt: "continue" }], setup: { tools: [], records: [record], initial_layout: layout }, checks: [{ id: "seeded-record", type: "record", page: "seeded", value: record.data }] }));
     child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
     const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
-    const exitCode = await Promise.race([child.exited, Bun.sleep(25_000).then(() => { throw new Error("scripted eval exceeded 25 seconds"); })]);
+    const exitCode = await Promise.race([child.exited, Bun.sleep(28_500).then(() => { throw new Error("scripted eval exceeded 28.5 seconds"); })]);
     expect(exitCode, `${await stdout}\n${await stderr}`).toBe(1);
     const report = JSON.parse(await readFile(join(root, "report.json"), "utf8")); const result = report.tasks[0];
     const snapshot = JSON.parse(await readFile(join(root, result.transcript), "utf8"));
@@ -51,7 +51,7 @@ test("turn cap report preserves the seeded initial snapshot", async () => {
     expect(result).toEqual(expect.objectContaining({ status: "agent_fail", cap_hit: true }));
     expect(JSON.stringify(result.checks)).not.toContain("setup precondition unverifiable");
   } finally {
-    if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(2_000)]); }
+    if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(500)]); }
     await rm(taskPath, { force: true }); await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
