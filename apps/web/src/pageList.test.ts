@@ -81,6 +81,23 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
       expect(h.state().items).toEqual(items("X", "A", "B", "D"));
     },
   },
+  {
+    name: "unmount disposal resets the requested depth",
+    run: async (h) => {
+      const initial = h.owner.reload("all");
+      h.succeed(0, page(["A", "B"], "B"));
+      await initial;
+      const delayedMore = h.owner.more();
+      h.owner.dispose();
+      const replacement = h.owner.reload("all");
+      expect(h.calls[2].limit).toBeUndefined();
+      h.succeed(2, page(["X", "A"], null));
+      await replacement;
+      h.succeed(1, page(["C", "D"], "D"));
+      expect(await delayedMore).toBeNull();
+      expect(h.state().items).toEqual(items("X", "A"));
+    },
+  },
   ...(["continuation first", "refresh first"] as const).map((order) => ({
     name: `more then reload keeps the requested depth: ${order}`,
     run: async (h: ReturnType<typeof harness>) => {
@@ -235,12 +252,13 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
     },
   },
   {
-    name: "search change cancels an in-flight more",
+    name: "search or collection identity change cancels more and resets depth",
     run: async (h) => {
       await h.seed("old search");
       const stale = h.owner.more();
       const replacement = h.owner.reload("new search");
       expect(h.calls[1].signal.aborted).toBe(true);
+      expect(h.calls[2].limit).toBeUndefined();
       h.succeed(2, page(["new"], null));
       await replacement;
       h.succeed(1, page(["stale"], null));

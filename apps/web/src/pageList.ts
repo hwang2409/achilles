@@ -140,12 +140,13 @@ export function createListOwner<K, T, M>(
       void runMore(candidate, key, before);
     });
   };
-  const cancel = () => {
+  const dispose = () => {
     stop();
     generation += 1;
+    activeKey = undefined;
   };
 
-  return { reload, more, cancel };
+  return { reload, more, dispose };
 }
 
 export type ListOwner<K, T, M> = ReturnType<typeof createListOwner<K, T, M>>;
