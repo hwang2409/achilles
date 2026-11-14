@@ -26,6 +26,7 @@ export async function waitForIdleTurn(
 export async function gateTranscript(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
+  requests: () => Array<{ method?: string; params?: { text?: string } }>,
 ) {
   const capture = async (name: string) => {
     if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${name}`, fullPage: true });
@@ -118,6 +119,8 @@ export async function gateTranscript(
   await page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 });
   if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
     throw new Error("prompt during turn end was not delivered exactly once");
+  const newTurnSends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending");
+  if (newTurnSends.length !== 1) throw new Error(`prompt during turn end used ${newTurnSends.length} new-turn sends instead of one`);
   await waitForIdleTurn(page, waitFor);
 
   await field.fill("stream text only lines to overflow");

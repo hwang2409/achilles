@@ -41,6 +41,7 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
         if (scenario.remount) await heldSend;
         return { accepted: true };
       }
+      if (method === "status") return { state: "idle" };
       if (method !== "delivery_status") throw new Error(`unexpected ${method}`);
       statusReads += 1;
       const status = statuses.shift() ?? { status: "queued" };

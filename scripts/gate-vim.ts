@@ -183,6 +183,10 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await stockAfterSend.inputValue() !== "") throw new Error(`switching after confirmed send restored stale text: ${JSON.stringify(await stockAfterSend.inputValue())}`);
 
   await stockAfterSend.fill("remove\nkeep");
+  await waitFor(async () => await page.evaluate(({ key, expected }) => {
+    const stored = localStorage.getItem(key);
+    return stored !== null && (JSON.parse(stored) as { text?: string }).text === expected;
+  }, { key: `achilles:draft:${stockSession}`, expected: "remove\nkeep" }), "composer owner stock draft before vim dd");
   await setVim(true);
   await composer.waitFor({ state: "visible", timeout: 20_000 });
   if (await vimDraft() !== "remove\nkeep") throw new Error(`vim did not inherit the exact stock draft before dd: ${JSON.stringify(await vimDraft())}`);
