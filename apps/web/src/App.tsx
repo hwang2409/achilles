@@ -7,6 +7,7 @@ import { AppShell } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
 import { DetailRecord, type DetailFilter } from "./DetailRecord";
+import { FormBlock, useRecordWrites } from "./page/RecordForm";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
@@ -213,7 +214,8 @@ function ConnectionBanner({ state, connection, compact = false }: { state: Conne
   return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{text}{"attempt" in state && ` · tried ${state.attempt} times`}</p><h1>{state.phase === "not_running" ? "start zeta, and this page connects by itself." : text}</h1>{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
+  const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p className="layout-metric"><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
   if (block.type === "list") return <RecordList key={`${pageId}:${String(block.collection)}`} title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
@@ -223,7 +225,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey }: { block: 
     if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
     return <p>{String(block.title)}: {fields.join(", ")}</p>;
   }
-  if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
+  if (block.type === "form") return <FormBlock title={String(block.title)} toolName={String(block.tool)} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
   return null;
 }
 export function RecordList({ title, collection, pageId, credential, refreshKey }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string }) {
