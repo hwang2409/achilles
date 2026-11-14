@@ -40,7 +40,7 @@ test("eval lifecycle owner leaves no process group or port behind", async () => 
     try {
       for (let i = 0; i < (scenario.name === "SIGINT" ? 300 : 600) && code === undefined; i++) {
         const rows = processRows(); const active = descendants(child.pid!, rows); for (const row of active) { seen.set(row.pid, row); for (const match of row.command.matchAll(/(?:--port|--ws)\s+(\d+)/g)) ports.add(Number(match[1])); }
-        if (scenario.signal && !sent) { const servers = active.filter(row => /(?:achilles|zeta).*serve/.test(row.command)); const recorded = Number(await Bun.file(join(marker, "runner.pid")).text().catch(() => "")); const ready = scenario.name === "SIGINT" ? recorded > 0 : servers.length >= 2; if (recorded && ready) { runnerPid = recorded; process.kill(recorded, scenario.signal); sent = true; } }
+        if (scenario.signal && !sent) { const recorded = Number(await Bun.file(join(marker, "runner.pid")).text().catch(() => "")); const ready = scenario.name === "SIGINT" ? recorded > 0 : Buffer.concat(output).includes('"retained_state"'); if (recorded && ready) { runnerPid = recorded; process.kill(recorded, scenario.signal); sent = true; } }
         code = await Promise.race([exited, Bun.sleep(50).then(() => undefined)]);
       }
       if (code === undefined) { timedOut = true; if (runnerPid) process.kill(runnerPid, "SIGKILL"); process.kill(child.pid!, "SIGKILL"); code = await Promise.race([exited, Bun.sleep(2000).then(() => undefined)]); }
