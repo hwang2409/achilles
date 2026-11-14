@@ -128,10 +128,20 @@ def build_mcp(store: PageStore):
             try:
                 _validate_create(params.name, args)
                 if params.name == "create_page":
-                    created, digest = await anyio.to_thread.run_sync(
-                        store.create_page, args["route"], args["title"], args["layout"], page["id"]
+                    created, digest, existing = await anyio.to_thread.run_sync(
+                        store.create_page,
+                        args["route"],
+                        args["title"],
+                        args["layout"],
+                        page["id"],
+                        args.get("tools"),
                     )
-                    result = {"page_id": created["id"], "route": created["route"], "digest": digest}
+                    result = {
+                        "page_id": created["id"],
+                        "route": created["route"],
+                        "digest": digest,
+                        "existing": existing,
+                    }
                 else:
                     created, digest = await anyio.to_thread.run_sync(
                         store.create_tool, page["id"], args["bundle"], "/bundle"

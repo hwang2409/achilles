@@ -88,9 +88,6 @@ def call_record(store, page_id: str, tool_name: str, arguments: dict[str, Any]) 
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")
     with store.transaction() as db:
-        principal = db.execute("SELECT create_mode FROM page WHERE id=?", (page_id,)).fetchone()
-        if principal is None or not principal[0]:
-            raise PermissionError("forbidden: create mode is off")
         row = db.execute(
             """SELECT t.id, t.owner_page_id, v.version, v.bundle FROM tool t
                JOIN page_tool pt ON pt.tool_id=t.id JOIN tool_version v
