@@ -196,7 +196,7 @@
         "page_id": "home",
         "collection": "books",
         "id": "new-book",
-        "version": 1,
+        "version": 2,
         "data": {
           "title": "Dune",
           "rating": 5
@@ -226,6 +226,8 @@
         "tool": "achilles__create_tool",
         "arguments": {
           "bundle": {
+            "format_version": 1,
+            "kind": "data_operation",
             "name": "add_book",
             "description": "insert a book with an optional rating",
             "input_schema": {
@@ -242,6 +244,25 @@
                 "title"
               ],
               "additionalProperties": false
+            },
+            "implementation": {
+              "operation": "insert",
+              "collection": "books",
+              "data_schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "rating": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": false
+              }
             }
           }
         },
@@ -532,6 +553,8 @@
         "tool": "achilles__create_tool",
         "arguments": {
           "bundle": {
+            "format_version": 1,
+            "kind": "data_operation",
             "name": "add_book",
             "description": "insert a book with an optional rating",
             "input_schema": {
@@ -548,6 +571,25 @@
                 "title"
               ],
               "additionalProperties": false
+            },
+            "implementation": {
+              "operation": "insert",
+              "collection": "books",
+              "data_schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "rating": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": false
+              }
             }
           }
         },

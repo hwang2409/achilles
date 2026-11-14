@@ -26,6 +26,17 @@ test("every task passes the expectation lint and its known-good and known-bad re
   }
 });
 
+test("tool-version references use product-valid bundles and version evidence", async () => {
+  const references = JSON.parse(await readFile(join(referencesDir, "tool-version-fresh-chat.json"), "utf8")) as { good: EvalSnapshot; bad: EvalSnapshot };
+  for (const [name, snapshot] of Object.entries(references)) {
+    const bundles = (snapshot.calls ?? []).filter(call => call.tool === "achilles__create_tool" && call.success === true).map(call => (call.arguments as { bundle?: unknown } | undefined)?.bundle).filter(Boolean);
+    const validation = Bun.spawn(["uv", "run", "python", "-c", "import json,sys; from achilles.tools import validate_bundle; [validate_bundle(bundle, reject_conflicting_output=True) for bundle in json.loads(sys.argv[1])]", JSON.stringify(bundles)], { cwd: new URL("..", import.meta.url).pathname, stdout: "pipe", stderr: "pipe" });
+    const stderr = await new Response(validation.stderr).text();
+    expect(await validation.exited, `${name}: ${stderr}`).toBe(0);
+  }
+  expect(references.good.records).toContainEqual(expect.objectContaining({ id: "new-book", version: 2 }));
+});
+
 test("wrong-page judge reference recomputes related pages through production", async () => {
   const task = validateTask(JSON.parse(await readFile(join(tasksDir, "judge-page-and-annotate.json"), "utf8")));
   const references = JSON.parse(await readFile(join(referencesDir, "judge-page-and-annotate.json"), "utf8")) as { initial: EvalSnapshot; bad: EvalSnapshot };

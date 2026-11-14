@@ -71,9 +71,9 @@ const toolEvolutionTask = (initial: Record<string, unknown>) => validateTask({
   checks: [toolEvolutionCheck],
   ...initial,
 });
-const toolEvolutionSnapshot = (field = "score", type = "number") => {
+const toolEvolutionSnapshot = (field = "score", fieldSchema: Record<string, unknown> = { type: "number" }) => {
   const v1 = { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false };
-  const v2 = { type: "object", properties: { title: { type: "string" }, [field]: { type } }, required: ["title"], additionalProperties: false };
+  const v2 = { type: "object", properties: { title: { type: "string" }, [field]: fieldSchema }, required: ["title"], additionalProperties: false };
   const initial = {
     pages: [{ id: "home", alias: "reading" }],
     tools: [{ id: "add-id", page_id: "home", name: "add_book" }, { id: "list-id", page_id: "home", name: "list_books" }],
@@ -103,9 +103,13 @@ const toolEvolutionSnapshot = (field = "score", type = "number") => {
 };
 
 for (const testCase of [
-  { name: "number field named score with a description change", snapshot: toolEvolutionSnapshot("score", "number"), status: "pass" },
-  { name: "integer field named stars", snapshot: toolEvolutionSnapshot("stars", "integer"), status: "pass" },
-  { name: "two new fields with one used", snapshot: (() => { const snapshot = toolEvolutionSnapshot("score", "number"); (snapshot.tool_versions.at(-1)!.input_schema as any).properties.note = { type: "string" }; return snapshot; })(), status: "pass" },
+  { name: "number field named score with a description change", snapshot: toolEvolutionSnapshot("score"), status: "pass" },
+  { name: "integer field named stars", snapshot: toolEvolutionSnapshot("stars", { type: "integer" }), status: "pass" },
+  { name: "anyOf accepts number or null", snapshot: toolEvolutionSnapshot("score", { anyOf: [{ type: "number" }, { type: "null" }] }), status: "pass" },
+  { name: "type array accepts number or null", snapshot: toolEvolutionSnapshot("score", { type: ["number", "null"] }), status: "pass" },
+  { name: "anyOf accepts integer or null", snapshot: toolEvolutionSnapshot("stars", { anyOf: [{ type: "integer" }, { type: "null" }] }), status: "pass" },
+  { name: "string or null rejects numeric use", snapshot: (() => { const snapshot = toolEvolutionSnapshot("score", { anyOf: [{ type: "string" }, { type: "null" }] }); snapshot.results[0].success = false; return snapshot; })(), status: "agent_fail" },
+  { name: "two new fields with one used", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.tool_versions.at(-1)!.input_schema as any).properties.note = { type: "string" }; return snapshot; })(), status: "pass" },
   { name: "publication does not depend on a specific authoring tool", snapshot: toolEvolutionSnapshot(), status: "pass" },
   { name: "v2 published but fresh chat uses cached v1", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.calls[0].arguments as any) = { title: "Dune" }; return snapshot; })(), status: "agent_fail" },
   { name: "fresh chat uses v2 but list omits legacy row", snapshot: (() => { const snapshot = toolEvolutionSnapshot(); (snapshot.results[1].data as any[]) = [(snapshot.results[1].data as any[])[1]]; return snapshot; })(), status: "agent_fail" },

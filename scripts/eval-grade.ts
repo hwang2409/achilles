@@ -312,15 +312,15 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const properties = (schema: unknown) => schema && typeof schema === "object" && !Array.isArray(schema) && (schema as Record<string, unknown>).properties && typeof (schema as Record<string, unknown>).properties === "object" ? (schema as { properties: Record<string, unknown> }).properties : {};
     const oldProperties = properties(before?.input_schema); const newProperties = properties(after?.input_schema);
     const required = new Set(Array.isArray((after?.input_schema as Record<string, unknown> | undefined)?.required) ? (after!.input_schema as { required: unknown[] }).required : []);
-    const numericFields = Object.entries(newProperties).filter(([name, schema]) => !(name in oldProperties) && !required.has(name) && schema && typeof schema === "object" && ["number", "integer"].includes(String((schema as Record<string, unknown>).type))).map(([name]) => name);
+    const addedFields = Object.keys(newProperties).filter(name => !(name in oldProperties) && !required.has(name));
     const calls = rows(snapshot, "calls").filter(row => row.page_id === page && row.chat_id === check.chat && row.tool === `achilles__${spec.tool}`);
     const results = rows(snapshot, "results");
-    const use = calls.find(call => numericFields.some(field => structurallyContains(call.arguments, { [field]: spec.new_value })) && results.some(result => result.call_id === call.id && successful(result) && numericFields.some(field => structurallyContains(result.data ?? result.result, { [field]: spec.new_value }))));
+    const use = calls.find(call => addedFields.some(field => structurallyContains(call.arguments, { [field]: spec.new_value })) && results.some(result => result.call_id === call.id && successful(result) && addedFields.some(field => structurallyContains(result.data ?? result.result, { [field]: spec.new_value }))));
     const useResult = results.find(result => result.call_id === use?.id && successful(result));
     const newRecord = matchingObjects(useResult?.data ?? useResult?.result, {}).find(row => typeof row.record_id === "string")?.record_id;
     const read = results.find(result => result.page_id === page && result.chat_id === check.chat && result.tool === `achilles__${spec.read_tool}` && successful(result) && structurallyContains(result.data ?? result.result, { record_id: spec.legacy_record }) && typeof newRecord === "string" && structurallyContains(result.data ?? result.result, { record_id: newRecord }));
     const legacy = owned("records").find(row => (row.id ?? row.record_id) === spec.legacy_record && row.version === spec.from);
-    return Boolean(before && after && assignment?.active_version === spec.to && numericFields.length && use && read && legacy);
+    return Boolean(before && after && assignment?.active_version === spec.to && addedFields.length && use && read && legacy);
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
