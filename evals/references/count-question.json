@@ -1,0 +1,312 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "books"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "book-1",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-2",
+        "collection": "books",
+        "data": {
+          "title": "Emma",
+          "status": "reading"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-3",
+        "collection": "books",
+        "data": {
+          "title": "Beloved",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-4",
+        "collection": "books",
+        "data": {
+          "title": "Ulysses",
+          "status": "to-read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-5",
+        "collection": "books",
+        "data": {
+          "title": "Middlemarch",
+          "status": "done"
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "books-chat",
+        "tool": "achilles__list_books",
+        "success": true,
+        "data": [
+          {
+            "record_id": "book-1",
+            "revision": 1,
+            "title": "Dune",
+            "status": "done"
+          },
+          {
+            "record_id": "book-2",
+            "revision": 1,
+            "title": "Emma",
+            "status": "reading"
+          },
+          {
+            "record_id": "book-3",
+            "revision": 1,
+            "title": "Beloved",
+            "status": "done"
+          },
+          {
+            "record_id": "book-4",
+            "revision": 1,
+            "title": "Ulysses",
+            "status": "to-read"
+          },
+          {
+            "record_id": "book-5",
+            "revision": 1,
+            "title": "Middlemarch",
+            "status": "done"
+          }
+        ]
+      }
+    ],
+    "answers": {
+      "ask": "3 of your 5 books are done: Dune, Beloved, and Middlemarch."
+    },
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_books",
+          "operation": "list",
+          "collection": "books"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "book-1",
+          "collection": "books",
+          "data": {
+            "title": "Dune",
+            "status": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-2",
+          "collection": "books",
+          "data": {
+            "title": "Emma",
+            "status": "reading"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-3",
+          "collection": "books",
+          "data": {
+            "title": "Beloved",
+            "status": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-4",
+          "collection": "books",
+          "data": {
+            "title": "Ulysses",
+            "status": "to-read"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-5",
+          "collection": "books",
+          "data": {
+            "title": "Middlemarch",
+            "status": "done"
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "books"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "book-1",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-2",
+        "collection": "books",
+        "data": {
+          "title": "Emma",
+          "status": "reading"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-3",
+        "collection": "books",
+        "data": {
+          "title": "Beloved",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-4",
+        "collection": "books",
+        "data": {
+          "title": "Ulysses",
+          "status": "to-read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "book-5",
+        "collection": "books",
+        "data": {
+          "title": "Middlemarch",
+          "status": "done"
+        }
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "books-chat",
+        "tool": "achilles__list_books",
+        "success": true,
+        "data": [
+          {
+            "record_id": "book-1",
+            "revision": 1,
+            "title": "Dune",
+            "status": "done"
+          },
+          {
+            "record_id": "book-2",
+            "revision": 1,
+            "title": "Emma",
+            "status": "reading"
+          },
+          {
+            "record_id": "book-3",
+            "revision": 1,
+            "title": "Beloved",
+            "status": "done"
+          },
+          {
+            "record_id": "book-4",
+            "revision": 1,
+            "title": "Ulysses",
+            "status": "to-read"
+          },
+          {
+            "record_id": "book-5",
+            "revision": 1,
+            "title": "Middlemarch",
+            "status": "done"
+          }
+        ]
+      }
+    ],
+    "answers": {
+      "ask": "You have 5 books."
+    },
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_books",
+          "operation": "list",
+          "collection": "books"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "book-1",
+          "collection": "books",
+          "data": {
+            "title": "Dune",
+            "status": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-2",
+          "collection": "books",
+          "data": {
+            "title": "Emma",
+            "status": "reading"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-3",
+          "collection": "books",
+          "data": {
+            "title": "Beloved",
+            "status": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-4",
+          "collection": "books",
+          "data": {
+            "title": "Ulysses",
+            "status": "to-read"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "book-5",
+          "collection": "books",
+          "data": {
+            "title": "Middlemarch",
+            "status": "done"
+          }
+        }
+      ]
+    }
+  }
+}
