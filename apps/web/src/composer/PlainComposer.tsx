@@ -41,15 +41,15 @@ export function PlainComposer(props: ComposerAdapterProps) {
     (model.stopping
       ? "stopping"
       : model.sending
-        ? steer
-          ? "steering"
+        ? model.send?.steer
+          ? "queued for the next step"
           : "sending"
         : "");
   const hint =
     state === "running"
       ? "a turn is running · stop it or wait to send"
       : steer
-        ? "enter to steer the running turn · shift+enter for a new line"
+        ? "enter to steer · shift+enter new line"
         : "enter to send · shift+enter for a new line";
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
