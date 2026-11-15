@@ -180,6 +180,22 @@ export function App() {
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
+  const shownToggleError = useRef(active.toggleError);
+  useEffect(() => {
+    // a successful retry removes the notice and its focused button; give focus back to the visible header control
+    const hadNotice = shownToggleError.current !== null; shownToggleError.current = active.toggleError;
+    if (!hadNotice || active.toggleError !== null || document.activeElement !== document.body) return;
+    [...document.querySelectorAll<HTMLElement>(".chat-actions > button")].find((button) => button.offsetParent !== null)?.focus();
+  }, [active.toggleError]);
+  useEffect(() => {
+    // zeta ends a running turn when this tab disconnects: a reload, a close, or a full page load (a sidebar page link,
+    // or selectChat's location.assign to a chat on another page), so the browser asks first. an approval wait survives
+    // a reload (zeta keeps it for 90 s), so it does not ask then.
+    if (!connected || lastState !== "running") return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    addEventListener("beforeunload", warn);
+    return () => removeEventListener("beforeunload", warn);
+  }, [connected, lastState]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
@@ -222,6 +238,18 @@ function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
 
 function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle, onRename }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void }) {
   const [overflow, setOverflow] = useState(false);
+  const overflowButton = useRef<HTMLButtonElement>(null);
+  const actions = useRef<HTMLDivElement>(null);
+  const closeOverflow = () => { setOverflow(false); overflowButton.current?.focus(); };
+  useEffect(() => {
+    // the open menu covers the notice below the header, so Escape (from anywhere) and a tap outside close it
+    if (!overflow) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setOverflow(false); overflowButton.current?.focus(); } };
+    const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
+    addEventListener("keydown", onKey);
+    addEventListener("pointerdown", onDown);
+    return () => { removeEventListener("keydown", onKey); removeEventListener("pointerdown", onDown); };
+  }, [overflow]);
   const rename = useInlineRename();
   const startRename = () => { if (onRename && sessionId) rename.start(title === "untitled chat" ? "" : title, (value) => onRename(sessionId, value)); };
   // a chat switch closes the editor; its draft never moves to the next chat
@@ -237,11 +265,11 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
   const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : page.create_mode ? "create mode on" : "create mode off";
-  const controls = <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={toggle}>{modeLabel}</button></>;
+  const controls = (inMenu: boolean) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button></>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {

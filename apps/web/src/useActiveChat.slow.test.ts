@@ -270,3 +270,17 @@ test("a failed tool refresh on the new chat button keeps its notice across the c
   expect(active.state).toMatchObject({ phase: "ready", page: { create_mode: true } });
   expect(requests.filter((method) => method === "mcp_refresh_tools")).toHaveLength(2);
 });
+
+test("a page refresh keeps the header create mode while the tool refresh still fails", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const harness = await refreshFailureHarness(1);
+  await act(async () => { await harness.active.toggle(); });
+  await act(async () => { await harness.active.newChat(); });
+  await flushUntil(() => harness.active.selectedId === "fresh" && harness.active.state.phase === "ready" && harness.active.toggleBlocked);
+  expect(harness.state.serverCreateMode).toBe(true); // the server stored create mode before zeta's refresh failed
+  expect(harness.active.state).toMatchObject({ page: { create_mode: false } });
+
+  await act(async () => { await harness.active.refreshPage(); }); // a form write, a finished turn, or update_layout
+  expect(harness.active.toggleBlocked).toBe(true);
+  expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "fresh", page: { create_mode: false } });
+});
