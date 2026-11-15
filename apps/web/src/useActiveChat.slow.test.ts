@@ -87,7 +87,7 @@ function client(firstResume?: Promise<unknown>) {
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => {
       await refresh();
-      return { store: { resync() {} }, release() {} };
+      return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} };
     },
     replayRevision: () => 1,
     finishReplay: () => true,
@@ -194,7 +194,7 @@ async function refreshFailureHarness(failures: number) {
       if (method === "send") return {};
       throw new Error(`unexpected ${method}`);
     },
-    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
     replayRevision: () => 1,
     finishReplay: () => true,
   };

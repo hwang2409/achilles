@@ -11,7 +11,7 @@ export async function gateShell(
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => { const url = new URL(location.href); url.searchParams.set("theme", "gruvbox-light"); history.replaceState({}, "", url); });
   const chatsBefore = await page.locator(".chat-row").count();
-  await page.getByRole("button", { name: "new chat" }).click();
+  await page.locator("button.new-chat").click();
   await waitFor(async () => {
     const current = await page.locator("[data-session-id]").getAttribute("data-session-id");
     return Boolean(current && current !== firstSessionId);
