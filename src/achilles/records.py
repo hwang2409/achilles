@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from typing import Any
+from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
 
@@ -99,6 +99,7 @@ def call_record(
     tool_name: str,
     arguments: dict[str, Any],
     expected_version: int,
+    actor: Literal["form", "agent"],
 ) -> Any:
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")
@@ -129,8 +130,10 @@ def call_record(
         else:
             result = _update(db, page_id, collection, row["version"], schema, arguments)
         _check(Draft202012Validator(bundle["output_schema"]), result)
+        record_id = result.get("record_id") if isinstance(result, dict) else None
         db.execute(
-            "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-            (page_id, f"invoke:{tool_name}", row["digest"], now()),
+            "INSERT INTO audit(page_id,action,version_digest,created_at,actor,record_id) "
+            "VALUES(?,?,?,?,?,?)",
+            (page_id, f"invoke:{tool_name}", row["digest"], now(), actor, record_id),
         )
         return result

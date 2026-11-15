@@ -342,6 +342,23 @@ def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
         ).fetchall() == [("session-old", "existing", "created", "updated")]
 
 
+def test_old_audit_table_gains_actor_and_record_id(tmp_path) -> None:
+    with sqlite3.connect(tmp_path / "achilles.sqlite3") as db:
+        db.execute(
+            "CREATE TABLE audit (id INTEGER PRIMARY KEY, page_id TEXT NOT NULL, "
+            "action TEXT NOT NULL, version_digest TEXT, created_at TEXT NOT NULL)"
+        )
+        db.execute("INSERT INTO audit(page_id,action,created_at) VALUES('home','old','then')")
+    store = PageStore(tmp_path)
+    with store.transaction() as db:
+        # the insert older code runs still works on the new columns.
+        db.execute("INSERT INTO audit(page_id,action,created_at) VALUES('home','older','now')")
+        rows = db.execute(
+            "SELECT action, actor, record_id FROM audit WHERE action LIKE 'old%' ORDER BY id"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [("old", None, None), ("older", None, None)]
+
+
 def test_update_layout_rejects_stale_and_unknown_tool_without_writes(tmp_path):
     store = PageStore(tmp_path)
     page_id = _update_page(store)
@@ -416,7 +433,7 @@ def test_update_layout_preserves_records_tools_and_chats(tmp_path):
     store = PageStore(tmp_path)
     page_id = _update_page(store)
     store.register_chat(page_id, "synthetic-chat")
-    call_record(store, page_id, "add_book", {"title": "one"}, 1)
+    call_record(store, page_id, "add_book", {"title": "one"}, 1, "agent")
     with store._connect() as db:
         before = {
             table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
@@ -479,3 +496,60 @@ def test_save_session_compare_and_set_has_one_winner(tmp_path):
             assert [tuple(row) for row in db.execute("SELECT session_id,page_id FROM chat")] == [
                 (winner[0], "home")
             ]
+
+
+def test_list_and_form_fields_refuse_unknown_names_before_any_write(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+
+    def blocks(list_fields, form_fields):
+        return {
+            "blocks": [
+                {"type": "list", "title": "books", "collection": "books", "fields": list_fields},
+                {"type": "form", "title": "add", "tool": "add_book", "fields": form_fields},
+            ]
+        }
+
+    with pytest.raises(ValidationError) as unknown_column:
+        store.create_page("/a", "a", blocks(["title", "author"], ["title"]), tools=[_BUNDLE])
+    assert (unknown_column.value.path, unknown_column.value.expected) == (
+        "/layout/blocks/0/fields/1",
+        "field in the books collection schema",
+    )
+    assert "Unknown field: author. Fields: title." in unknown_column.value.hint
+    with pytest.raises(ValidationError) as unknown_input:
+        store.create_page("/a", "a", blocks(["title"], ["titel"]), tools=[_BUNDLE])
+    assert unknown_input.value.path == "/layout/blocks/1/fields/0"
+    assert "Unknown field: titel. Fields: title." in unknown_input.value.hint
+    with pytest.raises(ValidationError) as repeated:
+        store.create_page("/a", "a", blocks(["title", "title"], ["title"]), tools=[_BUNDLE])
+    assert repeated.value.path == "/layout/blocks/0"
+    assert [page["route"] for page in store.pages()[0]] == ["/"]
+
+    page_id = _update_page(store)
+    with pytest.raises(ValidationError) as on_update:
+        store.update_layout(page_id, blocks(["status"], []), 1)
+    assert on_update.value.path == "/layout/blocks/0/fields/0"
+    chosen = blocks(["title"], ["title"])
+    assert store.update_layout(page_id, chosen, 1)[0] == 2
+    assert store.layout(page_id) == chosen
+
+
+def test_stored_layout_without_fields_still_reads_and_updates(tmp_path):
+    store = PageStore(tmp_path)
+    page_id = _update_page(store)
+    # the shape stored before list and form blocks had fields
+    old = {
+        "blocks": [
+            {"type": "list", "title": "books", "collection": "books"},
+            {"type": "form", "title": "add", "tool": "add_book"},
+        ]
+    }
+    with store.transaction() as db:
+        db.execute(
+            "UPDATE layout_version SET document=? WHERE page_id=? AND version=1",
+            (json.dumps(old), page_id),
+        )
+    assert store.layout(page_id) == old
+    assert store.inspect_page(page_id)["layout"] == old
+    assert store.update_layout(page_id, old, 1)[0] == 2

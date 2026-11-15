@@ -310,6 +310,7 @@ def create_app() -> Starlette:
                         "operation": tool["implementation"]["operation"],
                         "collection": tool["implementation"]["collection"],
                         "input_schema": tool["input_schema"],
+                        "data_schema": tool["implementation"]["data_schema"],
                         "version": tool["version"],
                         "needs_record_id": tool["implementation"]["operation"] in {"get", "update"},
                         "needs_version": True,
@@ -346,7 +347,13 @@ def create_app() -> Starlette:
             return JSONResponse({"error": error_document(error)}, status_code=400)
         try:
             result = await anyio.to_thread.run_sync(
-                call_record, store, page_id, request.path_params["name"], arguments, version
+                call_record,
+                store,
+                page_id,
+                request.path_params["name"],
+                arguments,
+                version,
+                "form",
             )
         except VersionConflict as exc:
             return JSONResponse({"error": error_document(exc)}, status_code=409)

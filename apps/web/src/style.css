@@ -179,7 +179,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .record-list h2 { font-size: 1rem; margin: 0 0 .5rem; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; border: 1px solid var(--fulcrum-border); padding: .4rem .5rem; vertical-align: top; }
-.record-list td.record-id { overflow-wrap: anywhere; color: var(--fulcrum-muted); font-size: .85em; }
 .record-list tr[aria-selected] { cursor: pointer; }
 .record-list tr[aria-selected="false"]:hover { background: color-mix(in srgb, var(--fulcrum-fg) 4%, transparent); }
 .record-list tr[aria-selected="true"] { background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); box-shadow: inset 3px 0 var(--fulcrum-accent); }

@@ -4,6 +4,8 @@ import { act } from "react";
 import React from "react";
 import { cleanup, render, type RenderResult } from "@testing-library/react";
 import { LayoutBlock, RecordList } from "./App";
+import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
+import type { PageTool } from "./page/usePageTools";
 
 const originalFetch = globalThis.fetch;
 
@@ -104,5 +106,65 @@ describe("RecordList", () => {
     await settle(calls[2], [{ record_id: "stale", title: "Old row" }]);
     expect(text(result)).toContain("A Wizard of Earthsea");
     expect(text(result)).not.toContain("Old row");
+  });
+});
+
+function headers(result: RenderResult) {
+  return [...result.container.querySelectorAll("th")].map((cell) => cell.textContent);
+}
+
+function routeFetches(tools: Partial<PageTool>[], records: Record<string, unknown>[]) {
+  globalThis.fetch = (async (url: string) => String(url).endsWith("/tools")
+    ? new Response(JSON.stringify({ tools }), { headers: { "content-type": "application/json" } })
+    : response(records)) as typeof fetch;
+}
+
+// stored records come back with sorted keys, newest first
+const books = [
+  { pages: 300, record_id: "b2", revision: 1, status: "done", title: "Earthsea" },
+  { author: "Le Guin", pages: 200, record_id: "b1", revision: 1, status: "to read", title: "The Dispossessed" },
+];
+const bookSchema = { type: "object", properties: { author: { type: "string" }, pages: { type: "integer" }, status: { type: "string" }, title: { type: "string" } }, required: ["title", "status"] };
+// omits "author", which the books records have: this forces the render through extendColumns, not just through the schema.
+const bookSchemaWithoutAuthor = { type: "object", properties: { pages: { type: "integer" }, status: { type: "string" }, title: { type: "string" } }, required: ["title", "status"] };
+
+describe("list columns", () => {
+  test("a list block with fields shows exactly those columns in that order", async () => {
+    routeFetches([], books);
+    const block = { type: "list", title: "reading", collection: "books", fields: ["title", "status"] };
+    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-one", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    expect(headers(result)).toEqual(["title", "status"]);
+    expect(text(result)).not.toContain("b1");
+  });
+
+  test("without fields, the data schema's required fields lead, the rest are sorted, and record_id is hidden", async () => {
+    routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchema }, { name: "add_film", collection: "films", data_schema: { type: "object", properties: { director: {} } } }], books);
+    const block = { type: "list", title: "reading", collection: "books" };
+    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-two", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    expect(headers(result)).toEqual(["title", "status", "author", "pages"]);
+  });
+
+  test("the order does not depend on which record is newest", () => {
+    expect(recordColumns(books)).toEqual(recordColumns([...books].reverse()));
+    expect(recordColumns(books)).toEqual(["author", "pages", "status", "title"]);
+    expect(schemaColumns([], "books")).toEqual([]);
+  });
+
+  // a partial data_schema, or an input added after the schema was written, must not hide data the
+  // record actually has: on main this column showed; the schema-only route silently hid it.
+  test("a record key the data schema does not name still shows, after the schema's own columns, sorted", () => {
+    const partialSchema = schemaColumns([{ name: "add_note", operation: "insert", collection: "notes", input_schema: {}, version: 1, data_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], "notes");
+    const notes = [{ record_id: "n1", revision: 1, title: "Partial schema", status: "draft" }];
+    expect(extendWithRecordKeys(partialSchema, notes)).toEqual(["title", "status"]);
+  });
+
+  test("fields: [] behaves like no fields: schema order, then extra record keys, sorted", async () => {
+    routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchemaWithoutAuthor }], books);
+    const block = { type: "list", title: "reading", collection: "books", fields: [] };
+    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-empty-fields", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    expect(headers(result)).toEqual(["title", "status", "pages", "author"]);
   });
 });
