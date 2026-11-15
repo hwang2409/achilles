@@ -6,7 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { restoreFocus } from "../AppShell";
+import { restoreFocus } from "../keyboard";
 import { enterAction } from "./composer-machine";
 import {
   useComposerDelivery,

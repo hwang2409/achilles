@@ -118,12 +118,12 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
   await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
   const first = await page.evaluateHandle(() => document.activeElement);
-  const last = page.locator(".sidebar .settings-button");
+  const last = page.locator(".sidebar .palette-button");
   await last.focus();
   await page.keyboard.press("Tab");
-  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control, settings, escaped the sidebar");
+  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control escaped the sidebar (last control: the palette button)");
   await page.keyboard.press("Shift+Tab");
-  if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, settings");
+  if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, the palette button");
   await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
   await page.keyboard.press("Escape");
