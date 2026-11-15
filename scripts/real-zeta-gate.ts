@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
 import { controlSnapshot, createFrameRing, createGateWait, diagnostic } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
-import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
+import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
@@ -582,6 +582,7 @@ try {
   }
   await reloadShell();
   await gateTranscript(page, waitFor, requests, control, gateWait);
+  await gateReloadMidTurn(page, waitFor, requests, gateWait);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests(), approvalModeResponse);
@@ -933,7 +934,7 @@ try {
   };
   await waitFor(async () => lateStatuses().at(-1) === "delivered", "delivered late steer delivery status");
   if (lateStatuses().includes("dropped")) throw new Error(`late steer was dropped: ${JSON.stringify(lateStatuses())}`);
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 18, "next turn carrying the late steer");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).request_count === 19, "next turn carrying the late steer");
   const afterLateSteer = JSON.parse(await Bun.file(control).text());
   const lateMessages = afterLateSteer.user_messages?.filter((text: string) => text === "repeat that layout update with the old version").length;
   if (lateMessages !== 1)

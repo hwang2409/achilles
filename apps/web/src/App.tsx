@@ -12,7 +12,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { createConnection, type Connection, type ConnectionState } from "./zeta";
+import { createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -183,14 +183,15 @@ export function App() {
     [...document.querySelectorAll<HTMLElement>(".chat-actions > button")].find((button) => button.offsetParent !== null)?.focus();
   }, [active.toggleError]);
   useEffect(() => {
-    // zeta ends a running turn when this tab disconnects: a reload, a close, or a full page load (a sidebar page link,
-    // or selectChat's location.assign to a chat on another page), so the browser asks first. an approval wait survives
-    // a reload (zeta keeps it for 90 s), so it does not ask then.
-    if (!connected || lastState !== "running") return;
+    // without `turn_reconnect`, zeta ends a running turn when this tab disconnects: a reload, a close, or a full page
+    // load (a sidebar page link, or selectChat's location.assign to a chat on another page), so the browser asks first.
+    // with it, zeta keeps the turn for 90 s and the next page load takes it over, like an approval wait, so it does
+    // not ask; the browser cannot tell a reload from a close, and only a close (nobody back in 90 s) ends the turn.
+    if (!connected || lastState !== "running" || (client && supportsFeature(client, "turn_reconnect"))) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     addEventListener("beforeunload", warn);
     return () => removeEventListener("beforeunload", warn);
-  }, [connected, lastState]);
+  }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);

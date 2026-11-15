@@ -206,3 +206,54 @@ export async function gateTranscript(
   await page.keyboard.press("Enter");
   await waitFor(async () => await distanceFromBottom() <= 4, "keyboard jump to latest after text-only stream");
 }
+
+// A reload in the middle of a streaming reply keeps the turn (`turn_reconnect`): the reloaded page attaches to it with
+// `resume` and shows one reply that finishes, with each line once and no warning before the reload.
+export async function gateReloadMidTurn(
+  page: Page,
+  waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
+  requests: () => Array<{ id?: number | string; method?: string; params?: { session_id?: string; reason?: string; data?: { reason?: string } }; result?: { attached?: string; capabilities?: { features?: string[] } }; error?: unknown }>,
+  gateWait: GateWait,
+) {
+  const field = page.getByRole("textbox", { name: "message", exact: true });
+  const messages = page.locator('[data-part="message"]');
+  const reply = messages.filter({ hasText: "reload line 000" });
+  const sessionId = await page.locator("[data-session-id]").getAttribute("data-session-id");
+  const dialogs: string[] = [];
+  const onDialog = (dialog: { type(): string; dismiss(): Promise<void> }) => { dialogs.push(dialog.type()); void dialog.dismiss(); };
+  page.on("dialog", onDialog);
+  try {
+    await waitForIdleTurn(page, waitFor);
+    const hello = requests().findLast((frame) => frame.result?.capabilities?.features);
+    if (!hello?.result?.capabilities?.features?.includes("turn_reconnect")) throw new Error("zeta did not grant turn_reconnect");
+    await field.fill("stream across a reload");
+    await field.press("Enter");
+    await waitFor(async () => (await reply.count()) === 1 && (await reply.innerText()).includes("reload line 010"), "reload stream line 010");
+    const framesBeforeReload = requests().length;
+    await gateWait.playwright(page, "reload");
+    if (dialogs.length) throw new Error(`reload during a running turn asked first: ${dialogs.join(", ")}`);
+    await waitFor(async () => (await reply.count()) === 1, "reply after reload");
+    const after = requests().slice(framesBeforeReload);
+    const resume = after.find((frame) => frame.method === "resume" && frame.params?.session_id === sessionId);
+    const attached = resume && after.find((frame) => frame.id === resume.id && (frame.result || frame.error) && frame.method === undefined);
+    if (attached?.result?.attached !== "live_turn") throw new Error(`reload did not attach to the kept turn: ${JSON.stringify(attached?.error ?? attached?.result ?? null)}`);
+    await gateWait(() => page.getByText("reload line 079", { exact: false }).waitFor({ timeout: 30_000 }));
+    await waitForIdleTurn(page, waitFor);
+    if (await reply.count() !== 1) throw new Error(`reload split or duplicated the reply into ${await reply.count()} messages`);
+    const text = await reply.innerText();
+    const missing: number[] = []; const repeated: number[] = [];
+    for (let index = 0; index < 80; index++) {
+      const count = text.split(`reload line ${String(index).padStart(3, "0")}`).length - 1;
+      if (count === 0) missing.push(index); else if (count > 1) repeated.push(index);
+    }
+    if (missing.length || repeated.length) throw new Error(`reply after reload lost lines ${JSON.stringify(missing)} and repeated lines ${JSON.stringify(repeated)}`);
+    const prompts = await page.locator(".transcript").getByText("stream across a reload", { exact: true }).count();
+    if (prompts !== 1) throw new Error(`reload showed the prompt ${prompts} times: ${(await page.locator(".transcript").innerText()).slice(-1500)}`);
+    const cancelled = requests().slice(framesBeforeReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"'));
+    if (cancelled) throw new Error("zeta cancelled the turn on reload (reason disconnect)");
+    if (await page.getByRole("alert").count()) throw new Error(`reload mid-turn showed a notice: ${await page.getByRole("alert").first().innerText()}`);
+    console.log("reload mid-turn asserted: the reloaded page took over the running turn; one reply, 80 lines once each, no warning, no notice");
+  } finally {
+    page.off("dialog", onDialog);
+  }
+}
