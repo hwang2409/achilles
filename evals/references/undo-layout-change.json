@@ -1,0 +1,591 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks",
+        "route": "/",
+        "title": "Home",
+        "active_layout_version": 3
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "name": "list_tasks",
+        "operation": "list",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "task-1",
+        "collection": "tasks",
+        "data": {
+          "title": "Write report"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "task-2",
+        "collection": "tasks",
+        "data": {
+          "title": "Plan sprint"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Team tasks"
+            },
+            {
+              "type": "list",
+              "title": "All tasks",
+              "collection": "tasks"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Tasks",
+              "collection": "tasks",
+              "count": true
+            },
+            {
+              "type": "list",
+              "title": "All tasks",
+              "collection": "tasks"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 3,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Team tasks"
+            },
+            {
+              "type": "list",
+              "title": "All tasks",
+              "collection": "tasks"
+            }
+          ]
+        }
+      }
+    ],
+    "related_page_ids": [
+      "home"
+    ],
+    "calls": [
+      {
+        "id": "inspect-1",
+        "call_id": "inspect-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "arguments": {},
+        "success": true
+      },
+      {
+        "id": "update-1",
+        "call_id": "update-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "metric",
+                "label": "Tasks",
+                "collection": "tasks",
+                "count": true
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "expected_version": 1
+        },
+        "success": true
+      },
+      {
+        "id": "inspect-2",
+        "call_id": "inspect-2",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "arguments": {},
+        "success": true
+      },
+      {
+        "id": "restore-1",
+        "call_id": "restore-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__restore_version",
+        "arguments": {
+          "kind": "layout",
+          "version": 1,
+          "expected_version": 2
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-1",
+        "success": true,
+        "data": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Team tasks"
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "layout_version": 1
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_layout",
+        "call_id": "update-1",
+        "success": true,
+        "data": {
+          "version": 2
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-2",
+        "success": true,
+        "data": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "metric",
+                "label": "Tasks",
+                "collection": "tasks",
+                "count": true
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "layout_version": 2,
+          "layout_versions": [
+            {
+              "version": 2
+            },
+            {
+              "version": 1
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__restore_version",
+        "call_id": "restore-1",
+        "success": true,
+        "data": {
+          "kind": "layout",
+          "version": 3,
+          "restored_from": 1
+        }
+      }
+    ],
+    "errors": [],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_layout_version": 1
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_tasks",
+          "operation": "list",
+          "collection": "tasks"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "task-1",
+          "collection": "tasks",
+          "data": {
+            "title": "Write report"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "task-2",
+          "collection": "tasks",
+          "data": {
+            "title": "Plan sprint"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Team tasks"
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks",
+        "route": "/",
+        "title": "Home",
+        "active_layout_version": 3
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "name": "list_tasks",
+        "operation": "list",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "task-1",
+        "collection": "tasks",
+        "data": {
+          "title": "Write report"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "task-2",
+        "collection": "tasks",
+        "data": {
+          "title": "Plan sprint"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Team tasks"
+            },
+            {
+              "type": "list",
+              "title": "All tasks",
+              "collection": "tasks"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Tasks",
+              "collection": "tasks",
+              "count": true
+            },
+            {
+              "type": "list",
+              "title": "All tasks",
+              "collection": "tasks"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 3,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Team tasks"
+            },
+            {
+              "type": "list",
+              "title": "All tasks",
+              "collection": "tasks"
+            }
+          ]
+        }
+      }
+    ],
+    "related_page_ids": [
+      "home"
+    ],
+    "calls": [
+      {
+        "id": "inspect-1",
+        "call_id": "inspect-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "arguments": {},
+        "success": true
+      },
+      {
+        "id": "update-1",
+        "call_id": "update-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "metric",
+                "label": "Tasks",
+                "collection": "tasks",
+                "count": true
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "expected_version": 1
+        },
+        "success": true
+      },
+      {
+        "id": "inspect-2",
+        "call_id": "inspect-2",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "arguments": {},
+        "success": true
+      },
+      {
+        "id": "update-2",
+        "call_id": "update-2",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Team tasks"
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "expected_version": 2
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-1",
+        "success": true,
+        "data": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Team tasks"
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "layout_version": 1
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_layout",
+        "call_id": "update-1",
+        "success": true,
+        "data": {
+          "version": 2
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__inspect_page",
+        "call_id": "inspect-2",
+        "success": true,
+        "data": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "metric",
+                "label": "Tasks",
+                "collection": "tasks",
+                "count": true
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          },
+          "layout_version": 2,
+          "layout_versions": [
+            {
+              "version": 2
+            },
+            {
+              "version": 1
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_layout",
+        "call_id": "update-2",
+        "success": true,
+        "data": {
+          "version": 3
+        }
+      }
+    ],
+    "errors": [],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_layout_version": 1
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_tasks",
+          "operation": "list",
+          "collection": "tasks"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "task-1",
+          "collection": "tasks",
+          "data": {
+            "title": "Write report"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "task-2",
+          "collection": "tasks",
+          "data": {
+            "title": "Plan sprint"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Team tasks"
+              },
+              {
+                "type": "list",
+                "title": "All tasks",
+                "collection": "tasks"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
