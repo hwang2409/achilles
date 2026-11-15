@@ -339,7 +339,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
 function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
-  useEffect(() => { if (!rename.editing) onRenameEnd(); }, [rename.editing]);
+  // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
+  useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   if (rename.editing) {
     return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
