@@ -114,14 +114,17 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu");
   await menu.click();
   const sidebar = page.locator(".sidebar");
-  const controls = sidebar.locator("button:not(:disabled), a[href]:not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
-  await gateWait.playwright(controls.first(), "waitFor");
-  await controls.last().focus();
+  // hold the drawer at the first frame of its slide-in, so Tab is pressed while the drawer is still off screen.
+  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
+  await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
+  const first = await page.evaluateHandle(() => document.activeElement);
+  const last = page.locator(".sidebar .settings-button");
+  await last.focus();
   await page.keyboard.press("Tab");
-  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer Tab escaped the sidebar");
-  await controls.first().focus();
+  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control, settings, escaped the sidebar");
   await page.keyboard.press("Shift+Tab");
-  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer reverse Tab escaped the sidebar");
+  if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, settings");
+  await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1440, height: 900 });
