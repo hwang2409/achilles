@@ -1,0 +1,93 @@
+{
+  "id": "page-awareness",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "books",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 6,
+  "steps": [
+    {
+      "id": "ask-page",
+      "kind": "prompt",
+      "page": "books",
+      "chat": "books-chat",
+      "prompt": "in one short sentence, what does this page do and what is on it?"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_book",
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "author"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "id": "book-1",
+        "collection": "books",
+        "data": {
+          "title": "Synthetic Book",
+          "author": "Test Author"
+        }
+      }
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Reading tracker"
+        },
+        {
+          "type": "list",
+          "collection": "books"
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "read-page",
+      "type": "successful_result",
+      "page": "books",
+      "tool": "achilles__inspect_page"
+    },
+    {
+      "id": "no-writes",
+      "type": "records_exact",
+      "page": "books",
+      "value": [
+        {
+          "title": "Synthetic Book",
+          "author": "Test Author"
+        }
+      ]
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "books"
+    }
+  ]
+}

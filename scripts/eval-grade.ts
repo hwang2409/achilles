@@ -352,7 +352,9 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   },
   assigned_tools_only: ({ snapshot, page, owned }) => {
     const assigned = new Set(owned("tool_versions").map(row => `achilles__${String(row.name)}`));
-    const other = rows(snapshot, "calls").filter(row => row.page_id === page && row.tool !== "mcp_discover" && !assigned.has(String(row.tool))).map(row => String(row.tool));
+    // discovery and the read-only page view are listed on every page, so they are not "unassigned" tools
+    const always = new Set(["mcp_discover", "achilles__inspect_page"]);
+    const other = rows(snapshot, "calls").filter(row => row.page_id === page && !always.has(String(row.tool)) && !assigned.has(String(row.tool))).map(row => String(row.tool));
     return other.length ? { reason: `called tools the page does not assign: ${[...new Set(other)].join(", ")}` } satisfies CheckFailure : true;
   },
   layout_restore: ({ snapshot, page }) => {
