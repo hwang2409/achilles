@@ -16,9 +16,12 @@ describe("composer delivery machine", () => {
     }],
     ["enter while it cannot send keeps the draft and sends nothing", () => {
       const running = transition(createComposerModel("kept while running", "running"), { type: "submit", turnRunning: true });
+      expect(running).toEqual({ model: expect.objectContaining({ draft: "kept while running", queued: false }) });
+    }],
+    ["enter while a send is pending queues the draft", () => {
       const pending = transition(transition(createComposerModel("kept while pending", "idle"), { type: "submit", turnRunning: false }).model, { type: "submit", turnRunning: false });
-      expect(running).toEqual({ model: expect.objectContaining({ draft: "kept while running" }) });
-      expect(pending).toEqual({ model: expect.objectContaining({ draft: "kept while pending", sending: true, send: expect.any(Object) }) });
+      expect(pending).toEqual({ model: expect.objectContaining({ draft: "kept while pending", sending: true, queued: true }) });
+      expect(apply(pending.model, { type: "reject", attempt: 1, message: "denied" }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "kept while pending", queued: false, error: { kind: "submit" } });
     }],
     ["remount or restart seeds the exact published draft", () => {
       const published = apply(createComposerModel("", "idle"), { type: "edit", draft: "first\n\n  third" });

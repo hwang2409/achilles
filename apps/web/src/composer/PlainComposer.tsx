@@ -40,7 +40,9 @@ export function PlainComposer(props: ComposerAdapterProps) {
     model.error?.text ??
     (model.stopping
       ? "stopping"
-      : model.sending
+      : model.queued
+        ? "queued to send next"
+        : model.sending
         ? model.send?.steer
           ? "queued for the next step"
           : "sending"
@@ -119,6 +121,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       data-pending={
         model.sending ? "submit" : model.stopping ? "stop" : undefined
       }
+      data-queued={model.queued || undefined}
       aria-label={label}
       aria-busy={model.sending || model.stopping || undefined}
       onSubmit={onFormSubmit}

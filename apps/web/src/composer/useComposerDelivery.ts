@@ -57,7 +57,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     return result.effect;
   };
 
-  return {
+  const delivery: ComposerDelivery = {
     getModel: () => model,
     subscribe(listener) {
       listeners.add(listener);
@@ -98,6 +98,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       } finally {
         apply({ type: "settle", attempt: sendAttempt });
       }
+      if (model.queued) await delivery.submit();
     },
     async stop() {
       const effect = apply({ type: "stop" });
@@ -111,6 +112,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       }
     },
   };
+  return delivery;
 }
 
 export function useComposerDelivery(options: ComposerAdapterProps) {

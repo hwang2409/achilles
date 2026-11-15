@@ -123,3 +123,41 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
     releaseSend?.();
   }
 });
+
+test("enter during a pending send delivers the next draft once, in order, after the first settles", async () => {
+  const sent: string[] = [];
+  let release!: (failure?: Error) => void;
+  const first = new Promise<void>((resolve, reject) => { release = (failure) => failure ? reject(failure) : resolve(); });
+  const owner = createComposerDelivery({
+    state: "idle",
+    defaultValue: "first",
+    onDraftChange: () => {},
+    onDeliveryConfirm: () => {},
+    onSubmit: async (text: string) => { sent.push(text); if (sent.length === 1) await first; },
+  });
+  const pending = owner.submit();
+  owner.edit("second");
+  const second = owner.submit();
+  expect(sent).toEqual(["first"]);
+  release();
+  await Promise.all([pending, second]);
+  expect(sent).toEqual(["first", "second"]);
+  expect(owner.getModel()).toMatchObject({ draft: "", sending: false, queued: false });
+});
+
+test("a failed pending send keeps the queued draft in the box with the error", async () => {
+  const sent: string[] = [];
+  const owner = createComposerDelivery({
+    state: "idle",
+    defaultValue: "first",
+    onDraftChange: () => {},
+    onDeliveryConfirm: () => {},
+    onSubmit: async (text: string) => { sent.push(text); await Promise.resolve(); throw new Error("denied"); },
+  });
+  const pending = owner.submit();
+  owner.edit("second");
+  await owner.submit();
+  await pending;
+  expect(sent).toEqual(["first"]);
+  expect(owner.getModel()).toMatchObject({ draft: "second", sending: false, queued: false, error: { kind: "submit", text: "denied" } });
+});

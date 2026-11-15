@@ -140,7 +140,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const canSubmit = model.draft.trim() !== "" && !model.sending && state !== "running" && state !== "read-only";
-  const message = model.error?.text ?? (model.stopping ? "stopping" : model.sending ? (model.send?.steer ? "queued for the next step" : "sending") : "");
+  const message = model.error?.text ?? (model.stopping ? "stopping" : model.queued ? "queued to send next" : model.sending ? (model.send?.steer ? "queued for the next step" : "sending") : "");
   const hint = mode === "insert" ? "esc normal · enter send · shift+enter new line" : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send · esc leave" : "i focus · j/k scroll chat · ? shortcuts";
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
@@ -148,7 +148,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     return () => { if (document.activeElement === button) viewRef.current?.focus(); };
   }, []);
 
-  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
+  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queued || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
       <div className="vim-guidance">

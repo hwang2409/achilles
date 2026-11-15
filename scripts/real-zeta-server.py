@@ -533,7 +533,8 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
             server.control._turn_end_published = False
             document["turn_start_barrier"] = "held"
             write_control(control, document)
-            for _ in range(300):
+            # longer than the gate's 30 s wait, so a gate timeout is reported by the gate, not hidden by this error
+            for _ in range(700):
                 document = json.loads(control.read_text())
                 if document.get("release_turn_start_barrier"):
                     document["turn_start_released"] = True
@@ -541,7 +542,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                     break
                 await asyncio.sleep(0.05)
             else:
-                raise RuntimeError("turn start barrier release timed out after 15 seconds")
+                raise RuntimeError("turn start barrier release timed out after 35 seconds")
         await original_event(event, *args, **kwargs)
 
     server.control._event = held_event

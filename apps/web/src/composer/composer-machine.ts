@@ -8,6 +8,8 @@ export type ComposerModel = {
   draft: string;
   sending: boolean;
   stopping: boolean;
+  /** Enter was pressed while a send was pending; the draft goes out once that send settles. */
+  queued: boolean;
   error?: ComposerError;
   send?: Send;
   nextAttempt: number;
@@ -32,7 +34,7 @@ export type ComposerEvent =
 export type ComposerTransition = { model: ComposerModel; effect?: ComposerEffect };
 
 export function createComposerModel(draft: string, state: ComposerState): ComposerModel {
-  return { state, draft, sending: false, stopping: false, nextAttempt: 1 };
+  return { state, draft, sending: false, stopping: false, queued: false, nextAttempt: 1 };
 }
 
 const unsentDraft = (current: string, sent: string) => current.startsWith(sent) ? current.slice(sent.length) : current;
@@ -49,11 +51,12 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
         error: model.error?.kind === "submit" && !model.sending ? undefined : model.error,
       } };
     case "submit": {
-      if (model.sending || !model.draft.trim() || model.state === "running" || model.state === "read-only") return { model };
+      if (!model.draft.trim() || model.state === "running" || model.state === "read-only") return { model: model.queued ? { ...model, queued: false } : model };
+      if (model.sending) return { model: model.queued ? model : { ...model, queued: true } };
       const attempt = model.nextAttempt;
       const steer = event.turnRunning;
       return {
-        model: { ...model, sending: true, error: model.error?.kind === "dropped" ? model.error : undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
+        model: { ...model, sending: true, queued: false, error: model.error?.kind === "dropped" ? model.error : undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
         effect: { type: "submit", attempt, text: model.draft, steer },
       };
     }
@@ -62,7 +65,8 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       return { model: { ...model, draft: unsentDraft(model.draft, model.send.sent), send: undefined, error: model.error?.kind === "submit" || model.error?.kind === "dropped" ? undefined : model.error } };
     case "reject": {
       if (model.send?.attempt !== event.attempt) return { model };
-      return { model: { ...model, error: { kind: event.dropped ? "dropped" : "submit", text: event.message } } };
+      // the queued text stays in the box with the error; the user resends it
+      return { model: { ...model, queued: false, error: { kind: event.dropped ? "dropped" : "submit", text: event.message } } };
     }
     case "dismiss-error":
       return { model: { ...model, error: undefined } };
