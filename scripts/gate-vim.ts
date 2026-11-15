@@ -47,7 +47,15 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   };
   const sessionId = () => page.locator("[data-session-id]").getAttribute("data-session-id");
   const switchTo = async (id: string) => {
-    await page.locator(`.chat-row[href*="chat=${id}"]`).click();
+    // some chats this test switches to (e.g. a never-sent draft-only chat) are hidden from the sidebar
+    // list, so switch by URL + a real popstate (what the browser back/forward buttons dispatch) instead
+    // of clicking a `.chat-row` that may not be rendered.
+    await page.evaluate((chatId) => {
+      const url = new URL(location.href);
+      url.searchParams.set("chat", chatId);
+      history.pushState({}, "", url);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, id);
     await waitFor(async () => await sessionId() === id, `chat ${id}`);
     await gateWait.playwright(page.getByRole("textbox", { name: "message", exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
   };

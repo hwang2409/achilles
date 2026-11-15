@@ -5,6 +5,7 @@ import binascii
 import json
 import os
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import anyio
@@ -246,6 +247,7 @@ def create_app() -> Starlette:
                 limit,
                 _parse_chat_cursor(request.query_params.get("before")),
                 request.query_params.get("q"),
+                request.query_params.get("include"),
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -277,25 +279,7 @@ def create_app() -> Starlette:
     async def patch_chat(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
-        body = await request.json()
-        if (
-            not isinstance(body, dict)
-            or not body
-            or not set(body) <= {"title", "last_state", "titled_by_user"}
-        ):
-            raise HTTPException(400, "provide only title, last_state, or titled_by_user")
-        title = body.get("title")
-        if "title" in body and (title is not None and not isinstance(title, str)):
-            raise HTTPException(400, "title must be a string or null")
-        if isinstance(title, str) and len(title) > 200:
-            raise HTTPException(400, "title must be at most 200 characters")
-        state = body.get("last_state")
-        if "last_state" in body and state not in {None, "idle", "running", "approval", "failed"}:
-            raise HTTPException(400, "invalid last_state")
-        if "titled_by_user" in body and not isinstance(body["titled_by_user"], bool):
-            raise HTTPException(400, "titled_by_user must be a boolean")
-        if body.get("titled_by_user") is True and not (isinstance(title, str) and title.strip()):
-            raise HTTPException(400, "a user title must not be blank")
+        body = _validated_chat_changes(await request.json())
         try:
             row = await anyio.to_thread.run_sync(
                 store.update_chat, request.path_params["session_id"], body
@@ -501,3 +485,37 @@ def _asset(request):
 
 def _app(request):
     return FileResponse(_static_file(_static_root(), "index.html"))
+
+
+def _text(value: str) -> str:
+    # drops lone surrogates (a client cut through an emoji); sqlite cannot store them
+    return value.encode("utf-8", "ignore").decode()
+
+
+def _validated_chat_changes(body: Any) -> dict[str, Any]:
+    if (
+        not isinstance(body, dict)
+        or not body
+        or not set(body) <= {"title", "last_state", "titled_by_user", "first_message"}
+    ):
+        raise HTTPException(400, "provide only title, last_state, titled_by_user, or first_message")
+    if "first_message" in body:
+        first = body["first_message"]
+        if not isinstance(first, str) or len(first) > 200:
+            raise HTTPException(400, "first_message must be a string of at most 200 characters")
+        body["first_message"] = _text(first).strip() or None
+    title = body.get("title")
+    if "title" in body and (title is not None and not isinstance(title, str)):
+        raise HTTPException(400, "title must be a string or null")
+    if isinstance(title, str):
+        if len(title) > 200:
+            raise HTTPException(400, "title must be at most 200 characters")
+        body["title"] = title = _text(title)
+    state = body.get("last_state")
+    if "last_state" in body and state not in {None, "idle", "running", "approval", "failed"}:
+        raise HTTPException(400, "invalid last_state")
+    if "titled_by_user" in body and not isinstance(body["titled_by_user"], bool):
+        raise HTTPException(400, "titled_by_user must be a boolean")
+    if body.get("titled_by_user") is True and not (isinstance(title, str) and title.strip()):
+        raise HTTPException(400, "a user title must not be blank")
+    return body
