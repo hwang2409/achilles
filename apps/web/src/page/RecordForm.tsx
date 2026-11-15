@@ -42,17 +42,31 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const selected = useSelectedRow(pageId);
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
   const onReloadTool = () => setReload((value) => value + 1);
+  const label = tool && tool.operation === "update" && row ? editingLabel(tool, fields, row) : "";
+  const heading = label ? `${title} · ${label}` : title;
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
     : tool.operation === "insert" ? <RecordForm tool={tool} order={fields} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={fields} row={row} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={fields} row={row} label={label} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
-  return <section className="record-form"><h2>{title}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+  return <section className="record-form"><h2>{heading}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
+// Names which record a form edits by its first listed field, in the header and (at narrow widths) above the form itself.
+function editingLabel(tool: PageTool, order: string[] | undefined, row: Record<string, unknown>): string {
+  const mapped = formFields(tool.input_schema, order);
+  const first = ("fields" in mapped ? mapped.fields : []).find((field) => field.name !== "record_id" && field.name !== "revision");
+  const value = first ? row[first.name] : undefined;
+  return value === null || value === undefined ? "" : String(value);
+}
+
+// The table marks itself with its collection and each row with its record id (App.tsx), so the form can find its
+// row back after cancel or save. Record ids are unique only within one collection.
+const tableRow = (collection: string, recordId: unknown) => document.querySelector<HTMLElement>(`table[data-collection="${CSS.escape(collection)}"] tr[data-record-id="${CSS.escape(String(recordId))}"]`);
+
 // With a row, the form edits that record: record_id and revision come from the row and are never inputs.
-export function RecordForm({ tool, order, row, pageId, credential, onReloadTool }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; pageId: string; credential: string; onReloadTool: () => void }) {
+export function RecordForm({ tool, order, row, label, pageId, credential, onReloadTool }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; label?: string; pageId: string; credential: string; onReloadTool: () => void }) {
   const mapped = formFields(tool.input_schema, order);
   const fields = "fields" in mapped ? mapped.fields.filter((field) => !row || (field.name !== "record_id" && field.name !== "revision")) : [];
   // typed holds only what the user changed, so a reloaded row shows its new values under the user's edits
@@ -63,11 +77,20 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const idPrefix = useId();
-  // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863)
-  useEffect(() => { if (message) form.current?.querySelector(".record-form-actions")?.scrollIntoView({ block: "nearest" }); }, [message]);
+  // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863); a
+  // successful save on a row scrolls to the row instead, since that is what "saved" means to the user here
+  useEffect(() => { if (!message) return; (row && message.kind === "status" ? tableRow(tool.collection, row.record_id) : form.current?.querySelector(".record-form-actions"))?.scrollIntoView({ block: "nearest" }); }, [message]);
   if ("unsupported" in mapped) return <p aria-disabled="true">this form needs the chat: unsupported field {mapped.unsupported}</p>;
 
   const focusField = (name?: string) => form.current?.querySelector<HTMLElement>(name ? `[name="${CSS.escape(name)}"]` : "[name]")?.focus();
+  // Clears the selection and hands focus back to the row, whether triggered by the cancel button or Escape.
+  // The row is often off screen (a long table below the form); focus() scrolls it into view.
+  const cancel = () => {
+    if (!row) return;
+    const target = tableRow(tool.collection, row.record_id);
+    selectRow(pageId, null);
+    target?.focus();
+  };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
@@ -95,7 +118,7 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
       }
       setTyped({});
       setMessage({ kind: "status", text: row ? "saved" : "added" });
-      // the saved record (new revision) stays selected, so the next save does not conflict with itself
+      // the saved record (new revision) stays selected, so the next save does not conflict with itself; the effect above scrolls it into view
       if (row && body) selectRow(pageId, { collection: tool.collection, record: body });
       notifyRecordWrite(pageId);
       if (!row) focusField();
@@ -122,15 +145,19 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
     }
   };
 
-  return <form ref={form} noValidate onSubmit={(event) => void submit(event)}>
+  return <>
+    {label && <p className="record-form-selected">selected: {label}</p>}
+    <form ref={form} noValidate onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === "Escape" && row && !event.defaultPrevented && !event.nativeEvent.isComposing) { event.preventDefault(); cancel(); } }}>
     {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name]} error={fieldErrors[field.name] ?? null} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
       <button type="submit" className="primary" disabled={busy}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
+      {row && <button type="button" onClick={cancel}>cancel</button>}
       {message && <p role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
       {message?.kind === "row-conflict" && <button type="button" onClick={() => void reloadRow()}>reload row</button>}
       {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
     </div>
-  </form>;
+    </form>
+  </>;
 }
 
 function Field({ id, field, value, error, onChange }: { id: string; field: FormField; value: string | boolean; error: string | null; onChange: (value: string | boolean) => void }) {
