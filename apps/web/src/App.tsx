@@ -153,7 +153,8 @@ export function App() {
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
-  useEffect(() => {
+  // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
+  useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
     if (!store || !scroll) return;
     return watchJumpToLatest(store, scroll, setShowJumpToLatest);
