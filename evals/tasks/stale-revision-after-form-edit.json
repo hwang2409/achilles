@@ -9,7 +9,7 @@
       "create_mode": false
     }
   ],
-  "agent_turns": 6,
+  "agent_turns": 10,
   "steps": [
     {
       "id": "show",
