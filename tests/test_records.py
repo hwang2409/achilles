@@ -103,7 +103,7 @@ def test_unknown_field_is_validation_error_with_hint(store):
     assert error.value.path == "/where/field"
     assert error.value.hint == (
         "Use a field from the tasks collection schema. Unknown field: state. "
-        "Collection fields: status, title. Did you mean status?"
+        "Fields: status, title. Did you mean status?"
     )
 
 

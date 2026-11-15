@@ -96,7 +96,7 @@ def _check_list_field(db, page_id, collection, where):
     raise ValidationError(
         "/where/field",
         "field in collection schema",
-        hint=unknown_field_hint(collection, field, fields, suggestion),
+        hint=unknown_field_hint(f"the {collection} collection schema", field, fields, suggestion),
     )
 
 

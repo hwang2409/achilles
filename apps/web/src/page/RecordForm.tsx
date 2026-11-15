@@ -29,7 +29,7 @@ export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
-export function FormBlock({ title, toolName, pageId, credential, refreshKey }: { title: string; toolName: string; pageId: string; credential: string; refreshKey: string }) {
+export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string }) {
   const [reload, setReload] = useState(0);
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
@@ -44,16 +44,16 @@ export function FormBlock({ title, toolName, pageId, credential, refreshKey }: {
   const onReloadTool = () => setReload((value) => value + 1);
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
-    : tool.operation === "insert" ? <RecordForm tool={tool} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : tool.operation === "insert" ? <RecordForm tool={tool} order={fields} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : row ? <RecordForm key={String(row.record_id)} tool={tool} row={row} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={fields} row={row} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
   return <section className="record-form"><h2>{title}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // With a row, the form edits that record: record_id and revision come from the row and are never inputs.
-export function RecordForm({ tool, row, pageId, credential, onReloadTool }: { tool: PageTool; row?: Record<string, unknown>; pageId: string; credential: string; onReloadTool: () => void }) {
-  const mapped = formFields(tool.input_schema);
+export function RecordForm({ tool, order, row, pageId, credential, onReloadTool }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; pageId: string; credential: string; onReloadTool: () => void }) {
+  const mapped = formFields(tool.input_schema, order);
   const fields = "fields" in mapped ? mapped.fields.filter((field) => !row || (field.name !== "record_id" && field.name !== "revision")) : [];
   // typed holds only what the user changed, so a reloaded row shows its new values under the user's edits
   const [typed, setTyped] = useState<FormValues>({});

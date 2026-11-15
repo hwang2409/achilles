@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-export type PageTool = { name: string; description: string; operation: string; collection: string; input_schema: unknown; version: number };
+export type PageTool = { name: string; description: string; operation: string; collection: string; input_schema: unknown; data_schema?: unknown; version: number };
 type Snapshot = { tools: PageTool[] | null; error: string | null };
 type Entry = { snapshot: Snapshot; listeners: Set<() => void> };
 

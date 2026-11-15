@@ -310,6 +310,7 @@ def create_app() -> Starlette:
                         "operation": tool["implementation"]["operation"],
                         "collection": tool["implementation"]["collection"],
                         "input_schema": tool["input_schema"],
+                        "data_schema": tool["implementation"]["data_schema"],
                         "version": tool["version"],
                         "needs_record_id": tool["implementation"]["operation"] in {"get", "update"},
                         "needs_version": True,
