@@ -612,6 +612,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const settleAfterTurn = useCallback(async () => {
     if (!client || state.phase !== "ready") return;
     const current = state; const mode = state.pendingApprovalMode; const token = owner.current.token();
+    setBusy((value) => value?.sessionId === current.sessionId ? null : value);
     try {
       await bindPage(current, token);
       if (!mode) return;
