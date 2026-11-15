@@ -14,7 +14,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, restoreFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, createConnection, type Connection, type ConnectionState } from "./zeta";
+import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -201,14 +201,15 @@ export function App() {
     [...document.querySelectorAll<HTMLElement>(".chat-actions > button")].find((button) => button.offsetParent !== null)?.focus();
   }, [active.toggleError]);
   useEffect(() => {
-    // zeta ends a running turn when this tab disconnects: a reload, a close, or a full page load (a sidebar page link,
-    // or selectChat's location.assign to a chat on another page), so the browser asks first. an approval wait survives
-    // a reload (zeta keeps it for 90 s), so it does not ask then.
-    if (!connected || lastState !== "running") return;
+    // without `turn_reconnect`, zeta ends a running turn when this tab disconnects: a reload, a close, or a full page
+    // load (a sidebar page link, or selectChat's location.assign to a chat on another page), so the browser asks first.
+    // with it, zeta keeps the turn for 90 s and the next page load takes it over, like an approval wait, so it does
+    // not ask; the browser cannot tell a reload from a close, and only a close (nobody back in 90 s) ends the turn.
+    if (!connected || lastState !== "running" || (client && supportsFeature(client, "turn_reconnect"))) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     addEventListener("beforeunload", warn);
     return () => removeEventListener("beforeunload", warn);
-  }, [connected, lastState]);
+  }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
@@ -217,7 +218,7 @@ export function App() {
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
   const hasComposer = !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
   const content = <>
-    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState === "idle" && (outcome === "cancelled" || outcome === "disconnected") ? "stopped" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}

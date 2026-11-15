@@ -231,6 +231,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ],
             delay=0.03,
         ),
+        # a page reload in the middle of this stream must keep the turn (`turn_reconnect`)
+        ScriptedTurn(
+            content=[TextContent(f"reload line {index:03d}\n") for index in range(80)],
+            delay=0.1,
+        ),
         ScriptedTurn(content=[TextContent("catalog ready")]),
         ScriptedTurn(
             tool_calls=[
@@ -544,7 +549,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
 
     async def held_finalize_turn(instance, *args, **kwargs):
         document = json.loads(control.read_text())
-        if document.get("request_count") == 17 and not document.get("late_turn_released"):
+        if document.get("request_count") == 18 and not document.get("late_turn_released"):
             document["late_turn_barrier"] = "held"
             write_control(control, document)
             for _ in range(300):

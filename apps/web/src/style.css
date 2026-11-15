@@ -115,6 +115,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .run-state.state-running::before { background: var(--fulcrum-accent); }
 .run-state.state-approval::before { background: var(--fulcrum-warn); }
 .run-state.state-failed::before { background: var(--fulcrum-danger); }
+.run-state.state-stopped::before { background: var(--fulcrum-warn); }
 .chat-header > [role="alert"] { position: absolute; top: 56px; right: 16px; color: var(--fulcrum-danger); }
 .create-mode-alert { position: relative; z-index: 2; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-danger); background: var(--fulcrum-bg); border-bottom: 1px solid var(--fulcrum-border); }
 .create-mode-alert button { flex: 0 0 auto; }
