@@ -522,20 +522,31 @@ def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) ->
 def test_patch_chat_updates_fields_and_validates_input() -> None:
     client = chat_client()
     client.post("/api/pages/home/chats", json={"session_id": "editable"})
+    assert client.get("/api/chats?limit=1").json()["chats"][0]["titled_by_user"] is False
     response = client.patch(
-        "/api/chats/editable", json={"title": "renamed", "last_state": "approval"}
+        "/api/chats/editable",
+        json={"title": "renamed", "last_state": "approval", "titled_by_user": True},
     )
     assert response.status_code == 200
     assert response.json()["title"] == "renamed"
     assert response.json()["last_state"] == "approval"
+    assert response.json()["titled_by_user"] is True
+    auto_name = client.patch("/api/chats/editable", json={"title": "zeta auto name"})
+    assert auto_name.json()["title"] == "renamed"
     for body in (
         {},
         {"title": 1},
         {"title": "x" * 201},
         {"last_state": "unknown"},
         {"unknown": True},
+        {"titled_by_user": "true"},
+        {"title": "  ", "titled_by_user": True},
     ):
         assert client.patch("/api/chats/editable", json=body).status_code == 400
+    assert (
+        client.patch("/api/chats/editable", json={"titled_by_user": False}).json()["titled_by_user"]
+        is False
+    )
     assert client.patch("/api/chats/missing", json={"title": "x"}).status_code == 404
 
 
