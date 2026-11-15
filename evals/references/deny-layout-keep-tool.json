@@ -1,0 +1,446 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tickets"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-add_ticket",
+        "name": "add_ticket",
+        "version": 1,
+        "operation": "insert",
+        "collection": "tickets",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_tickets",
+        "name": "list_tickets",
+        "version": 1,
+        "operation": "list",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "t-1",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-new",
+        "collection": "tickets",
+        "data": {
+          "title": "Billing page blank",
+          "priority": "high"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Tickets",
+              "collection": "tickets",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "tool-v2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "layout-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_layout",
+        "success": false
+      },
+      {
+        "id": "add",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__add_ticket",
+        "success": true,
+        "arguments": {
+          "title": "Billing page blank",
+          "priority": "high"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "tool-v2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "add_ticket",
+          "version": 2
+        }
+      },
+      {
+        "call_id": "layout-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_layout",
+        "success": false,
+        "data": "tool execution denied"
+      },
+      {
+        "call_id": "add",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__add_ticket",
+        "success": true,
+        "data": {
+          "title": "Billing page blank",
+          "priority": "high",
+          "record_id": "t-new",
+          "revision": 1
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "tool-v2",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__create_tool",
+        "decision": "approve"
+      },
+      {
+        "request_id": "layout-0",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_layout",
+        "decision": "deny"
+      },
+      {
+        "request_id": "add",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__add_ticket",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tickets"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-add_ticket",
+          "name": "add_ticket",
+          "version": 1,
+          "operation": "insert",
+          "collection": "tickets",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_tickets",
+          "name": "list_tickets",
+          "version": 1,
+          "operation": "list",
+          "collection": "tickets"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-1",
+          "collection": "tickets",
+          "data": {
+            "title": "Login page times out"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "list",
+                "title": "Tickets",
+                "collection": "tickets",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "turns": 5
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tickets"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-add_ticket",
+        "name": "add_ticket",
+        "version": 1,
+        "operation": "insert",
+        "collection": "tickets",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_tickets",
+        "name": "list_tickets",
+        "version": 1,
+        "operation": "list",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "t-1",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Tickets",
+              "collection": "tickets",
+              "fields": [
+                "title"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "tool-v2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "layout-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_layout",
+        "success": false
+      }
+    ],
+    "results": [
+      {
+        "call_id": "tool-v2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "add_ticket",
+          "version": 2
+        }
+      },
+      {
+        "call_id": "layout-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_layout",
+        "success": false,
+        "data": "tool execution denied"
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "tool-v2",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__create_tool",
+        "decision": "approve"
+      },
+      {
+        "request_id": "layout-0",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_layout",
+        "decision": "deny"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tickets"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-add_ticket",
+          "name": "add_ticket",
+          "version": 1,
+          "operation": "insert",
+          "collection": "tickets",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_tickets",
+          "name": "list_tickets",
+          "version": 1,
+          "operation": "list",
+          "collection": "tickets"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-1",
+          "collection": "tickets",
+          "data": {
+            "title": "Login page times out"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "list",
+                "title": "Tickets",
+                "collection": "tickets",
+                "fields": [
+                  "title"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "turns": 5
+  }
+}
