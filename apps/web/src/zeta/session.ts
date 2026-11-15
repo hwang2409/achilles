@@ -1,5 +1,6 @@
 import { fromZetaEvent, fromZetaHistory, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import type { RunEvent } from "@fulcrum/core";
+import { supportsFeature } from "./connection";
 
 type Status = { session?: { session_id: string } | null; state: "idle" | "running" | "tool"; pending_approvals?: Array<{ request_id: string; tool_call: unknown; delegated: boolean; resolution_pending?: string }>; last_turn_outcome?: { turn_id?: unknown; reason?: unknown } | null };
 type HistoryPage = { messages?: unknown[]; next_offset?: number | null };
@@ -73,9 +74,11 @@ export class SessionNotFoundError extends Error {}
 
 export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null) {
   let name: string | null = null;
-  // A live turn on this chat (for example one waiting for approval after a reload) blocks `resume`, so attach without
-  // it: the transcript and pending approval come from status and history. `rebind` re-sends the page binding later.
-  let rebind = await runningSession(client) === id;
+  // With `resume_attach`, `resume` of this chat during its live turn (for example an approval wait after a reload)
+  // attaches and re-binds the page tools at once. Without it zeta refuses that `resume`, so attach without it: the
+  // transcript and pending approval come from status and history, and `rebind` re-sends the page binding when idle.
+  // seam: `turn_reconnect` (a turn kept after the page leaves) reattaches through this same `resume`.
+  let rebind = !supportsFeature(client, "resume_attach") && await runningSession(client) === id;
   for (let retried = false; !rebind; retried = true) {
     try {
       const resumed = await rebindPage(client, id, pageBinding(credential, cwd)) as { session?: { name?: string | null } };
