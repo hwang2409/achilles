@@ -65,8 +65,8 @@ the 12 core tasks (full runs):
 
 focused-only tasks (run with `TASK=<name>`, never in a full run):
 
-- `browser-controller-slot`, `page-tool-without-create-mode`, `second-chat-tools`,
-  `undo-layout-change`
+- `browser-controller-slot`, `page-awareness`, `page-tool-without-create-mode`,
+  `second-chat-tools`, `undo-layout-change`
 
 rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
 a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
@@ -175,7 +175,7 @@ grader rules, as rules:
 
 ## the tasks
 
-the 16 tasks in `evals/tasks/` (12 core, 4 focused-only — see "core vs
+the 17 tasks in `evals/tasks/` (12 core, 5 focused-only — see "core vs
 focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
@@ -189,6 +189,8 @@ focused-only" above):
   is authored and used.
 - `judge-page-and-annotate`: build a review page with list and detail blocks, then
   author and use annotation tools.
+- `page-awareness`: with create mode off, ask what the page does; the agent reads
+  the page with `inspect_page` and changes no records.
 - `page-tool-without-create-mode`: with create mode off, add a contact using only
   the page's assigned insert tool.
 - `reading-list-one-prompt`: from one prompt, build a reading-list page, then add,
