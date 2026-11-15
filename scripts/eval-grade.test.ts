@@ -452,7 +452,11 @@ test("user write steps grade the agent only after the user write bumped the revi
     ["user write rejected", withWrite({ ok: false, status: 409, revision_after: null }), "harness_error"],
     ["user write did not bump the revision", withWrite({ revision_after: 1 }), "harness_error"],
     ["user write never ran", withWrite(undefined), "harness_error"],
+    ["turn cap hit before the user write ran", { pages: good.pages, initial: good.initial, user_writes: [], results: [], records: [{ page_id: "p", collection: "books", id: "dune", data: { title: "Dune", status: "reading", pages: 400 } }], turns: staleTask.agent_turns }, "agent_fail"],
+    ["last update_book failed after a later read", { ...good, results: [...good.results.slice(0, 2), { ...good.results[0] }, good.results[1]] }, "agent_fail"],
   ];
   for (const [name, snapshot, status] of rows) expect(gradeReference(staleTask, snapshot).status, name).toBe(status);
+  expect(gradeReference(staleTask, good).diagnostics.conflict_seen).toBe(true);
+  expect(gradeReference(staleTask, { ...good, results: good.results.slice(1) }).diagnostics.conflict_seen).toBe(false);
   expect(() => validateTask({ ...staleRevisionTaskJson, steps: [{ id: "w", kind: "user_write", page: "books", chat: "form", tool: "update_book", arguments: { record_id: "dune", revision: 1 } }] })).toThrow("no revision");
 });

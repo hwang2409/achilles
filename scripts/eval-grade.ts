@@ -490,6 +490,8 @@ export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot
 function userWriteFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
   return task.steps.filter(step => step.kind === "user_write").flatMap(step => {
     const write = rows(snapshot, "user_writes").find(row => row.step === step.id);
+    // a write that never ran because the agent used every turn first is the agent's cap hit, not a harness error
+    if (!write && (snapshot.turns ?? 0) >= task.agent_turns) return [];
     if (!write || write.ok !== true) return [`user write ${step.id} failed (${write?.status ?? "not run"})`];
     return write.revision_after === Number(write.revision_before) + 1 ? [] : [`user write ${step.id} did not bump the revision`];
   });
@@ -510,7 +512,13 @@ export function hostToolsGap(snapshot: EvalSnapshot): boolean {
   const forbidden = /^(bash|sqlite|write|edit|read|fetch|process|shell)(__|$)/i;
   return rows(snapshot, "calls").some(call => forbidden.test(String(call.tool ?? call.name ?? ""))) || rows(snapshot, "errors").some(error => /unknown[- ]?tool|tool not available|disallowed tool/i.test(String(error.code ?? error.message ?? "")));
 }
-export type EvalDiagnostics = { first_call_validity: Record<string, boolean>; observed_catalog?: string[]; structured_tool_errors: Array<{ code: unknown; path: unknown; expected: unknown }>; unstructured_tool_errors: number };
+export type EvalDiagnostics = { first_call_validity: Record<string, boolean>; observed_catalog?: string[]; structured_tool_errors: Array<{ code: unknown; path: unknown; expected: unknown }>; unstructured_tool_errors: number; conflict_seen?: boolean };
+// report-only evidence for user_write tasks: did the agent's stale write get a conflict? an agent that reads again first never sees one, so this is never graded
+function conflictSeen(task: EvalTask, snapshot: EvalSnapshot): { conflict_seen?: boolean } {
+  const tools = new Set(task.steps.filter(step => step.kind === "user_write").map(step => `achilles__${step.tool}`));
+  if (!tools.size) return {};
+  return { conflict_seen: rows(snapshot, "results").some(row => tools.has(String(row.tool)) && (row.data as { error?: { code?: unknown } } | undefined)?.error?.code === "conflict") };
+}
 export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
   const first_call_validity: Record<string, boolean> = {};
   for (const name of ["create_page", "create_tool"]) { const call = rows(snapshot, "calls").find(row => String(row.tool ?? row.name ?? "").endsWith(name)); if (call) first_call_validity[name] = successful(call); }
@@ -519,10 +527,10 @@ export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
 }
 export function gradeTask(task: EvalTask, snapshot: EvalSnapshot) {
   const preconditions = setupFailures(task, snapshot);
-  if (preconditions.length) return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "grader preconditions", actual: preconditions, evidence: { initial: snapshot.initial } }], turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
+  if (preconditions.length) return { task_id: task.id, pass: false, score: 0, checks: [{ id: "harness", pass: false, expected: "grader preconditions", actual: preconditions, evidence: { initial: snapshot.initial } }], turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: { ...diagnostics(snapshot), ...conflictSeen(task, snapshot) } };
   const checks = task.checks.map(check => gradeCheck(check, snapshot)); const required = checks.filter((_, i) => task.checks[i].required !== false);
   const score = Math.round((checks.filter(result => result.pass).length / checks.length) * 100);
-  return { task_id: task.id, pass: required.every(result => result.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: diagnostics(snapshot) };
+  return { task_id: task.id, pass: required.every(result => result.pass) && score >= 80, score, checks, turns: snapshot.turns ?? 0, wall_ms: snapshot.wall_ms ?? 0, tool_calls: rows(snapshot, "calls").length, approvals: rows(snapshot, "approvals").length, usage: snapshot.usage ?? "unavailable", host_tools_gap: hostToolsGap(snapshot), diagnostics: { ...diagnostics(snapshot), ...conflictSeen(task, snapshot) } };
 }
 
 export function gradeReference(task: EvalTask, snapshot: EvalSnapshot) {
