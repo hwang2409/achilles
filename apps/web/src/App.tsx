@@ -15,6 +15,7 @@ import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
+import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 
 const highlight = createHighlighter();
@@ -114,7 +115,7 @@ export function App() {
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const transcriptRef = useRef<HTMLElement>(null);
+  const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const send: typeof active.send = (...args) => {
     setFollowRequest((value) => value + 1);
     return active.send(...args);
@@ -153,24 +154,10 @@ export function App() {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
   useEffect(() => {
-    const transcript = transcriptRef.current;
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
-    if (!scroll) return;
-    let contentHeight = scroll.scrollHeight;
-    const update = () => {
-      const grew = scroll.scrollHeight > contentHeight;
-      if (scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 4) setShowJumpToLatest(false);
-      else if (grew) setShowJumpToLatest(true);
-      contentHeight = scroll.scrollHeight;
-    };
-    scroll.addEventListener("scroll", update, { passive: true });
-    const observer = new ResizeObserver(update);
-    observer.observe(scroll);
-    if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
-    const mutations = new MutationObserver(update);
-    mutations.observe(scroll, { subtree: true, childList: true, characterData: true });
-    return () => { scroll.removeEventListener("scroll", update); observer.disconnect(); mutations.disconnect(); };
-  }, [ready?.sessionId, outlineLength]);
+    if (!store || !scroll) return;
+    return watchJumpToLatest(store, scroll, setShowJumpToLatest);
+  }, [store, transcript]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
     // A chat attached during a live turn re-sends its page binding as soon as it is idle, even if the edge was missed.
@@ -217,7 +204,7 @@ export function App() {
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         {activePage.layout.blocks.length > 0 && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={ready ? transcriptRef : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <section ref={ready ? setTranscript : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcript?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
       </RunProvider>}
   </>;
