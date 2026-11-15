@@ -1,8 +1,11 @@
-// @vitest-environment happy-dom
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { useActiveChat } from "./useActiveChat";
+
+GlobalRegistrator.register();
+afterAll(() => GlobalRegistrator.unregister());
 
 const EXPECTED_ATTACH_SLOW_MS = 15_000;
 const originalGlobals = {
