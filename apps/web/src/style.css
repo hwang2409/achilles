@@ -102,6 +102,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .record-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .record-detail .match-note { margin: 12px 0 0; color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
 .transcript { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+/* one jump control: fulcrum's counts only new rows, so achilles owns it and text-only growth is covered too */
+.transcript [data-part="jump-to-latest-lane"] { display: none; }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
 .transcript table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
 html[data-density="compact"] .transcript { line-height: 1.35; }
