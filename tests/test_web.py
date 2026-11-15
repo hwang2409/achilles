@@ -348,6 +348,98 @@ def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_pa
     }
 
 
+def test_list_tool_filters_by_record_id_through_mcp(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "list_tasks",
+        "description": "list tasks",
+        "input_schema": {"type": "object", "additionalProperties": False},
+        "implementation": {
+            "operation": "list",
+            "collection": "tasks",
+            "data_schema": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "additionalProperties": True,
+            },
+        },
+    }
+    store.create_tool("home", bundle)
+    with store.transaction() as db:
+        db.executemany(
+            "INSERT INTO page_record(page_id,collection,record_id,version,revision,document,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            [
+                ("home", "tasks", "task-1", 1, 1, '{"title":"first"}', "now", "now"),
+                ("home", "tasks", "task-2", 1, 1, '{"title":"second"}', "now", "now"),
+            ],
+        )
+    token = store.ensure_credential("home")
+    mcp_headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+
+    def call(client, request_id, name, arguments):
+        return client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            },
+        ).json()["result"]
+
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        initialized = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        by_id = call(client, 3, "list_tasks", {"where": {"field": "record_id", "equals": "task-2"}})
+        unknown_id = call(
+            client, 4, "list_tasks", {"where": {"field": "record_id", "equals": "task-9"}}
+        )
+        unknown_field = call(
+            client, 5, "list_tasks", {"where": {"field": "name", "equals": "task-2"}}
+        )
+    assert not by_id.get("isError")
+    found = json.loads(by_id["content"][0]["text"])
+    assert [record["record_id"] for record in found] == ["task-2"]
+    assert found[0]["title"] == "second"
+    assert not unknown_id.get("isError")
+    assert json.loads(unknown_id["content"][0]["text"]) == []
+    assert unknown_field["isError"] is True
+    error = json.loads(unknown_field["content"][0]["text"])
+    assert error["path"] == "/where/field"
+    assert "record_id" in error["hint"]
+    assert "title" in error["hint"]
+
+
 def test_approval_mode_validation(monkeypatch) -> None:
     monkeypatch.delenv("ACHILLES_APPROVAL", raising=False)
     assert web.approval_mode() == "allow"
