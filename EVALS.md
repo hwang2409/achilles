@@ -68,9 +68,9 @@ the 12 core tasks (full runs):
 
 focused-only tasks (run with `TASK=<name>`, never in a full run):
 
-- `browser-controller-slot`, `count-question`, `page-awareness`,
-  `page-tool-without-create-mode`, `second-chat-tools`,
-  `stale-revision-after-form-edit`, `undo-layout-change`
+- `browser-controller-slot`, `count-question`, `create-mode-off-request`,
+  `other-page-request`, `page-awareness`, `page-tool-without-create-mode`,
+  `second-chat-tools`, `stale-revision-after-form-edit`, `undo-layout-change`
 
 rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
 a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
@@ -126,7 +126,10 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
 - `suite` (optional, `"core"` or `"focused"`): defaults to `"focused"`. a new
   task starts as focused-only; see "core vs focused-only" above.
 - `page_plan`: the pages. each has an `alias`, a `source` (`fixture`, `setup`, or
-  `created`), `bind_chat`, `create_mode`, and an optional `route`.
+  `created`), `bind_chat`, `create_mode`, and an optional `route`. every
+  `fixture` or `setup` page is the home page, except a `fixture` page with a
+  `route`: the harness creates that second page (one text block) before the
+  run. a `created` page's `route` names the page the agent creates.
 - `setup` (optional): the seeds. `tools` (name, operation, collection, optional
   `input_schema`), `records` (id, collection, data), and an `initial_layout`.
 - `steps`: the prompts and events, in order. each has an `id`, a `kind`, the
@@ -143,6 +146,7 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
 - `agent_turns`: the per-task turn cap.
 - `checks`: the acceptance table (see below). each has an `id`, a `type`, a
   `page`, and type-specific fields.
+- `no_new_page` passes when every page after the run existed before it.
 - `answer_mentions` grades a step's final answer text (the snapshot keeps it as
   `answers[step_id]`). it names the `step` and a `value` list; any one value
   must appear, case-insensitively, as a whole token ("12" never matches "120",
@@ -196,7 +200,7 @@ grader rules, as rules:
 
 ## the tasks
 
-the 18 tasks in `evals/tasks/` (12 core, 6 focused-only — see "core vs
+the 21 tasks in `evals/tasks/` (12 core, 9 focused-only — see "core vs
 focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
@@ -205,6 +209,8 @@ focused-only" above):
   in the browser.
 - `count-question`: with create mode off, ask how many of 5 seeded books are
   done; the final answer must say 3 and the records stay unchanged.
+- `create-mode-off-request`: with create mode off, ask for a new page; no page
+  is created and only the page's own tools are called.
 - `create-and-use-tool-same-chat`: author a page-local insert tool and use it in
   the same chat.
 - `harness-smoke`: the smoke task; create a page with one text block.
@@ -212,6 +218,8 @@ focused-only" above):
   is authored and used.
 - `judge-page-and-annotate`: build a review page with list and detail blocks, then
   author and use annotation tools.
+- `other-page-request`: on `/books` with create mode on, ask to change the home
+  page; neither page's layout changes and no page is created.
 - `page-awareness`: with create mode off, ask what the page does; the agent reads
   the page with `inspect_page` and changes no records.
 - `page-tool-without-create-mode`: with create mode off, add a contact using only
