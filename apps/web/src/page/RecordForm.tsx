@@ -18,7 +18,9 @@ export function useRecordWrites(pageId: string): number {
 
 export function FormBlock({ title, toolName, pageId, credential, refreshKey }: { title: string; toolName: string; pageId: string; credential: string; refreshKey: string }) {
   const [reload, setReload] = useState(0);
-  const { tools, error } = usePageTools(pageId, credential, `${refreshKey}:${reload}`);
+  // Default key matches other blocks on the same refreshKey, so a page with a form and the
+  // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
+  const { tools, error } = usePageTools(pageId, credential, reload > 0 ? `${refreshKey}:${reload}` : refreshKey);
   const tool = tools === null ? undefined : tools.find((item) => item.name === toolName) ?? null;
   const body = error ? <p role="alert">{error}</p>
     : tool === undefined ? <p role="status">loading form…</p>
