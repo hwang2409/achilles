@@ -368,12 +368,17 @@ try {
         await reloadShell();
         const search = page.locator(".chat-search input");
         await gateWait.playwright(search, "waitFor");
-        // the server has only the first page now: a before= request gets an empty batch, and a chat-list
-        // reload (which can answer the click instead) gets at most 50 rows and no next cursor.
+        // once "load 50 older" is clicked, the server has only the first page: a before= request gets an
+        // empty batch, and a chat-list reload (which can answer the click instead) gets at most 50 rows and
+        // no next cursor. before the click, reloads pass, so the button stays until the gate clicks it.
+        await page.evaluate(() => document.addEventListener("click", (event) => {
+          if ((event.target as Element).closest(".load-older")) (window as { olderClicked?: boolean }).olderClicked = true;
+        }, { capture: true }));
         const emptyOlder = async (route: Route) => {
           const url = new URL(route.request().url());
           if (url.searchParams.has("before")) return route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
-          if (url.searchParams.has("q")) return route.continue();
+          const clicked = await page.evaluate(() => (window as { olderClicked?: boolean }).olderClicked === true).catch(() => false);
+          if (url.searchParams.has("q") || !clicked) return route.continue();
           url.searchParams.set("limit", String(Math.min(50, Number(url.searchParams.get("limit") ?? 50))));
           const response = await route.fetch({ url: url.toString() });
           // a newer list reload may have cancelled this request already.
