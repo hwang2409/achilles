@@ -8,6 +8,8 @@ import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
 import { DetailRecord, type DetailFilter } from "./DetailRecord";
 import { FormBlock, selectRow, useRecordWrites, useSelectedRow } from "./page/RecordForm";
+import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
+import { usePageTools, type PageTool } from "./page/usePageTools";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget } from "./keyboard";
 import { useSettings } from "./settings";
@@ -284,29 +286,47 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p className="layout-metric"><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
-  if (block.type === "list") return <RecordList key={`${pageId}:${String(block.collection)}`} title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
+  if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
     const filter = block.filter as DetailFilter | undefined;
     if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
     return <p>{String(block.title)}: {fields.join(", ")}</p>;
   }
-  if (block.type === "form") return <FormBlock key={`${pageId}:${String(block.tool)}`} title={String(block.title)} toolName={String(block.tool)} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
+  if (block.type === "form") return <FormBlock key={`${pageId}:${String(block.tool)}`} title={String(block.title)} toolName={String(block.tool)} fields={Array.isArray(block.fields) ? block.fields.map(String) : undefined} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
   return null;
 }
-export function RecordList({ title, collection, pageId, credential, refreshKey }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string }) {
+
+function ListBlock({ block, pageId, credential, refreshKey, toolsKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
+  const key = `${pageId}:${String(block.collection)}`;
+  const list = { title: String(block.title), collection: String(block.collection), pageId, credential, refreshKey };
+  return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} /> : <SchemaRecordList key={key} {...list} toolsKey={toolsKey} />;
+}
+
+// Shares the page's tool list fetch with forms (same key), and keeps the last list so a chat turn does not blank the table.
+function SchemaRecordList({ toolsKey, ...list }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
+  const { tools, error } = usePageTools(list.pageId, list.credential, toolsKey);
+  const last = useRef<PageTool[] | null>(null);
+  if (tools !== null) last.current = tools;
+  const shown = tools ?? last.current;
+  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} extendColumns />;
+}
+
+// columns: null while they load; empty falls back to the record keys, sorted. extendColumns means
+// columns is the schema's own list, not an explicit `fields` choice: record keys the schema does not
+// name are appended, sorted, so the table never hides data the record actually has.
+export function RecordList({ title, collection, pageId, credential, refreshKey, columns = [], extendColumns = false }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; columns?: string[] | null; extendColumns?: boolean }) {
   const [records, setRecords] = useState<Record<string, unknown>[] | null>(null); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const requestSequence = useRef(0);
   useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, refreshKey]);
   const selected = useSelectedRow(pageId);
   const selectedId = selected?.collection === collection ? selected.record.record_id : undefined;
-  return <RecordListView title={title} records={records} total={total} error={error} selectedId={selectedId} onSelect={(record) => selectRow(pageId, record && { collection, record })} />;
+  return <RecordListView title={title} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onSelect={(record) => selectRow(pageId, record && { collection, record })} />;
 }
 
-export function RecordListView({ title, records, total, error, selectedId, onSelect }: { title: string; records: Record<string, unknown>[] | null; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null) => void }) {
+export function RecordListView({ title, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onSelect }: { title: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null) => void }) {
   const loadedRecords = records ?? [];
-  // revision is internal (it guards saves); record_id goes last and muted
-  const columns = [...new Set(loadedRecords.flatMap((record) => Object.keys(record).filter((key) => key !== "record_id" && key !== "revision")))]; if (loadedRecords.some((record) => "record_id" in record)) columns.push("record_id");
-  const loading = records === null && !error;
+  const columns = !chosen?.length ? recordColumns(loadedRecords) : extendColumns ? extendWithRecordKeys(chosen, loadedRecords) : chosen;
+  const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => {
     const row = event.currentTarget;
     if (event.key === "Enter" || event.key === " ") onSelect?.(record);
@@ -316,6 +336,6 @@ export function RecordListView({ title, records, total, error, selectedId, onSel
     else return;
     event.preventDefault();
   };
-  return <section className="record-list" aria-busy={loading}><h2>{title}</h2>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><table role={onSelect ? "grid" : undefined} aria-label={title}><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{loadedRecords.map((record, index) => <tr key={String(record.record_id ?? index)} {...onSelect && { tabIndex: 0, "aria-selected": record.record_id === selectedId, onClick: () => onSelect(record), onKeyDown: (event: React.KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column} className={column === "record_id" ? "record-id" : undefined}>{formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 100 && <p>showing newest 100 of {total}</p>}</>}</section>;
+  return <section className="record-list" aria-busy={loading}><h2>{title}</h2>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><table role={onSelect ? "grid" : undefined} aria-label={title}><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{loadedRecords.map((record, index) => <tr key={String(record.record_id ?? index)} {...onSelect && { tabIndex: 0, "aria-selected": record.record_id === selectedId, onClick: () => onSelect(record), onKeyDown: (event: React.KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column}>{formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 100 && <p>showing newest 100 of {total}</p>}</>}</section>;
 }
 function formatRecordValue(value: unknown): string { return value !== null && typeof value === "object" ? JSON.stringify(value) : String(value ?? ""); }
