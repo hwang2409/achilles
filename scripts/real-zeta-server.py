@@ -57,6 +57,10 @@ class BarrierBackend(FakeBackend):
     async def complete(self, messages, tool_schemas):
         backend = self.opening.get(self.opening_prompt(messages), self)
         turn_index = len(self.calls)
+        last_result = messages[-1].tool_result if messages else None
+        if last_result is not None and last_result.tool_call_id == "reload-add-book":
+            # the reply after the reload's page tool waits until the reloaded page has attached
+            await hold(self.control, "reload_reply_barrier")
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
             if event.type.name == "MESSAGE_END":
@@ -67,22 +71,20 @@ class BarrierBackend(FakeBackend):
                     write_control(self.control, document)
                     await asyncio.wait_for(inspect_turn_release.wait(), 30)
                 elif turn_index == 4:
-                    await self._hold("turn_barrier")
-                elif any(call.get("id") == "reload-add-book" for call in returned):
-                    # the gate reloads the page while this reply, which carries the call, is held
-                    await self._hold("reload_tool_barrier")
+                    await hold(self.control, "turn_barrier")
             yield event
 
-    async def _hold(self, barrier):
-        document = json.loads(self.control.read_text())
-        document[barrier] = "held"
-        write_control(self.control, document)
-        for _ in range(300):
-            document = json.loads(self.control.read_text())
-            if document.get(f"release_{barrier}"):
-                return
-            await asyncio.sleep(0.05)
-        raise RuntimeError(f"{barrier} release timed out after 15 seconds")
+
+async def hold(control: Path, barrier: str) -> None:
+    document = json.loads(control.read_text())
+    document[barrier] = "held"
+    write_control(control, document)
+    for _ in range(300):
+        document = json.loads(control.read_text())
+        if document.get(f"release_{barrier}"):
+            return
+        await asyncio.sleep(0.05)
+    raise RuntimeError(f"{barrier} release timed out after 15 seconds")
 
 
 class RestartBackend:
@@ -596,6 +598,17 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
             write_control(control, document)
         original_handle_call(actor, request)
 
+    original_call_tool = MCPServerActor.call_tool
+
+    async def held_call_tool(actor, tool_name, *args, **kwargs):
+        # announced (tool_start sent) but not yet at the MCP server: the gate reloads the page here
+        if tool_name == "add_book":
+            document = json.loads(control.read_text())
+            if document.get("hold_reload_tool") and "reload_tool_barrier" not in document:
+                await hold(control, "reload_tool_barrier")
+        return await original_call_tool(actor, tool_name, *args, **kwargs)
+
+    MCPServerActor.call_tool = held_call_tool
     MCPServerActor.suspend = counted_suspend
     MCPServerActor._handle_call = recorded_handle_call
     DeliveryRequests.send = held_send
