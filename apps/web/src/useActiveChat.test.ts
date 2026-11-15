@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, pageDeliverySteer, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, pageDeliverySteer, persistChatState, persistFirstMessage } from "./useActiveChat";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -238,7 +238,7 @@ describe("untitled chat delivery", () => {
       sends += 1;
       draft = draft.slice("sent text".length);
       clears += 1;
-      persistUntitledChatTitle("session", "sent text", () => {});
+      persistFirstMessage("session", "sent text", () => {});
       await Promise.resolve();
       expect(draft).toBe(" plus new");
       expect(clears).toBe(1);
@@ -277,6 +277,36 @@ describe("active chat attachment", () => {
       const ready = await attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
       expect(ready).toMatchObject({ phase: "ready", title: "my custom title" });
       expect(patched).toBe(false);
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
+  test("clearing a user title falls back to the first-message title", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("chat"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ session_id: "chat", page_id: "home", title: "bird notes", first_title: "second chat about birds", titled_by_user: true, message_sent: true }], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = {
+      features: ["session_mcp_bindings"],
+      request: async (method: string) => {
+        if (method === "resume") return { session: {} };
+        if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
+        throw new Error(`unexpected ${method}`);
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
+    const owner = createAttachmentOwner();
+    try {
+      const ready = await attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
+      // `rename` with an empty value shows autoTitle, so this is the title a clear reverts to
+      expect(ready).toMatchObject({ phase: "ready", title: "bird notes", autoTitle: "second chat about birds" });
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 

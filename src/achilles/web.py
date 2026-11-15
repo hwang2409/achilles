@@ -246,6 +246,7 @@ def create_app() -> Starlette:
                 limit,
                 _parse_chat_cursor(request.query_params.get("before")),
                 request.query_params.get("q"),
+                request.query_params.get("include"),
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -281,9 +282,16 @@ def create_app() -> Starlette:
         if (
             not isinstance(body, dict)
             or not body
-            or not set(body) <= {"title", "last_state", "titled_by_user"}
+            or not set(body) <= {"title", "last_state", "titled_by_user", "first_message"}
         ):
-            raise HTTPException(400, "provide only title, last_state, or titled_by_user")
+            raise HTTPException(
+                400, "provide only title, last_state, titled_by_user, or first_message"
+            )
+        if "first_message" in body:
+            first = body["first_message"]
+            if not isinstance(first, str) or len(first) > 200:
+                raise HTTPException(400, "first_message must be a string of at most 200 characters")
+            body["first_message"] = first.strip() or None
         title = body.get("title")
         if "title" in body and (title is not None and not isinstance(title, str)):
             raise HTTPException(400, "title must be a string or null")

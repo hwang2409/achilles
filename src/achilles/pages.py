@@ -258,12 +258,22 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def ensure_column(conn, table: str, column: str, ddl: str) -> None:
+def chat_row(row) -> dict[str, Any]:
+    return {
+        **dict(row),
+        "titled_by_user": bool(row["titled_by_user"]),
+        "message_sent": bool(row["message_sent"]),
+    }
+
+
+def ensure_column(conn, table: str, column: str, ddl: str, backfill: str | None = None) -> None:
     conn.execute("BEGIN IMMEDIATE")
     try:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            if backfill is not None:
+                conn.execute(backfill)
         conn.commit()
     except BaseException:
         conn.rollback()
@@ -548,6 +558,18 @@ class PageStore:
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
+        # default 1: rows from before this column, or written by older code, count as sent and
+        # stay listed; only register_chat/save_session insert a new chat as 0 until its first send.
+        ensure_column(db, "chat", "message_sent", "INTEGER NOT NULL DEFAULT 1")
+        # the first message's title, kept apart from `title` so clearing a rename falls back to it;
+        # an older chat's automatic title is its best first-message title.
+        ensure_column(
+            db,
+            "chat",
+            "first_title",
+            "TEXT",
+            "UPDATE chat SET first_title=title WHERE NOT titled_by_user",
+        )
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -901,9 +923,11 @@ class PageStore:
         limit: int,
         before: tuple[str, str] | None = None,
         query: str | None = None,
+        include: str | None = None,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        parameters: list[Any] = []
+        # a chat with no message sent is listed only when the caller names it (the open chat)
+        clauses: list[str] = ["(c.message_sent OR c.session_id IS ?)"]
+        parameters: list[Any] = [include]
         with self._connect() as db:
             if before is not None:
                 updated_at, session_id = before
@@ -911,17 +935,18 @@ class PageStore:
                 parameters.extend((updated_at, updated_at, session_id))
             if query is not None:
                 escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                clauses.append("c.title LIKE ? ESCAPE '\\' COLLATE NOCASE")
+                clauses.append("COALESCE(c.title, c.first_title) LIKE ? ESCAPE '\\' COLLATE NOCASE")
                 parameters.append(f"%{escaped}%")
-            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            where = f"WHERE {' AND '.join(clauses)}"
             rows = db.execute(
                 "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
-                "c.title,c.created_at,c.updated_at,c.last_state,c.titled_by_user FROM chat c "
+                "c.title,c.first_title,c.created_at,c.updated_at,c.last_state,c.titled_by_user,"
+                "c.message_sent FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
                 (*parameters, limit + 1),
             ).fetchall()
-        return [{**dict(row), "titled_by_user": bool(row["titled_by_user"])} for row in rows]
+        return [chat_row(row) for row in rows]
 
     def approval_count(self) -> int:
         with self._connect() as db:
@@ -935,8 +960,8 @@ class PageStore:
                 raise KeyError(page_id)
             stamp = now()
             db.execute(
-                "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at) "
-                "VALUES(?,?,?,?)",
+                "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at,message_sent) "
+                "VALUES(?,?,?,?,0)",
                 (session_id, page_id, stamp, stamp),
             )
             row = db.execute(
@@ -950,16 +975,19 @@ class PageStore:
     def chat(self, session_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
-                "SELECT session_id,page_id,title,created_at,updated_at,last_state,titled_by_user "
-                "FROM chat WHERE session_id=?",
+                "SELECT session_id,page_id,title,first_title,created_at,updated_at,last_state,"
+                "titled_by_user,message_sent FROM chat WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if row is None:
             raise KeyError(session_id)
-        return {**dict(row), "titled_by_user": bool(row["titled_by_user"])}
+        return chat_row(row)
 
     def update_chat(self, session_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         # a title-only write is an automatic name; it never replaces a title the user chose
+        changes = dict(changes)
+        sent = "first_message" in changes
+        first_title = changes.pop("first_message", None)
         keep_user_title = "title" in changes and "titled_by_user" not in changes
         assignments = [
             "title=CASE WHEN titled_by_user THEN title ELSE ? END"
@@ -967,13 +995,23 @@ class PageStore:
             else f"{key}=?"
             for key in changes
         ]
+        if sent:
+            # the first send marks the chat sent and keeps the first title; repeats change nothing
+            assignments.append("message_sent=1,first_title=COALESCE(first_title,?)")
         with self.transaction() as db:
             updated = db.execute(
                 f"UPDATE chat SET {','.join(assignments)},updated_at=? WHERE session_id=?",
-                (*changes.values(), now(), session_id),
+                (*changes.values(), *([first_title] if sent else []), now(), session_id),
             ).rowcount
             if not updated:
                 raise KeyError(session_id)
+            if sent:
+                # older code reads only `title`, so an unnamed chat also takes the first title there
+                db.execute(
+                    "UPDATE chat SET title=first_title "
+                    "WHERE session_id=? AND title IS NULL AND NOT titled_by_user",
+                    (session_id,),
+                )
         return self.chat(session_id)
 
     def save_session(
@@ -995,7 +1033,8 @@ class PageStore:
                 if owner is not None and owner["page_id"] != page_id:
                     raise ValueError("session belongs to another page")
                 db.execute(
-                    "INSERT INTO chat(session_id,page_id,created_at,updated_at) VALUES(?,?,?,?) "
+                    "INSERT INTO chat(session_id,page_id,created_at,updated_at,message_sent) "
+                    "VALUES(?,?,?,?,0) "
                     "ON CONFLICT(session_id) DO UPDATE SET updated_at=excluded.updated_at",
                     (session_id, page_id, stamp, stamp),
                 )

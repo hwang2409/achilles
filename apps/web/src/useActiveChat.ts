@@ -11,7 +11,7 @@ export type Page = { id: string; route: string; title: string; zeta_session_id: 
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
 type EmptyState = PageAttachment & { phase: "empty" };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
-type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string; autoTitle: string; rebind: boolean };
+type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean };
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState | BusyState;
 type BusyChat = { sessionId: string | null; chat: Chat | null; retry: "attach" | "new" };
@@ -50,10 +50,11 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
   };
 }
 
-export function persistUntitledChatTitle(sessionId: string, title: string, onSuccess: () => void): void {
-  void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) })
+// marks the chat sent (it joins the chat list) and stores its first-message title once
+export function persistFirstMessage(sessionId: string, firstMessage: string, onSuccess: () => void): void {
+  void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ first_message: firstMessage }) })
     .then((response) => { if (response.ok) onSuccess(); })
-    .catch((error) => console.error("could not update chat title", error));
+    .catch((error) => console.error("could not record the first message", error));
 }
 
 export async function persistChatTitle(sessionId: string, title: string | null, titledByUser: boolean, fetchFn: typeof fetch = fetch): Promise<boolean> {
@@ -81,7 +82,7 @@ function attachmentError(caught: unknown, context: "loading" | "creation" = "loa
 async function findChat(sessionId: string) {
   let before: string | null = null;
   do {
-    const params = new URLSearchParams({ limit: "200" });
+    const params = new URLSearchParams({ limit: "200", include: sessionId });
     if (before) params.set("before", before);
     const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
     if (!response.ok) return null;
@@ -147,11 +148,11 @@ export async function attachPage(
       page.approval_mode = session.approvalMode;
       const storedChat = selectedChat ?? (await findChat(session.id)); requireCurrent(owner, token);
       const userTitled = Boolean(storedChat?.titled_by_user);
-      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || "new chat";
+      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || storedChat?.first_title?.trim() || "new chat";
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
       if (!userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, rebind: session.rebind };
+      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind };
     };
     const busy = (busySessionId: string | null): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId });
 
@@ -580,10 +581,15 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (pendingSelection.current?.sessionId === current.sessionId) pendingSelection.current = null;
       throw error;
     }
-    if (!owner.current.current(token) || current.title !== "new chat") return;
-    const nextTitle = text.trim().slice(0, 200);
-    persistUntitledChatTitle(current.sessionId, nextTitle, () => {
-      updateReady(token, (value) => ({ ...value, title: nextTitle }));
+    // not gated on the owner token: a chat switch mid-send must still record the send
+    if (current.sent) return;
+    const firstTitle = text.trim().slice(0, 200);
+    persistFirstMessage(current.sessionId, firstTitle, () => {
+      updateReady(token, (value) => value.sessionId !== current.sessionId ? value : {
+        ...value, sent: true,
+        autoTitle: value.autoTitle === "new chat" ? firstTitle : value.autoTitle,
+        title: value.title === "new chat" ? firstTitle : value.title,
+      });
       setListRefresh((value) => value + 1);
     });
   }, [bindPage, client, createFirstChat, state, updateReady]);

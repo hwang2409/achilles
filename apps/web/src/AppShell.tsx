@@ -12,6 +12,8 @@ export type Chat = {
   page_route: string;
   page_title: string;
   title: string | null;
+  first_title?: string | null;
+  message_sent?: boolean;
   created_at: string;
   updated_at: string;
   last_state: "idle" | "running" | "approval" | "failed" | null;
@@ -44,7 +46,7 @@ const chatHref = (chat: Chat) => {
   url.searchParams.set("chat", chat.session_id);
   return `${url.pathname}${url.search}`;
 };
-const titleOf = (chat: Chat) => chat.title?.trim() || "new chat";
+const titleOf = (chat: Chat) => chat.title?.trim() || chat.first_title?.trim() || "new chat";
 const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
 const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 // in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
@@ -121,6 +123,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   const requestFocus = useFocusAfterCommit();
   const pageListOwner = useRef<ListOwner<null, PageLink, null> | null>(null);
   const chatListOwner = useRef<ListOwner<string, Chat, number> | null>(null);
+  const openChat = useRef(sessionId);
+  openChat.current = sessionId;
   if (!pageListOwner.current) {
     pageListOwner.current = createListOwner(initialPageListState, async (_key, before, signal, limit = 20) => {
       const params = new URLSearchParams({ limit: String(limit) });
@@ -134,6 +138,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   if (!chatListOwner.current) {
     chatListOwner.current = createListOwner(initialChatListState, async (search, before, signal, limit = 50) => {
       const params = new URLSearchParams({ limit: String(limit) });
+      // the server lists only chats with a sent message, plus the open chat named here
+      if (openChat.current) params.set("include", openChat.current);
       if (search) params.set("q", search);
       if (before) params.set("before", before);
       const response = await fetch(`/api/chats?${params}`, { cache: "no-store", signal });
@@ -142,10 +148,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       return { items: result.chats, next: result.next, meta: result.approval_count };
     }, (item) => item.session_id, setChatList, 50, 200);
   }
-  const rawChats = chatList.items ?? [];
-  // a chat with no message ever sent keeps a null title (see chatCreation.ts); hide it from browsing
-  // unless it is the chat currently open, so "new chat" clicks don't pile up empty rows.
-  const chats = useMemo(() => rawChats.filter((chat) => chat.title !== null || chat.session_id === sessionId), [rawChats, sessionId]);
+  const chats = chatList.items ?? [];
   const loading = chatList.items === null && !chatList.error;
   const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
   const openSettings = (opener: Element | null) => {
@@ -260,8 +263,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     const firstChat = await chatListOwner.current!.more();
     if (firstChat) requestFocus(() => {
       if (document.activeElement !== initiator && !(!initiator.isConnected && document.activeElement === document.body)) return null;
-      // the newly loaded chat can itself be hidden (empty, not current); fall back to the button that stays in place.
-      const row = document.querySelector<HTMLAnchorElement>(`[data-chat-id="${CSS.escape(firstChat.session_id)}"]`) ?? (initiator.isConnected ? initiator : null);
+      const row = document.querySelector<HTMLAnchorElement>(`[data-chat-id="${CSS.escape(firstChat.session_id)}"]`);
       row?.scrollIntoView({ block: "nearest" });
       return row;
     });
@@ -281,7 +283,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
           {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload(null)}>retry</button></div> : pageList.items === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}</>}
         </div>
       </section>
-      <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={rawChats.length} onKeyDown={chatListKey}>
+      <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
         {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
@@ -298,7 +300,14 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
 
 function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void }) {
   const rename = useInlineRename();
+  const refocus = useRef(false);
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
+  // a keyboard rename hands focus back to its row, unless the user already moved focus elsewhere
+  useEffect(() => {
+    if (rename.editing || !refocus.current) return;
+    refocus.current = false;
+    if (document.activeElement === document.body) document.querySelector<HTMLElement>(`a[data-chat-id="${CSS.escape(chat.session_id)}"]`)?.focus();
+  }, [rename.editing, chat.session_id]);
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   if (rename.editing) {
     return <div id={rowId} data-chat-id={chat.session_id} className={rowClass}>
@@ -308,12 +317,13 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { 
   const startRename = (event: { preventDefault(): void; stopPropagation(): void }) => {
     event.preventDefault();
     event.stopPropagation();
-    rename.start(chat.title?.trim() ?? "", (value) => onRename(chat, value));
+    rename.start(chat.title?.trim() || chat.first_title?.trim() || "", (value) => onRename(chat, value));
   };
-  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
+  // F2 is the keyboard path to rename a row; the pencil is a pointer shortcut only
+  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") { refocus.current = true; startRename(event); } }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>
-    <button type="button" tabIndex={-1} className="chat-row-rename" aria-label={`rename ${titleOf(chat)}`} onClick={startRename}>✎</button>
+    <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>
   </a>;
 }
 
