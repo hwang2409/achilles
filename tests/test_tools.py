@@ -236,7 +236,7 @@ def test_generated_tool_versions_and_page_scope(tmp_path):
     }
     updated, _, _ = store.create_tool("home", version_two)
     assert updated["version"] == 2
-    store.rollback_tool("home", "annotate_trace", 1)
+    store.rollback_tool("home", "annotate_trace", 1, 2)
     assert store.page_tools("home")[0]["version"] == 1
     store.set_create_mode("home", False)
     assert call_record(store, "home", "annotate_trace", {"text": "late"}, 1)["text"] == "late"

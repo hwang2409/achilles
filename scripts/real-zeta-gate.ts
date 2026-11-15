@@ -1214,7 +1214,7 @@ try {
         Authorization: `Bearer ${credential}`,
         Origin: origin,
       },
-      body: JSON.stringify({ version: 1 }),
+      body: JSON.stringify({ version: 1, expected_version: 2 }),
     },
   );
   if (!rollback.ok) throw new Error(`rollback failed: ${rollback.status}`);

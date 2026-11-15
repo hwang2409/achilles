@@ -126,10 +126,10 @@ export function App() {
       if (item.kind !== "tool") continue;
       const value = store.getItem(item.id) as { active?: boolean; is_error?: boolean; tool_call?: { name?: string } } | undefined;
       const name = value?.tool_call?.name ?? "";
-      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
+      if (value && ["create_page", "achilles__create_page", "update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name) && !value.active && !value.is_error && !completedCreatePages.current.has(item.id)) {
         completedCreatePages.current.add(item.id);
         setPageRefreshNonce((current) => current + 1);
-        if (["update_layout", "achilles__update_layout"].includes(name)) void active.refreshPage();
+        if (["update_layout", "achilles__update_layout", "restore_version", "achilles__restore_version"].includes(name)) void active.refreshPage();
       }
     }
   }), [active.refreshPage, store]);
@@ -176,7 +176,7 @@ export function App() {
   const composerProps = activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
   const content = <>
     {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
-    {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>retry</button>}</div>}
+    {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry creating chat</button></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>

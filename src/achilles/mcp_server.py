@@ -12,6 +12,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 from .pages import (
     CREATE_PAGE_SCHEMA,
     LAYOUT_SCHEMA,
+    RESTORE_VERSION_SCHEMA,
     UPDATE_LAYOUT_SCHEMA,
     PageStore,
     bounded_inspect,
@@ -107,6 +108,23 @@ INSPECT_PAGE_OUTPUT_SCHEMA = {
             },
         },
         "tools": {"type": "array", "items": {"type": "object"}},
+        "layout_versions": {
+            "type": "array",
+            "description": (
+                "Up to 20 recent stored layout versions, newest first; pass one as "
+                "restore_version version."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "version": {"type": "integer", "minimum": 1},
+                    "created_at": {"type": "string"},
+                    "block_types": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["version", "created_at", "block_types"],
+                "additionalProperties": False,
+            },
+        },
         "collections": {
             "type": "object",
             "additionalProperties": {"type": "integer", "minimum": 0},
@@ -183,6 +201,7 @@ def _validate_create(name: str, args: Any) -> None:
         "create_page": CREATE_PAGE_SCHEMA,
         "create_tool": CREATE_TOOL_SCHEMA,
         "update_layout": UPDATE_LAYOUT_SCHEMA,
+        "restore_version": RESTORE_VERSION_SCHEMA,
     }[name]
     validate_schema(args, schema)
 
@@ -279,6 +298,22 @@ def build_mcp(store: PageStore):
                         ),
                         inputSchema=UPDATE_LAYOUT_SCHEMA,
                     ),
+                    Tool(
+                        name="restore_version",
+                        description=(
+                            "Undo a layout or tool change on this page, for example when the "
+                            "user says undo or you need to take back your own change. First "
+                            "call achilles__inspect_page. For kind layout, pick a version from "
+                            "layout_versions and pass layout_version as expected_version; this "
+                            "creates a new layout version that copies the old one, so history "
+                            "is kept and the restore can itself be undone. For kind tool, pass "
+                            "the tool name, an earlier version, and the tool's current version "
+                            "as expected_version; this makes that version active again. On a "
+                            "version conflict, inspect again and retry. To change another "
+                            "page, open that page's chat."
+                        ),
+                        inputSchema=RESTORE_VERSION_SCHEMA,
+                    ),
                 ]
             )
         bundles = await anyio.to_thread.run_sync(store.page_tools, page["id"])
@@ -323,6 +358,29 @@ def build_mcp(store: PageStore):
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return _inspect_error()
 
+    async def restore_version(page, args) -> dict[str, Any]:
+        if args.get("route", page["route"]) != page["route"]:
+            raise ValidationError(
+                "/route", "this page", "forbidden", "To change another page, open that page's chat."
+            )
+        if args["kind"] == "layout":
+            version, digest, detail_summary = await anyio.to_thread.run_sync(
+                store.restore_layout, page["id"], args["version"], args["expected_version"]
+            )
+            return {
+                "kind": "layout",
+                "version": version,
+                "restored_from": args["version"],
+                "digest": digest,
+                "detail_filter_matches": detail_summary,
+            }
+        if "name" not in args:
+            raise ValidationError("/name", "a tool name when kind is tool")
+        restored = await anyio.to_thread.run_sync(
+            store.rollback_tool, page["id"], args["name"], args["version"], args["expected_version"]
+        )
+        return {"kind": "tool", **restored}
+
     async def call_tool(context, params) -> CallToolResult:
         page = await principal(context)
         if not page:
@@ -365,6 +423,8 @@ def build_mcp(store: PageStore):
                         },
                         note,
                     )
+                elif params.name == "restore_version":
+                    result = await restore_version(page, args)
                 elif params.name == "update_layout":
                     version, digest, detail_summary = await anyio.to_thread.run_sync(
                         store.update_layout,
