@@ -1,5 +1,6 @@
 {
   "id": "judge-page-and-annotate",
+"suite": "core",
   "page_plan": [
     {
       "alias": "home",

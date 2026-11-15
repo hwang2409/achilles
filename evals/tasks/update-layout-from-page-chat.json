@@ -1,5 +1,6 @@
 {
   "id": "update-layout-from-page-chat",
+"suite": "core",
   "page_plan": [
     {
       "alias": "records",

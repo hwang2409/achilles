@@ -1,5 +1,6 @@
 {
   "id": "create-and-use-tool-same-chat",
+"suite": "core",
   "page_plan": [
     {
       "alias": "notes",

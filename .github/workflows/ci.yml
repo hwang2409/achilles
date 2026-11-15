@@ -76,7 +76,8 @@ jobs:
           STATUS=$status python - <<'PY'
           import json, os
           from pathlib import Path
-          expected = sorted(path.stem for path in Path('evals/tasks').glob('*.json'))
+          tasks = [json.loads(path.read_text()) for path in Path('evals/tasks').glob('*.json')]
+          expected = sorted(task['id'] for task in tasks if task.get('suite', 'focused') == 'core')
           report = json.loads(Path('.cache/eval-ci-setup/report.json').read_text())
           actual = sorted(task['task_id'] for task in report['tasks'])
           assert actual == expected, (actual, expected)
