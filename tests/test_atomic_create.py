@@ -495,6 +495,66 @@ def test_create_tool_handles_mixed_type_enum(creation_client):
     assert not created.get("isError")
 
 
+def test_required_field_errors_name_top_level_and_nested_fields(creation_client):
+    _, store, client, headers = creation_client
+    update = bundle(name="update_book", operation="update")
+    update["input_schema"] = {
+        "type": "object",
+        "properties": {
+            "record_id": {"type": "string"},
+            "revision": {"type": "integer"},
+            "metadata": {
+                "type": "object",
+                "properties": {"label": {"type": "string"}},
+                "required": ["label"],
+                "additionalProperties": False,
+            },
+            "title": {"type": "string"},
+        },
+        "required": ["record_id", "revision", "metadata"],
+        "additionalProperties": False,
+    }
+    store.create_tool("home", update)
+    mcp(client, headers, 2, "tools/list", {})
+    cases = [
+        ({"revision": 1, "metadata": {"label": "x"}}, "required property: record_id", "/record_id"),
+        (
+            {"record_id": "book", "metadata": {"label": "x"}},
+            "required property: revision",
+            "/revision",
+        ),
+        (
+            {"record_id": "book", "revision": 1, "metadata": {}},
+            "required property: label",
+            "/metadata/label",
+        ),
+    ]
+    for request_id, (arguments, expected, path) in enumerate(cases, 3):
+        result = mcp(
+            client,
+            headers,
+            request_id,
+            "tools/call",
+            {"name": "update_book", "arguments": arguments},
+        )
+        error = json.loads(result["content"][0]["text"])
+        assert error["expected"] == expected
+        assert error["path"] == path
+
+    nested_type = mcp(
+        client,
+        headers,
+        6,
+        "tools/call",
+        {
+            "name": "update_book",
+            "arguments": {"record_id": "book", "revision": 1, "metadata": {"label": 1}},
+        },
+    )
+    nested_type_error = json.loads(nested_type["content"][0]["text"])
+    assert nested_type_error["path"] == "/metadata/label"
+
+
 def test_all_operation_tools_list_and_run_over_mcp(creation_client):
     _, store, client, headers = creation_client
     data_schema = bundle()["implementation"]["data_schema"]
