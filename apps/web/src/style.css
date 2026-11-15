@@ -77,9 +77,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 12px; min-width: 0; }
 .chat-heading span { flex: 0 1 220px; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-heading strong { flex: 1 1 160px; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.chat-heading strong[role="button"] { cursor: text; border-radius: 2px; }
+.chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
 .chat-heading strong[role="button"]:hover, .chat-heading strong[role="button"]:focus-visible { outline: 1px solid var(--fulcrum-border); }
-.chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 28px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 14px; color: inherit; }
+.chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 14px; color: inherit; }
 .chat-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; font-size: 14px; }
 .chat-actions button { min-height: 40px; padding: 8px 10px; border-color: var(--fulcrum-accent); }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--fulcrum-ok); }

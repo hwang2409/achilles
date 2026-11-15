@@ -180,7 +180,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     const top = layers.at(-1);
     if (!top) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || (event.target instanceof Element && event.target.closest("[data-inline-rename]"))) return;
       event.preventDefault();
       event.stopPropagation();
       top();
@@ -276,13 +276,13 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { 
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   if (rename.editing) {
     return <div id={rowId} data-chat-id={chat.session_id} className={rowClass}>
-      <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind((value) => onRename(chat, value))} />
+      <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind()} />
     </div>;
   }
   const startRename = (event: { preventDefault(): void; stopPropagation(): void }) => {
     event.preventDefault();
     event.stopPropagation();
-    rename.start(chat.title?.trim() ?? "");
+    rename.start(chat.title?.trim() ?? "", (value) => onRename(chat, value));
   };
   return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>

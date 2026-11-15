@@ -294,6 +294,8 @@ def create_app() -> Starlette:
             raise HTTPException(400, "invalid last_state")
         if "titled_by_user" in body and not isinstance(body["titled_by_user"], bool):
             raise HTTPException(400, "titled_by_user must be a boolean")
+        if body.get("titled_by_user") is True and not (isinstance(title, str) and title.strip()):
+            raise HTTPException(400, "a user title must not be blank")
         try:
             row = await anyio.to_thread.run_sync(
                 store.update_chat, request.path_params["session_id"], body

@@ -364,7 +364,7 @@ def test_session_mapping_is_atomic_and_private(monkeypatch, tmp_path: Path) -> N
     assert home.stat().st_mode & 0o777 == 0o700
     assert (home / "achilles.sqlite3").stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(home / "achilles.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
     for sidecar in (home / "achilles.sqlite3-wal", home / "achilles.sqlite3-shm"):
         if sidecar.exists():
             assert sidecar.stat().st_mode & 0o777 == 0o600
@@ -531,6 +531,8 @@ def test_patch_chat_updates_fields_and_validates_input() -> None:
     assert response.json()["title"] == "renamed"
     assert response.json()["last_state"] == "approval"
     assert response.json()["titled_by_user"] is True
+    auto_name = client.patch("/api/chats/editable", json={"title": "zeta auto name"})
+    assert auto_name.json()["title"] == "renamed"
     for body in (
         {},
         {"title": 1},
@@ -538,6 +540,7 @@ def test_patch_chat_updates_fields_and_validates_input() -> None:
         {"last_state": "unknown"},
         {"unknown": True},
         {"titled_by_user": "true"},
+        {"title": "  ", "titled_by_user": True},
     ):
         assert client.patch("/api/chats/editable", json=body).status_code == 400
     assert (
