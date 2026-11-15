@@ -634,7 +634,7 @@ export type EvalDiagnostics = { first_call_validity: Record<string, boolean>; ob
 function conflictSeen(task: EvalTask, snapshot: EvalSnapshot): { conflict_seen?: boolean } {
   const tools = new Set(task.steps.filter(step => step.kind === "user_write").map(step => `achilles__${step.tool}`));
   if (!tools.size) return {};
-  return { conflict_seen: rows(snapshot, "results").some(row => tools.has(String(row.tool)) && (row.data as { error?: { code?: unknown } } | undefined)?.error?.code === "conflict") };
+  return { conflict_seen: rows(snapshot, "results").some(row => tools.has(String(row.tool)) && (row.data as { code?: unknown } | undefined)?.code === "conflict") };
 }
 export function diagnostics(snapshot: EvalSnapshot): EvalDiagnostics {
   const first_call_validity: Record<string, boolean> = {};

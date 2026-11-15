@@ -27,11 +27,9 @@
         "tool": "achilles__update_book",
         "success": false,
         "data": {
-          "error": {
-            "code": "conflict",
-            "path": "/revision",
-            "expected": "current record revision"
-          }
+          "code": "conflict",
+          "path": "/revision",
+          "expected": "current record revision"
         }
       },
       {
@@ -134,11 +132,9 @@
         "tool": "achilles__update_book",
         "success": false,
         "data": {
-          "error": {
-            "code": "conflict",
-            "path": "/revision",
-            "expected": "current record revision"
-          }
+          "code": "conflict",
+          "path": "/revision",
+          "expected": "current record revision"
         }
       },
       {
