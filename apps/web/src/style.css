@@ -41,16 +41,17 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .page-list a b { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-width: 0; font-weight: 500; }
 .page-list-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; color: var(--fulcrum-muted); font-size: 12px; }
 .page-list-error button { min-height: 40px; padding: 8px 0; color: var(--fulcrum-accent); }
-.chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+/* rows snap under the two sticky heads (36px list head + 36px group head), so no half row shows below them */
+.chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-snap-type: y proximity; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
-.chat-group h2 { position: sticky; top: 36px; z-index: 1; margin: 0; padding: 8px 16px 6px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 14px; font-weight: 400; text-transform: lowercase; }
-.chat-row { position: relative; display: block; padding: 10px 48px 10px 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
+.chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; display: flex; align-items: center; margin: 0; padding: 0 16px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 14px; font-weight: 400; text-transform: lowercase; }
+.chat-row { position: relative; display: block; padding: 10px 48px 10px 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); scroll-snap-align: start; }
 .chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.4; font-weight: 500; }
 .chat-row > span { display: flex; gap: 4px; min-width: 0; margin-top: 5px; color: var(--fulcrum-muted); font-size: 14px; }
-.chat-row > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.chat-row > span i { overflow: hidden; flex: 0 0 auto; }
-.chat-row i { margin-left: auto; font-style: normal; }
+.chat-row-meta { overflow: hidden; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
+.chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
 .chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
+.chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .chat-row.current strong { font-weight: 700; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
@@ -81,7 +82,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-heading strong[role="button"]:hover, .chat-heading strong[role="button"]:focus-visible { outline: 1px solid var(--fulcrum-border); }
 .chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 14px; color: inherit; }
 .chat-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; font-size: 14px; }
-.chat-actions button { min-height: 40px; padding: 8px 10px; border-color: var(--fulcrum-accent); }
+.chat-actions button { min-height: 40px; padding: 8px 10px; border-color: var(--fulcrum-border); }
+.chat-actions button:focus-visible { border-color: var(--fulcrum-accent); }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--fulcrum-ok); }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
 .header-overflow, .header-menu { display: none; }
@@ -101,7 +103,10 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .record-detail dt { color: var(--fulcrum-muted); }
 .record-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .record-detail .match-note { margin: 12px 0 0; color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
-.transcript { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+/* a page's own layout blocks (forms, lists, metrics) can be tall; .transcript keeps a usable
+   floor so the chat and the empty-chat starters stay reachable, and .layout-blocks (which
+   already scrolls) gives up space first. */
+.transcript { position: relative; flex: 1 1 auto; min-height: min(260px, 40dvh); overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 /* one jump control: fulcrum's counts only new rows, so achilles owns it and text-only growth is covered too */
 .transcript [data-part="jump-to-latest-lane"] { display: none; }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
@@ -118,7 +123,10 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer-status"][data-tone="warning"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; height: auto; min-height: 20px; padding: 8px; overflow: visible; border: 1px solid var(--fulcrum-warn); color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 9%, transparent); font-size: var(--achilles-ui-size, 14px); font-weight: 600; line-height: 1.4; white-space: normal; text-overflow: clip; }
 .main-pane [data-part="composer-status"][data-tone="warning"] [data-part="composer-message"] { flex: 1 1 320px; text-wrap: pretty; }
 .main-pane [data-part="composer-dismiss"] { --action: var(--fulcrum-warn); background: transparent; color: var(--fulcrum-warn); }
-.empty-chat { position: absolute; z-index: 1; inset-inline: max(24px, calc((100% - 880px) / 2)); margin: min(20vh, 180px) auto 32px; max-width: 880px; }
+/* fills the transcript's box exactly (never taller) and scrolls its own content, so a tall
+   page above it (layout-blocks) or a short viewport never pushes starters under the composer;
+   see minor-7 and A-2/A-4 in firstrun-c028cdd.md and firstrun-e797f07.md. */
+.empty-chat { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; padding: min(20vh, 180px) max(24px, calc((100% - 880px) / 2)) 32px; }
 .empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; font-size: clamp(24px, 4vw, 36px); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .empty-chat p { max-width: 68ch; color: var(--fulcrum-muted); line-height: 1.7; }
 .chat-starters { margin-top: 30px; border-top: 1px solid var(--fulcrum-border); }
@@ -195,6 +203,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .drawer-open .drawer-scrim { opacity: 1; pointer-events: auto; }
   .main-pane { height: 100%; }
   .menu-button { position: absolute; z-index: 2; top: 9px; left: 12px; display: block; width: 40px; height: 40px; font-size: 20px; }
+  .skip-link:focus { top: 56px; }
   .chat-header { padding: 0 12px 0 64px; }
   .chat-heading { display: block; }
   .chat-heading strong { display: block; max-width: calc(100vw - 150px); }
@@ -213,8 +222,11 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
   [data-part="approval"] button { min-height: 40px; }
   .connection-banner { align-items: flex-start; padding: 8px 12px; }
-  .chat-starters button { grid-template-columns: 24px 1fr; }
-  .chat-starters i { display: none; }
+  /* less top padding than the desktop rule: at narrow widths there is less room to spare, so
+     content starts close to the top instead of visually centering. */
+  .empty-chat { padding: 16px 12px 24px; }
+  .chat-starters button { grid-template-columns: 24px 1fr; grid-template-rows: auto auto; row-gap: 4px; min-height: 60px; }
+  .chat-starters i { display: block; grid-column: 2; }
   .main-pane [data-part="composer"] button { min-height: 40px; }
   .full-state > .primary { min-height: 44px; }
 }

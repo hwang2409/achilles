@@ -145,7 +145,7 @@ export async function assertServerAskWins(page: Page, id: string, frames: Frame[
 
 export async function gateCreationApprovalDefaults(page: Page, frames: () => Frame[], approvalModeResponse: ApprovalModeResponse, gateWait: GateWait): Promise<void> {
   const initial = await sessionId(page);
-  await page.getByRole("button", { name: "new chat" }).click();
+  await page.locator("button.new-chat").click();
   await gateWait.playwright(page, "waitForFunction", (previous) => document.querySelector("[data-session-id]")?.getAttribute("data-session-id") !== previous, initial);
   const allowId = await sessionId(page);
   if (!allowId || approvalModeResponse("set_settings", allowId) !== "allow") throw new Error("default-on new chat did not use allow mode");
@@ -157,7 +157,7 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   await approvalDefault.click();
   await page.getByRole("button", { name: "esc" }).click();
 
-  await page.getByRole("button", { name: "new chat" }).click();
+  await page.locator("button.new-chat").click();
   await gateWait.playwright(page, "waitForFunction", (previous) => document.querySelector("[data-session-id]")?.getAttribute("data-session-id") !== previous, allowId);
   const askId = await sessionId(page);
   if (!askId || approvalModeResponse("session_settings", askId) !== "ask") throw new Error("default-off new chat did not use ask mode");

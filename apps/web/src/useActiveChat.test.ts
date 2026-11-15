@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, pageDeliverySteer, persistChatState, persistUntitledChatTitle } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, pageDeliverySteer, persistChatState, persistFirstMessage } from "./useActiveChat";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -151,7 +151,7 @@ function attachmentClient(onRequest?: (method: string, params?: unknown) => void
       if (method === "status") return { session: { session_id: "created-on-zeta" }, state: "idle" };
       throw new Error(`unexpected ${method}`);
     },
-    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
     replayRevision: () => 1,
     finishReplay: () => true,
   };
@@ -238,12 +238,20 @@ describe("untitled chat delivery", () => {
       sends += 1;
       draft = draft.slice("sent text".length);
       clears += 1;
-      persistUntitledChatTitle("session", "sent text", () => {});
+      persistFirstMessage("session", "sent text", () => {});
       await Promise.resolve();
       expect(draft).toBe(" plus new");
       expect(clears).toBe(1);
       expect(sends).toBe(1);
     } finally { globalThis.fetch = originalFetch; console.error = originalError; }
+  });
+});
+
+describe("chat title cut", () => {
+  test("an emoji across the 200-character edge stays whole or is dropped, never halved", () => {
+    const title = cutTitle(`  ${"a".repeat(199)}😀😀 `);
+    expect(title).toBe(`${"a".repeat(199)}😀`);
+    expect(cutTitle("😀".repeat(300))).toBe("😀".repeat(200));
   });
 });
 
@@ -268,7 +276,7 @@ describe("active chat attachment", () => {
         if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
         throw new Error(`unexpected ${method}`);
       },
-      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
       replayRevision: () => 1,
       finishReplay: () => true,
     };
@@ -277,6 +285,36 @@ describe("active chat attachment", () => {
       const ready = await attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
       expect(ready).toMatchObject({ phase: "ready", title: "my custom title" });
       expect(patched).toBe(false);
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
+  test("clearing a user title falls back to the first-message title", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("chat"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ session_id: "chat", page_id: "home", title: "bird notes", first_title: "second chat about birds", titled_by_user: true, message_sent: true }], next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = {
+      features: ["session_mcp_bindings"],
+      request: async (method: string) => {
+        if (method === "resume") return { session: {} };
+        if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
+        throw new Error(`unexpected ${method}`);
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
+    const owner = createAttachmentOwner();
+    try {
+      const ready = await attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
+      // `rename` with an empty value shows autoTitle, so this is the title a clear reverts to
+      expect(ready).toMatchObject({ phase: "ready", title: "bird notes", autoTitle: "second chat about birds" });
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
 
@@ -301,7 +339,7 @@ describe("active chat attachment", () => {
         if (method === "status") { statusRequests += 1; if (statusRequests === 2) { reached(); await statusGate; } return { session: { session_id: "s" }, state: "idle" }; }
         throw new Error(`unexpected ${method}`);
       },
-      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() { releases += 1; } }; },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() { releases += 1; } }; },
     };
     const owner = createAttachmentOwner();
     const operation = attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
@@ -414,7 +452,7 @@ describe("attachment while a turn runs", () => {
         if (method === "session_history") return { messages: [], next_offset: null };
         throw new Error(`unexpected ${method}`);
       },
-      replay: async (_id: string, refresh: () => Promise<typeof events>) => { events = await refresh(); return { store: { resync(next: typeof events) { events = next; } }, release() {} }; },
+      replay: async (_id: string, refresh: () => Promise<typeof events>) => { events = await refresh(); return { store: { getState: () => ({ outline: [] }), resync(next: typeof events) { events = next; } }, release() {} }; },
     };
     const owner = createAttachmentOwner();
     try {
@@ -423,6 +461,22 @@ describe("attachment while a turn runs", () => {
       expect(result).toMatchObject({ phase: "ready", sessionId: "waiting", rebind: true });
       expect(events.filter((event) => event.type === "approval_request").map((event) => event.request_id)).toEqual(["c1"]);
       expect(methods).not.toContain("resume");
+    } finally { owner.clear(); }
+  });
+
+  test("an opened chat with a turn but no first-message record repairs it from its history", async () => {
+    const user = { type: "user", event: { type: "user_message", text: "  plan the trip  ", mode: "normal" } };
+    const client = { ...attachmentClient(), replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [{ id: "u1" }] }), getItem: () => user, resync() {} }, release() {} }; } };
+    const patches: unknown[] = [];
+    const fetcher = (async (resource: string | URL | Request, init?: RequestInit) => {
+      if (String(resource) === "/api/chats/lost" && init?.method === "PATCH") { patches.push(JSON.parse(String(init.body))); return Response.json({}); }
+      return pageFetch([{ session_id: "lost", page_id: "home", title: null, message_sent: false }])(resource, init);
+    }) as typeof fetch;
+    const owner = createAttachmentOwner();
+    try {
+      const result = await withFetch(fetcher, () => attachPage(client as never, "home", "lost", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("lost", true)));
+      expect(result).toMatchObject({ phase: "ready", title: "plan the trip" });
+      expect(patches).toEqual([{ first_message: "plan the trip" }]);
     } finally { owner.clear(); }
   });
 
@@ -499,7 +553,7 @@ describe("chat creation lifecycle", () => {
         if (method === "send") { deliveries += 1; return {}; }
         throw new Error(`unexpected ${method}`);
       },
-      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
       replayRevision: () => 1,
       finishReplay: () => true,
     };

@@ -1460,7 +1460,7 @@ try {
   const registrationFailure = (response: { request(): { method(): string }; url(): string; status(): number }) => response.request().method() === "POST" && response.url() === registrationFailureUrl && response.status() === 503;
   await expectBrowserErrors(page, registrationExpected, async () => {
     const firstFailure = gateWait.playwright(page, "waitForResponse", registrationFailure);
-    await page.getByRole("button", { name: "new chat" }).click();
+    await page.locator("button.new-chat").click();
     await firstFailure;
     await gateWait.playwright(retryRegistration, "waitFor", { timeout: 20_000 });
     const secondFailure = gateWait.playwright(page, "waitForResponse", registrationFailure);

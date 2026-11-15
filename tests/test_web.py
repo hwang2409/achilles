@@ -522,7 +522,10 @@ def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) ->
 def test_patch_chat_updates_fields_and_validates_input() -> None:
     client = chat_client()
     client.post("/api/pages/home/chats", json={"session_id": "editable"})
-    assert client.get("/api/chats?limit=1").json()["chats"][0]["titled_by_user"] is False
+    assert (
+        client.get("/api/chats?limit=1&include=editable").json()["chats"][0]["titled_by_user"]
+        is False
+    )
     response = client.patch(
         "/api/chats/editable",
         json={"title": "renamed", "last_state": "approval", "titled_by_user": True},
@@ -841,3 +844,99 @@ def test_discovery_rejects_invalid_port(monkeypatch, tmp_path: Path, port: objec
         headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
     )
     assert response.status_code == 503
+
+
+def test_chat_list_shows_a_chat_only_after_its_first_message(tmp_path: Path) -> None:
+    client = chat_client()
+    client.post("/api/pages/home/chats", json={"session_id": "sent"})
+    first = client.patch("/api/chats/sent", json={"first_message": "  about birds  "}).json()
+    client.post("/api/pages/home/chats", json={"session_id": "draft"})
+    assert first["message_sent"] is True
+    assert first["first_title"] == first["title"] == "about birds"
+    # the never-sent chat is newest, yet the list and its count come only from sent chats
+    listed = client.get("/api/chats?limit=1").json()
+    assert [row["session_id"] for row in listed["chats"]] == ["sent"]
+    assert listed["next"] is None
+    included = client.get("/api/chats?include=draft").json()["chats"]
+    assert [(row["session_id"], row["message_sent"]) for row in included] == [
+        ("draft", False),
+        ("sent", True),
+    ]
+    again = client.patch("/api/chats/sent", json={"first_message": "later text"}).json()
+    assert again["first_title"] == "about birds"
+    client.patch("/api/chats/sent", json={"title": "bird notes", "titled_by_user": True})
+    cleared = client.patch("/api/chats/sent", json={"title": None, "titled_by_user": False})
+    assert cleared.json()["title"] is None
+    assert cleared.json()["first_title"] == "about birds"
+    assert [row["session_id"] for row in client.get("/api/chats?q=birds").json()["chats"]] == [
+        "sent"
+    ]
+    for body in ({"first_message": 1}, {"first_message": "x" * 201}):
+        assert client.patch("/api/chats/sent", json=body).status_code == 400
+
+
+def test_a_chat_whose_turn_ran_is_listed_without_its_first_message_record() -> None:
+    client = chat_client()
+    for session_id in ("ran", "draft"):
+        client.post("/api/pages/home/chats", json={"session_id": session_id})
+    # the first-message PATCH was lost, but the run state proves a turn ran
+    assert client.patch("/api/chats/ran", json={"last_state": "running"}).json()["message_sent"]
+    assert not client.patch("/api/chats/draft", json={"last_state": "idle"}).json()["message_sent"]
+    listed = client.get("/api/chats").json()["chats"]
+    assert [row["session_id"] for row in listed] == ["ran"]
+
+
+def test_a_first_message_cut_through_an_emoji_is_stored_without_the_half() -> None:
+    client = chat_client()
+    client.post("/api/pages/home/chats", json={"session_id": "cut"})
+    # a lone surrogate (half an emoji) must never reach sqlite, which cannot encode it
+    body = '{"first_message": "' + "a" * 199 + '\\ud83d"}'
+    response = client.patch(
+        "/api/chats/cut", content=body, headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 200
+    assert response.json()["first_title"] == "a" * 199
+    assert response.json()["message_sent"] is True
+    renamed = client.patch(
+        "/api/chats/cut",
+        content='{"title": "x\\ude00", "titled_by_user": true}',
+        headers={"content-type": "application/json"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "x"
+
+
+def test_chats_from_a_database_without_the_sent_marker_stay_listed(tmp_path: Path) -> None:
+    home = tmp_path / "achilles"
+    home.mkdir(mode=0o700)
+    with sqlite3.connect(home / "achilles.sqlite3") as db:
+        db.execute(
+            "CREATE TABLE page (id TEXT PRIMARY KEY, route TEXT NOT NULL UNIQUE, "
+            "title TEXT NOT NULL, zeta_session_id TEXT, active_layout_version INTEGER, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        db.execute(
+            "CREATE TABLE chat (session_id TEXT PRIMARY KEY, page_id TEXT NOT NULL, title TEXT, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_state TEXT, "
+            "titled_by_user INTEGER NOT NULL DEFAULT 0)"
+        )
+        db.execute("INSERT INTO page VALUES ('home','/','home',NULL,NULL,'t','t')")
+        db.executemany(
+            "INSERT INTO chat VALUES (?,?,?,?,?,?,?)",
+            [
+                ("named", "home", "old first message", "t1", "t1", None, 0),
+                ("renamed", "home", "user name", "t2", "t2", None, 1),
+                ("untitled", "home", None, "t3", "t3", None, 0),
+            ],
+        )
+        db.execute("PRAGMA user_version = 3")
+    rows = chat_client().get("/api/chats").json()["chats"]
+    assert {
+        row["session_id"]: (row["message_sent"], row["title"], row["first_title"]) for row in rows
+    } == {
+        "named": (True, "old first message", "old first message"),
+        "renamed": (True, "user name", None),
+        "untitled": (True, None, None),
+    }
+    with sqlite3.connect(home / "achilles.sqlite3") as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
