@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -15,10 +15,11 @@ export type TaskCheck = {
   synonyms?: string[];
   step?: string;
   max?: number;
+  fields?: string[];
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
 export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> } };
-export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
+export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown>; data_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" | "hard" };
 export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>; tools?: Array<Record<string, unknown>>; assignments?: Array<Record<string, unknown>>;
@@ -34,7 +35,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -44,7 +45,7 @@ function validateSetup(value: unknown): TaskSetup | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("setup must be an object");
   own(value, ["tools", "records", "initial_layout"], "setup"); const setup = value as TaskSetup;
   if (!Array.isArray(setup.tools) || !Array.isArray(setup.records)) throw new Error("setup tools and records must be arrays");
-  setup.tools.forEach((tool, i) => { own(tool, ["name", "operation", "collection", "input_schema"], `setup.tools[${i}]`); if (!identifier(tool.name) || !["list", "get", "insert", "update"].includes(tool.operation) || !identifier(tool.collection) || (tool.input_schema !== undefined && (!tool.input_schema || typeof tool.input_schema !== "object" || Array.isArray(tool.input_schema)))) throw new Error(`invalid setup.tools[${i}]`); });
+  setup.tools.forEach((tool, i) => { own(tool, ["name", "operation", "collection", "input_schema", "data_schema"], `setup.tools[${i}]`); if (!identifier(tool.name) || !["list", "get", "insert", "update"].includes(tool.operation) || !identifier(tool.collection) || [tool.input_schema, tool.data_schema].some(schema => schema !== undefined && (!schema || typeof schema !== "object" || Array.isArray(schema)))) throw new Error(`invalid setup.tools[${i}]`); });
   setup.records.forEach((record, i) => { own(record, ["id", "collection", "data"], `setup.records[${i}]`); if (typeof record.id !== "string" || !identifier(record.collection) || !record.data || typeof record.data !== "object" || Array.isArray(record.data)) throw new Error(`invalid setup.records[${i}]`); });
   if (setup.initial_layout !== undefined && (!setup.initial_layout || !Array.isArray(setup.initial_layout.blocks))) throw new Error("invalid setup.initial_layout");
   return setup;
@@ -126,6 +127,15 @@ function validateCheckShape(check: TaskCheck, i: number) {
     own(value, ["string", "number", "integer"], `checks[${i}].value`);
     for (const kind of ["number", "integer"] as const) if (value[kind] !== undefined && (typeof value[kind] !== "string" || !Number.isFinite(Number(value[kind])) || (kind === "integer" && !Number.isInteger(Number(value[kind]))))) throw new Error(`checks[${i}].value.${kind} must be a ${kind} string`);
   }
+  if (check.fields !== undefined && (check.type !== "list_shows" || check.collection === undefined || !Array.isArray(check.fields) || !check.fields.length || !check.fields.every(identifier))) throw new Error(`checks[${i}] fields must be a list_shows check with a collection and field names`);
+  // approval_outcomes: which records the tool's approval requests must target, and what an approved write sets
+  if (check.type === "approval_outcomes") {
+    const value = check.value as Record<string, unknown>;
+    if (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || !identifier(check.collection) || !value || typeof value !== "object" || Array.isArray(value)) throw new Error(`checks[${i}] needs an achilles tool, a collection, and a value`);
+    own(value, ["records", "set"], `checks[${i}].value`);
+    const set = value.set as Record<string, unknown>;
+    if (!Array.isArray(value.records) || !value.records.length || !value.records.every(id => typeof id === "string") || new Set(value.records).size !== value.records.length || !set || typeof set !== "object" || Array.isArray(set) || !Object.keys(set).length) throw new Error(`checks[${i}] needs unique record ids and a non-empty set`);
+  }
   if (check.step !== undefined && check.type !== "answer_mentions") throw new Error(`checks[${i}] has an unused step`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
 }
@@ -134,7 +144,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms", "step", "max"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms", "step", "max", "fields"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -150,7 +160,7 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "collection", // fixed data-source field in list and detail blocks
 ]);
 // form_submit values are input the harness types, not expectations
-const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["form_submit", "operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count", "tool_evolution"]);
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["approval_outcomes", "form_submit", "operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count", "tool_evolution"]);
 function nestedTokens(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
@@ -206,6 +216,14 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
   for (const token of nestedTokens(setup?.initial_layout)) declared.add(token);
   for (const check of checks.filter(check => check.type === "answer_mentions")) for (const value of check.value as string[]) {
     if (!seededFact(value, setup)) throw new Error(`check ${check.id} expects ${JSON.stringify(value)} in the answer, which is not a seeded record value or count`);
+  }
+  for (const check of checks) {
+    for (const field of check.fields ?? []) if (!promptText.includes(field) && !declared.has(field)) throw new Error(`check ${check.id} expects list field ${JSON.stringify(field)} without a prompt quote or declared schema`);
+    if (check.type !== "approval_outcomes") continue;
+    const value = check.value as { records: string[]; set: Record<string, unknown> };
+    for (const id of value.records) if (!setup?.records.some(record => record.id === id && record.collection === check.collection)) throw new Error(`check ${check.id} names record ${JSON.stringify(id)}, which is not seeded in ${check.collection}`);
+    for (const token of nestedTokens(value.set)) if (!promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
+    if (!declared.has(check.tool!.replace(/^achilles__/, ""))) throw new Error(`check ${check.id} names undeclared tool ${check.tool}`);
   }
   for (const check of checks.filter(check => check.type !== "answer_mentions")) for (const token of expectationTokens(check)) {
     // Count names select a closed snapshot collection; layout checks use a fixed document envelope.
@@ -395,6 +413,29 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (typeof answer !== "string") return { reason: `no final answer captured for step ${check.step}` } satisfies CheckFailure;
     return (check.value as string[]).some(value => mentions(answer, value)) || { reason: `answer mentions none of ${JSON.stringify(check.value)}: ${JSON.stringify(answer.slice(0, 500))}` } satisfies CheckFailure;
   },
+  // the tool's approval requests target exactly the expected records; an approved record ends with `set`,
+  // a denied record is never asked again and keeps its seed data, and every other record keeps its seed data
+  approval_outcomes: ({ check, snapshot, page, owned }) => {
+    const { records: expected, set } = check.value as { records: string[]; set: Record<string, unknown> };
+    const calls = new Map(rows(snapshot, "calls").map(call => [call.id, call]));
+    const requests = owned("approvals").filter(row => row.tool === check.tool).map(row => {
+      const args = calls.get(row.request_id)?.arguments as Record<string, unknown> | undefined;
+      return { record: typeof args?.record_id === "string" ? args.record_id : undefined, decision: row.decision === "deny" ? "deny" : "approve" };
+    });
+    if (requests.some(request => request.record === undefined)) return { reason: `an approval request for ${check.tool} has no record_id` } satisfies CheckFailure;
+    const asked = [...new Set(requests.map(request => request.record!))].sort();
+    if (JSON.stringify(asked) !== JSON.stringify([...expected].sort())) return { reason: `asked to write ${JSON.stringify(asked)}, expected ${JSON.stringify([...expected].sort())}`, evidence: { asked } } satisfies CheckFailure;
+    const retried = requests.find((request, index) => request.decision === "deny" && requests.slice(index + 1).some(later => later.record === request.record));
+    if (retried) return { reason: `asked again to write ${retried.record} after it was denied` } satisfies CheckFailure;
+    const data = (source: EvalSnapshot, id: string) => { const row = rows(source, "records").find(record => record.page_id === page && record.collection === check.collection && (record.id ?? record.record_id) === id); return row?.data ?? row; };
+    const ids = new Set([...rows(snapshot.initial ?? {}, "records").filter(row => row.page_id === page), ...owned("records")].filter(row => row.collection === check.collection).map(row => String(row.id ?? row.record_id)));
+    for (const id of ids) {
+      const approved = requests.some(request => request.record === id && request.decision === "approve");
+      if (approved && !structurallyContains(data(snapshot, id), set)) return { reason: `approved record ${id} does not have ${JSON.stringify(set)}`, evidence: { record: id, data: data(snapshot, id) } } satisfies CheckFailure;
+      if (!approved && !sameSeedValue(data(snapshot, id), data(snapshot.initial ?? {}, id))) return { reason: `record ${id} changed without an approved write`, evidence: { record: id, before: data(snapshot.initial ?? {}, id), after: data(snapshot, id) } } satisfies CheckFailure;
+    }
+    return true;
+  },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   reconnect: ({ owned }) => owned("reconnects").some(row => row.original_session_id === row.resumed_session_id && row.history_continuity === true),
   record: ({ check, owned }) => owned("records").some(row => structurallyContains(row.data ?? row, check.value)),
@@ -462,6 +503,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
       const collection = typeof list.collection === "string" ? list.collection : recordCollections.length === 1 ? recordCollections[0] : undefined;
       if (check.collection !== undefined && collection !== check.collection) { failure = { reason: `list on ${String(collection)}, expected ${check.collection}` }; continue; }
       if (collection === undefined) { failure = { reason: "list has no collection" }; continue; }
+      if (check.fields && JSON.stringify(list.fields) !== JSON.stringify(check.fields)) { failure = { reason: `list on ${collection} has fields ${JSON.stringify(list.fields ?? null)}, expected ${JSON.stringify(check.fields)} in that order` }; continue; }
       if (check.value === undefined) return true;
       const selected = selectBlockRecords(list, owned("records").filter(record => record.collection === collection), true)!;
       if (selected.records.some(record => record.data && typeof record.data === "object" && !Array.isArray(record.data) && Object.values(record.data).some(value => value === check.value))) return true;

@@ -1,0 +1,154 @@
+{
+  "id": "projects-tasks-two-pages",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "projects",
+      "source": "created",
+      "bind_chat": true,
+      "create_mode": false,
+      "route": "/projects"
+    },
+    {
+      "alias": "tasks",
+      "source": "created",
+      "bind_chat": true,
+      "create_mode": false,
+      "route": "/tasks"
+    }
+  ],
+  "agent_turns": 18,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "build two linked pages. /projects keeps the projects collection, with tools add_project (fields id and name) and list_projects, a list block of projects, and a detail block that shows the project whose id is apollo. /tasks keeps the tasks collection, with tools add_task (fields title, project_id, status) and list_tasks, where project_id holds a project's id. on /tasks put first a metric block that counts tasks whose project_id is apollo, then a list block of tasks with fields title, status, project_id in that order"
+    },
+    {
+      "id": "add-projects",
+      "kind": "prompt",
+      "page": "projects",
+      "chat": "projects-chat",
+      "prompt": "add two projects: id apollo named Apollo, and id zephyr named Zephyr"
+    },
+    {
+      "id": "add-tasks",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "add three tasks: write spec for project apollo with status open, ship v1 for project apollo with status done, and pick logo for project zephyr with status open. then check this page's metric"
+    }
+  ],
+  "checks": [
+    {
+      "id": "projects-page",
+      "type": "page_exists",
+      "page": "projects",
+      "route": "/projects"
+    },
+    {
+      "id": "tasks-page",
+      "type": "page_exists",
+      "page": "tasks",
+      "route": "/tasks"
+    },
+    {
+      "id": "project-tool",
+      "type": "tool",
+      "page": "projects",
+      "name": "add_project"
+    },
+    {
+      "id": "task-tool",
+      "type": "tool",
+      "page": "tasks",
+      "name": "add_task"
+    },
+    {
+      "id": "projects",
+      "type": "records_exact",
+      "page": "projects",
+      "value": [
+        {
+          "id": "apollo",
+          "name": "Apollo"
+        },
+        {
+          "id": "zephyr",
+          "name": "Zephyr"
+        }
+      ]
+    },
+    {
+      "id": "tasks",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "write spec",
+          "project_id": "apollo",
+          "status": "open"
+        },
+        {
+          "title": "ship v1",
+          "project_id": "apollo",
+          "status": "done"
+        },
+        {
+          "title": "pick logo",
+          "project_id": "zephyr",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "id": "project-detail",
+      "type": "detail_selects",
+      "page": "projects",
+      "collection": "projects",
+      "value": "apollo"
+    },
+    {
+      "id": "project-list",
+      "type": "list_shows",
+      "page": "projects",
+      "collection": "projects"
+    },
+    {
+      "id": "apollo-metric",
+      "type": "metric_count",
+      "page": "tasks",
+      "value": {
+        "collection": "tasks",
+        "where": {
+          "field": "project_id",
+          "equals": "apollo"
+        },
+        "count": 2,
+        "position": "first"
+      }
+    },
+    {
+      "id": "task-columns",
+      "type": "list_shows",
+      "page": "tasks",
+      "collection": "tasks",
+      "fields": [
+        "title",
+        "status",
+        "project_id"
+      ]
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
+  ]
+}

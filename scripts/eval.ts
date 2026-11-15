@@ -81,10 +81,10 @@ async function preflightBrowser(tasks: EvalTask[]) {
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
 
-const bundle = (name: string, operation: string, collection: string, input_schema?: Record<string, unknown>) => {
+const bundle = (name: string, operation: string, collection: string, input_schema?: Record<string, unknown>, data_schema: Record<string, unknown> = { type: "object", additionalProperties: true }) => {
   const record = { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] };
   const output_schema = operation === "list" ? { type: "array", items: record } : operation === "get" ? { anyOf: [record, { type: "null" }] } : record;
-  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: input_schema ?? (operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }), output_schema, implementation: { operation, collection, data_schema: { type: "object", additionalProperties: true } } };
+  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: input_schema ?? (operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }), output_schema, implementation: { operation, collection, data_schema } };
 };
 const CAPABILITIES_SCRIPT = `
 import inspect, json
@@ -123,7 +123,7 @@ if hasattr(store, "inspect_page"):
 else:
     page = store.page(page_id); summary = {"layout": {"version": page["active_layout_version"] or 1}}
 tools = store.page_tools(page_id)
-summary["tools"] = [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"], "input_schema": tool["input_schema"]} for tool in tools]
+summary["tools"] = [{"name": tool["name"], "operations": [tool["implementation"]["operation"]], "collection": tool["implementation"]["collection"], "input_schema": tool["input_schema"], "data_schema": tool["implementation"]["data_schema"]} for tool in tools]
 collections = {item["collection"] for item in setup.get("records", [])}
 print(json.dumps({"inspect": summary, "layout": layout, "records": {collection: store.records(page_id, collection)[0] for collection in collections}}))
 `;
@@ -156,7 +156,7 @@ export async function preparePage(stack: EvalStack, task: EvalTask, signal: Abor
   }
   const plan = task.page_plan.find(page => page.source !== "created" && !page.route);
   if (task.setup) {
-    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
+    const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema, tool.data_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
     verifySetup(task.setup, JSON.parse(process.stdout));

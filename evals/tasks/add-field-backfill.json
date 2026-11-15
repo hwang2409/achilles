@@ -1,0 +1,196 @@
+{
+  "id": "add-field-backfill",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "contacts",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 14,
+  "steps": [
+    {
+      "id": "add-company",
+      "kind": "prompt",
+      "page": "contacts",
+      "chat": "author-chat",
+      "prompt": "my contacts need a company. add an optional company field to add_contact, show company in the contacts list between name and email, and fill it in for the existing contacts: Ana Ruiz and Ben Okafor work at Acme, Cara Lind works at Globex. leave the others without a company"
+    },
+    {
+      "id": "use-company",
+      "kind": "prompt",
+      "page": "contacts",
+      "chat": "fresh-chat",
+      "prompt": "add Dee Park, dee@example.test, who works at Globex"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ]
+        }
+      },
+      {
+        "name": "list_contacts",
+        "operation": "list",
+        "collection": "contacts"
+      },
+      {
+        "name": "update_contact",
+        "operation": "update",
+        "collection": "contacts"
+      }
+    ],
+    "records": [
+      {
+        "id": "c-1",
+        "collection": "contacts",
+        "data": {
+          "name": "Ana Ruiz",
+          "email": "ana@example.test"
+        }
+      },
+      {
+        "id": "c-2",
+        "collection": "contacts",
+        "data": {
+          "name": "Ben Okafor",
+          "email": "ben@example.test"
+        }
+      },
+      {
+        "id": "c-3",
+        "collection": "contacts",
+        "data": {
+          "name": "Cara Lind",
+          "email": "cara@example.test"
+        }
+      },
+      {
+        "id": "c-4",
+        "collection": "contacts",
+        "data": {
+          "name": "Eli Moss",
+          "email": "eli@example.test"
+        }
+      },
+      {
+        "id": "c-5",
+        "collection": "contacts",
+        "data": {
+          "name": "Fay Chen",
+          "email": "fay@example.test"
+        }
+      }
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "list",
+          "title": "Contacts",
+          "collection": "contacts",
+          "fields": [
+            "name",
+            "email"
+          ]
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "backfilled",
+      "type": "records_exact",
+      "page": "contacts",
+      "value": [
+        {
+          "name": "Ana Ruiz",
+          "company": "Acme"
+        },
+        {
+          "name": "Ben Okafor",
+          "company": "Acme"
+        },
+        {
+          "name": "Cara Lind",
+          "company": "Globex"
+        },
+        {
+          "name": "Eli Moss",
+          "email": "eli@example.test"
+        },
+        {
+          "name": "Fay Chen",
+          "email": "fay@example.test"
+        },
+        {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex"
+        }
+      ]
+    },
+    {
+      "id": "new-contact",
+      "type": "successful_result",
+      "page": "contacts",
+      "chat": "fresh-chat",
+      "tool": "achilles__add_contact",
+      "value": {
+        "name": "Dee Park",
+        "company": "Globex"
+      }
+    },
+    {
+      "id": "company-column",
+      "type": "list_shows",
+      "page": "contacts",
+      "collection": "contacts",
+      "fields": [
+        "name",
+        "company",
+        "email"
+      ]
+    },
+    {
+      "id": "updates-recovered",
+      "type": "no_unrecovered_error",
+      "page": "contacts",
+      "tool": "achilles__update_contact"
+    }
+  ]
+}
