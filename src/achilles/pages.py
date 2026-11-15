@@ -345,23 +345,29 @@ def _validate_layout_filter(
     if field in fields:
         return
 
-    listed = ", ".join(sorted(fields)) or "(none)"
-    hint = (
-        f"Use a field from the {block['collection']} collection schema. "
-        f"Unknown field: {field}. Collection fields: {listed}."
-    )
     suggestion = (
         suggest_field(block["collection"], field, field_filter["equals"], fields)
         if suggest_field is not None
         else None
     )
-    if suggestion is not None:
-        hint += f" Did you mean {suggestion}?"
     raise ValidationError(
         f"{prefix}/blocks/{index}/{filter_name}/field",
         "field in collection schema",
-        hint=hint,
+        hint=unknown_field_hint(block["collection"], field, fields, suggestion),
     )
+
+
+def unknown_field_hint(
+    collection: str, field: str, fields: set[str], suggestion: str | None
+) -> str:
+    listed = ", ".join(sorted(fields)) or "(none)"
+    hint = (
+        f"Use a field from the {collection} collection schema. "
+        f"Unknown field: {field}. Collection fields: {listed}."
+    )
+    if suggestion is not None:
+        hint += f" Did you mean {suggestion}?"
+    return hint
 
 
 def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
