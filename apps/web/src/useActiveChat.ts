@@ -347,6 +347,8 @@ export async function deliverChatMessage(
 ): Promise<"send" | "steer"> {
   const first: "send" | "steer" = steer ? "steer" : "send";
   let used = first;
+  // tracked before the request: zeta echoes an accepted message before it answers
+  track(deliveryId);
   try {
     await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId });
   } catch (error) {
@@ -357,17 +359,14 @@ export async function deliverChatMessage(
     used = steer ? "send" : "steer";
     await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId });
   }
-  if (used === "steer") await confirmSteerDelivery(client, deliveryId, track);
-  else track(deliveryId);
+  if (used === "steer") await confirmSteerDelivery(client, deliveryId);
   return used;
 }
 
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
   deliveryId: string,
-  track: (id: string) => void,
 ): Promise<string> {
-  track(deliveryId);
   for (;;) {
     const result: unknown = await client.request("delivery_status", { delivery_id: deliveryId }, { timeoutMs: 1_000 });
     if (!result || typeof result !== "object") throw new Error("invalid steer delivery status");

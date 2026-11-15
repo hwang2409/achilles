@@ -63,8 +63,10 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* no durable hover on touch, so keep it visible there, just quieter than the old always-on opacity */
 @media (pointer: coarse) { .chat-row-rename { opacity: .35; } }
 /* editing drops the pencil, so the input can use the row's full width instead of the pencil's gutter */
-.chat-row.editing { padding: 10px 16px; }
-.chat-row-edit { box-sizing: border-box; width: 100%; min-height: 40px; margin: 0; padding: 10px 16px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; color: inherit; }
+/* the editor sits over the hidden title in one grid cell, so the row keeps its height and its page/time line */
+.chat-row.editing { display: grid; }
+.chat-row.editing > strong { grid-area: 1 / 1; visibility: hidden; }
+.chat-row-edit { grid-area: 1 / 1; align-self: stretch; box-sizing: border-box; width: calc(100% + 48px); min-width: 0; margin: -6px -40px -6px -8px; padding: 0 7px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 13px; color: inherit; }
 .load-older { width: calc(100% - 32px); height: 40px; margin: 12px 16px; }
 .sidebar > footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
 .sidebar > footer > button { flex: 1; height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
