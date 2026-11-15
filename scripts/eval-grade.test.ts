@@ -537,3 +537,27 @@ test("a denied step accepts only ask-mode prompt steps, and approval max bounds 
     expect(gradeReference(denied, snapshot).status, `${count} approvals`).toBe(status);
   }
 });
+
+test("form_submit passes on one new record and names the field a chat-only form needs", () => {
+  const check = validateTask(readingListTaskJson).checks.find(item => item.type === "form_submit")!;
+  expect(check.required).toBe(false);
+  const graded = (rows: Array<Record<string, unknown>>) => gradeCheck(check, { pages: [{ id: "reading-id", alias: "reading" }], form_submits: rows.map(row => ({ page_id: "reading-id", tool: "add_book", collection: "books", ...row })) });
+  expect(graded([{ status: 200, new_records: 1 }]).pass).toBe(true);
+  const chatOnly = graded([{ unsupported: "tags" }]);
+  expect(chatOnly.pass).toBe(false);
+  expect(chatOnly.reason).toContain("this form needs the chat");
+  expect(chatOnly.evidence).toMatchObject({ tool: "add_book", field: "tags" });
+  expect(graded([{ status: 200, new_records: 2 }]).reason).toContain("added 2 records");
+  expect(graded([{ status: 200, new_records: 0 }]).pass).toBe(false);
+  expect(graded([{ status: 422, error: "submit failed (422)" }]).pass).toBe(false);
+  expect(graded([]).reason).toBe("the page has no insert form");
+});
+
+test("form_submit needs a value map of input strings", () => {
+  const withValue = (value: unknown) => () => validateTask({ ...readingListTaskJson, checks: [{ id: "form", type: "form_submit", page: "reading", value }] });
+  expect(withValue({ string: "Form Book", integer: "2" })).not.toThrow();
+  expect(withValue(undefined)).toThrow("needs value");
+  expect(withValue({ integer: "2" })).toThrow("string value");
+  expect(withValue({ string: "x", integer: "2.5" })).toThrow("integer string");
+  expect(withValue({ string: "x", date: "2026" })).toThrow("unknown key date");
+});

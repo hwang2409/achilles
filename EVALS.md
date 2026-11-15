@@ -164,6 +164,17 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   (in a collection, or where one field equals one value) as digits or a word.
   it is a weak signal (cannot see negation, a list marker, or a record id), so
   every value must be a seeded fact, never free-form expected prose.
+- `form_submit` uses the page as a user would. after the agent steps, the
+  harness opens the page in a browser and, for each insert form block in the
+  active layout, fills every required input from the check's `value` map by the
+  input's schema type (`string` is required; `number` and `integer` are
+  optional numeric strings; an enum takes its first option; a checkbox stays
+  off), submits, and waits for the form's success state. it passes when each
+  submit adds exactly one record to the tool's collection, counted in the
+  database before and after the submit. a form that shows "this form needs the
+  chat" fails with the unsupported field name as evidence; a page with no
+  insert form fails. the `value` map is input, not an expectation, so the lint
+  does not look for it in the prompt.
 - optional `requires` / `goal_capabilities`: capabilities that gate `unsupported`
   and the "goal not reachable" label on older revisions.
 
@@ -236,7 +247,8 @@ focused-only" above):
 - `page-tool-without-create-mode`: with create mode off, add a contact using only
   the page's assigned insert tool.
 - `reading-list-one-prompt`: from one prompt, build a reading-list page, then add,
-  update, and list a book.
+  update, and list a book. a score-only (`required: false`) `form_submit`
+  check adds a book through the page's own add form.
 - `reading-metric-count`: add a metric that counts "done" books and verify it.
 - `reconnect-recovery`: write a note, reconnect, then read it back.
 - `record-crud`: insert two records, update one, then list all.
