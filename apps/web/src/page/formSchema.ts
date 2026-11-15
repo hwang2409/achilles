@@ -1,10 +1,12 @@
+type Limits = { minimum?: number; maximum?: number; minLength?: number; maxLength?: number };
 export type FormField =
-  | { name: string; kind: "string" | "number" | "integer" | "boolean"; required: boolean; description?: string }
+  | { name: string; kind: "string" | "number" | "integer" | "boolean"; required: boolean; description?: string } & Limits
   | { name: string; kind: "enum"; required: boolean; description?: string; options: unknown[] };
 
 export type FormValues = Record<string, string | boolean>;
 
 const SCALARS = new Set(["string", "number", "integer", "boolean"]);
+const LIMITS = ["minimum", "maximum", "minLength", "maxLength"] as const;
 
 // The schema is written by an agent, so anything other than a flat object of scalars or enums is refused, not guessed.
 export function formFields(schema: unknown): { fields: FormField[] } | { unsupported: string } {
@@ -17,16 +19,46 @@ export function formFields(schema: unknown): { fields: FormField[] } | { unsuppo
     if (!isObject(property)) return { unsupported: name };
     const description = typeof property.description === "string" ? property.description : undefined;
     const base = { name, required: required.has(name), ...(description ? { description } : {}) };
+    const limits = Object.fromEntries(LIMITS.filter((key) => typeof property[key] === "number").map((key) => [key, property[key]])) as Limits;
     if (Array.isArray(property.enum) && property.enum.length > 0 && property.enum.every((value) => value === null || typeof value !== "object")) fields.push({ ...base, kind: "enum", options: property.enum });
-    else if (typeof property.type === "string" && SCALARS.has(property.type) && !("enum" in property)) fields.push({ ...base, kind: property.type as "string" | "number" | "integer" | "boolean" });
+    else if (typeof property.type === "string" && SCALARS.has(property.type) && !("enum" in property)) fields.push({ ...base, kind: property.type as "string" | "number" | "integer" | "boolean", ...limits });
     else return { unsupported: name };
   }
   // Stored schemas come back with sorted keys, so the agent's order is lost; required fields lead instead.
   return { fields: [...fields.filter((field) => field.required), ...fields.filter((field) => !field.required)] };
 }
 
-export function emptyValues(fields: FormField[]): FormValues {
-  return Object.fromEntries(fields.map((field) => [field.name, field.kind === "boolean" ? false : ""]));
+// Values typed for an older schema carry over to fields that still exist with a value that still fits; the rest start empty.
+export function keepValues(fields: FormField[], values: FormValues): FormValues {
+  return Object.fromEntries(fields.map((field) => {
+    const value = values[field.name];
+    const fits = field.kind === "boolean" ? typeof value === "boolean"
+      : typeof value === "string" && (field.kind !== "enum" || value === "" || field.options.some((option) => JSON.stringify(option) === value));
+    return [field.name, fits ? value : field.kind === "boolean" ? false : ""];
+  }));
+}
+
+// The client checks what the schema states before the POST, so one submit names every problem, in field order, in plain words.
+export function formErrors(fields: FormField[], values: FormValues): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const field of fields) {
+    const value = values[field.name];
+    if (field.kind === "boolean" || typeof value !== "string") continue;
+    if (value === "") { if (field.required) errors[field.name] = field.kind === "enum" ? "pick one" : "required"; continue; }
+    if (field.kind === "enum") continue;
+    if (field.kind === "string") {
+      const length = [...value].length;
+      if (field.minLength !== undefined && length < field.minLength) errors[field.name] = `at least ${field.minLength} characters`;
+      else if (field.maxLength !== undefined && length > field.maxLength) errors[field.name] = `at most ${field.maxLength} characters`;
+      continue;
+    }
+    const number = value.trim() === "" ? NaN : Number(value);
+    if (!Number.isFinite(number)) errors[field.name] = field.kind === "integer" ? "enter a whole number" : "enter a number";
+    else if (field.kind === "integer" && !Number.isInteger(number)) errors[field.name] = "enter a whole number";
+    else if (field.minimum !== undefined && number < field.minimum) errors[field.name] = `at least ${field.minimum}`;
+    else if (field.maximum !== undefined && number > field.maximum) errors[field.name] = `at most ${field.maximum}`;
+  }
+  return errors;
 }
 
 // Empty inputs are left out so the server names a missing required field; text that is not a number is sent as is so the server names the type.
