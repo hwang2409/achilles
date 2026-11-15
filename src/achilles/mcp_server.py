@@ -7,7 +7,7 @@ from typing import Any
 import anyio
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.server import NotificationOptions
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAnnotations
 
 from .pages import (
     CREATE_PAGE_SCHEMA,
@@ -231,25 +231,36 @@ def build_mcp(store: PageStore):
         if not connection.state.get(cleanup_key):
             connection.state[cleanup_key] = True
             connection.exit_stack.push_async_callback(remove_connection, page["id"], connection)
-        tools: list[Tool] = []
+        # inspect_page only reads, so every page chat can see what is on its page.
+        inspect_edit_hint = (
+            "when layout_complete is true, layout is the complete stored layout to edit "
+            "and layout_version is the value for update_layout expected_version; when "
+            "layout_complete is false, do not change the page and tell the user it is "
+            "too large to edit from chat; "
+            if page["create_mode"]
+            else "this page is not in create mode, so use this tool to answer questions "
+            "about the page; it cannot be changed from this chat; "
+        )
+        tools: list[Tool] = [
+            Tool(
+                name="inspect_page",
+                description=(
+                    "read what is on this page: its route, title, layout blocks, record "
+                    "counts per collection, and tools; also pages it created. "
+                    f"{inspect_edit_hint}"
+                    "metric_values reports computed counts and "
+                    "detail_filter_matches reports filtered detail match counts and "
+                    "repair hints, both by layout block index; legacy pages can inspect "
+                    "only themselves"
+                ),
+                inputSchema=INSPECT_PAGE_SCHEMA,
+                outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
+                annotations=ToolAnnotations(readOnlyHint=True),
+            ),
+        ]
         if page["create_mode"]:
             tools.extend(
                 [
-                    Tool(
-                        name="inspect_page",
-                        description=(
-                            "inspect this page and pages it created; when layout_complete is "
-                            "true, layout is the complete stored layout to edit and layout_version "
-                            "is the value for update_layout expected_version; when layout_complete "
-                            "is false, do not change the page and tell the user it is too large to "
-                            "edit from chat; metric_values reports computed counts and "
-                            "detail_filter_matches reports filtered detail match counts and "
-                            "repair hints, both by layout block index; legacy pages can inspect "
-                            "only themselves"
-                        ),
-                        inputSchema=INSPECT_PAGE_SCHEMA,
-                        outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
-                    ),
                     Tool(
                         name="create_page",
                         description=(
@@ -340,8 +351,6 @@ def build_mcp(store: PageStore):
             validate_schema(args, INSPECT_PAGE_SCHEMA)
             if "route" in args and "page_id" in args:
                 raise ValidationError("", "one selector", "invalid_input")
-            if not page["create_mode"]:
-                return _inspect_error()
             target = page
             if "route" in args or "page_id" in args:
                 target = await anyio.to_thread.run_sync(

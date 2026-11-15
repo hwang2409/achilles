@@ -408,6 +408,7 @@ test("assigned_tools_only rejects calls to tools the page does not assign", () =
   const rows: Array<[string, ReturnType<typeof grade>, boolean]> = [
     ["assigned tool only", grade("achilles__add_contact"), true],
     ["tool discovery is allowed", grade("mcp_discover", "achilles__add_contact"), true],
+    ["page read is allowed", grade("achilles__inspect_page", "achilles__add_contact"), true],
     ["authoring tool attempt", grade("achilles__create_tool", "achilles__add_contact"), false],
     ["another page's tool", grade("achilles__delete_all"), false],
     ["host tool", grade("bash"), false],
