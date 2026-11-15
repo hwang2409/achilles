@@ -39,6 +39,9 @@ web app, and a chromium for the browser checks on first use.
 - an older achilles revision: `make eval ACHILLES_DIR=/path/to/old/checkout`
 - a zeta revision: `make eval ZETA_REV=<sha>` (cloned into the cache and pinned)
 - keep the full private stack after the run: `make eval KEEP_EVAL=1`
+- compare with an earlier run: `make eval BASE=evals/reports/<run>` puts a
+  "changes since" section at the top of `report.md` (pass -> fail, fail -> pass,
+  turn or token changes over 25%, tasks in only one run)
 - a retained stack for a preview or ux test: `make eval-stack` starts the stack
   for `harness-smoke`, keeps it, and prints the local achilles url, model, tool
   policy (`achilles__*,mcp_discover`), and the retained state path. it never

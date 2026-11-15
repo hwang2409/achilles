@@ -6,9 +6,19 @@ from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
 
-from .pages import now
+from .pages import (
+    _EQUALITY_FILTER_SCHEMA,
+    PageStore,
+    _collection_fields,
+    _json_scalar_match,
+    _suggest_filter_field,
+    now,
+    unknown_field_hint,
+)
 from .tools import validate_bundle
 from .validation import ValidationError, validate_schema
+
+LIST_LIMIT = 500
 
 
 def _check(validator: Draft202012Validator, value: Any) -> None:
@@ -49,11 +59,60 @@ def _get(db, page_id, collection, arguments):
     return {**json.loads(found[1]), "record_id": found[0], "revision": found[2]}
 
 
-def _list(db, page_id, collection):
+def list_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
+    """Every list tool accepts where and limit on top of its own input schema."""
+    return {
+        **input_schema,
+        "properties": {
+            **input_schema.get("properties", {}),
+            "where": {
+                **_EQUALITY_FILTER_SCHEMA,
+                "description": "Only records whose field equals this JSON scalar.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": LIST_LIMIT,
+                "description": f"At most this many records, newest first. Default {LIST_LIMIT}.",
+            },
+        },
+    }
+
+
+def _check_list_field(db, page_id, collection, where):
+    field = where["field"]
+    fields = _collection_fields(PageStore._page_tools(db, page_id)).get(collection, set())
+    if field in fields:
+        return
+    # free-form collections have no schema properties; a field stored on a record is real too
+    stored = db.execute(
+        "SELECT 1 FROM page_record WHERE page_id=? AND collection=? "
+        "AND json_type(document, ?) IS NOT NULL LIMIT 1",
+        (page_id, collection, f'$."{field}"'),
+    ).fetchone()
+    if stored is not None:
+        return
+    suggestion = _suggest_filter_field(db, page_id, collection, field, where["equals"], fields)
+    raise ValidationError(
+        "/where/field",
+        "field in collection schema",
+        hint=unknown_field_hint(f"the {collection} collection schema", field, fields, suggestion),
+    )
+
+
+def _list(db, page_id, collection, arguments):
+    query = "SELECT record_id,document,revision FROM page_record WHERE page_id=? AND collection=?"
+    parameters: tuple[Any, ...] = (page_id, collection)
+    where = arguments.get("where")
+    if where is not None:
+        _check_list_field(db, page_id, collection, where)
+        # the field reaches SQL only as a bound json path parameter, never as SQL text
+        predicate, filter_parameters = _json_scalar_match(where["field"], where["equals"])
+        query += " AND " + predicate
+        parameters += filter_parameters
     found = db.execute(
-        "SELECT record_id,document,revision FROM page_record "
-        "WHERE page_id=? AND collection=? ORDER BY created_at",
-        (page_id, collection),
+        query + " ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        (*parameters, arguments.get("limit", LIST_LIMIT)),
     ).fetchall()
     return [{**json.loads(item[1]), "record_id": item[0], "revision": item[2]} for item in found]
 
@@ -116,9 +175,12 @@ def call_record(
         if expected_version != row["version"]:
             raise VersionConflict("/version", "active tool version")
         bundle = validate_bundle(json.loads(row["bundle"]))
-        _check(Draft202012Validator(bundle["input_schema"]), arguments)
         implementation = bundle["implementation"]
         operation = implementation["operation"]
+        input_schema = bundle["input_schema"]
+        if operation == "list":
+            input_schema = list_input_schema(input_schema)
+        _check(Draft202012Validator(input_schema), arguments)
         collection = implementation["collection"]
         schema = Draft202012Validator(implementation["data_schema"])
         if operation == "insert":
@@ -126,7 +188,7 @@ def call_record(
         elif operation == "get":
             result = _get(db, page_id, collection, arguments)
         elif operation == "list":
-            result = _list(db, page_id, collection)
+            result = _list(db, page_id, collection, arguments)
         else:
             result = _update(db, page_id, collection, row["version"], schema, arguments)
         _check(Draft202012Validator(bundle["output_schema"]), result)
