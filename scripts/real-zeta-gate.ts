@@ -8,6 +8,7 @@ import { controlSnapshot, createFrameRing, createGateWait, diagnostic } from "./
 import { gateShell } from "./gate-shell";
 import { gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
+import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 
 import { expectBrowserErrors } from "./browser-errors";
@@ -1183,7 +1184,7 @@ try {
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
-  if (JSON.stringify(secondNames) !== JSON.stringify(["add_book", "list_books", "update_book"]))
+  if (JSON.stringify(secondNames) !== JSON.stringify(["inspect_page", "add_book", "list_books", "update_book"]))
     throw new Error(`reading page tools were not created atomically: ${JSON.stringify(secondNames)}`);
   const secondRecords = await (
     await fetch(`${origin}/api/pages/${createdPageId}/records/books`, {
@@ -1438,6 +1439,7 @@ try {
   const firstSetSettingsAfterAllowReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterAllowReopen !== firstSetSettingsBeforeAllowReopen)
     throw new Error("reopening a user ask chat under an allow server sent set_settings");
+  await gatePalette(page, first, waitFor, gateWait);
 
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
