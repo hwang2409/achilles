@@ -78,6 +78,8 @@ def list_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
 
 def _check_list_field(db, page_id, collection, where):
     field = where["field"]
+    if field == "record_id":
+        return
     fields = _collection_fields(PageStore._page_tools(db, page_id)).get(collection, set())
     if field in fields:
         return
@@ -93,7 +95,9 @@ def _check_list_field(db, page_id, collection, where):
     raise ValidationError(
         "/where/field",
         "field in collection schema",
-        hint=unknown_field_hint(f"the {collection} collection schema", field, fields, suggestion),
+        hint=unknown_field_hint(
+            f"the {collection} collection schema", field, fields | {"record_id"}, suggestion
+        ),
     )
 
 
@@ -103,10 +107,14 @@ def _list(db, page_id, collection, arguments):
     where = arguments.get("where")
     if where is not None:
         _check_list_field(db, page_id, collection, where)
-        # the field reaches SQL only as a bound json path parameter, never as SQL text
-        predicate, filter_parameters = _json_scalar_match(where["field"], where["equals"])
-        query += " AND " + predicate
-        parameters += filter_parameters
+        if where["field"] == "record_id":
+            query += " AND record_id = ?"
+            parameters += (where["equals"],)
+        else:
+            # the field reaches SQL only as a bound json path parameter, never as SQL text
+            predicate, filter_parameters = _json_scalar_match(where["field"], where["equals"])
+            query += " AND " + predicate
+            parameters += filter_parameters
     found = db.execute(
         query + " ORDER BY created_at DESC, rowid DESC LIMIT ?",
         (*parameters, arguments.get("limit", LIST_LIMIT)),

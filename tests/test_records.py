@@ -103,8 +103,17 @@ def test_unknown_field_is_validation_error_with_hint(store):
     assert error.value.path == "/where/field"
     assert error.value.hint == (
         "Use a field from the tasks collection schema. Unknown field: state. "
-        "Fields: status, title. Did you mean status?"
+        "Fields: record_id, status, title. Did you mean status?"
     )
+
+
+def test_where_record_id_matches_one_record_exactly(store):
+    first = _add(store, title="a", status="done")
+    _add(store, title="b", status="open")
+
+    matched = _list(store, where={"field": "record_id", "equals": first["record_id"]})
+    assert [r["title"] for r in matched] == ["a"]
+    assert _list(store, where={"field": "record_id", "equals": "missing"}) == []
 
 
 @pytest.mark.parametrize(
