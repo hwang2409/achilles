@@ -202,8 +202,12 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
   [data-part="approval"] button { min-height: 40px; }
   .connection-banner { align-items: flex-start; padding: 8px 12px; }
-  .chat-starters button { grid-template-columns: 24px 1fr; }
-  .chat-starters i { display: none; }
+  /* at narrow widths a page's own layout blocks can leave little room under the composer; the
+     empty-chat block fills whatever space is left and scrolls its own starters into reach
+     instead of centering and overflowing past the transcript's clipped box. */
+  .empty-chat { top: 0; right: 0; bottom: 0; left: 0; margin: 0; max-width: none; padding: 16px 12px 24px; overflow-y: auto; }
+  .chat-starters button { grid-template-columns: 24px 1fr; grid-template-rows: auto auto; row-gap: 4px; min-height: 60px; }
+  .chat-starters i { display: block; grid-column: 2; }
   .main-pane [data-part="composer"] button { min-height: 40px; }
   .full-state > .primary { min-height: 44px; }
 }

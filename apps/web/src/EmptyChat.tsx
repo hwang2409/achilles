@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Page } from "./useActiveChat";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 
-type Starter = { text: string; tag?: string; onSelect: () => void };
+type Starter = { text: string; tag?: string; onSelect: () => void | Promise<void> };
 
 const VERB_BY_OPERATION: Record<string, string> = {
   insert: "add a record with",
@@ -31,15 +31,22 @@ function useHasWaitingChat(): boolean {
   return hasWaiting;
 }
 
-export function EmptyChat({ page, send, continueWaiting, credential, refreshKey }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void>; credential: string; refreshKey: string }) {
+export function EmptyChat({ page, send, continueWaiting, toggleCreateMode, credential, refreshKey }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void>; toggleCreateMode: () => Promise<void>; credential: string; refreshKey: string }) {
   const { tools, error } = usePageTools(page.id, credential, refreshKey);
   const hasWaitingChat = useHasWaitingChat();
   const send1 = (text: string) => void send(text, { steer: false }, () => {});
+  // A creation starter needs create mode's tools, so it turns create mode on first, through the
+  // same path (and the same refresh-failure handling) as the header toggle, then sends. If the
+  // toggle's tool refresh fails, the header's notice shows and send()'s own guard holds the message.
+  const sendWithCreateMode = async (text: string) => {
+    if (!page.create_mode) await toggleCreateMode();
+    send1(text);
+  };
   const resolvedTools = error ? [] : tools;
   const pageStarters = resolvedTools === null ? []
     : resolvedTools.length > 0
       ? resolvedTools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), tag: tool.name, onSelect: () => send1(toolStarterText(tool)) }))
-      : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => send1(text) }));
+      : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => sendWithCreateMode(text) }));
   const starters: Starter[] = [
     ...pageStarters,
     ...(hasWaitingChat ? [{ text: "continue your waiting chat", tag: "waiting chat", onSelect: () => void continueWaiting() }] : []),
