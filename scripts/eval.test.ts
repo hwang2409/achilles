@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { classifyTaskSupport, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { classifyTaskSupport, finalAnswer, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
 import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
@@ -202,4 +202,19 @@ test("account and secret failures stop the suite", () => {
   expect(stopsSuite(new Error('{"type":"usage_limit_reached"}'))).toBe(true);
   try { scanSecrets("Bearer abcdefghijklmnop", []); } catch (error) { expect(stopsSuite(error)).toBe(true); }
   expect(stopsSuite(new Error("task setup failed"))).toBe(false);
+});
+
+test("each step's answer is the last assistant text of its own turn", () => {
+  const text = (value: string) => ({ role: "assistant", content: [{ type: "thinking", text: "hidden" }, { type: "text", text: value }] });
+  const end = { role: "system", event: "served_turn_end" };
+  const history = [
+    { role: "user", content: [{ type: "text", text: "first" }] }, text("first answer"), end,
+    { role: "user", content: [{ type: "text", text: "second" }] }, text("let me check"),
+    { role: "assistant", content: [{ type: "tool_use", tool_call: { id: "t1", name: "achilles__list_books" } }] },
+    { role: "tool_result", content: [{ type: "text", text: "[]" }], tool_result: { tool_call_id: "t1", content: "[]" } },
+    text("3 are done"), { role: "system", event: "approval_end", content: [{ type: "text", text: "not an answer" }] }, end,
+  ];
+  expect(finalAnswer(history, 0)).toBe("first answer");
+  expect(finalAnswer(history, 1)).toBe("3 are done");
+  expect(finalAnswer([{ role: "user", content: [] }, { role: "assistant", content: [{ type: "tool_use" }] }, end], 0)).toBeUndefined();
 });

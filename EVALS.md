@@ -65,8 +65,8 @@ the 12 core tasks (full runs):
 
 focused-only tasks (run with `TASK=<name>`, never in a full run):
 
-- `browser-controller-slot`, `page-awareness`, `page-tool-without-create-mode`,
-  `second-chat-tools`, `undo-layout-change`
+- `browser-controller-slot`, `count-question`, `page-awareness`,
+  `page-tool-without-create-mode`, `second-chat-tools`, `undo-layout-change`
 
 rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
 a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
@@ -130,6 +130,12 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
 - `agent_turns`: the per-task turn cap.
 - `checks`: the acceptance table (see below). each has an `id`, a `type`, a
   `page`, and type-specific fields.
+- `answer_mentions` grades a step's final answer text (the snapshot keeps it as
+  `answers[step_id]`). it names the `step` and a `value` list; any one value
+  must appear, case-insensitively, as a whole token ("12" never matches "120",
+  "12.5", or "12th"; "three" never matches "thirty-three"). each value must be a
+  fact the seeded records hold: a record's string value, or a count of records
+  (in a collection, or where one field equals one value) as digits or a word.
 - optional `requires` / `goal_capabilities`: capabilities that gate `unsupported`
   and the "goal not reachable" label on older revisions.
 
@@ -175,13 +181,15 @@ grader rules, as rules:
 
 ## the tasks
 
-the 17 tasks in `evals/tasks/` (12 core, 5 focused-only — see "core vs
+the 18 tasks in `evals/tasks/` (12 core, 6 focused-only — see "core vs
 focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
 - `approval-once`: with approval on, add exactly one note after one approval.
 - `browser-controller-slot`: create `/eval-smoke` and confirm the text is visible
   in the browser.
+- `count-question`: with create mode off, ask how many of 5 seeded books are
+  done; the final answer must say 3 and the records stay unchanged.
 - `create-and-use-tool-same-chat`: author a page-local insert tool and use it in
   the same chat.
 - `harness-smoke`: the smoke task; create a page with one text block.
