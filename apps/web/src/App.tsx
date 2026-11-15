@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, 
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
-import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, type ComposerProps, type Renderers } from "@fulcrum/react";
+import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
@@ -11,11 +11,11 @@ import { FormBlock, selectRow, useRecordWrites, useSelectedRow } from "./page/Re
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget } from "./keyboard";
+import { isEditableTarget, restoreFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
-import { useActiveChat, type Page } from "./useActiveChat";
+import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
@@ -25,6 +25,17 @@ addEventListener("pagehide", () => highlight.dispose(), { once: true });
 const fences: Fences = {};
 const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
 const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
+// a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
+// inside the reply that is still streaming. it shows here once delivery settles.
+function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
+  const item = useItem(id);
+  const event = item?.type === "user" && item.event.type === "user_message" ? item.event : undefined;
+  if (event?.mode === "steer" && event.delivery_id && !event.delivery_status && queued.has(event.delivery_id)) return null;
+  return <Fallback id={id} />;
+}
+
+const composerField = () => document.querySelector('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
+
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
 
 function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
@@ -125,9 +136,14 @@ export function App() {
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
-  const send: typeof active.send = (...args) => {
+  const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
+  const send: typeof active.send = (text, intent, track) => {
     setFollowRequest((value) => value + 1);
-    return active.send(...args);
+    return trackQueuedSteer(
+      (queue) => active.send(text, intent, queue),
+      (id) => { track(id); setQueuedSteers((ids) => new Set(ids).add(id)); },
+      (id) => setQueuedSteers((ids) => { const next = new Set(ids); next.delete(id); return next; }),
+    );
   };
 
   useEffect(() => {
@@ -194,7 +210,7 @@ export function App() {
     return () => removeEventListener("beforeunload", warn);
   }, [connected, lastState]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const composerProps = activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
@@ -216,7 +232,14 @@ export function App() {
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
         <div className="page-chat">
-        <section ref={ready ? setTranscript : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcript?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <section ref={ready ? setTranscript : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={(event) => {
+          // the button unmounts once the reader is at the bottom; keyboard activation (detail 0) moves focus to the composer, not to <body>.
+          // a mouse click or tap leaves focus alone: focusing the textarea on a tap opens the soft keyboard over the transcript
+          if (event.detail === 0 && document.activeElement === event.currentTarget) restoreFocus(composerField());
+          setFollowRequest((value) => value + 1);
+          const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
+          scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+        }}>jump to latest</button>}</section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
         </div>
         </div>
@@ -254,7 +277,18 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
     return () => { removeEventListener("keydown", onKey); removeEventListener("pointerdown", onDown); };
   }, [overflow]);
   const rename = useInlineRename();
+  const titleControl = useRef<HTMLElement>(null);
   const startRename = () => { if (onRename && sessionId) rename.start(title === "new chat" ? "" : title, (value) => onRename(sessionId, value)); };
+  // enter or esc unmounts the editor and drops focus to <body>; hand it back to the title. deferred past the focus
+  // change, so a blur commit by a click elsewhere keeps the clicked control's focus.
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (rename.editing) { wasEditing.current = true; return; }
+    if (!wasEditing.current) return;
+    wasEditing.current = false;
+    const timer = setTimeout(() => { if (document.activeElement === document.body) titleControl.current?.focus(); });
+    return () => clearTimeout(timer);
+  }, [rename.editing]);
   // a chat switch closes the editor; its draft never moves to the next chat
   useEffect(() => rename.cancel, [sessionId]);
   useEffect(() => {
@@ -271,7 +305,7 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   const controls = (inMenu: boolean) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button></>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
-    : <strong title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
+    : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 

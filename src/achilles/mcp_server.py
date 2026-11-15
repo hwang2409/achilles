@@ -17,7 +17,7 @@ from .pages import (
     PageStore,
     bounded_inspect,
 )
-from .records import call_record
+from .records import LIST_LIMIT, call_record, list_input_schema
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
@@ -334,13 +334,20 @@ def build_mcp(store: PageStore):
         for bundle in bundles:
             description = bundle["description"]
             output_schema, publish_output_schema = derived_output_schema(bundle)
+            input_schema = bundle["input_schema"]
             if bundle["implementation"]["operation"] == "update":
                 description += "; read or list first, then pass the returned revision"
+            if bundle["implementation"]["operation"] == "list":
+                description += (
+                    "; returns records newest first, at most limit (default and max "
+                    f"{LIST_LIMIT}); optional where {{field, equals}} keeps exact matches"
+                )
+                input_schema = list_input_schema(input_schema)
             tools.append(
                 Tool(
                     name=bundle["name"],
                     description=description,
-                    inputSchema=bundle["input_schema"],
+                    inputSchema=input_schema,
                     outputSchema=output_schema if publish_output_schema else None,
                 )
             )

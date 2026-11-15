@@ -3,7 +3,7 @@ import { modKey, wrapTab } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListPage } from "./pageList";
 import "./command-palette.css";
 
-export type PaletteEntry = { id: string; label: string; detail?: string; run: () => void };
+export type PaletteEntry = { id: string; label: string; detail?: string; shortcut?: string; run: () => void };
 type SearchChats = (query: string, before: string | null, signal: AbortSignal, limit?: number) => Promise<ListPage<PaletteEntry, unknown>>;
 
 export function Highlight({ value, query }: { value: string; query: string }) {
@@ -69,7 +69,7 @@ export function CommandPalette({ commands, pages, searchChats, onClose }: { comm
         {rows.map((entry) => {
           const position = index++;
           return <div key={entry.id} id={`palette-option-${position}`} role="option" aria-selected={position === current} className="palette-option" onMouseMove={() => setActive(position)} onMouseDown={(event) => event.preventDefault()} onClick={() => run(entry)}>
-            <span><Highlight value={entry.label} query={needle} /></span>{entry.detail && <small>{entry.detail}</small>}
+            <span><Highlight value={entry.label} query={needle} /></span>{entry.detail && <small>{entry.detail}</small>}{entry.shortcut && <kbd className="palette-shortcut">{entry.shortcut}</kbd>}
           </div>;
         })}
       </div>)}

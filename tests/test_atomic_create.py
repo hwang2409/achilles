@@ -1158,10 +1158,7 @@ def test_unknown_filter_field_is_actionable_through_public_tools(
             },
         )
 
-    hint = (
-        "Use a field from the books collection schema. Unknown field: missing. "
-        "Collection fields: title."
-    )
+    hint = "Use a field from the books collection schema. Unknown field: missing. Fields: title."
     if writer == "update_layout":
         hint += " Did you mean title?"
     assert json.loads(result["content"][0]["text"]) == {
