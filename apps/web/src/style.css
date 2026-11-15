@@ -114,12 +114,15 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .header-menu button { display: block; text-align: left; }
   /* the full controls fold into the menu above, but an enabled mode must not become invisible: a word mark
      (only rendered when that mode is on) stays beside ••• in the header itself. */
+  /* a divider keeps the marks from reading as part of the run state word */
   .fold-indicator { display: flex; gap: 12px; align-items: center; }
-  .fold-mark::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; }
+  .fold-indicator:not(:empty) { padding-left: 12px; border-left: 1px solid var(--fulcrum-border); }
+  .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
   .fold-mark-approve { color: var(--fulcrum-warn); }
   .fold-mark-approve::before { background: var(--fulcrum-warn); }
-  /* a hollow square in the text color, so it never reads as the filled accent "running" mark */
-  .fold-mark-create::before { box-shadow: inset 0 0 0 1px currentColor; }
+  /* a hollow square in the text color, so it never reads as the filled accent "running" mark; the menu repeats
+     both marks in front of their full names, so it works as a legend */
+  .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { box-shadow: inset 0 0 0 1px currentColor; }
   /* the title keeps a minimum width; the marks get shorter instead of pushing it off-screen */
   .chat-heading { min-width: 6em; }
 }
