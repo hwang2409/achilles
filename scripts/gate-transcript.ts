@@ -128,12 +128,22 @@ export async function gateTranscript(
   const afterMoreDeltas = await scroll.evaluate((element) => element.scrollTop);
   if (Math.abs(afterMoreDeltas - scrolledUp) > 4)
     throw new Error(`streaming transcript jumped after scroll up: ${scrolledUp} -> ${afterMoreDeltas}`);
-  const jump = page.locator('[data-part="jump-to-latest"]');
+  const jump = page.locator('[data-part="jump-to-latest"]:visible');
   await gateWait(() => jump.waitFor({ state: "visible", timeout: 20_000 }));
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("tool-call stream rendered more than one visible jump to latest control");
+  // keyboard focus on the control must survive a new row arriving below while the user reads above
+  const focusKept = (mark: string) => page.evaluate((mark) => (document.activeElement as HTMLElement | null)?.dataset.gateFocused === mark, mark);
+  await jump.evaluate((element) => { (element as HTMLElement).dataset.gateFocused = "stream-jump"; });
+  await jump.focus();
+  if (!(await focusKept("stream-jump"))) throw new Error("tool-call stream jump to latest control is not keyboard focusable");
+  await gateWait(() => page.locator('[data-part="jump-to-latest-lane"] [data-part="jump-to-latest"]').waitFor({ state: "attached", timeout: 20_000 }));
+  if (!(await focusKept("stream-jump"))) {
+    const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 160) ?? "none");
+    throw new Error(`jump to latest lost keyboard focus when a new row arrived; focus is on ${active}`);
+  }
   await capture("streaming-scrolled-up-jump-1440x900.png");
-  await jump.click();
+  await page.keyboard.press("Enter");
   await waitFor(async () => await distanceFromBottom() <= 4, "jump to latest for this turn");
   const approval = page.locator('[data-part="approval"][data-state="pending"]').filter({ hasText: "read" });
   await approval.getByRole("button", { name: "deny", exact: true }).click();
@@ -189,14 +199,19 @@ export async function gateTranscript(
   await page.mouse.wheel(0, -480);
   await waitFor(async () => await distanceFromBottom() > 100, "user scroll up during text-only stream");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
-  const textOnlyJump = page.locator('[data-part="jump-to-latest"]');
+  const textOnlyJump = page.locator('[data-part="jump-to-latest"]:visible');
   await gateWait(() => textOnlyJump.waitFor({ state: "visible", timeout: 20_000 }));
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("text-only stream rendered more than one visible jump to latest control");
+  await textOnlyJump.evaluate((element) => { (element as HTMLElement).dataset.gateFocused = "text-jump"; });
   await textOnlyJump.focus();
-  if (!(await textOnlyJump.evaluate((element) => document.activeElement === element)))
-    throw new Error("text-only jump to latest control is not keyboard focusable");
-  await textOnlyJump.click();
-  await waitFor(async () => await distanceFromBottom() <= 4, "jump to latest after text-only stream");
+  if (!(await focusKept("text-jump"))) throw new Error("text-only jump to latest control is not keyboard focusable");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 119"), "text-only stream complete");
+  await waitForIdleTurn(page, waitFor);
+  if (!(await focusKept("text-jump"))) {
+    const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 120) ?? "none");
+    throw new Error(`jump to latest lost keyboard focus while the reply streamed; focus is on ${active}`);
+  }
+  await page.keyboard.press("Enter");
+  await waitFor(async () => await distanceFromBottom() <= 4, "keyboard jump to latest after text-only stream");
 }
