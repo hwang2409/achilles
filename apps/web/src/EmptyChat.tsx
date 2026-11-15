@@ -50,11 +50,11 @@ export function EmptyChat({ page, send, continueWaiting, credential }: { page: P
   const tools = usePageTools(page.id, credential);
   const hasWaitingChat = useHasWaitingChat();
   const send1 = (text: string) => void send(text, { steer: false }, () => {});
-  const creationStarters = tools && tools.length > 0
+  const pageStarters = tools && tools.length > 0
     ? tools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), tag: tool.name, onSelect: () => send1(toolStarterText(tool)) }))
     : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => send1(text) }));
   const starters: Starter[] = [
-    ...creationStarters,
+    ...pageStarters,
     ...(hasWaitingChat ? [{ text: "continue your waiting chat", tag: "waiting chat", onSelect: () => void continueWaiting() }] : []),
   ];
   return <div className="empty-chat">
