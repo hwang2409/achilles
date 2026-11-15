@@ -149,11 +149,11 @@ test("a slow attachment can retry without accepting its late answer", async () =
   await act(async () => { renderer.unmount(); mounted = null; });
 });
 
-test("a failed tool refresh on the first send keeps the new chat with a retry notice", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  const emptyPage = { ...page, zeta_session_id: null };
+// An empty page whose first tool refreshes fail; later refreshes wait on `lastRefresh`.
+async function refreshFailureHarness(failures: number) {
+  const emptyPage = { ...page, zeta_session_id: null as string | null };
   const requests: string[] = [];
-  let refreshes = 0;
+  const state = { refreshes: 0, serverCreateMode: false, created: false };
   const lastRefresh = deferred<void>();
   setGlobals({
     localStorage: new MemoryStorage(),
@@ -161,14 +161,17 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
     history: { pushState() {}, replaceState() {} },
     addEventListener() {},
     removeEventListener() {},
-    fetch: async (input: string | URL | Request) => {
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/pages/home") return Response.json(emptyPage);
+      if (url === "/api/pages/home") return Response.json({ ...emptyPage, create_mode: state.serverCreateMode });
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
       if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
-      if (url === "/api/pages/home/session") return Response.json({ session_id: "fresh" });
-      if (url === "/api/pages/home/create-mode") return Response.json({ create_mode: true });
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
+      if (url === "/api/pages/home/session") { emptyPage.zeta_session_id = "fresh"; return Response.json({ session_id: "fresh" }); }
+      if (url === "/api/pages/home/create-mode") {
+        state.serverCreateMode = (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled;
+        return Response.json({ create_mode: state.serverCreateMode });
+      }
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: state.created ? [{ ...chat, session_id: "fresh" }] : [], next: null });
       if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
       throw new Error(`unexpected fetch ${url}`);
     },
@@ -177,14 +180,14 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
     features: ["session_mcp_bindings", "mcp_refresh_tools"],
     request: async (method: string) => {
       requests.push(method);
-      if (method === "new_session") return { session: { session_id: "fresh" } };
+      if (method === "new_session") { state.created = true; return { session: { session_id: "fresh" } }; }
       if (method === "resume") return { session: { name: null } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history") return { messages: [], next_offset: null };
       if (method === "status") return { session: { session_id: "fresh" }, state: "idle" };
       if (method === "mcp_refresh_tools") {
-        refreshes += 1;
-        if (refreshes <= 2) throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "MCP tools/list timed out after 10s" } });
+        state.refreshes += 1;
+        if (state.refreshes <= failures) throw Object.assign(new Error("refresh failed"), { code: -32005, data: { reason: "MCP tools/list timed out after 10s" } });
         await lastRefresh.promise;
         return { session_id: "fresh", servers: ["achilles"] };
       }
@@ -195,36 +198,75 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
     replayRevision: () => 1,
     finishReplay: () => true,
   };
-  let active!: ReturnType<typeof useActiveChat>;
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat>, requests, state, lastRefresh };
   const clock = new ManualClock();
-  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never); return null; };
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
   await act(async () => { mounted = render(createElement(Harness)); });
-  await flushUntil(() => active.state.phase === "empty");
-  await act(async () => { await active.toggle(); });
+  await flushUntil(() => harness.active.state.phase === "empty");
+  return harness;
+}
 
+test("a failed tool refresh on the first send keeps the new chat with a retry notice", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const harness = await refreshFailureHarness(2);
+  const { requests, lastRefresh } = harness;
+  await act(async () => { await harness.active.toggle(); });
+
+  draftStore.set("new:home", "typed by hand"); // a starter-button send must not erase composer text
   let sent: Promise<void> | null = null;
-  await act(async () => { sent = active.send("make a reading list", { steer: false }, () => {}); await sent.catch(() => {}); });
+  await act(async () => { sent = harness.active.send("make a reading list", { steer: false }, () => {}); await sent.catch(() => {}); });
+  let active = harness.active;
   expect(active.creationError).toBeNull();
   expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh", page: { create_mode: false } });
   await expect(sent!).rejects.toThrow("send is off until page tools refresh");
   expect(active.toggleError).toContain("zeta could not refresh page tools: MCP tools/list timed out after 10s");
   expect([active.toggleBlocked, active.toggleRetryable]).toEqual([true, true]);
   expect(draftStore.get("fresh")).toBe("make a reading list");
+  expect(draftStore.get("new:home")).toBe("typed by hand");
+  draftStore.set("new:home", "");
 
-  await act(async () => { await active.toggle(); });
+  await act(async () => { await harness.active.toggle(); });
+  active = harness.active;
   expect(active.toggleError).toContain("timed out");
   expect([active.toggleBlocked, active.toggling]).toEqual([true, false]);
 
   let retried: Promise<void> | null = null;
-  await act(async () => { retried = active.toggle(); });
-  await flushUntil(() => refreshes === 3);
+  await act(async () => { retried = harness.active.toggle(); });
+  await flushUntil(() => harness.state.refreshes === 3);
+  active = harness.active;
   expect([active.toggling, active.toggleBlocked]).toEqual([true, true]);
   expect(active.toggleError).toContain("timed out");
   lastRefresh.resolve();
   await act(async () => { await retried; });
+  active = harness.active;
   expect([active.toggleError, active.toggleBlocked]).toEqual([null, false]);
   expect(active.state).toMatchObject({ phase: "ready", page: { create_mode: true } });
   expect(requests.filter((method) => method === "mcp_refresh_tools")).toHaveLength(3);
-  await act(async () => { await active.send("make a reading list", { steer: false }, () => {}); });
+  await act(async () => { await harness.active.send("make a reading list", { steer: false }, () => {}); });
   expect(requests.at(-1)).toBe("send");
+});
+
+test("a failed tool refresh on the new chat button keeps its notice across the chat's own re-attach", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const harness = await refreshFailureHarness(1);
+  const { requests, lastRefresh } = harness;
+  await act(async () => { await harness.active.toggle(); });
+  await act(async () => { await harness.active.newChat(); });
+  // publishReady selects the new chat, so the attach effect runs again for it and resumes it.
+  await flushUntil(() => harness.active.selectedId === "fresh" && requests.filter((method) => method === "resume").length === 2 && harness.active.state.phase === "ready");
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  let active = harness.active;
+  expect(active.creationError).toBeNull();
+  expect(active.toggleError).toContain("zeta could not refresh page tools: MCP tools/list timed out after 10s");
+  expect([active.toggleBlocked, active.toggleRetryable]).toEqual([true, true]);
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "fresh", page: { create_mode: false } });
+  await expect(harness.active.send("hello", { steer: false }, () => {})).rejects.toThrow("send is off until page tools refresh");
+  expect(requests.filter((method) => method === "new_session")).toHaveLength(1);
+
+  lastRefresh.resolve();
+  await act(async () => { await harness.active.toggle(); });
+  active = harness.active;
+  expect([active.toggleError, active.toggleBlocked]).toEqual([null, false]);
+  expect(active.state).toMatchObject({ phase: "ready", page: { create_mode: true } });
+  expect(requests.filter((method) => method === "mcp_refresh_tools")).toHaveLength(2);
 });
