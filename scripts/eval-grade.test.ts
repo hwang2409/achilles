@@ -400,3 +400,18 @@ test("workflow, approval, and reconnect checks use page-local structured evidenc
   expect(gradeCheck(approval, { pages, approvals: [{ page_id: "p1", tool: "achilles__add_note" }, { page_id: "p1", tool: "achilles__add_note" }] }).pass).toBe(false);
   expect(gradeCheck({ id: "resume", type: "reconnect", page: "p" }, { pages, reconnects: [{ page_id: "p1", original_session_id: "s", resumed_session_id: "s", history_continuity: true }] }).pass).toBe(true);
 });
+
+test("assigned_tools_only rejects calls to tools the page does not assign", () => {
+  const check = { id: "assigned", type: "assigned_tools_only" as const, page: "p" };
+  const base = { pages: [{ id: "p1", alias: "p" }], tool_versions: [{ page_id: "p1", name: "add_contact" }, { page_id: "other", name: "delete_all" }] };
+  const grade = (...tools: string[]) => gradeCheck(check, { ...base, calls: tools.map(tool => ({ page_id: "p1", tool })) });
+  const rows: Array<[string, ReturnType<typeof grade>, boolean]> = [
+    ["assigned tool only", grade("achilles__add_contact"), true],
+    ["tool discovery is allowed", grade("mcp_discover", "achilles__add_contact"), true],
+    ["authoring tool attempt", grade("achilles__create_tool", "achilles__add_contact"), false],
+    ["another page's tool", grade("achilles__delete_all"), false],
+    ["host tool", grade("bash"), false],
+  ];
+  for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
+  expect(gradeCheck(check, { ...base, calls: [{ page_id: "other", tool: "achilles__create_tool" }] }).pass).toBe(true);
+});

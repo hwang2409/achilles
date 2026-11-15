@@ -1,0 +1,258 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts",
+        "route": "/",
+        "title": "Home"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "synthetic-1",
+        "version": 1,
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com"
+        }
+      }
+    ],
+    "related_page_ids": [
+      "home"
+    ],
+    "calls": [
+      {
+        "id": "add-1",
+        "call_id": "add-1",
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__add_contact",
+        "call_id": "add-1",
+        "success": true,
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com",
+          "record_id": "synthetic-1",
+          "revision": 1
+        }
+      }
+    ],
+    "errors": [],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_contact",
+          "operation": "insert",
+          "collection": "contacts",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "records": [],
+      "layouts": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts",
+        "route": "/",
+        "title": "Home"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "synthetic-1",
+        "version": 1,
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com"
+        }
+      }
+    ],
+    "related_page_ids": [
+      "home"
+    ],
+    "calls": [
+      {
+        "id": "create-1",
+        "call_id": "create-1",
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "add_contact_v2"
+          }
+        },
+        "success": false
+      },
+      {
+        "id": "add-1",
+        "call_id": "add-1",
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__create_tool",
+        "call_id": "create-1",
+        "success": false,
+        "data": "unknown tool: achilles__create_tool"
+      },
+      {
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__add_contact",
+        "call_id": "add-1",
+        "success": true,
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com",
+          "record_id": "synthetic-1",
+          "revision": 1
+        }
+      }
+    ],
+    "errors": [
+      {
+        "page_id": "home",
+        "chat_id": "contacts-chat",
+        "tool": "achilles__create_tool",
+        "message": "unknown tool"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_contact",
+          "operation": "insert",
+          "collection": "contacts",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "records": [],
+      "layouts": []
+    }
+  }
+}
