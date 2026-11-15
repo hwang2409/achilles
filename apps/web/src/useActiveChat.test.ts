@@ -141,7 +141,7 @@ async function waitBounded<T>(wait: Promise<T>, cancel: () => void, drain: () =>
 
 function attachmentClient(onRequest?: (method: string, params?: unknown) => void | Promise<void>) {
   return {
-    features: ["session_mcp_bindings"],
+    features: ["session_mcp_bindings", "session_replay_seq"],
     request: async (method: string, params?: unknown) => {
       await onRequest?.(method, params);
       if (method === "new_session") return { session: { session_id: "created-on-zeta" } };
@@ -299,7 +299,7 @@ describe("active chat attachment", () => {
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         if (method === "resume") return { session: { name: "zeta auto name" } };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
@@ -329,7 +329,7 @@ describe("active chat attachment", () => {
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         if (method === "resume") return { session: {} };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
@@ -572,7 +572,7 @@ describe("chat creation lifecycle", () => {
       if (fail === name && !failed) { failed = true; throw new Error(`forced ${name} failure`); }
     };
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         await step(method);
         if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }

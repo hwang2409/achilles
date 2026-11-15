@@ -73,7 +73,7 @@ function client(firstResume?: Promise<unknown>) {
   let resumes = 0;
   return {
     get resumes() { return resumes; },
-    features: ["session_mcp_bindings"],
+    features: ["session_mcp_bindings", "session_replay_seq"],
     request: async (method: string) => {
       if (method === "resume") {
         resumes += 1;
@@ -177,7 +177,7 @@ async function refreshFailureHarness(failures: number) {
     },
   });
   const zeta = {
-    features: ["session_mcp_bindings", "mcp_refresh_tools"],
+    features: ["session_mcp_bindings", "session_replay_seq", "mcp_refresh_tools"],
     request: async (method: string) => {
       requests.push(method);
       if (method === "new_session") { state.created = true; return { session: { session_id: "fresh" } }; }
@@ -304,17 +304,18 @@ test("a reload during a pending approval re-binds the page tools, so the approve
   });
   // zeta after a reload: the turn waits for approval of a page tool, and the page binding left with the old socket
   let bound = false;
+  const waiting = { state: "tool", pending_approvals: [{ request_id: "c1", tool_call: { id: "t1", name: "achilles__list_pages", arguments: {} }, delegated: false }] };
   const zeta = {
-    features: ["session_mcp_bindings", "resume_attach"],
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach"],
     request: async (method: string, params?: { session_id?: string; mcp_bindings?: unknown[] }) => {
       if (method === "resume") {
         if (params?.session_id !== "chat") throw Object.assign(new Error("a turn is already running"), { code: -32004 });
         bound = Boolean(params.mcp_bindings?.length);
         return { session: { session_id: "chat", name: null }, attached: "live_turn" };
       }
-      if (method === "status") return { session: { session_id: "chat" }, state: "running", pending_approvals: [{ request_id: "c1", tool_call: { id: "t1", name: "achilles__list_pages", arguments: {} }, delegated: false }] };
+      if (method === "status") return { session: { session_id: "chat" }, ...waiting };
       if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
-      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, history_validator: { end: 0, entry_id: null, repair_generation: null }, status: waiting };
       throw new Error(`unexpected ${method}`);
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
