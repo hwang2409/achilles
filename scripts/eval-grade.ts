@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -25,7 +25,7 @@ export type EvalSnapshot = {
   records?: Array<Record<string, unknown>>; layouts?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
   calls?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; approvals?: Array<Record<string, unknown>>;
   errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
-  reconnects?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
+  reconnects?: Array<Record<string, unknown>>; form_submits?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
   answers?: Record<string, string>;
@@ -34,7 +34,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -92,7 +92,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "approval" && (typeof check.tool !== "string" || (check.count === undefined) === (check.max === undefined) || !Number.isInteger(check.count ?? check.max) || (check.max !== undefined && check.max < 1))) throw new Error(`checks[${i}] needs tool and either count or max >= 1`);
   if (check.type !== "approval" && check.max !== undefined) throw new Error(`checks[${i}] only approval takes max`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
-  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "metric_count", "layout_update", "tool_evolution"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
+  if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "metric_count", "layout_update", "tool_evolution", "form_submit"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
   if (check.type === "tool_evolution") {
     if (!check.value || typeof check.value !== "object" || Array.isArray(check.value)) throw new Error(`checks[${i}] needs a tool evolution spec`);
     own(check.value, ["tool", "from", "to", "new_value", "legacy_record", "read_tool"], `checks[${i}].value`);
@@ -116,6 +116,13 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (["browser_text", "prompt"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
   if (check.synonyms !== undefined && (!["browser_text", "schema_roundtrip"].includes(check.type) || !Array.isArray(check.synonyms) || !check.synonyms.length || !check.synonyms.every(value => typeof value === "string"))) throw new Error(`checks[${i}] has invalid synonyms`);
   if (check.type === "answer_mentions" && (typeof check.step !== "string" || !Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string" && value.trim() === value && value.length > 0))) throw new Error(`checks[${i}] needs a step and non-empty mention values`);
+  // form_submit: what the harness types into each required input, by the input's schema type
+  if (check.type === "form_submit") {
+    const value = check.value as Record<string, unknown>;
+    if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.string !== "string" || !value.string) throw new Error(`checks[${i}] needs a value map with a string value`);
+    own(value, ["string", "number", "integer"], `checks[${i}].value`);
+    for (const kind of ["number", "integer"] as const) if (value[kind] !== undefined && (typeof value[kind] !== "string" || !Number.isFinite(Number(value[kind])) || (kind === "integer" && !Number.isInteger(Number(value[kind]))))) throw new Error(`checks[${i}].value.${kind} must be a ${kind} string`);
+  }
   if (check.step !== undefined && check.type !== "answer_mentions") throw new Error(`checks[${i}] has an unused step`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
 }
@@ -139,7 +146,8 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
   "type", // fixed discriminator in every layout block
   "collection", // fixed data-source field in list and detail blocks
 ]);
-const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count", "tool_evolution"]);
+// form_submit values are input the harness types, not expectations
+const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["form_submit", "operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count", "tool_evolution"]);
 function nestedTokens(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
@@ -280,7 +288,7 @@ function matchValueRows(actual: unknown, expected: string[][]) {
 }
 
 type GradeContext = { check: TaskCheck; snapshot: EvalSnapshot; page: unknown; owned(type: keyof EvalSnapshot): Array<Record<string, unknown>> };
-type CheckFailure = { reason: string; field?: string; before?: unknown; after?: unknown };
+type CheckFailure = { reason: string; field?: string; before?: unknown; after?: unknown; evidence?: Record<string, unknown> };
 type TransitionFailure = CheckFailure & { field: string; before: unknown; after: unknown };
 const normalizeTransitionValue = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, "");
 const transitionFailure = (reason: string, field: string, before: unknown, after: unknown): TransitionFailure => ({ reason, field, before, after });
@@ -426,6 +434,17 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     return true;
   },
   browser_text: ({ check, owned }) => owned("browser").some(row => check.synonyms ? String(row.text ?? "").split(/[\t\r\n]+/).some(cell => [check.text!, ...check.synonyms!].some(value => normalizeToken(cell.trim()) === normalizeToken(value))) : String(row.text ?? "").includes(String(check.text))),
+  // one row per insert form block the browser submitted; each must add exactly one record (from the DB, not the screen)
+  form_submit: ({ owned }) => {
+    const submits = owned("form_submits");
+    if (!submits.length) return { reason: "the page has no insert form" } satisfies CheckFailure;
+    for (const row of submits) {
+      if (typeof row.unsupported === "string") return { reason: `form ${String(row.tool)} shows "this form needs the chat": unsupported field ${row.unsupported}`, evidence: { tool: row.tool, field: row.unsupported } } satisfies CheckFailure;
+      if (typeof row.error === "string") return { reason: `form ${String(row.tool)}: ${row.error}`, evidence: { tool: row.tool } } satisfies CheckFailure;
+      if (row.new_records !== 1) return { reason: `form ${String(row.tool)} added ${String(row.new_records)} records to ${String(row.collection)}, expected 1`, evidence: { tool: row.tool, new_records: row.new_records } } satisfies CheckFailure;
+    }
+    return true;
+  },
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),
   same_page: ({ snapshot, page }) => (snapshot.related_page_ids?.length ?? 0) > 0 && snapshot.related_page_ids!.every(id => id === page),
   layout_contains: ({ check, owned }) => owned("layouts").some(row => structurallyContains(row.document, check.value)),
@@ -492,7 +511,7 @@ export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResul
   // max: the agent asked at least once and did not loop past the bound
   const pass = failure ? false : check.max !== undefined ? typeof result === "number" && result >= 1 && result <= check.max : ["count", "approval"].includes(check.type) ? result === expected : Boolean(result);
   const transition = failure?.field === undefined ? {} : { transition: { field: failure.field, before: failure.before, after: failure.after } };
-  return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...transition }, ...(failure ? { reason: failure.reason } : {}) };
+  return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...transition, ...failure?.evidence }, ...(failure ? { reason: failure.reason } : {}) };
 }
 
 const canonicalSeedValue = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalSeedValue) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalSeedValue(item)])) : value;

@@ -1,6 +1,6 @@
 {
   "id": "reading-list-one-prompt",
-"suite": "core",
+  "suite": "core",
   "prompt": "make a page that tracks my reading list",
   "page_plan": [
     {
@@ -123,6 +123,17 @@
       "id": "same-page",
       "type": "same_page",
       "page": "reading"
+    },
+    {
+      "id": "form-submit",
+      "type": "form_submit",
+      "page": "reading",
+      "required": false,
+      "value": {
+        "string": "Form Book",
+        "integer": "1",
+        "number": "1"
+      }
     }
   ],
   "goal_capabilities": [

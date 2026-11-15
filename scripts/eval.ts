@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
 import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup, type TaskStep } from "./eval-grade";
+import { createGateWait } from "./gate-diagnostics";
+import { formFields } from "../apps/web/src/page/formSchema";
 import { loadBaseReport, makeReport, reportJson, reportMarkdown, type BaseReport } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 
@@ -73,7 +75,7 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
 async function preflightBrowser(tasks: EvalTask[]) {
-  if (!tasks.some(task => task.checks.some(check => check.type === "browser_text"))) return;
+  if (!tasks.some(task => task.checks.some(check => ["browser_text", "form_submit"].includes(check.type)))) return;
   try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
@@ -309,6 +311,29 @@ function listCollections(snapshot: EvalSnapshot, pageId: string) {
   const blocks = (layout?.document as { blocks?: unknown[] } | undefined)?.blocks;
   return Array.isArray(blocks) ? blocks.flatMap(block => block && typeof block === "object" && !Array.isArray(block) && (block as Record<string, unknown>).type === "list" && typeof (block as Record<string, unknown>).collection === "string" ? [(block as Record<string, unknown>).collection as string] : []) : [];
 }
+// Opens a page route and waits until its list blocks loaded their records and the chat connected.
+async function openReadyPage(browser: any, stack: EvalStack, plan: PagePlan, pageId: string, snapshot: EvalSnapshot, signal: AbortSignal) {
+  const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
+  const page = await browser.newPage();
+  const remaining = listCollections(snapshot, pageId); const finished: Promise<unknown>[] = [];
+  const recordsSettled = remaining.length ? page.waitForResponse((response: any) => {
+    const path = new URL(response.url()).pathname; const index = remaining.findIndex(collection => path === `/api/pages/${pageId}/records/${collection}`);
+    if (index < 0) return false; remaining.splice(index, 1); finished.push(response.finished().then((error: unknown) => { if (error) throw error; })); return remaining.length === 0;
+  }, { timeout: 10_000 }) : undefined;
+  await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
+  if (recordsSettled) try { await recordsSettled; await page.waitForLoadState("networkidle", { timeout: 10_000 }); await Promise.all(finished); }
+  catch { signal.throwIfAborted(); throw new Error(`browser list records did not settle for page ${plan.alias}: ${remaining.join(", ") || "response body"}`); }
+  signal.throwIfAborted();
+  let abortReady: (() => void) | undefined;
+  try {
+    await Promise.race([
+      page.locator('.connection-state, .connection-banner, [role="status"]:has-text("loading chat…")').waitFor({ state: "hidden", timeout: 5_000 }),
+      new Promise<never>((_, reject) => { abortReady = () => reject(signal.reason); signal.addEventListener("abort", abortReady, { once: true }); }),
+    ]);
+  } catch { signal.throwIfAborted(); const text = await page.locator("body").innerText({ timeout: 10_000 }); throw new Error(`browser page did not become ready: ${text}`); }
+  finally { if (abortReady) signal.removeEventListener("abort", abortReady); }
+  return page;
+}
 async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
   if (!task.checks.some(check => check.type === "browser_text")) return [];
   signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
@@ -316,26 +341,71 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
     const output = [];
     for (const plan of task.page_plan.filter(page => task.checks.some(check => check.type === "browser_text" && check.page === page.alias))) {
       const pageId = pages.get(plan.alias); if (!pageId) continue;
-      const route = snapshot.pages?.find(row => row.id === pageId)?.route ?? plan.route; if (typeof route !== "string") throw new Error(`created page ${plan.alias} has no route`);
-      const page = await browser.newPage();
-      const remaining = listCollections(snapshot, pageId); const finished: Promise<unknown>[] = [];
-      const recordsSettled = remaining.length ? page.waitForResponse(response => {
-        const path = new URL(response.url()).pathname; const index = remaining.findIndex(collection => path === `/api/pages/${pageId}/records/${collection}`);
-        if (index < 0) return false; remaining.splice(index, 1); finished.push(response.finished().then(error => { if (error) throw error; })); return remaining.length === 0;
-      }, { timeout: 10_000 }) : undefined;
-      await page.goto(`${stack.achillesOrigin}${route}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
-      if (recordsSettled) try { await recordsSettled; await page.waitForLoadState("networkidle", { timeout: 10_000 }); await Promise.all(finished); }
-      catch { signal.throwIfAborted(); throw new Error(`browser list records did not settle for page ${plan.alias}: ${remaining.join(", ") || "response body"}`); }
-      signal.throwIfAborted();
-      let abortReady: (() => void) | undefined;
-      try {
-        await Promise.race([
-          page.locator('.connection-state, .connection-banner, [role="status"]:has-text("loading chat…")').waitFor({ state: "hidden", timeout: 5_000 }),
-          new Promise<never>((_, reject) => { abortReady = () => reject(signal.reason); signal.addEventListener("abort", abortReady, { once: true }); }),
-        ]);
-      } catch { signal.throwIfAborted(); const text = await page.locator("body").innerText({ timeout: 10_000 }); throw new Error(`browser page did not become ready: ${text}`); }
-      finally { if (abortReady) signal.removeEventListener("abort", abortReady); }
+      const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
       output.push({ page_id: pageId, text: await page.locator("body").innerText({ timeout: 10_000 }) }); await page.close();
+    }
+    return output;
+  } finally { await browser.close(); }
+}
+// The insert form blocks of a page's active layout, in render order, with the active input schema of each tool.
+export function insertForms(snapshot: EvalSnapshot, pageId: string) {
+  const layout = (snapshot.layouts ?? []).filter(row => row.page_id === pageId).sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0)).at(-1);
+  const blocks = (layout?.document as { blocks?: unknown[] } | undefined)?.blocks ?? [];
+  const forms = blocks.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "form"));
+  return forms.flatMap((block, index) => {
+    const tool = (snapshot.tools ?? []).find(row => row.page_id === pageId && row.name === block.tool);
+    const active = (snapshot.assignments ?? []).find(row => row.page_id === pageId && row.tool_id === tool?.id)?.active_version;
+    const version = (snapshot.tool_versions ?? []).find(row => row.page_id === pageId && row.tool_id === tool?.id && row.version === active);
+    return version?.operation === "insert" ? [{ index, tool: String(block.tool), collection: String(version.collection), input_schema: version.input_schema, fields: Array.isArray(block.fields) ? block.fields.map(String) : undefined }] : [];
+  });
+}
+const recordKeys = (snapshot: EvalSnapshot, pageId: string, collection: string) => new Set((snapshot.records ?? []).filter(row => row.page_id === pageId && row.collection === collection).map(row => String(row.id)));
+// For each insert form on a form_submit page: fill the required inputs from the check's value map, submit, and count the new records in the DB.
+async function formSubmits(stack: EvalStack, task: EvalTask, pages: Map<string, string>, snapshot: EvalSnapshot, signal: AbortSignal) {
+  const checks = task.checks.filter(check => check.type === "form_submit"); if (!checks.length) return [];
+  signal.throwIfAborted(); const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true });
+  try {
+    const output: Array<Record<string, unknown>> = [];
+    for (const check of checks) {
+      const plan = task.page_plan.find(page => page.alias === check.page)!; const pageId = pages.get(plan.alias); if (!pageId) continue;
+      const forms = insertForms(snapshot, pageId); if (!forms.length) continue;
+      const page = await openReadyPage(browser, stack, plan, pageId, snapshot, signal);
+      const gateWait = createGateWait(() => [], () => page.locator("body").innerText({ timeout: 2_000 }).catch(() => "page text unavailable"));
+      const values = check.value as Record<string, string>;
+      for (const form of forms) {
+        signal.throwIfAborted();
+        const row: Record<string, unknown> = { page_id: pageId, tool: form.tool, collection: form.collection };
+        const section = page.locator("section.record-form").nth(form.index);
+        try {
+          await gateWait(() => section.locator('form, p[aria-disabled="true"], [role="alert"]').first().waitFor({ timeout: 10_000 }));
+          const mapped = formFields(form.input_schema, form.fields);
+          if (!await section.locator("form").count()) {
+            if ("unsupported" in mapped) row.unsupported = mapped.unsupported;
+            else row.error = `no form shown: ${await section.innerText({ timeout: 2_000 })}`;
+            output.push(row); continue;
+          }
+          if ("unsupported" in mapped) throw new Error(`the browser shows a form for unsupported field ${mapped.unsupported}`);
+          for (const field of mapped.fields.filter(field => field.required)) {
+            const input = section.locator(`[name="${field.name.replace(/["\\]/g, "\\$&")}"]`);
+            if (field.kind === "enum") await input.selectOption({ index: 1 });
+            else if (field.kind !== "boolean") {
+              const value = values[field.kind]; if (value === undefined) throw new Error(`the value map has no ${field.kind} value for required field ${field.name}`);
+              await input.fill(value);
+            }
+          }
+          const before = recordKeys(await databaseSnapshot(stack), pageId, form.collection);
+          const invoked = gateWait(() => page.waitForResponse((response: any) => response.request().method() === "POST" && new URL(response.url()).pathname === `/api/pages/${pageId}/tools/${encodeURIComponent(form.tool)}/invoke`, { timeout: 10_000 }));
+          await section.locator('button[type="submit"]').click();
+          const response = await invoked as { status(): number; json(): Promise<unknown> };
+          row.status = response.status();
+          if (response.status() >= 400) { row.error = `submit failed (${response.status()}): ${JSON.stringify(await response.json().catch(() => null))}`; output.push(row); continue; }
+          await gateWait(() => section.locator('.record-form-actions [role="status"]').waitFor({ timeout: 10_000 }));
+          const after = recordKeys(await databaseSnapshot(stack), pageId, form.collection);
+          row.new_records = [...after].filter(id => !before.has(id)).length;
+        } catch (error) { signal.throwIfAborted(); row.error = error instanceof Error ? error.message : String(error); }
+        output.push(row);
+      }
+      await page.close();
     }
     return output;
   } finally { await browser.close(); }
@@ -387,7 +457,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
