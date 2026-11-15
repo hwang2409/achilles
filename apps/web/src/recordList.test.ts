@@ -5,6 +5,8 @@ import React from "react";
 import { cleanup, render, type RenderResult } from "@testing-library/react";
 import { LayoutBlock, RecordList } from "./App";
 
+const originalFetch = globalThis.fetch;
+
 GlobalRegistrator.register();
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -18,7 +20,6 @@ type RecordListProps = {
   refreshKey: string;
 };
 
-const originalFetch = globalThis.fetch;
 const props: RecordListProps = { title: "reading", collection: "books", pageId: "page-one", credential: "secret", refreshKey: "0:0" };
 let calls: Deferred[] = [];
 
