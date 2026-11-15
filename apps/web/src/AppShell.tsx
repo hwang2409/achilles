@@ -43,6 +43,8 @@ const chatHref = (chat: Chat) => {
 const titleOf = (chat: Chat) => chat.title?.trim() || "untitled chat";
 const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
 const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
+// in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
+const tabbable = (element: HTMLElement) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true });
 const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
 const restorableFocus = (...candidates: Array<Element | null>) => candidates.find((element): element is HTMLElement => {
   if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement || !element.isConnected || element.matches("[disabled], :disabled") || element.closest("[inert], [aria-hidden='true']")) return false;
@@ -189,7 +191,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     if (!narrow || !drawer) return;
     const key = (event: KeyboardEvent) => {
       if (event.key !== "Tab" || !sidebar.current?.contains(document.activeElement)) return;
-      const controls = Array.from(sidebar.current.querySelectorAll<HTMLElement>(focusable)).filter((element) => restorableFocus(element));
+      const controls = Array.from(sidebar.current.querySelectorAll<HTMLElement>(focusable)).filter(tabbable);
       if (!controls.length) return;
       const next = event.shiftKey ? controls.at(-1) : controls[0];
       const current = event.shiftKey ? controls[0] : controls.at(-1);
