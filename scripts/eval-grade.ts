@@ -14,9 +14,10 @@ export type TaskCheck = {
   route?: string;
   synonyms?: string[];
   step?: string;
+  max?: number;
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown> };
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" };
 export type EvalSnapshot = {
@@ -61,13 +62,13 @@ function validatePages(value: unknown): PagePlan[] {
   });
 }
 
-function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string): TaskStep[] {
+function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string, approvalMode?: EvalTask["approval_mode"]): TaskStep[] {
   if (!Array.isArray(value) || !value.length) throw new Error("steps must not be empty");
   const missingPrompts = value.filter(item => item && typeof item === "object" && ["prompt", "annotate"].includes((item as TaskStep).kind) && !(item as TaskStep).prompt).length;
   if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
-    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments"], `steps[${i}]`); const step = item as TaskStep;
+    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
     const isWrite = step.kind === "user_write"; const args = step.arguments;
     // the harness fills the current revision, like a form that loaded the record
@@ -75,6 +76,8 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
     if (!isWrite && (step.tool !== undefined || args !== undefined)) throw new Error(`steps[${i}] only user_write takes tool and arguments`);
     const needsPrompt = step.kind === "prompt" || step.kind === "annotate"; const hasPrompt = typeof step.prompt === "string" && step.prompt.length > 0;
     if (!needsPrompt && hasPrompt) throw new Error(`steps[${i}] has invalid prompt source`);
+    // the harness answers every approval request of a model step; other kinds run no model turn
+    if (step.approval !== undefined && (!needsPrompt || approvalMode !== "ask" || !["approve", "deny"].includes(step.approval))) throw new Error(`steps[${i}] approval must be approve or deny, on a prompt step of an approval_mode ask task`);
     return step;
   });
 }
@@ -84,7 +87,8 @@ function validateCheckShape(check: TaskCheck, i: number) {
   if (check.type === "count" && (!identifier(check.name) || !SNAPSHOT_COLLECTIONS.has(check.name!) || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs a known collection and count`);
   if (["tool", "tool_absent", "refused_tool_name"].includes(check.type) && !identifier(check.name)) throw new Error(`checks[${i}] needs tool name`);
   if (check.type === "operations" && (!Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => ["insert", "update", "list", "get"].includes(String(value))))) throw new Error(`checks[${i}] needs operation kinds`);
-  if (check.type === "approval" && (typeof check.tool !== "string" || !Number.isInteger(check.count))) throw new Error(`checks[${i}] needs tool and count`);
+  if (check.type === "approval" && (typeof check.tool !== "string" || (check.count === undefined) === (check.max === undefined) || !Number.isInteger(check.count ?? check.max) || (check.max !== undefined && check.max < 1))) throw new Error(`checks[${i}] needs tool and either count or max >= 1`);
+  if (check.type !== "approval" && check.max !== undefined) throw new Error(`checks[${i}] only approval takes max`);
   if (check.type === "successful_result" && typeof check.tool !== "string") throw new Error(`checks[${i}] needs tool`);
   if (["record", "records_exact", "updated_record", "schema_roundtrip", "layout_contains", "detail_selects", "metric_count", "layout_update", "tool_evolution"].includes(check.type) && check.value === undefined) throw new Error(`checks[${i}] needs value`);
   if (check.type === "tool_evolution") {
@@ -118,7 +122,7 @@ function validateChecks(value: unknown, aliases: Set<string>): TaskCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must not be empty");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`checks[${i}] must be an object`);
-    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms", "step"], `checks[${i}]`); const check = item as TaskCheck;
+    own(item, ["id", "type", "required", "page", "chat", "name", "value", "collection", "transition", "count", "text", "tool", "route", "synonyms", "step", "max"], `checks[${i}]`); const check = item as TaskCheck;
     if (!identifier(check.id) || !CHECK_TYPES.has(check.type) || (check.page !== undefined && !aliases.has(check.page))) throw new Error(`invalid checks[${i}]`);
     validateCheckShape(check, i); return check;
   });
@@ -209,7 +213,7 @@ export function validateTask(value: unknown): EvalTask {
   if (task.goal_capabilities !== undefined && (!Array.isArray(task.goal_capabilities) || !task.goal_capabilities.length || !task.goal_capabilities.every(identifier) || new Set(task.goal_capabilities).size !== task.goal_capabilities.length)) throw new Error("goal_capabilities must name unique capabilities");
   const page_plan = validatePages(task.page_plan); const aliases = new Set(page_plan.map(page => page.alias));
   const prompt = task.prompt as string | undefined;
-  const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt); const checks = validateChecks(task.checks, aliases);
+  const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt, task.approval_mode as EvalTask["approval_mode"]); const checks = validateChecks(task.checks, aliases);
   for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && ["prompt", "annotate"].includes(step.kind))) throw new Error(`check ${check.id} names step ${check.step}, which is not a prompt step on page ${check.page}`);
   validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", ...nestedTokens(step.arguments)])].join(" "), setup, task.requires as string[] ?? []);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused" };
@@ -474,10 +478,11 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   },
 };
 export function gradeCheck(check: TaskCheck, snapshot: EvalSnapshot): CheckResult {
-  const expected = check.value ?? check.count ?? check.text ?? true; const page = expectedPageId(snapshot, check.page); const owned = (type: keyof EvalSnapshot) => rows(snapshot, type).filter(row => row.page_id === page || row.pageId === page);
+  const expected = check.value ?? check.count ?? (check.max === undefined ? undefined : `1..${check.max}`) ?? check.text ?? true; const page = expectedPageId(snapshot, check.page); const owned = (type: keyof EvalSnapshot) => rows(snapshot, type).filter(row => row.page_id === page || row.pageId === page);
   const result = CHECK_GRADERS[check.type]({ check, snapshot, page, owned });
   const failure = result && typeof result === "object" && "reason" in result ? result as CheckFailure : undefined;
-  const pass = failure ? false : ["count", "approval"].includes(check.type) ? result === expected : Boolean(result);
+  // max: the agent asked at least once and did not loop past the bound
+  const pass = failure ? false : check.max !== undefined ? typeof result === "number" && result >= 1 && result <= check.max : ["count", "approval"].includes(check.type) ? result === expected : Boolean(result);
   const transition = failure?.field === undefined ? {} : { transition: { field: failure.field, before: failure.before, after: failure.after } };
   return { id: check.id, pass, expected, actual: failure ? false : result, evidence: { type: check.type, page, ...transition }, ...(failure ? { reason: failure.reason } : {}) };
 }
