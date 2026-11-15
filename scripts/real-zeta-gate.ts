@@ -332,6 +332,7 @@ try {
   const reloadShell = async () => {
     await page.reload();
     await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]'), "waitFor", { timeout: 20_000 });
   };
   const waitForListChange = async (selector: ".chat-list" | ".page-list", before: number, response: Promise<unknown>, label: string) => {
     await response;
@@ -353,9 +354,9 @@ try {
         await assertActive("chat load-older button", loadOlder);
         const boundaryChat = await rows.last().getAttribute("data-chat-id");
         if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
-        const continuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await loadOlder.click();
-        await waitForListChange(".chat-list", 50, continuation, "older chats");
+        await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])'), "waitFor", { timeout: 20_000 });
+        if (await rows.count() <= 50) throw new Error("load 50 older did not add chat rows");
         const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
         await gateWait.playwright(firstNewlyLoaded, "waitFor", { state: "attached" });
         await assertActive("chat load-older success", firstNewlyLoaded);
@@ -367,18 +368,27 @@ try {
         await reloadShell();
         const search = page.locator(".chat-search input");
         await gateWait.playwright(search, "waitFor");
+        // once "load 50 older" is clicked, the server has only the first page: a before= request gets an
+        // empty batch, and a chat-list reload (which can answer the click instead) gets at most 50 rows and
+        // no next cursor. before the click, reloads pass, so the button stays until the gate clicks it.
+        await page.evaluate(() => document.addEventListener("click", (event) => {
+          if ((event.target as Element).closest(".load-older")) (window as { olderClicked?: boolean }).olderClicked = true;
+        }, { capture: true }));
         const emptyOlder = async (route: Route) => {
           const url = new URL(route.request().url());
-          if (url.searchParams.has("before")) await route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
-          else await route.continue();
+          if (url.searchParams.has("before")) return route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
+          const clicked = await page.evaluate(() => (window as { olderClicked?: boolean }).olderClicked === true).catch(() => false);
+          if (url.searchParams.has("q") || !clicked) return route.continue();
+          url.searchParams.set("limit", String(Math.min(50, Number(url.searchParams.get("limit") ?? 50))));
+          const response = await route.fetch({ url: url.toString() });
+          // a newer list reload may have cancelled this request already.
+          await route.fulfill({ response, json: { ...(await response.json()), next: null } }).catch(() => {});
         };
         await page.route("**/api/chats?**", emptyOlder);
         const before = Number(await page.locator(".chat-list").getAttribute("data-loaded-count"));
-        const emptyResponse = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await page.getByRole("button", { name: "load 50 older" }).click();
-        await emptyResponse;
-        await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`), "waitFor", { timeout: 20_000 });
         await gateWait.playwright(page.getByRole("button", { name: "load 50 older" }), "waitFor", { state: "detached" });
+        await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`), "waitFor", { timeout: 20_000 });
         await page.unroute("**/api/chats?**", emptyOlder);
         const refreshed = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("q"));
         await search.fill("older chat 54");
