@@ -1,6 +1,6 @@
 {
   "id": "add-field-backfill",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "contacts",

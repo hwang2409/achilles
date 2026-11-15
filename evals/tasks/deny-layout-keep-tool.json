@@ -1,6 +1,6 @@
 {
   "id": "deny-layout-keep-tool",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tickets",

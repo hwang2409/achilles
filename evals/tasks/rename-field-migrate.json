@@ -16,14 +16,14 @@
       "kind": "prompt",
       "page": "books",
       "chat": "author-chat",
-      "prompt": "rename the state field to status everywhere on this page: the tools, the existing books, the list column, and the done metric. then check the metric"
+      "prompt": "rename the state field to status everywhere on this page: the tools, the existing books, the list column, and the done metric. also change the values: todo becomes to_read and done becomes finished, so the metric counts finished books. then check the metric"
     },
     {
       "id": "use",
       "kind": "prompt",
       "page": "books",
       "chat": "fresh-chat",
-      "prompt": "add Piranesi with status todo"
+      "prompt": "add Piranesi with status to_read"
     }
   ],
   "setup": {
@@ -178,27 +178,27 @@
       "value": [
         {
           "title": "Dune",
-          "status": "done"
+          "status": "finished"
         },
         {
           "title": "Emma",
-          "status": "todo"
+          "status": "to_read"
         },
         {
           "title": "Beloved",
-          "status": "done"
+          "status": "finished"
         },
         {
           "title": "Kindred",
-          "status": "todo"
+          "status": "to_read"
         },
         {
           "title": "Middlemarch",
-          "status": "todo"
+          "status": "to_read"
         },
         {
           "title": "Piranesi",
-          "status": "todo"
+          "status": "to_read"
         }
       ]
     },
@@ -210,7 +210,7 @@
       "tool": "achilles__add_book",
       "value": {
         "title": "Piranesi",
-        "status": "todo"
+        "status": "to_read"
       }
     },
     {
@@ -231,7 +231,7 @@
         "collection": "books",
         "where": {
           "field": "status",
-          "equals": "done"
+          "equals": "finished"
         },
         "count": 2,
         "position": "first"

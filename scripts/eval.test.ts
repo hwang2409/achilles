@@ -106,6 +106,11 @@ test("suite selection validates every task and sums one command budget", async (
   expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
   expect(reserveTurns(tasks, 1)).toBe(tasks.reduce((total, task) => total + task.agent_turns, 0));
   expect(() => assertTurnBudget(reserveTurns(tasks, 50))).toThrow("command budget");
+  expect(tasks.every(task => task.suite === "core")).toBe(true);
+  const hard = await selectTasks(undefined, undefined, "hard");
+  expect(hard.length).toBeGreaterThan(0);
+  expect(hard.every(task => task.suite === "hard")).toBe(true);
+  expect(() => assertTurnBudget(reserveTurns(hard, 3))).not.toThrow();
 });
 
 test("turn reservation is command-wide", () => {

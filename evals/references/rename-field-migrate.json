@@ -100,7 +100,7 @@
         "data": {
           "title": "Dune",
           "state": "done",
-          "status": "done"
+          "status": "finished"
         }
       },
       {
@@ -110,7 +110,7 @@
         "data": {
           "title": "Emma",
           "state": "todo",
-          "status": "todo"
+          "status": "to_read"
         }
       },
       {
@@ -120,7 +120,7 @@
         "data": {
           "title": "Beloved",
           "state": "done",
-          "status": "done"
+          "status": "finished"
         }
       },
       {
@@ -130,7 +130,7 @@
         "data": {
           "title": "Kindred",
           "state": "todo",
-          "status": "todo"
+          "status": "to_read"
         }
       },
       {
@@ -140,7 +140,7 @@
         "data": {
           "title": "Middlemarch",
           "state": "todo",
-          "status": "todo"
+          "status": "to_read"
         }
       },
       {
@@ -149,7 +149,7 @@
         "collection": "books",
         "data": {
           "title": "Piranesi",
-          "status": "todo"
+          "status": "to_read"
         }
       }
     ],
@@ -193,7 +193,7 @@
               "count": true,
               "where": {
                 "field": "status",
-                "equals": "done"
+                "equals": "finished"
               }
             },
             {
@@ -225,7 +225,7 @@
         "success": true,
         "arguments": {
           "title": "Piranesi",
-          "status": "todo"
+          "status": "to_read"
         }
       }
     ],
@@ -253,7 +253,7 @@
         "success": true,
         "data": {
           "title": "Piranesi",
-          "status": "todo",
+          "status": "to_read",
           "record_id": "b-new",
           "revision": 1
         }
@@ -532,7 +532,7 @@
         "data": {
           "title": "Dune",
           "state": "done",
-          "status": "done"
+          "status": "finished"
         }
       },
       {
@@ -542,7 +542,7 @@
         "data": {
           "title": "Emma",
           "state": "todo",
-          "status": "todo"
+          "status": "to_read"
         }
       },
       {
@@ -552,7 +552,7 @@
         "data": {
           "title": "Beloved",
           "state": "done",
-          "status": "done"
+          "status": "finished"
         }
       },
       {
@@ -562,7 +562,7 @@
         "data": {
           "title": "Kindred",
           "state": "todo",
-          "status": "todo"
+          "status": "to_read"
         }
       },
       {
@@ -572,7 +572,7 @@
         "data": {
           "title": "Middlemarch",
           "state": "todo",
-          "status": "todo"
+          "status": "to_read"
         }
       },
       {
@@ -581,7 +581,7 @@
         "collection": "books",
         "data": {
           "title": "Piranesi",
-          "status": "todo"
+          "status": "to_read"
         }
       }
     ],
@@ -625,7 +625,7 @@
               "count": true,
               "where": {
                 "field": "state",
-                "equals": "done"
+                "equals": "finished"
               }
             },
             {
@@ -657,7 +657,7 @@
         "success": true,
         "arguments": {
           "title": "Piranesi",
-          "status": "todo"
+          "status": "to_read"
         }
       }
     ],
@@ -685,7 +685,7 @@
         "success": true,
         "data": {
           "title": "Piranesi",
-          "status": "todo",
+          "status": "to_read",
           "record_id": "b-new",
           "revision": 1
         }

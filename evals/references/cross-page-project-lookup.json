@@ -1,0 +1,208 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "projects"
+      },
+      {
+        "id": "pg-tasks",
+        "alias": "tasks",
+        "route": "/tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_projects",
+        "name": "list_projects",
+        "version": 1,
+        "operation": "list",
+        "collection": "projects"
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "pg-tasks",
+        "name": "add_task"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "pg-tasks",
+        "name": "list_tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "p-1",
+        "collection": "projects",
+        "data": {
+          "name": "Apollo",
+          "code": "PRJ-4C1E"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-2",
+        "collection": "projects",
+        "data": {
+          "name": "Zephyr",
+          "code": "PRJ-9B07"
+        }
+      },
+      {
+        "page_id": "pg-tasks",
+        "collection": "tasks",
+        "id": "r-1",
+        "data": {
+          "title": "write spec",
+          "project_code": "PRJ-4C1E"
+        }
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "projects"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_projects",
+          "name": "list_projects",
+          "version": 1,
+          "operation": "list",
+          "collection": "projects"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "p-1",
+          "collection": "projects",
+          "data": {
+            "name": "Apollo",
+            "code": "PRJ-4C1E"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-2",
+          "collection": "projects",
+          "data": {
+            "name": "Zephyr",
+            "code": "PRJ-9B07"
+          }
+        }
+      ]
+    },
+    "turns": 5
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "projects"
+      },
+      {
+        "id": "pg-tasks",
+        "alias": "tasks",
+        "route": "/tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_projects",
+        "name": "list_projects",
+        "version": 1,
+        "operation": "list",
+        "collection": "projects"
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "pg-tasks",
+        "name": "add_task"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "pg-tasks",
+        "name": "list_tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "p-1",
+        "collection": "projects",
+        "data": {
+          "name": "Apollo",
+          "code": "PRJ-4C1E"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-2",
+        "collection": "projects",
+        "data": {
+          "name": "Zephyr",
+          "code": "PRJ-9B07"
+        }
+      },
+      {
+        "page_id": "pg-tasks",
+        "collection": "tasks",
+        "id": "r-1",
+        "data": {
+          "title": "write spec",
+          "project_code": "apollo"
+        }
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "projects"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_projects",
+          "name": "list_projects",
+          "version": 1,
+          "operation": "list",
+          "collection": "projects"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "p-1",
+          "collection": "projects",
+          "data": {
+            "name": "Apollo",
+            "code": "PRJ-4C1E"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-2",
+          "collection": "projects",
+          "data": {
+            "name": "Zephyr",
+            "code": "PRJ-9B07"
+          }
+        }
+      ]
+    },
+    "turns": 5
+  }
+}
