@@ -38,6 +38,18 @@ export function keepValues(fields: FormField[], values: FormValues): FormValues 
   }));
 }
 
+// A selected row fills an update form: each stored value becomes what its input holds (enums are JSON, like their options).
+export function recordValues(fields: FormField[], record: Record<string, unknown>): FormValues {
+  const values: FormValues = {};
+  for (const field of fields) {
+    const value = record[field.name];
+    if (field.kind === "enum") { if (field.name in record) values[field.name] = JSON.stringify(value); }
+    else if (field.kind === "boolean") values[field.name] = value === true;
+    else if (value !== null && value !== undefined) values[field.name] = String(value);
+  }
+  return values;
+}
+
 // The client checks what the schema states before the POST, so one submit names every problem, in field order, in plain words.
 export function formErrors(fields: FormField[], values: FormValues): Record<string, string> {
   const errors: Record<string, string> = {};

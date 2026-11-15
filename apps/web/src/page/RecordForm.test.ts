@@ -11,7 +11,7 @@ afterAll(() => { GlobalRegistrator.unregister(); globalThis.IS_REACT_ACT_ENVIRON
 
 const { act, createElement } = await import("react");
 const { fireEvent, render, waitFor } = await import("@testing-library/react");
-const { FormBlock } = await import("./RecordForm");
+const { FormBlock, selectRow } = await import("./RecordForm");
 
 let mounted: ReturnType<typeof render> | null = null;
 // Queries come from the render result: `screen` binds to the document that existed when testing-library was first imported, which another test file may do before any DOM.
@@ -19,6 +19,7 @@ const view = () => mounted as ReturnType<typeof render>;
 afterEach(async () => {
   if (mounted) await act(async () => { mounted?.unmount(); });
   mounted = null;
+  selectRow("books", null);
   globalThis.fetch = originalFetch;
 });
 
@@ -71,4 +72,64 @@ test("reload tool after a 409 keeps typed values and focuses the first field", a
   // The retry now carries the new version and succeeds.
   fireEvent.click(view().getByRole("button", { name: "add" }));
   expect(await view().findByText("added")).toBeTruthy();
+});
+
+// An update tool on a scripted store: invoke checks the revision like the server and answers 409 at /revision when it is stale.
+function serveUpdate(stored: Record<string, unknown>) {
+  const sent: Record<string, unknown>[] = [];
+  const tool = { name: "edit_book", operation: "update", collection: "books", version: 1, input_schema: { type: "object", properties: { record_id: { type: "string" }, revision: { type: "integer" }, status: { enum: ["to read", "done"] }, title: { type: "string" } }, required: ["record_id", "revision"] } };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/tools")) return Response.json({ tools: [tool] });
+    if (url.includes("/records/")) return Response.json([stored]);
+    const { arguments: args } = JSON.parse(String(init?.body)) as { arguments: Record<string, unknown> };
+    sent.push(args);
+    if (args.revision !== stored.revision) return Response.json({ error: { code: "conflict", path: "/revision", expected: "current record revision" } }, { status: 409 });
+    Object.assign(stored, args, { revision: Number(stored.revision) + 1 });
+    return Response.json({ ...stored });
+  }) as typeof fetch;
+  return sent;
+}
+const editBlock = () => createElement(FormBlock, { title: "edit book", toolName: "edit_book", pageId: "books", credential: "c", refreshKey: "0:0" });
+
+test("a selected row fills the update form and its record_id and revision are sent, not shown", async () => {
+  const stored = { record_id: "b1", revision: 3, status: "to read", title: "Dune" };
+  const sent = serveUpdate(stored);
+  mounted = render(editBlock());
+  await view().findByText("select a row in the table to edit it");
+  act(() => selectRow("books", { collection: "books", record: { ...stored } }));
+  const status = await view().findByLabelText(/status/) as HTMLSelectElement;
+  expect(status.value).toBe(JSON.stringify("to read"));
+  expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune");
+  expect(view().queryByLabelText(/record_id/)).toBeNull();
+  expect(view().queryByLabelText(/revision/)).toBeNull();
+  fireEvent.change(status, { target: { value: done } });
+  fireEvent.click(view().getByRole("button", { name: "save" }));
+  expect(await view().findByText("saved")).toBeTruthy();
+  expect(sent[0]).toEqual({ record_id: "b1", revision: 3, status: "done", title: "Dune" });
+  // the saved row stays selected at its new revision, so a second save does not conflict with itself
+  fireEvent.click(view().getByRole("button", { name: "save" }));
+  await waitFor(() => expect(sent.length).toBe(2));
+  expect(sent[1]?.revision).toBe(4);
+  expect(view().queryByText(/changed since you selected it/)).toBeNull();
+});
+
+test("a 409 for a row changed from chat keeps typed values; reload row keeps them over the new row", async () => {
+  const stored = { record_id: "b1", revision: 3, status: "to read", title: "Dune" };
+  const sent = serveUpdate(stored);
+  mounted = render(editBlock());
+  await view().findByText("select a row in the table to edit it");
+  act(() => selectRow("books", { collection: "books", record: { ...stored } }));
+  fireEvent.change(await view().findByLabelText(/status/), { target: { value: done } });
+  // chat renames the book first
+  Object.assign(stored, { title: "Dune Messiah", revision: 4 });
+  fireEvent.click(view().getByRole("button", { name: "save" }));
+  expect(await view().findByText(/changed since you selected it/)).toBeTruthy();
+  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
+  fireEvent.click(view().getByRole("button", { name: "reload row" }));
+  await waitFor(() => expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune Messiah"));
+  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
+  fireEvent.click(view().getByRole("button", { name: "save" }));
+  expect(await view().findByText("saved")).toBeTruthy();
+  expect(sent.at(-1)).toEqual({ record_id: "b1", revision: 4, status: "done", title: "Dune Messiah" });
 });
