@@ -1,5 +1,6 @@
 {
   "id": "agent-data-access",
+"suite": "core",
   "page_plan": [
     {
       "alias": "data",
