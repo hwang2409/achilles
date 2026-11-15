@@ -11,14 +11,14 @@ export type ConnectionState =
   | { phase: "not_running"; attempt: number; retryAt: number; lost: boolean }
   | { phase: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; attempt: number; retryAt: number; lost: boolean }
   | { phase: "dropped"; attempt: number; retryAt: number; lost: true }
-  | { phase: "unresponsive" | "incompatible"; attempt: number; retryAt: number; lost: boolean };
+  | { phase: "unresponsive" | "incompatible" | "controller_taken"; attempt: number; retryAt: number; lost: boolean };
 
 export type ConnectionEvent =
   | { type: "attempt" }
   | { type: "connected"; authority: ZetaRole }
   | { type: "not_running"; now: number }
   | { type: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; now: number }
-  | { type: "unresponsive" | "incompatible"; now: number }
+  | { type: "unresponsive" | "incompatible" | "controller_taken"; now: number }
   | { type: "closed"; now: number };
 
 /** The command that starts a server this page may connect to. The origin is exact: localhost and 127.0.0.1 differ. */
@@ -172,8 +172,10 @@ export function createConnection({
     const authority = "controller" as const;
     const opened = await openRole(authority);
     if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    if (opened.kind === "busy") return send({ type: "incompatible", now: now() });
+    // -32001 "connection_capacity": zeta already has a controller (another tab). Not a version problem.
+    if (opened.kind === "busy") return send({ type: "controller_taken", now: now() });
     if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
+    // -32002 "protocol_mismatch": the only case that is a real version mismatch.
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
     // The process runs and the origin is allowed, so a refused upgrade means the token was refused.
     if (opened.kind === "rejected") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
