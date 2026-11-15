@@ -525,8 +525,14 @@ test("a denied step accepts only ask-mode prompt steps, and approval max bounds 
   expect(withStep({}, "allow")).toThrow("approval_mode ask");
   const { approval_mode: _, ...noMode } = deniedTaskJson;
   expect(() => validateTask(noMode)).toThrow("approval_mode ask");
-  expect(withStep({ approval: "maybe" })).toThrow("approve or deny");
-  expect(withStep({ kind: "reconnect", prompt: undefined })).toThrow("approve or deny");
+  expect(withStep({ approval: "maybe" })).toThrow("approve, deny, or");
+  expect(withStep({ kind: "reconnect", prompt: undefined })).toThrow("approve, deny, or");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["approve", "deny"] } })).not.toThrow();
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: [] } })).toThrow("{ tool, decisions }");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["skip"] } })).toThrow("{ tool, decisions }");
+  expect(withStep({ approval: { tool: "add_note", decisions: ["deny"] } })).toThrow("{ tool, decisions }");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["deny"], extra: 1 } })).toThrow("unknown key extra");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["deny"] } }, "allow")).toThrow("approval_mode ask");
   const withCheck = (change: Record<string, unknown>) => () => validateTask({ ...deniedTaskJson, checks: [{ id: "a", type: "approval", page: "notes", tool: "achilles__add_note", ...change }] });
   expect(withCheck({ max: 0 })).toThrow("count or max");
   expect(withCheck({ max: 2, count: 1 })).toThrow("count or max");

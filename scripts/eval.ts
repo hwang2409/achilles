@@ -60,7 +60,8 @@ export async function loadTask(id: string, dir = new URL("../evals/tasks/", impo
   const task = validateTask(JSON.parse(await readFile(join(dir, `${id}.json`), "utf8")));
   if (task.id !== id) throw new Error(`task id ${task.id} does not match ${id}`); return task;
 }
-export async function selectTasks(selection?: string, dir = new URL("../evals/tasks/", import.meta.url).pathname) {
+// TASK names tasks of any suite; without TASK a full run takes every task of one suite (default core).
+export async function selectTasks(selection?: string, dir = new URL("../evals/tasks/", import.meta.url).pathname, suite: EvalTask["suite"] = "core") {
   if (selection?.trim()) {
     const ids = selection.split(",").map(id => id.trim()).filter(Boolean);
     if (!ids.length || new Set(ids).size !== ids.length) throw new Error("TASK must select at least one unique task");
@@ -68,9 +69,9 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
   }
   const ids = (await readdir(dir)).filter(name => name.endsWith(".json")).map(name => name.slice(0, -5)).sort();
   const tasks = await Promise.all(ids.map(id => loadTask(id, dir)));
-  const core = tasks.filter(task => task.suite === "core");
-  if (!core.length) throw new Error("no core tasks found; set suite: \"core\" on at least one task");
-  return core;
+  const chosen = tasks.filter(task => task.suite === suite);
+  if (!chosen.length) throw new Error(`no ${suite} tasks found; set suite: "${suite}" on at least one task`);
+  return chosen;
 }
 
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
@@ -411,6 +412,11 @@ async function formSubmits(stack: EvalStack, task: EvalTask, pages: Map<string, 
   } finally { await browser.close(); }
 }
 
+// A step answers every approval request with one decision, or answers the n-th request for one tool from a list (later requests and other tools are approved).
+export function approvalDecision(rule: TaskStep["approval"], tool: unknown, next: () => number): "approve" | "deny" {
+  if (rule === undefined || typeof rule === "string") return rule ?? "approve";
+  return tool === rule.tool ? rule.decisions[next()] ?? "approve" : "approve";
+}
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
@@ -418,7 +424,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
-  let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let decision: "approve" | "deny" = "approve";
+  let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
   const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
   const onEvent = (event: Record<string, any>) => {
     events.push(event);
@@ -427,7 +433,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     if (event.event !== "approval_request") return;
     const session = [...sessions.entries()].find(([, value]) => value.id === event.session_id); const requestId = event.data?.request_id ?? event.request_id;
     if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
-    const request = event.data ?? event; approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision }); void protocol.decide(session[1].id, String(requestId), decision).catch(error => { fatal = error; });
+    const request = event.data ?? event; const decision = approvalDecision(approvalRule, request.tool_call?.name, () => ruleRequests++); approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision }); void protocol.decide(session[1].id, String(requestId), decision).catch(error => { fatal = error; });
   };
   protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
@@ -446,7 +452,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect" && step.kind !== "user_write") throw new TurnCapFailure("task model turn limit has no remaining turn");
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       if (step.kind === "user_write") { const write = await userWrite(stack, step, pages.get(step.page), hidden, signal); userWrites.push(write); if (!write.ok || write.revision_after !== Number(write.revision_before) + 1) throw new Error(`user write ${step.id} failed (${write.status})`); continue; }
-      const session = await getSession(step.chat, step.page); if (!session) break; decision = step.approval ?? "approve"; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
+      const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
@@ -572,7 +578,7 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const expandHome = (path: string) => path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path; const base = Bun.env.BASE ? await loadBaseReport(resolve(expandHome(Bun.env.BASE))) : undefined; const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const expandHome = (path: string) => path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path; const base = Bun.env.BASE ? await loadBaseReport(resolve(expandHome(Bun.env.BASE))) : undefined; const suite = Bun.env.SUITE || "core"; if (!["core", "hard"].includes(suite)) throw new Error("SUITE must be core or hard"); const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR, suite as EvalTask["suite"]); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {

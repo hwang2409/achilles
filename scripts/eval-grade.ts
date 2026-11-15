@@ -17,9 +17,9 @@ export type TaskCheck = {
   max?: number;
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" };
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> } };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
-export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" };
+export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" | "hard" };
 export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>; tools?: Array<Record<string, unknown>>; assignments?: Array<Record<string, unknown>>;
   records?: Array<Record<string, unknown>>; layouts?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
@@ -79,7 +79,10 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
     const needsPrompt = step.kind === "prompt" || step.kind === "annotate"; const hasPrompt = typeof step.prompt === "string" && step.prompt.length > 0;
     if (!needsPrompt && hasPrompt) throw new Error(`steps[${i}] has invalid prompt source`);
     // the harness answers every approval request of a model step; other kinds run no model turn
-    if (step.approval !== undefined && (!needsPrompt || approvalMode !== "ask" || !["approve", "deny"].includes(step.approval))) throw new Error(`steps[${i}] approval must be approve or deny, on a prompt step of an approval_mode ask task`);
+    const rule = step.approval; const sequence = rule && typeof rule === "object" && !Array.isArray(rule);
+    if (sequence) own(rule, ["tool", "decisions"], `steps[${i}].approval`);
+    const validRule = typeof rule === "string" ? ["approve", "deny"].includes(rule) : sequence && typeof rule.tool === "string" && rule.tool.startsWith("achilles__") && Array.isArray(rule.decisions) && rule.decisions.length > 0 && rule.decisions.every(decision => ["approve", "deny"].includes(decision));
+    if (rule !== undefined && (!needsPrompt || approvalMode !== "ask" || !validRule)) throw new Error(`steps[${i}] approval must be approve, deny, or { tool, decisions }, on a prompt step of an approval_mode ask task`);
     return step;
   });
 }
@@ -216,7 +219,7 @@ export function validateTask(value: unknown): EvalTask {
   own(value, ["id", "prompt", "page_plan", "agent_turns", "steps", "checks", "setup", "approval_mode", "requires", "goal_capabilities", "suite"], "task"); const task = value as Record<string, unknown>;
   if (typeof task.id !== "string" || !/^[a-z0-9-]+$/.test(task.id)) throw new Error("task.id must be kebab-case");
   if (task.prompt !== undefined && typeof task.prompt !== "string") throw new Error("task.prompt must be a string");
-  if (task.suite !== undefined && !["core", "focused"].includes(String(task.suite))) throw new Error("task.suite must be core or focused");
+  if (task.suite !== undefined && !["core", "focused", "hard"].includes(String(task.suite))) throw new Error("task.suite must be core, focused, or hard");
   if (!Number.isInteger(task.agent_turns) || (task.agent_turns as number) < 1 || (task.agent_turns as number) > 20) throw new Error("agent_turns must be 1..20");
   if (task.approval_mode !== undefined && !["allow", "ask"].includes(String(task.approval_mode))) throw new Error("approval_mode must be allow or ask");
   if (task.requires !== undefined && (!Array.isArray(task.requires) || !task.requires.length || !task.requires.every(identifier) || new Set(task.requires).size !== task.requires.length)) throw new Error("requires must name unique capabilities");
