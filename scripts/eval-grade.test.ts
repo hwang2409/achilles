@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { expectationTokens, gradeCheck, gradeReference, gradeTask, structurallyContains, validateTask } from "./eval-grade";
+import { expectationTokens, gradeCheck, gradeReference, gradeTask, mentions, structurallyContains, validateTask } from "./eval-grade";
+import countTaskJson from "../evals/tasks/count-question.json";
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
 import metricTaskJson from "../evals/tasks/reading-metric-count.json";
 import readingListTaskJson from "../evals/tasks/reading-list-one-prompt.json";
@@ -458,5 +459,44 @@ test("user write steps grade the agent only after the user write bumped the revi
   for (const [name, snapshot, status] of rows) expect(gradeReference(staleTask, snapshot).status, name).toBe(status);
   expect(gradeReference(staleTask, good).diagnostics.conflict_seen).toBe(true);
   expect(gradeReference(staleTask, { ...good, results: good.results.slice(1) }).diagnostics.conflict_seen).toBe(false);
+  expect(() => validateTask({ ...staleRevisionTaskJson, checks: [...staleRevisionTaskJson.checks, { id: "answer", type: "answer_mentions", page: "books", step: "form-edit", value: ["Dune"] }] })).toThrow("names step form-edit, which is not a prompt step");
   expect(() => validateTask({ ...staleRevisionTaskJson, steps: [{ id: "w", kind: "user_write", page: "books", chat: "form", tool: "update_book", arguments: { record_id: "dune", revision: 1 } }] })).toThrow("no revision");
+});
+
+test("answer_mentions matches any value case-insensitively as a whole token", () => {
+  const rows: Array<[string, string, boolean]> = [
+    ["3 of your 5 books are done", "3", true],
+    ["You have **3** finished books.", "3", true],
+    ["done: 3.", "3", true],
+    ["3/5 are done", "3", true],
+    ["THREE books are done", "three", true],
+    ["Three.", "three", true],
+    ["120 books", "12", false],
+    ["312 books", "12", false],
+    ["12.5 books", "12", false],
+    ["1,120 books", "120", false],
+    ["the 12th book", "12", false],
+    ["v12 shipped", "12", false],
+    ["threefold", "three", false],
+    ["thirty-three books", "three", false],
+    ["5", "3", false],
+  ];
+  for (const [answer, value, expected] of rows) expect(mentions(answer, value), `${JSON.stringify(value)} in ${JSON.stringify(answer)}`).toBe(expected);
+  const task = validateTask(countTaskJson); const check = task.checks.find(item => item.type === "answer_mentions")!;
+  const grade = (answers?: Record<string, string>) => gradeCheck(check, { pages: [{ id: "home", alias: "books" }], answers });
+  expect(grade({ ask: "3 of your 5 books are done" }).pass).toBe(true);
+  expect(grade({ ask: "three are done" }).pass).toBe(true);
+  expect(grade({ ask: "5" }).pass).toBe(false);
+  expect(grade({ ask: "13 are done" }).pass).toBe(false);
+  expect(grade(undefined).reason).toBe("no final answer captured for step ask");
+});
+
+test("answer_mentions only expects facts the seeded records hold, on a real prompt step", () => {
+  const withCheck = (check: Record<string, unknown>) => () => validateTask({ ...countTaskJson, checks: [{ id: "answer", type: "answer_mentions", page: "books", step: "ask", ...check }] });
+  expect(withCheck({ value: ["5", "five", "Dune", "dune"] })).not.toThrow();
+  expect(withCheck({ value: ["4"] })).toThrow("not a seeded record value or count");
+  expect(withCheck({ value: ["four"] })).toThrow("not a seeded record value or count");
+  expect(withCheck({ value: ["Neuromancer"] })).toThrow("not a seeded record value or count");
+  expect(withCheck({ value: ["3"], step: "missing" })).toThrow("names step missing");
+  expect(withCheck({ value: [] })).toThrow("needs a step and non-empty mention values");
 });
