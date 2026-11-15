@@ -106,8 +106,26 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.keyboard.press("Escape");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${origin}/allow`);
+  const menu = page.getByRole("button", { name: "open menu" });
+  await menu.click();
+  await page.getByRole("button", { name: "close menu" }).click({ position: { x: 370, y: 400 } });
+  await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu");
+  await menu.click();
+  const sidebar = page.locator(".sidebar");
+  const controls = sidebar.locator("button:not(:disabled), a[href]:not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
+  await gateWait.playwright(controls.first(), "waitFor");
+  await controls.last().focus();
+  await page.keyboard.press("Tab");
+  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer Tab escaped the sidebar");
+  await controls.first().focus();
+  await page.keyboard.press("Shift+Tab");
+  if (!(await sidebar.locator(":focus").count()) || await page.locator(".skip-link:focus").count()) throw new Error("drawer reverse Tab escaped the sidebar");
+  if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
+  await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1440, height: 900 });
-  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, and focus return");
+  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, focus return, and drawer focus wrap");
 }
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };
