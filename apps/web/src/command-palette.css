@@ -8,21 +8,30 @@
 .palette-input input { flex: 1; min-width: 0; padding: 0; color: inherit; font: inherit; font-size: 1.15em; background: transparent; border: 0; outline: 0; }
 .palette-input kbd, .command-palette footer { color: var(--fulcrum-muted); font: inherit; }
 
+/* a shadow at an edge only while more content is past it: the covers scroll with the content, the shadows stay put */
+.palette-results, .sheet-groups {
+  background:
+    linear-gradient(var(--fulcrum-bg) 30%, transparent) center top / 100% 32px no-repeat local,
+    linear-gradient(transparent, var(--fulcrum-bg) 70%) center bottom / 100% 32px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--fulcrum-fg) 28%, transparent), transparent) center top / 100% 12px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--fulcrum-fg) 28%, transparent), transparent) center bottom / 100% 12px no-repeat scroll;
+}
 .palette-results { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
 .palette-results > div + div { border-top: 1px solid var(--fulcrum-border); }
 .palette-results h2 { margin: 0; padding: 14px 20px 6px; color: var(--fulcrum-muted); font-size: 0.85em; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
 .palette-option { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 40px; box-sizing: border-box; padding: 9px 20px; border-left: 3px solid transparent; cursor: pointer; }
 .palette-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.palette-option small { flex: none; color: var(--fulcrum-muted); font-size: 1em; }
+.palette-option small, .palette-option kbd { flex: none; color: var(--fulcrum-muted); font: inherit; font-size: 1em; }
 .palette-option[aria-selected="true"] { background: var(--fulcrum-surface); border-left-color: var(--fulcrum-accent); font-weight: 600; }
 .palette-empty { margin: 0; padding: 20px; color: var(--fulcrum-muted); }
 .command-palette footer { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--fulcrum-border); }
 
 .shortcuts-sheet { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.shortcuts-sheet[open] { display: flex; flex-direction: column; }
 .sheet-title { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
 .sheet-title h2 { margin: 0; font-size: 18px; }
 .sheet-title button { padding: 5px 9px; color: var(--fulcrum-fg); font: inherit; background: transparent; border: 1px solid var(--fulcrum-border); }
-.sheet-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; padding: 16px 20px 20px; }
+.sheet-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; min-height: 0; padding: 16px 20px 20px; overflow-y: auto; overscroll-behavior: contain; }
 .sheet-groups h3 { margin: 8px 0; color: var(--fulcrum-muted); font-size: 0.85em; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
 .sheet-groups dl { margin: 0; }
 .sheet-groups dl > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 5px 0; }
@@ -35,4 +44,20 @@
   .shortcuts-sheet { max-height: 100vh; }
   .sheet-groups { grid-template-columns: minmax(0, 1fr); }
   .command-palette footer { display: none; }
+}
+
+/* a short landscape phone: the palette starts near the top and uses the height it has */
+@media (max-height: 500px) and (min-width: 761px) {
+  .command-palette { margin-top: 16px; }
+  .command-palette[open] { max-height: calc(100vh - 32px); }
+  .palette-input { min-height: 44px; }
+  .palette-results h2 { padding: 8px 20px 4px; }
+  .palette-option { min-height: 36px; padding-block: 6px; }
+  .command-palette footer { display: none; }
+  .sheet-title { min-height: 44px; }
+}
+
+/* touch without a keyboard: key hints are noise */
+@media (hover: none) and (pointer: coarse) {
+  .palette-shortcut, .palette-input kbd { display: none; }
 }
