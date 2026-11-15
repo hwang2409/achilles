@@ -41,8 +41,10 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
     } catch {
       // A chat that is already attached (ready, empty transcript) runs the toggle's network call
       // right here; if it fails, send() rejects before the text goes anywhere. Keep it as the
-      // composer draft, the same recovery createFirstChat already gives a brand-new chat.
-      if (sessionId) draftStore.set(sessionId, text);
+      // composer draft, like createFirstChat does for a brand-new chat — but only when the
+      // composer is empty. The composer for this session is already mounted here, so writing
+      // unconditionally would erase text the user already typed.
+      if (sessionId && !draftStore.get(sessionId).trim()) draftStore.set(sessionId, text);
     }
   };
   // A creation starter needs create mode's tools, so it turns create mode on first, through the

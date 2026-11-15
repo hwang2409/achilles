@@ -70,6 +70,19 @@ describe("EmptyChat starters", () => {
     expect(draftStore.get("session-1")).toBe("make a page that tracks something you care about");
   });
 
+  test("keeps text the user already typed when the toggle is already blocked and send rejects", async () => {
+    draftStore.set("session-typed", "my own typed words");
+    const toggleCreateMode = async () => {};
+    const send = async () => { throw new Error("send is off until page tools refresh. retry create mode."); };
+    const result = await renderEmptyChat({ sessionId: "session-typed", send, toggleCreateMode });
+    const button = result.getAllByRole("button")[0];
+
+    expect(draftStore.get("session-typed")).toBe("my own typed words");
+    await act(async () => { fireEvent.click(button); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(draftStore.get("session-typed")).toBe("my own typed words");
+  });
+
   test("ignores a second click while the first starter is still sending", async () => {
     let resolveSend!: () => void;
     let calls = 0;
