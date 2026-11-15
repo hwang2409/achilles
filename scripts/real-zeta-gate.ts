@@ -362,6 +362,17 @@ try {
         const rows = page.locator(".chat-row");
         await gateWait.playwright(rows.nth(49), "waitFor");
         if (await rows.count() !== 50) throw new Error("chat pagination did not show its first 50 rows");
+        const renameTitle = await rows.first().locator("strong").innerText();
+        await rows.first().locator(".chat-row-rename").click();
+        const renameInput = page.locator(".chat-row-edit");
+        await assertActive("chat row rename input", renameInput);
+        await page.keyboard.type("typed by keyboard");
+        if (await renameInput.inputValue() !== "typed by keyboard") throw new Error(`chat row rename did not take keyboard input: ${await renameInput.inputValue()}`);
+        await page.keyboard.press("End");
+        await assertActive("chat row rename input after End", renameInput);
+        await page.keyboard.press("Escape");
+        await gateWait.playwright(renameInput, "waitFor", { state: "detached" });
+        if (await rows.first().locator("strong").innerText() !== renameTitle) throw new Error("escape did not cancel the chat row rename");
         await rows.last().focus();
         await page.keyboard.press("Tab");
         const loadOlder = page.getByRole("button", { name: "load 50 older" });
