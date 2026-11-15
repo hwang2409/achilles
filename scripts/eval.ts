@@ -135,6 +135,7 @@ from achilles.pages import PageStore
 root, route = sys.argv[1:]
 store = PageStore(Path(root)); store.set_create_mode("home", True)
 row = store.create_page(route, route[1:], {"blocks": [{"type": "text", "text": route[1:]}]})[0]
+store.set_create_mode("home", False)
 print(json.dumps({"id": row["id"]}))
 `;
 async function setCreateMode(stack: EvalStack, pageId: string, plan: PagePlan, signal: AbortSignal) {
@@ -157,7 +158,6 @@ export async function preparePage(stack: EvalStack, task: EvalTask, signal: Abor
     verifySetup(task.setup, JSON.parse(process.stdout));
   }
   for (const page of task.page_plan.filter(page => page.source !== "created" && !pages.has(page.alias))) pages.set(page.alias, "home");
-  // home is set last: the fixture script turns its create mode on
   for (const page of task.page_plan.filter(page => page.source !== "created")) if (page.route) await setCreateMode(stack, pages.get(page.alias)!, page, signal);
   if (plan) await setCreateMode(stack, "home", plan, signal);
   return pages;
