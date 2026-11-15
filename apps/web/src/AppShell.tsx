@@ -287,7 +287,7 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { 
   return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     <span title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
-    <button type="button" className="chat-row-rename" aria-label={`rename ${titleOf(chat)}`} onClick={startRename}>✎</button>
+    <button type="button" tabIndex={-1} className="chat-row-rename" aria-label={`rename ${titleOf(chat)}`} onClick={startRename}>✎</button>
   </a>;
 }
 
