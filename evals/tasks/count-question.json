@@ -1,0 +1,117 @@
+{
+  "id": "count-question",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "books",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 4,
+  "steps": [
+    {
+      "id": "ask",
+      "kind": "prompt",
+      "page": "books",
+      "chat": "books-chat",
+      "prompt": "how many of my books are done?"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_books",
+        "operation": "list",
+        "collection": "books"
+      }
+    ],
+    "records": [
+      {
+        "id": "book-1",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "status": "done"
+        }
+      },
+      {
+        "id": "book-2",
+        "collection": "books",
+        "data": {
+          "title": "Emma",
+          "status": "reading"
+        }
+      },
+      {
+        "id": "book-3",
+        "collection": "books",
+        "data": {
+          "title": "Beloved",
+          "status": "done"
+        }
+      },
+      {
+        "id": "book-4",
+        "collection": "books",
+        "data": {
+          "title": "Ulysses",
+          "status": "to-read"
+        }
+      },
+      {
+        "id": "book-5",
+        "collection": "books",
+        "data": {
+          "title": "Middlemarch",
+          "status": "done"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "answer",
+      "type": "answer_mentions",
+      "page": "books",
+      "step": "ask",
+      "value": [
+        "3",
+        "three"
+      ]
+    },
+    {
+      "id": "records-unchanged",
+      "type": "records_exact",
+      "page": "books",
+      "value": [
+        {
+          "title": "Dune",
+          "status": "done"
+        },
+        {
+          "title": "Emma",
+          "status": "reading"
+        },
+        {
+          "title": "Beloved",
+          "status": "done"
+        },
+        {
+          "title": "Ulysses",
+          "status": "to-read"
+        },
+        {
+          "title": "Middlemarch",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "books"
+    }
+  ]
+}
