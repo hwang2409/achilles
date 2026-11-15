@@ -129,7 +129,8 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .command { display: grid; grid-template-columns: 1fr auto; border-left: 2px solid var(--fulcrum-ok); background: var(--fulcrum-surface); }
 .command span, .command button { padding: 9px 12px; color: var(--fulcrum-muted); border: 0; border-bottom: 1px solid var(--fulcrum-border); }
 .command button { color: var(--fulcrum-fg); }
-.command code { grid-column: 1 / -1; overflow-x: auto; padding: 18px 12px; white-space: nowrap; }
+.command code { grid-column: 1 / -1; padding: 18px 12px; white-space: pre-wrap; word-break: break-all; }
+.attempt-count { white-space: nowrap; }
 .connection-state > .primary { margin-top: 24px; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
 .full-state > .primary { min-height: 40px; }
 .record-list { margin: 1rem 0; overflow-x: auto; }
@@ -140,14 +141,17 @@ th, td { text-align: left; border: 1px solid var(--fulcrum-border); padding: .4r
 th { color: var(--fulcrum-muted); font-weight: 600; }
 .record-list p { color: var(--fulcrum-muted); }
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
-.sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
-.sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
-.sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
-.sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed .sidebar > footer .settings-label, .sidebar-collapsed .sidebar > footer > kbd { display: none; }
-.sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 40px; justify-content: center; margin: 12px 6px 0; padding: 0; }
-.sidebar-collapsed .waiting-count { display: grid; place-items: center; width: 32px; height: 32px; margin: 12px 9px; border: 1px solid var(--fulcrum-warn); }
-.sidebar-collapsed .sidebar > footer { margin-top: auto; padding: 6px; }
-.sidebar-collapsed .sidebar > footer > button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
+/* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px) below) */
+@media (min-width: 761px) {
+  .sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
+  .sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
+  .sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
+  .sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed .sidebar > footer .settings-label, .sidebar-collapsed .sidebar > footer > kbd { display: none; }
+  .sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 40px; justify-content: center; margin: 12px 6px 0; padding: 0; }
+  .sidebar-collapsed .waiting-count { display: grid; place-items: center; width: 32px; height: 32px; margin: 12px 9px; border: 1px solid var(--fulcrum-warn); }
+  .sidebar-collapsed .sidebar > footer { margin-top: auto; padding: 6px; }
+  .sidebar-collapsed .sidebar > footer > button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
+}
 
 @media (max-width: 760px) {
   .app-shell { display: block; }

@@ -75,6 +75,8 @@ export async function gateShell(
     throw new Error("open drawer left the main pane interactive");
   if (!(await sidebar.evaluate((element) => element.contains(document.activeElement))))
     throw new Error("opening the drawer did not move focus into it");
+  if (await sidebar.getByRole("button", { name: /collapse sidebar|expand sidebar/ }).count())
+    throw new Error("the drawer must not expose the desktop collapse control at narrow widths");
   await page.keyboard.press("Tab");
   if (!(await sidebar.evaluate((element) => element.contains(document.activeElement))))
     throw new Error("drawer tab escaped into the obscured main pane");
