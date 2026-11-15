@@ -307,7 +307,12 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  // the fold hides the full approval-mode and create-mode controls into the ••• menu below 64em, but an
+  // enabled mode must stay visible without opening it (spec.md:36): a compact square mark (the app's own
+  // state-mark language, spec.md section 1) sits beside ••• when the fold is active and that mode is on;
+  // an aria-label carries the name for anyone who cannot see color.
+  const foldMarkers = <span className="fold-indicator">{page.approval_mode === "allow" && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" />}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" />}</span>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state}</span>{foldMarkers}<button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
@@ -318,13 +323,23 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
 };
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
+  // clicking "retry now" otherwise changes nothing visible until the next failure lands (near-instant when
+  // zeta is down, but still a blank moment): this flag shows "retrying…" right away, and clears once `state`
+  // moves on (a new object, win or lose).
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => { setRetrying(false); }, [state]);
+  const retryNow = () => { setRetrying(true); connection.retryNow(); };
   const text = connectionFailure(state) ?? "connecting to zeta…";
-  if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><button onClick={() => connection.retryNow()}>retry now</button></div>; }
+  if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; const extra = retrying ? " retrying…" : seconds !== null ? ` reconnecting in ${seconds}s…` : ""; return <div className="connection-banner" role="alert"><span>{text}{extra} the transcript below is the last copy; your draft is kept.</span><button onClick={retryNow} disabled={retrying}>retry now</button></div>; }
   const command = `zeta serve --ws ${connection.port} --ws-origin ${location.origin}`;
-  // a short heading, the full sentence as body text; the time of the last try instead of a rising attempt count, which read as a failure
+  // a short heading, the full sentence as body text; the time of the last try (not a rising attempt
+  // count alone, which read as a failure) plus the count itself, so a click has something to confirm it worked.
   const heading = connectionHeadings[state.phase];
-  const status = "retryAt" in state ? `retrying by itself · last try ${new Date(state.retryAt - backoff(state.attempt)).toLocaleTimeString()}` : "retrying…";
-  return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{status}</p><h1>{heading ?? text}</h1>{heading && <p className="connection-detail">{text}</p>}{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
+  const attempt = "attempt" in state ? state.attempt : 0;
+  const status = retrying ? "retrying…" : "retryAt" in state
+    ? <>retrying by itself · last try <span className="local-time">{new Date(state.retryAt - backoff(attempt)).toLocaleTimeString().toLowerCase()}</span> · tried {attempt} time{attempt === 1 ? "" : "s"}</>
+    : "retrying…";
+  return <section className="full-state connection-state" role="alert"><p><span className="retry-mark" />{status}</p><h1>{heading ?? text}</h1>{heading && <p className="connection-detail">{text}</p>}{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={retryNow} disabled={retrying}>retry now</button></section>;
 }
 
 export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {

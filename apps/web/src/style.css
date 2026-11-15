@@ -99,7 +99,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-actions button:focus-visible { border-color: var(--fulcrum-accent); }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--fulcrum-ok); }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
-.header-overflow, .header-menu { display: none; }
+.header-overflow, .header-menu, .fold-indicator { display: none; }
 /* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
    width): 64em of header leaves the title about 30 characters beside the full actions. em follows the
    ui font size; ch would also follow the font face, and a wide fallback face folded them at 1440. */
@@ -110,6 +110,11 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .header-menu { position: absolute; z-index: 5; top: 46px; right: 0; display: grid; min-width: 210px; padding: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); box-shadow: 0 12px 30px rgb(0 0 0 / .35); }
   .header-menu .approval-mode { min-height: 40px; display: flex; align-items: center; padding: 0 10px; }
   .header-menu button { display: block; text-align: left; }
+  /* the full controls fold into the menu above, but an enabled mode must not become invisible: a compact
+     mark (only rendered when that mode is on) stays beside ••• in the header itself. */
+  .fold-indicator { display: flex; gap: 6px; align-items: center; }
+  .fold-mark { display: inline-block; width: 8px; height: 8px; background: var(--fulcrum-ok); }
+  .fold-mark-create { background: var(--fulcrum-accent); }
 }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
@@ -181,8 +186,13 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .not-found-state .primary { display: inline-block; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
 .connection-state { display: block; width: min(720px, 100%); margin: auto; }
 .connection-state > p { color: var(--fulcrum-muted); }
-.connection-state h1 { max-width: 20ch; margin: 28px 0 12px; font-size: clamp(26px, 4vw, 42px); }
-.danger-mark { display: inline-block; width: 9px; height: 9px; margin-right: 12px; background: var(--fulcrum-danger); }
+/* 26ch, not 20ch: the short phase headings ("zeta is busy elsewhere", 22 chars) must not wrap; the
+   not_running and fallback headings are full sentences and still wrap over several lines past this width. */
+.connection-state h1 { max-width: 26ch; margin: 28px 0 12px; font-size: clamp(26px, 4vw, 42px); }
+/* a square beside calm "retrying…" text: this component never puts an alarming message next to the
+   mark (the real failure text is the heading below), so it uses the warning tone, not danger red. */
+.retry-mark { display: inline-block; width: 9px; height: 9px; margin-right: 12px; background: var(--fulcrum-warn); }
+.local-time { white-space: nowrap; }
 .command { display: grid; grid-template-columns: 1fr auto; border-left: 2px solid var(--fulcrum-ok); background: var(--fulcrum-surface); }
 .command span, .command button { padding: 9px 12px; color: var(--fulcrum-muted); border: 0; border-bottom: 1px solid var(--fulcrum-border); }
 .command button { color: var(--fulcrum-fg); }
