@@ -162,8 +162,9 @@ export function App() {
   }, [ready?.sessionId, outlineLength]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
-    if (previous === "running" && turn === "idle") void active.settleAfterTurn();
-  }, [active.settleAfterTurn, turn]);
+    // A chat attached during a live turn re-sends its page binding as soon as it is idle, even if the edge was missed.
+    if (turn === "idle" && (previous === "running" || ready?.rebind)) void active.settleAfterTurn();
+  }, [active.settleAfterTurn, turn, ready?.rebind]);
   const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
