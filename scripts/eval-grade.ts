@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -34,7 +34,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -52,12 +52,14 @@ function validateSetup(value: unknown): TaskSetup | undefined {
 
 function validatePages(value: unknown): PagePlan[] {
   if (!Array.isArray(value) || !value.length) throw new Error("page_plan must not be empty");
-  const aliases = new Set<string>();
+  const aliases = new Set<string>(); const routes = new Set<string>();
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`page_plan[${i}] must be an object`);
     own(item, ["alias", "source", "bind_chat", "create_mode", "route"], `page_plan[${i}]`); const page = item as PagePlan;
     if (!identifier(page.alias) || aliases.has(page.alias) || !["fixture", "setup", "created"].includes(page.source) || typeof page.bind_chat !== "boolean" || typeof page.create_mode !== "boolean") throw new Error(`invalid page_plan[${i}]`);
-    if (page.route !== undefined && (page.source !== "created" || typeof page.route !== "string" || !page.route.startsWith("/"))) throw new Error(`page_plan[${i}] has invalid route`);
+    // a created page names the route the agent makes; a fixture page names the second page the harness makes
+    if (page.route !== undefined && (page.source === "setup" || typeof page.route !== "string" || !page.route.startsWith("/") || page.route === "/" || routes.has(page.route))) throw new Error(`page_plan[${i}] has invalid route`);
+    if (page.route) routes.add(page.route);
     aliases.add(page.alias); return page;
   });
 }
@@ -404,6 +406,12 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const always = new Set(["mcp_discover", "achilles__inspect_page"]);
     const other = rows(snapshot, "calls").filter(row => row.page_id === page && !always.has(String(row.tool)) && !assigned.has(String(row.tool))).map(row => String(row.tool));
     return other.length ? { reason: `called tools the page does not assign: ${[...new Set(other)].join(", ")}` } satisfies CheckFailure : true;
+  },
+  no_new_page: ({ snapshot }) => {
+    if (!snapshot.initial) return { reason: "no initial snapshot to compare pages with" } satisfies CheckFailure;
+    const before = new Set(rows(snapshot.initial, "pages").map(row => row.id));
+    const added = rows(snapshot, "pages").filter(row => !before.has(row.id)).map(row => String(row.route ?? row.id));
+    return added.length ? { reason: `new pages: ${added.join(", ")}` } satisfies CheckFailure : true;
   },
   layout_restore: ({ snapshot, page }) => {
     const layouts = rows(snapshot, "layouts").filter(row => row.page_id === page).sort((a, b) => Number(a.version) - Number(b.version));

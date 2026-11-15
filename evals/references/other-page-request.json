@@ -1,0 +1,244 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "title": "Home",
+        "active_layout_version": 1,
+        "alias": "home"
+      },
+      {
+        "id": "page-books",
+        "route": "/books",
+        "title": "books",
+        "active_layout_version": 1,
+        "alias": "books"
+      }
+    ],
+    "tool_versions": [],
+    "records": [],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Welcome"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "page-books",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "books"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [],
+    "results": [],
+    "errors": [],
+    "answers": {
+      "ask-other-page": "This chat can only change /books. Open the home page and ask its chat."
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_layout_version": 1
+        },
+        {
+          "id": "page-books",
+          "route": "/books",
+          "title": "books",
+          "active_layout_version": 1
+        }
+      ],
+      "tool_versions": [],
+      "records": [],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Welcome"
+              }
+            ]
+          }
+        },
+        {
+          "page_id": "page-books",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "books"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "title": "Home",
+        "active_layout_version": 1,
+        "alias": "home"
+      },
+      {
+        "id": "page-books",
+        "route": "/books",
+        "title": "books",
+        "active_layout_version": 2,
+        "alias": "books"
+      }
+    ],
+    "tool_versions": [],
+    "records": [],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Welcome"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "page-books",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "books"
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "page-books",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "books"
+            },
+            {
+              "type": "text",
+              "text": "hi"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "layout-1",
+        "call_id": "layout-1",
+        "page_id": "page-books",
+        "chat_id": "books-chat",
+        "tool": "achilles__update_layout",
+        "arguments": {
+          "layout": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "books"
+              },
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ]
+          }
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "page_id": "page-books",
+        "chat_id": "books-chat",
+        "tool": "achilles__update_layout",
+        "call_id": "layout-1",
+        "success": true,
+        "data": {
+          "version": 2
+        }
+      }
+    ],
+    "errors": [],
+    "answers": {
+      "ask-other-page": "Added a hi block."
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "route": "/",
+          "title": "Home",
+          "active_layout_version": 1
+        },
+        {
+          "id": "page-books",
+          "route": "/books",
+          "title": "books",
+          "active_layout_version": 1
+        }
+      ],
+      "tool_versions": [],
+      "records": [],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Welcome"
+              }
+            ]
+          }
+        },
+        {
+          "page_id": "page-books",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "text",
+                "text": "books"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
