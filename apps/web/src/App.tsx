@@ -13,7 +13,7 @@ import { isEditableTarget, restoreFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { createConnection, type Connection, type ConnectionState } from "./zeta";
-import { useActiveChat, type Page } from "./useActiveChat";
+import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
@@ -137,14 +137,11 @@ export function App() {
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
   const send: typeof active.send = (text, intent, track) => {
     setFollowRequest((value) => value + 1);
-    let tracked: string | undefined;
-    return active.send(text, intent, (id) => {
-      tracked = id;
-      track(id);
-      setQueuedSteers((ids) => new Set(ids).add(id));
-    }).finally(() => {
-      if (tracked) setQueuedSteers((ids) => { const next = new Set(ids); next.delete(tracked!); return next; });
-    });
+    return trackQueuedSteer(
+      (queue) => active.send(text, intent, queue),
+      (id) => { track(id); setQueuedSteers((ids) => new Set(ids).add(id)); },
+      (id) => setQueuedSteers((ids) => { const next = new Set(ids); next.delete(id); return next; }),
+    );
   };
 
   useEffect(() => {
@@ -234,8 +231,9 @@ export function App() {
         {hasBlocks && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
         <div className="page-chat">
         <section ref={ready ? setTranscript : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={(event) => {
-          // the button unmounts once the reader is at the bottom; keyboard focus on it moves to the composer, not to <body>
-          if (document.activeElement === event.currentTarget) restoreFocus(composerField());
+          // the button unmounts once the reader is at the bottom; keyboard activation (detail 0) moves focus to the composer, not to <body>.
+          // a mouse click or tap leaves focus alone: focusing the textarea on a tap opens the soft keyboard over the transcript
+          if (event.detail === 0 && document.activeElement === event.currentTarget) restoreFocus(composerField());
           setFollowRequest((value) => value + 1);
           const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });

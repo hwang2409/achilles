@@ -92,6 +92,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-heading strong[role="button"] { cursor: text; border-radius: 2px; line-height: 40px; }
 .chat-heading strong[role="button"]:hover, .chat-heading strong[role="button"]:focus-visible { outline: 1px solid var(--fulcrum-border); }
 .chat-title-edit { flex: 1 1 160px; min-width: 160px; min-height: 40px; padding: 2px 4px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 14px; color: inherit; }
+/* iOS Safari zooms the page when it focuses an input under 16px */
+@media (pointer: coarse) { .chat-row-edit, .chat-title-edit { font-size: 16px; } }
 .chat-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; font-size: 14px; }
 .chat-actions button { min-height: 40px; padding: 8px 10px; border-color: var(--fulcrum-border); }
 .chat-actions button:focus-visible { border-color: var(--fulcrum-accent); }

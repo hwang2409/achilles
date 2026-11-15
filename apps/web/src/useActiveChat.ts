@@ -363,6 +363,21 @@ export async function deliverChatMessage(
   return used;
 }
 
+// marks a steer as queued from the moment its delivery id is tracked until the send settles (resolve or reject);
+// zeta has no live "delivered" event, so this settle is the only thing that un-hides the delivered steer
+export async function trackQueuedSteer<T>(
+  send: (track: (id: string) => void) => Promise<T>,
+  add: (id: string) => void,
+  remove: (id: string) => void,
+): Promise<T> {
+  let tracked: string | undefined;
+  try {
+    return await send((id) => { tracked = id; add(id); });
+  } finally {
+    if (tracked !== undefined) remove(tracked);
+  }
+}
+
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
   deliveryId: string,

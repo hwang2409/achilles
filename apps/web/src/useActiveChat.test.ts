@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
-import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, pageDeliverySteer, persistChatState, persistFirstMessage } from "./useActiveChat";
+import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -193,6 +193,49 @@ describe("steer delivery confirmation", () => {
     }};
     await expect(confirmSteerDelivery(client as never, "initial")).rejects.toThrow("timed out");
     expect(timeoutMs).toBeGreaterThan(0);
+  });
+});
+
+const refused = (code: number) => Object.assign(new Error(`refused ${code}`), { code });
+
+describe("message delivery tracking", () => {
+  test.each([
+    { name: "send", steer: false, replies: [{}], log: ["track:d1", "send:d1"] },
+    { name: "steer", steer: true, replies: [{}, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), {}, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), {}], log: ["track:d1", "steer:d1", "send:d1"] },
+    { name: "network error on the first request", steer: false, replies: [new Error("socket closed")], log: ["track:d1", "send:d1"], error: "socket closed" },
+    { name: "second refusal", steer: false, replies: [refused(-32004), refused(-32005)], log: ["track:d1", "send:d1", "steer:d1"], error: "refused -32005" },
+  ])("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error }) => {
+    const log: string[] = [];
+    const client = { request: async (method: string, params: { delivery_id: string }) => {
+      log.push(`${method}:${params.delivery_id}`);
+      const reply = replies.shift();
+      if (reply instanceof Error) throw reply;
+      return reply;
+    }};
+    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id}`));
+    if (error) await expect(delivery).rejects.toThrow(error);
+    else await delivery;
+    expect(log).toEqual(expected);
+  });
+
+  test.each([
+    { name: "resolves", outcome: async () => "steer" },
+    { name: "rejects with a network error", outcome: async () => { throw new Error("socket closed"); } },
+    { name: "rejects with a second refusal", outcome: async () => { throw refused(-32005); } },
+    { name: "rejects with a dropped steer", outcome: async () => { throw new DroppedSteerDeliveryError("dropped"); } },
+  ])("the queued id leaves the set when the send $name", async ({ outcome }) => {
+    const queued = new Set<string>();
+    let whileSending: string[] = [];
+    const result = trackQueuedSteer(async (track) => {
+      track("d1");
+      whileSending = [...queued];
+      return outcome();
+    }, (id) => queued.add(id), (id) => queued.delete(id));
+    await result.catch(() => {});
+    expect(whileSending).toEqual(["d1"]);
+    expect([...queued]).toEqual([]);
   });
 });
 
