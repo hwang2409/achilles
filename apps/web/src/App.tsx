@@ -8,7 +8,7 @@ import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
 import { DetailRecord, type DetailFilter } from "./DetailRecord";
 import { FormBlock, selectRow, useRecordWrites, useSelectedRow } from "./page/RecordForm";
-import { recordColumns, schemaColumns } from "./page/listColumns";
+import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget } from "./keyboard";
@@ -289,7 +289,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   if (block.type === "list") {
     const key = `${pageId}:${String(block.collection)}`;
     const list = { title: String(block.title), collection: String(block.collection), pageId, credential, refreshKey };
-    return Array.isArray(block.fields) ? <RecordList key={key} {...list} columns={block.fields.map(String)} /> : <SchemaRecordList key={key} {...list} toolsKey={chatRefreshKey} />;
+    return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} /> : <SchemaRecordList key={key} {...list} toolsKey={chatRefreshKey} />;
   }
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
@@ -306,21 +306,23 @@ function SchemaRecordList({ toolsKey, ...list }: { title: string; collection: st
   const last = useRef<PageTool[] | null>(null);
   if (tools !== null) last.current = tools;
   const shown = tools ?? last.current;
-  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} />;
+  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} extendColumns />;
 }
 
-// columns: null while they load; empty falls back to the record keys, sorted.
-export function RecordList({ title, collection, pageId, credential, refreshKey, columns = [] }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; columns?: string[] | null }) {
+// columns: null while they load; empty falls back to the record keys, sorted. extendColumns means
+// columns is the schema's own list, not an explicit `fields` choice: record keys the schema does not
+// name are appended, sorted, so the table never hides data the record actually has.
+export function RecordList({ title, collection, pageId, credential, refreshKey, columns = [], extendColumns = false }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; columns?: string[] | null; extendColumns?: boolean }) {
   const [records, setRecords] = useState<Record<string, unknown>[] | null>(null); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const requestSequence = useRef(0);
   useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, refreshKey]);
   const selected = useSelectedRow(pageId);
   const selectedId = selected?.collection === collection ? selected.record.record_id : undefined;
-  return <RecordListView title={title} records={records} columns={columns} total={total} error={error} selectedId={selectedId} onSelect={(record) => selectRow(pageId, record && { collection, record })} />;
+  return <RecordListView title={title} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onSelect={(record) => selectRow(pageId, record && { collection, record })} />;
 }
 
-export function RecordListView({ title, records, columns: chosen = [], total, error, selectedId, onSelect }: { title: string; records: Record<string, unknown>[] | null; columns?: string[] | null; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null) => void }) {
+export function RecordListView({ title, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onSelect }: { title: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null) => void }) {
   const loadedRecords = records ?? [];
-  const columns = chosen?.length ? chosen : recordColumns(loadedRecords);
+  const columns = !chosen?.length ? recordColumns(loadedRecords) : extendColumns ? extendWithRecordKeys(chosen, loadedRecords) : chosen;
   const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => {
     const row = event.currentTarget;

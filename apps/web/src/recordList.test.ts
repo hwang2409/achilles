@@ -4,7 +4,7 @@ import { act } from "react";
 import React from "react";
 import { cleanup, render, type RenderResult } from "@testing-library/react";
 import { LayoutBlock, RecordList } from "./App";
-import { recordColumns, schemaColumns } from "./page/listColumns";
+import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import type { PageTool } from "./page/usePageTools";
 
 const originalFetch = globalThis.fetch;
@@ -148,5 +148,21 @@ describe("list columns", () => {
     expect(recordColumns(books)).toEqual(recordColumns([...books].reverse()));
     expect(recordColumns(books)).toEqual(["author", "pages", "status", "title"]);
     expect(schemaColumns([], "books")).toEqual([]);
+  });
+
+  // a partial data_schema, or an input added after the schema was written, must not hide data the
+  // record actually has: on main this column showed; the schema-only route silently hid it.
+  test("a record key the data schema does not name still shows, after the schema's own columns, sorted", () => {
+    const partialSchema = schemaColumns([{ name: "add_note", operation: "insert", collection: "notes", input_schema: {}, version: 1, data_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], "notes");
+    const notes = [{ record_id: "n1", revision: 1, title: "Partial schema", status: "draft" }];
+    expect(extendWithRecordKeys(partialSchema, notes)).toEqual(["title", "status"]);
+  });
+
+  test("fields: [] behaves like no fields: schema order, then extra record keys, sorted", async () => {
+    routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchema }], books);
+    const block = { type: "list", title: "reading", collection: "books", fields: [] };
+    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-empty-fields", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    expect(headers(result)).toEqual(["title", "status", "author", "pages"]);
   });
 });
