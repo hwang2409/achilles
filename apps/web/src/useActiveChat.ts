@@ -107,8 +107,7 @@ async function findChat(sessionId: string) {
   return null;
 }
 
-// the newest listed chat (the sidebar's order) that matches
-async function findNewestChat(matches: (chat: Chat) => boolean) {
+async function findWaitingChat() {
   let before: string | null = null;
   do {
     const params = new URLSearchParams({ limit: "200" });
@@ -116,7 +115,7 @@ async function findNewestChat(matches: (chat: Chat) => boolean) {
     const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
     if (!response.ok) return null;
     const result = await response.json() as { chats: Chat[]; next: string | null };
-    const found = result.chats.find(matches);
+    const found = result.chats.find((chat) => chat.last_state === "approval");
     if (found) return found;
     before = result.next;
   } while (before);
@@ -175,9 +174,7 @@ export async function attachPage(
     const creationStatus = creation.status(page.id);
     const pending = creationStatus.pending;
     if (creationStatus.createMode !== undefined) page.create_mode = creationStatus.createMode;
-    // with no chat named, a page opens on its most recent chat; page.zeta_session_id is only its first chat
-    const newest = forceNew || create || selectedId || pending ? null : await findNewestChat((chat) => chat.page_id === page.id); requireCurrent(owner, token);
-    let sessionId = forceNew ? null : selectedId ?? newest?.session_id ?? page.zeta_session_id;
+    let sessionId = forceNew ? null : selectedId ?? page.zeta_session_id;
     if (sessionId && !pending) {
       try { return await attachSession(sessionId); }
       catch (caught) {
@@ -499,7 +496,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [selectedId]);
 
   const continueWaitingChat = useCallback(async () => {
-    const waiting = await findNewestChat((chat) => chat.last_state === "approval");
+    const waiting = await findWaitingChat();
     if (waiting) selectChat(waiting);
   }, [selectChat]);
 
