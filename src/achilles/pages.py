@@ -547,6 +547,7 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -915,12 +916,12 @@ class PageStore:
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = db.execute(
                 "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
-                "c.title,c.created_at,c.updated_at,c.last_state FROM chat c "
+                "c.title,c.created_at,c.updated_at,c.last_state,c.titled_by_user FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
                 (*parameters, limit + 1),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [{**dict(row), "titled_by_user": bool(row["titled_by_user"])} for row in rows]
 
     def approval_count(self) -> int:
         with self._connect() as db:
@@ -949,16 +950,23 @@ class PageStore:
     def chat(self, session_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
-                "SELECT session_id,page_id,title,created_at,updated_at,last_state "
+                "SELECT session_id,page_id,title,created_at,updated_at,last_state,titled_by_user "
                 "FROM chat WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if row is None:
             raise KeyError(session_id)
-        return dict(row)
+        return {**dict(row), "titled_by_user": bool(row["titled_by_user"])}
 
-    def update_chat(self, session_id: str, changes: dict[str, str | None]) -> dict[str, Any]:
-        assignments = [f"{key}=?" for key in changes]
+    def update_chat(self, session_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        # a title-only write is an automatic name; it never replaces a title the user chose
+        keep_user_title = "title" in changes and "titled_by_user" not in changes
+        assignments = [
+            "title=CASE WHEN titled_by_user THEN title ELSE ? END"
+            if key == "title" and keep_user_title
+            else f"{key}=?"
+            for key in changes
+        ]
         with self.transaction() as db:
             updated = db.execute(
                 f"UPDATE chat SET {','.join(assignments)},updated_at=? WHERE session_id=?",
