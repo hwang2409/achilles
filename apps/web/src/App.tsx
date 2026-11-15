@@ -75,9 +75,12 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
-    // zeta allows one controller; a second tab (or gamma) gets refused here. zeta never promotes an
-    // observer to controller, so there is no take-over: the only path back in is the other tab closing.
-    case "controller_taken": return "achilles is open in another tab. close it there, then retry here.";
+    // zeta allows one controller; this fires for any other controller connection (a second achilles
+    // tab, or another client such as gamma, fulcrum, or the cli), and also when a reload's own
+    // cleanup has not finished within zeta's 10s handoff deadline, even with no other tab open.
+    // zeta never promotes an observer to controller, so there is no take-over to offer; the page
+    // retries by itself with backoff until the slot frees.
+    case "controller_taken": return "another client is using zeta (only one can control it at a time), maybe achilles in another tab. close it, and this page reconnects by itself.";
     default: return null;
   }
 }
