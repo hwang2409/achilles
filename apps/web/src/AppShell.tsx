@@ -253,7 +253,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   const pageEntries = pageRows.map((item): PaletteEntry => ({ id: `page:${item.id}`, label: item.title, detail: item.route, run: () => location.assign(pageHref(item.route)) }));
   const searchChats = (search: string, before: string | null, signal: AbortSignal, limit = 20) => chatPage(() => null)(search, before, signal, limit)
     .then((result) => ({ ...result, items: result.items.map((chat): PaletteEntry => ({ id: chat.session_id, label: titleOf(chat), detail: `${chat.page_title} · ${timeLabel(chat.updated_at)}`, run: () => select(chat) })) }));
-  // a keyboard (F2) rename hands focus back to its row: once the editor closes, and again after the
+  // a row rename (F2 or the pencil) hands focus back to its row: once the editor closes, and again after the
   // list refresh moves the row; it lets go as soon as focus lands anywhere else.
   const renamedRow = useRef<string | null>(null);
   const returnRowFocus = () => {
@@ -262,7 +262,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     row?.focus();
     return row;
   };
-  const startKeyboardRename = (id: string) => { renamedRow.current = id; };
+  const startRowRename = (id: string) => { renamedRow.current = id; };
   useEffect(() => { if (returnRowFocus()) renamedRow.current = null; }, [chats]);
   useEffect(() => {
     const release = (event: FocusEvent) => {
@@ -323,7 +323,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} onKeyboardRename={startKeyboardRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} onKeyboardRename={startKeyboardRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
@@ -338,23 +338,25 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   </div>;
 }
 
-function ChatRow({ chat, current, active, index, query, onSelect, onRename, onKeyboardRename, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void; onKeyboardRename: (id: string) => void; onRenameEnd: () => void }) {
+function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
-  useEffect(() => { if (!rename.editing) onRenameEnd(); }, [rename.editing]);
+  // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
+  useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   if (rename.editing) {
-    return <div id={rowId} data-chat-id={chat.session_id} className={rowClass}>
+    return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
       <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind()} />
     </div>;
   }
+  // F2 or the pencil both start a rename the same way, so focus returns to the row either way (onRenameStart marks it)
   const startRename = (event: { preventDefault(): void; stopPropagation(): void }) => {
     event.preventDefault();
     event.stopPropagation();
+    onRenameStart(chat.session_id);
     rename.start(chat.title?.trim() || chat.first_title?.trim() || "", (value) => onRename(chat, value));
   };
-  // F2 is the keyboard path to rename a row; the pencil is a pointer shortcut only
-  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") { onKeyboardRename(chat.session_id); startRename(event); } }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
+  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>
     <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>
