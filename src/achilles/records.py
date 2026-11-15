@@ -140,13 +140,20 @@ def _update(db, page_id, collection, version, schema, arguments):
         ),
     )
     if updated.rowcount != 1:
-        raise VersionConflict("/revision", "current record revision")
+        # record the live revision so a caller can retry without a separate read
+        live = db.execute(
+            "SELECT revision FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+            (page_id, collection, record_id),
+        ).fetchone()
+        current = {"record_id": record_id, "revision": live[0]} if live else None
+        raise VersionConflict("/revision", "current record revision", current)
     return {**document, "record_id": record_id, "revision": revision + 1}
 
 
 class VersionConflict(ValidationError):
-    def __init__(self, path: str, expected: str):
+    def __init__(self, path: str, expected: str, current: dict[str, Any] | None = None):
         super().__init__(path, expected, "conflict")
+        self.current = current
 
 
 def call_record(

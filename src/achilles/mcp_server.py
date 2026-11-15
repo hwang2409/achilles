@@ -332,9 +332,15 @@ def build_mcp(store: PageStore):
             output_schema, publish_output_schema = derived_output_schema(bundle)
             input_schema = bundle["input_schema"]
             if bundle["implementation"]["operation"] == "update":
-                description += "; read or list first, then pass the returned revision"
+                description += (
+                    "; read or list first, then pass the returned revision; record_id "
+                    "and revision are for tool calls, not to show the user"
+                )
             if bundle["implementation"]["operation"] == "list":
-                description += "; newest first"
+                description += (
+                    "; newest first; record_id and revision are for tool calls, not to "
+                    "show the user"
+                )
                 input_schema = list_input_schema(input_schema)
             tools.append(
                 Tool(

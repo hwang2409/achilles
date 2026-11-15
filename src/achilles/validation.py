@@ -21,10 +21,13 @@ class ValidationError(ValueError):
         super().__init__(expected)
 
 
-def error_document(exc: ValidationError) -> dict[str, str]:
-    document = {"code": exc.code, "path": exc.path, "expected": exc.expected}
+def error_document(exc: ValidationError) -> dict[str, Any]:
+    document: dict[str, Any] = {"code": exc.code, "path": exc.path, "expected": exc.expected}
     if exc.hint is not None:
         document["hint"] = exc.hint
+    current = getattr(exc, "current", None)
+    if current is not None:
+        document["current"] = current
     return document
 
 
