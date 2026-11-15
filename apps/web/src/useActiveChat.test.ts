@@ -287,6 +287,26 @@ describe("chat title cut", () => {
 });
 
 describe("active chat attachment", () => {
+  test("opening a page without a chat in the URL lands on its most recent chat, not the first chat it was mapped to", async () => {
+    const chats = [
+      { session_id: "books-latest", page_id: "books", title: "books chat", message_sent: true },
+      { session_id: "home-latest", page_id: "home", title: "newest home chat", message_sent: true },
+      { session_id: "home-first", page_id: "home", title: "first home chat", message_sent: true },
+    ];
+    const fetcher = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("home-first"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats, next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const owner = createAttachmentOwner();
+    try {
+      const ready = await withFetch(fetcher, () => attachPage(attachmentClient() as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true)));
+      expect(ready).toMatchObject({ phase: "ready", sessionId: "home-latest" });
+    } finally { owner.clear(); }
+  });
+
   test("a user-set title is not overwritten by a later zeta auto-name", async () => {
     const originalFetch = globalThis.fetch;
     let patched = false;

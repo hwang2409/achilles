@@ -22,6 +22,13 @@ export const restoreFocus = (...candidates: Array<Element | null>) => {
   restorableFocus(...candidates)?.focus();
 };
 
+const composerField = () => document.querySelector('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
+// a control that unmounts or disables once used hands keyboard focus (Enter/Space: click detail 0) to the composer, not to <body>.
+// a mouse click or tap leaves focus alone: focusing the textarea on a tap opens the soft keyboard over the transcript
+export const keyboardFocusToComposer = (event: { detail: number; currentTarget: EventTarget }) => {
+  if (event.detail === 0 && document.activeElement === event.currentTarget) restoreFocus(composerField());
+};
+
 // keeps Tab inside `container`: from the last tabbable control to the first, and back with Shift+Tab
 export function wrapTab(event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault">, container: HTMLElement) {
   if (event.key !== "Tab") return;
