@@ -34,13 +34,14 @@ export function watchTurnEnd(client: ZetaClient, sessionId: string, ended: () =>
   let unsubscribe = () => {};
   const stop = () => { if (done) return false; done = true; unsubscribe(); lease.release(); return true; };
   const finish = () => { if (stop()) ended(); };
-  const marked = store.getState().agent !== "running";
+  const { agent, endOutcome } = store.getState();
+  const marked = agent !== "running";
   try { if (marked) store.dispatch({ type: "run_start" }); }
   catch { stop(); return () => {}; } // a store under replay refuses events: the notice keeps its "try again"
   unsubscribe = store.subscribe(() => { if (store.getState().agent !== "running") finish(); });
   void runningSession(client).then((running) => {
     if (done || running === sessionId) return;
-    try { if (marked) store.dispatch({ type: "run_end" }); } catch { /* evicted store: nothing to undo */ }
+    try { if (marked) store.dispatch({ type: "run_end", ...(endOutcome ? { outcome: endOutcome } : {}) }); } catch { /* evicted store: nothing to undo */ }
     finish();
   }, () => {});
   return () => { stop(); };

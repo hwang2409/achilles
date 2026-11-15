@@ -653,7 +653,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     } catch (caught) { if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) }); }
   }, [bindPage, busy, client, state, updateReady]);
 
-  useEffect(() => { if (client && settleWait) return watchTurnEnd(client, settleWait.sessionId, () => setSettleWake((value) => value + 1)); }, [client, settleWait]);
+  useEffect(() => { if (client && settleWait) return watchTurnEnd(client, settleWait.sessionId, () => { setSettleWait(null); setSettleWake((value) => value + 1); }); }, [client, settleWait]);
   useEffect(() => { if (settleWake > 0) void settleAfterTurn(); }, [settleWake]); // this render's settleAfterTurn sees the current state
 
   // The notice for another running chat clears itself when that turn ends; a blocked attach then retries.

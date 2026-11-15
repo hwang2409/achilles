@@ -93,7 +93,10 @@ describe("watchTurnEnd", () => {
     watchTurnEnd(client as never, "other", () => { ended += 1; });
     await settle();
     expect(ended).toBe(0);
-    store.dispatch({ type: "turn_end" }); store.dispatch({ type: "run_end" }); store.dispatch({ type: "run_end" });
+    store.dispatch({ type: "turn_end" });
+    await settle();
+    expect(ended).toBe(0); // the run_start mark keeps a store that missed agent_start running until agent_end
+    store.dispatch({ type: "run_end" }); store.dispatch({ type: "run_end" });
     await settle();
     expect(ended).toBe(1);
     expect(released()).toBe(1);
@@ -106,6 +109,14 @@ describe("watchTurnEnd", () => {
     await settle();
     expect(ended).toBe(1);
     expect(store.getState().agent).toBe("idle");
+  });
+
+  test("keeps the last outcome when it undoes its mark", async () => {
+    const { store, client } = watched({ state: "idle" });
+    store.dispatch({ type: "run_start" }); store.dispatch({ type: "run_end", outcome: "failed" });
+    watchTurnEnd(client as never, "other", () => {});
+    await settle();
+    expect(store.getState().endOutcome).toBe("failed");
   });
 
   test("cancel stops it", async () => {
