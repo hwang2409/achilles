@@ -1,6 +1,6 @@
 {
   "id": "rename-field-migrate",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "books",

@@ -71,5 +71,8 @@
         }
       ]
     }
+  ],
+  "goal_capabilities": [
+    "cross_page_records"
   ]
 }
