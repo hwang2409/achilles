@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
-import { expectationTokens, gradeCheck, gradeReference, gradeTask, mentions, structurallyContains, validateTask } from "./eval-grade";
+import { type EvalSnapshot, expectationTokens, gradeCheck, gradeReference, gradeTask, mentions, structurallyContains, validateTask } from "./eval-grade";
 import countTaskJson from "../evals/tasks/count-question.json";
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
 import metricTaskJson from "../evals/tasks/reading-metric-count.json";
 import readingListTaskJson from "../evals/tasks/reading-list-one-prompt.json";
 import staleRevisionTaskJson from "../evals/tasks/stale-revision-after-form-edit.json";
 import staleRevisionReferences from "../evals/references/stale-revision-after-form-edit.json";
+import createModeOffTaskJson from "../evals/tasks/create-mode-off-request.json";
+import createModeOffReferences from "../evals/references/create-mode-off-request.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -418,6 +420,19 @@ test("assigned_tools_only rejects calls to tools the page does not assign", () =
   ];
   for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
   expect(gradeCheck(check, { ...base, calls: [{ page_id: "other", tool: "achilles__create_tool" }] }).pass).toBe(true);
+});
+
+test("no_new_page fails only on a page id that was not in the initial snapshot", () => {
+  const task = validateTask(createModeOffTaskJson);
+  const good = createModeOffReferences.good as never as EvalSnapshot;
+  const failing = (snapshot: EvalSnapshot) => gradeReference(task, snapshot).checks.filter(check => !check.pass).map(check => `${check.id}: ${check.reason}`);
+  const rows: Array<[string, EvalSnapshot, string[]]> = [
+    ["same pages", good, []],
+    ["new page", { ...good, pages: [...good.pages!, { id: "page-movies", route: "/movies" }] }, ["no-new-page: new pages: /movies"]],
+    ["page removed", { ...good, initial: { ...good.initial!, pages: [...good.initial!.pages!, { id: "page-old", route: "/old" }] } }, []],
+  ];
+  for (const [name, snapshot, expected] of rows) expect(failing(snapshot), name).toEqual(expected);
+  expect(gradeCheck(task.checks.find(check => check.type === "no_new_page")!, { ...good, initial: undefined }).reason).toBe("no initial snapshot to compare pages with");
 });
 
 test("layout_restore requires a restore_version that appends a copy of v1", () => {
