@@ -104,7 +104,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* a page's own layout blocks (forms, lists, metrics) can be tall; .transcript keeps a usable
    floor so the chat and the empty-chat starters stay reachable, and .layout-blocks (which
    already scrolls) gives up space first. */
-.transcript { position: relative; flex: 1 1 auto; min-height: 260px; overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.transcript { position: relative; flex: 1 1 auto; min-height: min(260px, 40dvh); overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 /* one jump control: fulcrum's counts only new rows, so achilles owns it and text-only growth is covered too */
 .transcript [data-part="jump-to-latest-lane"] { display: none; }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
