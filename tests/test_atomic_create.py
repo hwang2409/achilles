@@ -288,9 +288,42 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     )
     assert json.loads(cross_forbidden["content"][0]["text"]) == expected
     assert json.loads(missing["content"][0]["text"]) == expected
-    store.set_create_mode("home", False)
-    off = mcp(client, home_headers, 10, "tools/call", {"name": "inspect_page", "arguments": {}})
-    assert off["isError"]
+
+
+def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_client):
+    root, store, client, headers = creation_client
+    created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    page_headers = initialize(client, store.ensure_credential(page_id), 3)
+    assert not store.page(page_id)["create_mode"]
+
+    catalog = mcp(client, page_headers, 4, "tools/list", {})
+    assert sorted(tool["name"] for tool in catalog["tools"]) == ["add_book", "inspect_page"]
+
+    before = state(root)
+    inspected = mcp(
+        client, page_headers, 5, "tools/call", {"name": "inspect_page", "arguments": {}}
+    )
+    assert inspected.get("isError") is not True, inspected
+    summary = json.loads(inspected["content"][0]["text"])
+    assert summary["route"] == "/reading" and summary["title"] == "reading list"
+    assert [block["type"] for block in summary["layout"]["blocks"]] == ["form", "list"]
+    assert state(root) == before
+
+    layout = {"blocks": [{"type": "text", "text": "changed"}]}
+    for request_id, name, arguments in (
+        (6, "update_layout", {"layout": layout, "expected_version": 1}),
+        (7, "create_page", {**request(), "route": "/other"}),
+        (8, "create_tool", {"bundle": bundle(name="sneaky")}),
+        (9, "restore_version", {"kind": "layout", "version": 1, "expected_version": 1}),
+    ):
+        refused = mcp(
+            client, page_headers, request_id, "tools/call", {"name": name, "arguments": arguments}
+        )
+        assert refused["isError"] is True, name
+    assert state(root) == before
+    home = {"name": "inspect_page", "arguments": {"route": "/"}}
+    assert mcp(client, page_headers, 10, "tools/call", home)["isError"] is True
 
 
 def test_fresh_mcp_session_must_list_tools_before_generated_call(creation_client):
@@ -774,7 +807,7 @@ def test_create_page_atomically_publishes_initial_tools_and_page_catalog(creatio
         assert [row[0] for row in actions] == ["create_page", "create_tool"]
     page_headers = initialize(client, store.ensure_credential(page_id), 3)
     catalog = mcp(client, page_headers, 4, "tools/list", {})
-    assert [tool["name"] for tool in catalog["tools"]] == ["add_book"]
+    assert [tool["name"] for tool in catalog["tools"]] == ["inspect_page", "add_book"]
     inserted = mcp(
         client,
         page_headers,
