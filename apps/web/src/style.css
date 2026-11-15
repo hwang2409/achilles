@@ -80,7 +80,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .skip-link { position: fixed; z-index: 20; top: 8px; left: 8px; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-accent); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
-.chat-header { flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
+.chat-header { container-type: inline-size; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 12px; min-width: 0; }
 .chat-heading span { flex: 0 1 220px; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
@@ -96,6 +96,16 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--fulcrum-ok); }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
 .header-overflow, .header-menu { display: none; }
+/* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
+   width): 112ch of header leaves the title about 30ch beside the full actions; ch follows the ui font size. */
+@container (max-width: 112ch) {
+  .chat-actions > .approval-mode, .chat-actions > button:not(.header-overflow) { display: none; }
+  .chat-actions { position: relative; gap: 12px; }
+  .header-overflow { display: block; width: 40px; height: 40px; padding: 0; }
+  .header-menu { position: absolute; z-index: 5; top: 46px; right: 0; display: grid; min-width: 210px; padding: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); box-shadow: 0 12px 30px rgb(0 0 0 / .35); }
+  .header-menu .approval-mode { min-height: 40px; display: flex; align-items: center; padding: 0 10px; }
+  .header-menu button { display: block; text-align: left; }
+}
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
 .run-state.state-approval::before { background: var(--fulcrum-warn); }
@@ -107,13 +117,15 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .layout-blocks > :not(.layout-metric) { grid-column: 1 / -1; }
 /* the stacked page view (.page-view without .docked) is the only place blocks share a column with
    the chat below them, so only there do blocks give up half the height (M-2 in firstrun-2a2a863);
-   the busy-state blocks render with no chat alongside and keep their full height. */
-.page-view > .layout-blocks { max-height: 50%; }
+   the busy-state blocks render with no chat alongside and keep their full height. 40%, not 50%:
+   at 390x844 half the height left the chat about 11 lines. */
+.page-view > .layout-blocks { max-height: 40%; }
 /* below 1100px (or with no blocks) the page stacks as before: .page-chat adds no box, so blocks,
-   transcript and composer share .page-view's column. at 1100px+ the chat docks right and each side scrolls alone. */
+   transcript and composer share .page-view's column. at 1100px+ (or short and wide) the chat docks right and each side scrolls alone. */
 .page-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .page-chat { display: contents; }
-@media (min-width: 1100px) {
+/* a short landscape viewport (a phone on its side) docks too: stacked, the page got a 77px band. */
+@media (min-width: 1100px), (max-height: 500px) and (min-width: 700px) {
   .page-view.docked { flex-direction: row; }
   .page-view.docked > .layout-blocks { flex: 1 1 0; min-width: 0; max-height: none; align-content: start; padding: 16px 24px; border-bottom: 0; border-right: 1px solid var(--fulcrum-border); }
   .page-view.docked > .page-chat { flex: 0 0 clamp(380px, 40%, 460px); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -157,18 +169,17 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .chat-starters i { color: var(--fulcrum-muted); font-style: normal; font-size: 12px; }
 .connection-banner { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-left: 2px solid var(--fulcrum-danger); border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-danger) 25%, var(--fulcrum-border)); padding: 8px 24px; color: var(--fulcrum-fg); background: color-mix(in srgb, var(--fulcrum-danger) 8%, transparent); font-size: 12px; }
 .connection-banner button { padding: 6px 10px; }
-.full-state { flex: 1; display: grid; place-content: center; gap: 20px; padding: 32px; }
+.full-state { flex: 1; min-height: 0; overflow-y: auto; display: grid; place-content: center; gap: 20px; padding: 32px; }
 .not-found-state > div { display: flex; gap: 12px; }
 .not-found-state .primary { display: inline-block; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
 .connection-state { display: block; width: min(720px, 100%); margin: auto; }
 .connection-state > p { color: var(--fulcrum-muted); }
-.connection-state h1 { max-width: 20ch; margin: 28px 0; font-size: clamp(26px, 4vw, 42px); }
+.connection-state h1 { max-width: 20ch; margin: 28px 0 12px; font-size: clamp(26px, 4vw, 42px); }
 .danger-mark { display: inline-block; width: 9px; height: 9px; margin-right: 12px; background: var(--fulcrum-danger); }
 .command { display: grid; grid-template-columns: 1fr auto; border-left: 2px solid var(--fulcrum-ok); background: var(--fulcrum-surface); }
 .command span, .command button { padding: 9px 12px; color: var(--fulcrum-muted); border: 0; border-bottom: 1px solid var(--fulcrum-border); }
 .command button { color: var(--fulcrum-fg); }
 .command code { grid-column: 1 / -1; padding: 18px 12px; white-space: pre-wrap; word-break: break-all; }
-.attempt-count { white-space: nowrap; }
 .connection-state > .primary { margin-top: 24px; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
 .full-state > .primary { min-height: 40px; }
 .record-list { margin: 1rem 0; overflow-x: auto; }
@@ -203,8 +214,8 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .record-form-actions button:not(.primary) { min-height: 36px; padding: 6px 12px; }
 .record-form-actions button:disabled { opacity: .6; cursor: default; }
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
-/* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px) below) */
-@media (min-width: 761px) {
+/* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px), (max-height: 500px) below) */
+@media (min-width: 761px) and (min-height: 501px) {
   .sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
   .sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
   .sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
@@ -215,7 +226,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .sidebar-collapsed .sidebar > footer > button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) {
   .record-form-actions button { min-height: 40px; }
   .app-shell { display: block; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 320px; max-width: calc(100vw - 48px); transform: translateX(-100%); transition: transform 140ms ease-out; }
@@ -230,14 +241,6 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .chat-heading strong { display: block; max-width: calc(100vw - 150px); }
   .chat-heading span { max-width: calc(100vw - 150px); }
   .chat-heading span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
-  .chat-actions > .approval-mode, .chat-actions > button:not(.header-overflow) { display: none; }
-  .chat-actions { position: relative; gap: 12px; }
-  .header-overflow { display: block; width: 40px; height: 40px; padding: 0; }
-  .header-menu { position: absolute; z-index: 5; top: 46px; right: 0; display: grid; min-width: 210px; padding: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); box-shadow: 0 12px 30px rgb(0 0 0 / .35); }
-  .header-menu .approval-mode { min-height: 40px; display: flex; align-items: center; padding: 0 10px; }
-  .header-menu button { display: block; text-align: left; }
-  .run-state { width: 9px; overflow: hidden; color: transparent; }
-  .run-state::before { margin: 0; }
   .transcript { padding: 14px 12px; }
   [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
   [data-part="approval"] button { min-height: 40px; }
@@ -249,6 +252,8 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .chat-starters i { display: block; grid-column: 2; }
   .main-pane [data-part="composer"] button { min-height: 40px; }
   .full-state > .primary { min-height: 44px; }
+  .connection-state h1 { margin-top: 16px; }
+  .connection-state > .primary { margin-top: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }

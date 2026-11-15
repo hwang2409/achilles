@@ -14,7 +14,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { createConnection, type Connection, type ConnectionState } from "./zeta";
+import { backoff, createConnection, type Connection, type ConnectionState } from "./zeta";
 import { useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -272,14 +272,24 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
+
+const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
+  not_running: "start zeta, and this page connects by itself.",
+  controller_taken: "zeta is busy elsewhere",
+  auth_failed: "zeta refused this page",
+  incompatible: "zeta version mismatch",
+};
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";
   if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><button onClick={() => connection.retryNow()}>retry now</button></div>; }
   const command = `zeta serve --ws ${connection.port} --ws-origin ${location.origin}`;
-  return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{text}{"attempt" in state && <span className="attempt-count"> · tried {state.attempt} times</span>}</p><h1>{state.phase === "not_running" ? "start zeta, and this page connects by itself." : text}</h1>{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
+  // a short heading, the full sentence as body text; the time of the last try instead of a rising attempt count, which read as a failure
+  const heading = connectionHeadings[state.phase];
+  const status = "retryAt" in state ? `retrying by itself · last try ${new Date(state.retryAt - backoff(state.attempt)).toLocaleTimeString()}` : "retrying…";
+  return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{status}</p><h1>{heading ?? text}</h1>{heading && <p className="connection-detail">{text}</p>}{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
 }
 
 export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
