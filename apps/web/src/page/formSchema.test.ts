@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { formArguments, formFields, type FormField, type FormValues } from "./formSchema";
+import { formArguments, formErrors, formFields, keepValues, type FormField, type FormValues } from "./formSchema";
 
 const rows: [string, unknown, ReturnType<typeof formFields>][] = [
   ["flat scalars with required marks", { type: "object", properties: { title: { type: "string", description: "book title" }, pages: { type: "integer" }, rating: { type: "number" }, done: { type: "boolean" } }, required: ["title", "pages"] }, { fields: [
@@ -16,6 +16,11 @@ const rows: [string, unknown, ReturnType<typeof formFields>][] = [
     { name: "title", kind: "string", required: true },
     { name: "author", kind: "string", required: false },
     { name: "favorite", kind: "boolean", required: false },
+  ] }],
+  ["numeric and length limits are kept for the client check", { type: "object", properties: { pages: { type: "integer", minimum: 1 }, rating: { type: "number", minimum: 0, maximum: 5 }, title: { type: "string", minLength: 1, maxLength: 80 } } }, { fields: [
+    { name: "pages", kind: "integer", required: false, minimum: 1 },
+    { name: "rating", kind: "number", required: false, minimum: 0, maximum: 5 },
+    { name: "title", kind: "string", required: false, minLength: 1, maxLength: 80 },
   ] }],
   ["no properties", { type: "object" }, { fields: [] }],
   ["nested object", { type: "object", properties: { title: { type: "string" }, meta: { type: "object", properties: {} } } }, { unsupported: "meta" }],
@@ -39,4 +44,42 @@ const argumentRows: [string, FormField[], FormValues, Record<string, unknown>][]
 
 test.each(argumentRows)("formArguments: %s", (_name, fields, values, expected) => {
   expect(formArguments(fields, values)).toEqual(expected);
+});
+
+const books: FormField[] = [
+  { name: "title", kind: "string", required: true, minLength: 1, maxLength: 5 },
+  { name: "status", kind: "enum", required: true, options: ["reading", "done"] },
+  { name: "pages", kind: "integer", required: true, minimum: 1 },
+  { name: "rating", kind: "number", required: false, minimum: 0, maximum: 5 },
+  { name: "favorite", kind: "boolean", required: false },
+];
+const filled: FormValues = { title: "dune", status: JSON.stringify("done"), pages: "200", rating: "4.5", favorite: true };
+
+const errorRows: [string, FormValues, Record<string, string>][] = [
+  ["empty form names every required field at once, in field order", {}, { title: "required", status: "pick one", pages: "required" }],
+  ["valid values pass", filled, {}],
+  ["a fraction for an integer", { ...filled, pages: "1.5" }, { pages: "enter a whole number" }],
+  ["text for an integer", { ...filled, pages: "abc" }, { pages: "enter a whole number" }],
+  ["spaces for a number", { ...filled, rating: "  " }, { rating: "enter a number" }],
+  ["below the minimum names the limit", { ...filled, pages: "0" }, { pages: "at least 1" }],
+  ["above the maximum names the limit", { ...filled, rating: "9" }, { rating: "at most 5" }],
+  ["too long a text", { ...filled, title: "a longer title" }, { title: "at most 5 characters" }],
+  ["an empty optional number is fine", { ...filled, rating: "" }, {}],
+  ["several problems keep field order", { title: "", status: "", pages: "0", rating: "9" }, { title: "required", status: "pick one", pages: "at least 1", rating: "at most 5" }],
+];
+
+test.each(errorRows)("formErrors: %s", (_name, values, expected) => {
+  const errors = formErrors(books, keepValues(books, values));
+  expect(errors).toEqual(expected);
+  expect(Object.keys(errors)).toEqual(Object.keys(expected));
+});
+
+const keepRows: [string, FormValues, FormValues][] = [
+  ["values of fields that still exist stay; new fields start empty", { title: "dune", pages: "200", gone: "x" }, { title: "dune", status: "", pages: "200", rating: "", favorite: false }],
+  ["an enum value that is no longer an option is dropped", { status: JSON.stringify("abandoned") }, { title: "", status: "", pages: "", rating: "", favorite: false }],
+  ["a value of the wrong kind is dropped", { title: true, favorite: "yes" }, { title: "", status: "", pages: "", rating: "", favorite: false }],
+];
+
+test.each(keepRows)("keepValues: %s", (_name, values, expected) => {
+  expect(keepValues(books, values)).toEqual(expected);
 });
