@@ -27,7 +27,7 @@ export async function waitForIdleTurn(
 export async function gateTranscript(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
-  requests: () => Array<{ id?: number | string; method?: string; params?: { text?: string; delivery_id?: string }; result?: { accepted?: boolean }; error?: { code?: number; message?: string } }>,
+  requests: () => Array<{ id?: number | string; method?: string; params?: { text?: string; delivery_id?: string; event?: string; status?: string; reason?: string }; result?: { accepted?: boolean }; error?: { code?: number; message?: string } }>,
   controlPath: string,
   gateWait: GateWait,
 ) {
@@ -146,38 +146,32 @@ export async function gateTranscript(
   if (!steerFrame?.params?.delivery_id) throw new Error("held steer frame did not include a delivery id");
   const control = JSON.parse(await Bun.file(controlPath).text());
   await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
-  await (async () => {
-    await gateWait(() => page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 }));
-    await waitFor(async () => {
-      const frames = requests();
-      const index = frames.findIndex((frame) => frame.method === "steer" && frame.id === steerFrame.id);
-      return frames.slice(index + 1).some((frame) => frame.id === steerFrame.id);
-    }, "turn-end steer refusal");
-    const refusalFrames = requests();
-    const refusalIndex = refusalFrames.findIndex((frame) => frame.method === "steer" && frame.id === steerFrame.id);
-    const steerResponse = refusalFrames.slice(refusalIndex + 1).find((frame) => frame.id === steerFrame.id);
-    if (steerResponse?.error?.code !== -32005) throw new Error(`turn-end steer was not refused as idle: ${JSON.stringify(steerResponse ?? null)}`);
-    await waitFor(async () => {
-      const frames = requests();
-      const index = frames.findIndex((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending");
-      return index >= 0 && frames.slice(index + 1).some((frame) => frame.id === frames[index].id);
-    }, "accepted fallback send after refused turn-end steer");
-    const fallbackFrames = requests();
-    const fallbackIndex = fallbackFrames.findIndex((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending");
-    const fallbackResponse = fallbackFrames.slice(fallbackIndex + 1).find((frame) => frame.id === fallbackFrames[fallbackIndex].id);
-    if (!fallbackResponse?.result?.accepted) throw new Error(`turn-end fallback send was not accepted: ${JSON.stringify(fallbackResponse ?? null)}`);
-    await gateWait(() => page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 }));
-    if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
-      throw new Error("prompt during turn end was not delivered exactly once");
-    if (await field.inputValue() !== "") throw new Error("turn-end fallback did not clear its confirmed draft");
-    const newTurnSends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending");
-    if (newTurnSends.length - beforeBarrierSends !== 1) throw new Error(`prompt during turn end used ${newTurnSends.length - beforeBarrierSends} fallback sends instead of one`);
-    const sendFrame = newTurnSends.at(-1);
-    if (!sendFrame?.params?.delivery_id) throw new Error("turn-end fallback send did not include a delivery id");
-    if (sendFrame.params.delivery_id !== steerFrame.params.delivery_id) throw new Error("turn-end fallback did not reuse its delivery id");
-  })().catch((error) => {
-    throw new Error(`known zeta turn-end race (zeta fix pending)\n${error}`);
-  });
+  const steerIndex = requests().findIndex((frame) => frame.method === "steer" && frame.id === steerFrame.id);
+  await waitFor(async () => requests().slice(steerIndex + 1).some((frame) => frame.id === steerFrame.id), "turn-end steer response");
+  const steerResponse = requests().slice(steerIndex + 1).find((frame) => frame.id === steerFrame.id);
+  if (steerResponse?.result?.accepted !== true) throw new Error(`turn-end steer was not accepted into the live turn: ${JSON.stringify(steerResponse ?? null)}`);
+  await gateWait(() => page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 }));
+  if (await messages.filter({ hasText: "stream tool complete" }).count() !== 1) throw new Error("live turn reply did not render exactly once");
+  await waitFor(async () => requests().some((frame) => frame.method === "event" && frame.params?.event === "delivery_status" && frame.params.delivery_id === steerFrame.params?.delivery_id), "turn-end steer terminal status");
+  const steerStatus = requests().find((frame) => frame.method === "event" && frame.params?.event === "delivery_status" && frame.params.delivery_id === steerFrame.params?.delivery_id)?.params;
+  if (steerStatus?.status !== "dropped" || steerStatus.reason !== "turn_end") throw new Error(`turn-end steer did not end dropped at turn_end: ${JSON.stringify(steerStatus ?? null)}`);
+  // zeta injects steering only at a tool boundary, so a steer during the final response ends dropped at turn_end.
+  await gateWait(() => page.getByText("this message was not sent. your text is still here; press send to try again.", { exact: true }).waitFor({ timeout: 20_000 }));
+  const afterSteer = requests().slice(steerIndex + 1);
+  if (afterSteer.some((frame) => frame.method === "abort" || (frame.method === "event" && frame.params?.event === "turn_aborted")))
+    throw new Error("turn-end steer aborted the streaming turn");
+  const fallbackSends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending").length - beforeBarrierSends;
+  if (fallbackSends) throw new Error(`accepted turn-end steer still took the new-turn fallback: ${fallbackSends} sends`);
+  if (await field.inputValue() !== "prompt during denied tool turn ending") throw new Error("dropped turn-end steer did not keep its draft");
+  await waitForIdleTurn(page, waitFor);
+  await page.getByRole("button", { name: "send message", exact: true }).click();
+  await gateWait(() => page.getByText("end-of-turn followup complete", { exact: true }).waitFor({ timeout: 30_000 }));
+  if (await messages.filter({ hasText: "end-of-turn followup complete" }).count() !== 1)
+    throw new Error("resent turn-end prompt was not delivered exactly once");
+  const resends = requests().filter((frame) => frame.method === "send" && frame.params?.text === "prompt during denied tool turn ending").slice(beforeBarrierSends);
+  if (resends.length !== 1 || resends[0]?.params?.delivery_id === steerFrame.params.delivery_id)
+    throw new Error(`resend after dropped turn-end steer did not use one new delivery id: ${JSON.stringify(resends)}`);
+  await waitFor(async () => await field.inputValue() === "", "draft clear after resent turn-end prompt");
   await waitForIdleTurn(page, waitFor);
 
   await field.fill("stream text only lines to overflow");
