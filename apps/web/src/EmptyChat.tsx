@@ -3,20 +3,29 @@ import { draftStore } from "./draftStore";
 import type { Page } from "./useActiveChat";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 
-type Starter = { text: string; tag?: string; onSelect: () => void | Promise<void> };
-
-const VERB_BY_OPERATION: Record<string, string> = {
-  insert: "add a record with",
-  update: "update a record with",
-  get: "look up a record with",
-  list: "list records with",
-  delete: "delete a record with",
-};
+type Starter = { text: string; detail?: string; tag?: string; onSelect: () => void | Promise<void> };
 
 const GENERIC_STARTERS = ["make a page that tracks something you care about", "add a tool to this page"];
 
-function toolStarterText(tool: PageTool): string {
-  return `${VERB_BY_OPERATION[tool.operation] ?? "use"} ${tool.name}`;
+const STARTER_TEXT_MAX = 80;
+
+// A click sends exactly the text the button shows, so the starter text itself must already be
+// short and sendable: the tool's description (written for a human) cut to its first sentence
+// (split on the first ". " or newline), trailing period dropped, capped at STARTER_TEXT_MAX chars
+// at a word boundary. A cut starter is still sent in full as shown — there is no longer text
+// hiding behind it. Falls back to the tool name when that leaves nothing (no description, or a
+// description that is only punctuation/whitespace). The full description remains available as
+// the tooltip (see `detail` on the starter built from this).
+export function toolStarterText(tool: PageTool): string {
+  const description = tool.description.trim();
+  if (!description) return `use ${tool.name}`;
+  const cutAt = description.search(/\.\s|\n/);
+  const sentence = (cutAt === -1 ? description : description.slice(0, cutAt)).replace(/\.$/, "").trim();
+  if (!sentence) return `use ${tool.name}`;
+  if (sentence.length <= STARTER_TEXT_MAX) return sentence;
+  const hardCut = sentence.slice(0, STARTER_TEXT_MAX);
+  const lastSpace = hardCut.lastIndexOf(" ");
+  return (lastSpace > 0 ? hardCut.slice(0, lastSpace) : hardCut).trim();
 }
 
 function useHasWaitingChat(): boolean {
@@ -57,7 +66,11 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   const resolvedTools = error ? [] : tools;
   const pageStarters = resolvedTools === null ? []
     : resolvedTools.length > 0
-      ? resolvedTools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), tag: tool.name, onSelect: () => send1(toolStarterText(tool)) }))
+      ? resolvedTools.slice(0, 2).map((tool): Starter => {
+          const text = toolStarterText(tool);
+          const detail = tool.description.trim();
+          return { text, detail: detail && detail !== text ? detail : undefined, onSelect: () => send1(text) };
+        })
       : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => sendWithCreateMode(text) }));
   const starters: Starter[] = [
     ...pageStarters,
@@ -75,6 +88,6 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   return <div className="empty-chat">
     <h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1>
     <p>create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
-    <div className="chat-starters">{starters.map((starter, index) => <button key={starter.text} disabled={sending} onClick={() => void select(starter.onSelect)}><b>{index + 1}</b><span>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
+    <div className="chat-starters">{starters.map((starter, index) => <button key={index} disabled={sending} onClick={() => void select(starter.onSelect)}><b>{index + 1}</b><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
   </div>;
 }
