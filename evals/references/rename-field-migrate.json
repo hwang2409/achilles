@@ -1,0 +1,866 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "books"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-add_book",
+        "name": "add_book",
+        "version": 1,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_books",
+        "name": "list_books",
+        "version": 1,
+        "operation": "list",
+        "collection": "books"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_book",
+        "name": "update_book",
+        "version": 1,
+        "operation": "update",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_id",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "b-1",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "state": "done",
+          "status": "finished"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-2",
+        "collection": "books",
+        "data": {
+          "title": "Emma",
+          "state": "todo",
+          "status": "to_read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-3",
+        "collection": "books",
+        "data": {
+          "title": "Beloved",
+          "state": "done",
+          "status": "finished"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-4",
+        "collection": "books",
+        "data": {
+          "title": "Kindred",
+          "state": "todo",
+          "status": "to_read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-5",
+        "collection": "books",
+        "data": {
+          "title": "Middlemarch",
+          "state": "todo",
+          "status": "to_read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-new",
+        "collection": "books",
+        "data": {
+          "title": "Piranesi",
+          "status": "to_read"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Done",
+              "collection": "books",
+              "count": true,
+              "where": {
+                "field": "state",
+                "equals": "done"
+              }
+            },
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books",
+              "fields": [
+                "title",
+                "state"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Done",
+              "collection": "books",
+              "count": true,
+              "where": {
+                "field": "status",
+                "equals": "finished"
+              }
+            },
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books",
+              "fields": [
+                "title",
+                "status"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "inspect",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__inspect_page",
+        "success": true
+      },
+      {
+        "id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "arguments": {
+          "title": "Piranesi",
+          "status": "to_read"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "inspect",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "metric_values": [
+            {
+              "block": 0,
+              "value": 2
+            }
+          ]
+        }
+      },
+      {
+        "call_id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "data": {
+          "title": "Piranesi",
+          "status": "to_read",
+          "record_id": "b-new",
+          "revision": 1
+        }
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "books"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-add_book",
+          "name": "add_book",
+          "version": 1,
+          "operation": "insert",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_books",
+          "name": "list_books",
+          "version": 1,
+          "operation": "list",
+          "collection": "books"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_book",
+          "name": "update_book",
+          "version": 1,
+          "operation": "update",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "record_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id",
+              "revision"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "b-1",
+          "collection": "books",
+          "data": {
+            "title": "Dune",
+            "state": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-2",
+          "collection": "books",
+          "data": {
+            "title": "Emma",
+            "state": "todo"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-3",
+          "collection": "books",
+          "data": {
+            "title": "Beloved",
+            "state": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-4",
+          "collection": "books",
+          "data": {
+            "title": "Kindred",
+            "state": "todo"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-5",
+          "collection": "books",
+          "data": {
+            "title": "Middlemarch",
+            "state": "todo"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "metric",
+                "label": "Done",
+                "collection": "books",
+                "count": true,
+                "where": {
+                  "field": "state",
+                  "equals": "done"
+                }
+              },
+              {
+                "type": "list",
+                "title": "Books",
+                "collection": "books",
+                "fields": [
+                  "title",
+                  "state"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "turns": 10
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "books"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-add_book",
+        "name": "add_book",
+        "version": 1,
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_books",
+        "name": "list_books",
+        "version": 1,
+        "operation": "list",
+        "collection": "books"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_book",
+        "name": "update_book",
+        "version": 1,
+        "operation": "update",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_id",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "b-1",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "state": "done",
+          "status": "finished"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-2",
+        "collection": "books",
+        "data": {
+          "title": "Emma",
+          "state": "todo",
+          "status": "to_read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-3",
+        "collection": "books",
+        "data": {
+          "title": "Beloved",
+          "state": "done",
+          "status": "finished"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-4",
+        "collection": "books",
+        "data": {
+          "title": "Kindred",
+          "state": "todo",
+          "status": "to_read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-5",
+        "collection": "books",
+        "data": {
+          "title": "Middlemarch",
+          "state": "todo",
+          "status": "to_read"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "b-new",
+        "collection": "books",
+        "data": {
+          "title": "Piranesi",
+          "status": "to_read"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Done",
+              "collection": "books",
+              "count": true,
+              "where": {
+                "field": "state",
+                "equals": "done"
+              }
+            },
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books",
+              "fields": [
+                "title",
+                "state"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Done",
+              "collection": "books",
+              "count": true,
+              "where": {
+                "field": "state",
+                "equals": "finished"
+              }
+            },
+            {
+              "type": "list",
+              "title": "Books",
+              "collection": "books",
+              "fields": [
+                "title",
+                "status"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "inspect",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__inspect_page",
+        "success": true
+      },
+      {
+        "id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "arguments": {
+          "title": "Piranesi",
+          "status": "to_read"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "inspect",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "metric_values": [
+            {
+              "block": 0,
+              "value": 2
+            }
+          ]
+        }
+      },
+      {
+        "call_id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_book",
+        "success": true,
+        "data": {
+          "title": "Piranesi",
+          "status": "to_read",
+          "record_id": "b-new",
+          "revision": 1
+        }
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "books"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-add_book",
+          "name": "add_book",
+          "version": 1,
+          "operation": "insert",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_books",
+          "name": "list_books",
+          "version": 1,
+          "operation": "list",
+          "collection": "books"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_book",
+          "name": "update_book",
+          "version": 1,
+          "operation": "update",
+          "collection": "books",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "record_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id",
+              "revision"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "b-1",
+          "collection": "books",
+          "data": {
+            "title": "Dune",
+            "state": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-2",
+          "collection": "books",
+          "data": {
+            "title": "Emma",
+            "state": "todo"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-3",
+          "collection": "books",
+          "data": {
+            "title": "Beloved",
+            "state": "done"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-4",
+          "collection": "books",
+          "data": {
+            "title": "Kindred",
+            "state": "todo"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "b-5",
+          "collection": "books",
+          "data": {
+            "title": "Middlemarch",
+            "state": "todo"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "metric",
+                "label": "Done",
+                "collection": "books",
+                "count": true,
+                "where": {
+                  "field": "state",
+                  "equals": "done"
+                }
+              },
+              {
+                "type": "list",
+                "title": "Books",
+                "collection": "books",
+                "fields": [
+                  "title",
+                  "state"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "turns": 10
+  }
+}

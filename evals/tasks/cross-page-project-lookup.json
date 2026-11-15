@@ -1,0 +1,78 @@
+{
+  "id": "cross-page-project-lookup",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "projects",
+      "source": "setup",
+      "bind_chat": false,
+      "create_mode": false
+    },
+    {
+      "alias": "tasks",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true,
+      "route": "/tasks"
+    }
+  ],
+  "agent_turns": 10,
+  "steps": [
+    {
+      "id": "build-and-add",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "this page tracks tasks for the projects listed on the home page. add a tasks collection with tools add_task (fields title, project_code) and list_tasks, where project_code is the code of a project from the home page. then add the task write spec for the Apollo project"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_projects",
+        "operation": "list",
+        "collection": "projects"
+      }
+    ],
+    "records": [
+      {
+        "id": "p-1",
+        "collection": "projects",
+        "data": {
+          "name": "Apollo",
+          "code": "PRJ-4C1E"
+        }
+      },
+      {
+        "id": "p-2",
+        "collection": "projects",
+        "data": {
+          "name": "Zephyr",
+          "code": "PRJ-9B07"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "task-tool",
+      "type": "tool",
+      "page": "tasks",
+      "name": "add_task"
+    },
+    {
+      "id": "linked-task",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "write spec",
+          "project_code": "PRJ-4C1E"
+        }
+      ]
+    }
+  ],
+  "goal_capabilities": [
+    "cross_page_records"
+  ]
+}

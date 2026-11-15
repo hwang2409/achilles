@@ -50,6 +50,8 @@ export function aggregateTaskResults(results: Array<{ task_id: string; pass: boo
     pass_rate: rows.filter((row) => row.pass).length / rows.length,
     score_min: Math.min(...rows.map((row) => row.score)),
     score_max: Math.max(...rows.map((row) => row.score)),
+    mean_score: mean(rows.map((row) => row.score)),
+    mean_turns: mean(rows.map((row) => row.turns)),
     median_turns: median(rows.map((row) => row.turns)),
     median_tool_calls: median(rows.map((row) => row.tool_calls)),
     median_wall_ms: median(rows.map((row) => row.wall_ms)),
@@ -57,6 +59,7 @@ export function aggregateTaskResults(results: Array<{ task_id: string; pass: boo
     cap_action: rows.filter(row => (row as { cap_hit?: boolean }).cap_hit).length > 1 ? "raise cap" : "",
   }]));
 }
+const mean = (values: number[]) => values.reduce((total, value) => total + value, 0) / values.length;
 const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); if (!sorted.length) return 0; const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
 
 export function reportJson(report: EvalReport): string { return JSON.stringify(report, null, 2) + "\n"; }
@@ -95,8 +98,13 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport): string {
     lines.push("| task | check | field | before | after |", "| --- | --- | --- | --- | --- |");
     for (const value of report.unmapped_values) lines.push(`| ${value.task_id} | ${value.check_id} | ${value.field} | ${String(value.before)} | ${String(value.after)} |`);
   }
-  lines.push("", "## grouped repeat metrics", "", "unsupported, needs-review, and harness-error runs are excluded from comparable task metrics.", "needs review: extend the value map or confirm agent fail", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time | cap hits | action |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
-  for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.score_min}–${value.score_max} | ${value.median_turns} | ${value.median_tool_calls} | ${value.median_wall_ms} ms | ${value.cap_hits} | ${value.cap_action} |`);
+  // one row per task over every run; pass rate, mean score, and mean turns use graded runs only
+  lines.push("", "## per task", "", "runs counts every run. pass rate, mean score, and mean turns count graded runs only: unsupported, needs-review, and harness-error runs are left out.", "needs review: extend the value map or confirm agent fail", "", "| task | runs | passes | pass rate | mean score | mean turns | cap hits | harness errors |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const id of [...new Set(report.tasks.map(task => task.task_id))]) {
+    const runs = report.tasks.filter(task => task.task_id === id); const value = grouped[id];
+    const graded = value ? `${value.passes}/${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.mean_score.toFixed(0)} | ${value.mean_turns.toFixed(1)}` : "0/0 | n/a | n/a | n/a";
+    lines.push(`| ${id} | ${runs.length} | ${graded} | ${runs.filter(task => task.cap_hit).length}${value?.cap_action ? ` (${value.cap_action})` : ""} | ${runs.filter(task => task.status === "harness_error").length} |`);
+  }
   return (base ? diffMarkdown(base, report) + "\n" : "") + lines.join("\n") + "\n";
 }
 
@@ -133,7 +141,7 @@ const totalTokens = (usage: unknown) => {
   return values.every(value => typeof value === "number") ? (values as number[]).reduce((a, b) => a + b, 0) : undefined;
 };
 const percent = (from: number, to: number) => from === 0 ? (to === 0 ? 0 : Infinity) : (to - from) / from;
-// per task: pass rate, median turns, median total tokens over comparable runs (same exclusions as the grouped table).
+// per task: pass rate, median turns, median total tokens over comparable runs (same exclusions as the per-task table).
 function summarize(tasks: BaseReport["tasks"]) {
   const grouped = aggregateTaskResults(tasks.map(task => ({ ...task, score: 0, tool_calls: 0, wall_ms: 0 })));
   return new Map(Object.entries(grouped).map(([id, value]) => {

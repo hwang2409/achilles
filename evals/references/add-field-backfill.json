@@ -1,0 +1,850 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-add_contact",
+        "name": "add_contact",
+        "version": 2,
+        "operation": "insert",
+        "collection": "contacts",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "company": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "company": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_contacts",
+        "name": "list_contacts",
+        "version": 1,
+        "operation": "list",
+        "collection": "contacts"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_contact",
+        "name": "update_contact",
+        "version": 1,
+        "operation": "update",
+        "collection": "contacts"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "c-1",
+        "collection": "contacts",
+        "data": {
+          "name": "Ana Ruiz",
+          "email": "ana@acme.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-2",
+        "collection": "contacts",
+        "data": {
+          "name": "Ben Okafor",
+          "email": "ben@acme.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-3",
+        "collection": "contacts",
+        "data": {
+          "name": "Cara Lind",
+          "email": "cara@globex.test",
+          "company": "Globex"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-4",
+        "collection": "contacts",
+        "data": {
+          "name": "Eli Moss",
+          "email": "eli@mail.test",
+          "company": "Independent"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-5",
+        "collection": "contacts",
+        "data": {
+          "name": "Fay Chen",
+          "email": "fay@globex.test",
+          "company": "Globex"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-6",
+        "collection": "contacts",
+        "data": {
+          "name": "Gus Hale",
+          "email": "gus@acmeco.test",
+          "company": "Independent"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-7",
+        "collection": "contacts",
+        "data": {
+          "name": "Hal Brandt",
+          "email": "hal@acme.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-new",
+        "collection": "contacts",
+        "data": {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Contacts",
+              "collection": "contacts",
+              "fields": [
+                "name",
+                "email"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Contacts",
+              "collection": "contacts",
+              "fields": [
+                "name",
+                "company",
+                "email"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "v2",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "fill-1",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_contact",
+        "success": true,
+        "arguments": {
+          "record_id": "c-1",
+          "revision": 1,
+          "company": "Acme"
+        }
+      },
+      {
+        "id": "layout",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_layout",
+        "success": true
+      },
+      {
+        "id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "arguments": {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "v2",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "fill-1",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_contact",
+        "success": true,
+        "data": {
+          "record_id": "c-1",
+          "revision": 1,
+          "company": "Acme"
+        }
+      },
+      {
+        "call_id": "layout",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_layout",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex",
+          "record_id": "c-new",
+          "revision": 1
+        }
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "contacts"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-add_contact",
+          "name": "add_contact",
+          "version": 1,
+          "operation": "insert",
+          "collection": "contacts",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ]
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_contacts",
+          "name": "list_contacts",
+          "version": 1,
+          "operation": "list",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_contact",
+          "name": "update_contact",
+          "version": 1,
+          "operation": "update",
+          "collection": "contacts"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "c-1",
+          "collection": "contacts",
+          "data": {
+            "name": "Ana Ruiz",
+            "email": "ana@acme.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-2",
+          "collection": "contacts",
+          "data": {
+            "name": "Ben Okafor",
+            "email": "ben@acme.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-3",
+          "collection": "contacts",
+          "data": {
+            "name": "Cara Lind",
+            "email": "cara@globex.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-4",
+          "collection": "contacts",
+          "data": {
+            "name": "Eli Moss",
+            "email": "eli@mail.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-5",
+          "collection": "contacts",
+          "data": {
+            "name": "Fay Chen",
+            "email": "fay@globex.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-6",
+          "collection": "contacts",
+          "data": {
+            "name": "Gus Hale",
+            "email": "gus@acmeco.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-7",
+          "collection": "contacts",
+          "data": {
+            "name": "Hal Brandt",
+            "email": "hal@acme.test"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "list",
+                "title": "Contacts",
+                "collection": "contacts",
+                "fields": [
+                  "name",
+                  "email"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "turns": 8
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-add_contact",
+        "name": "add_contact",
+        "version": 2,
+        "operation": "insert",
+        "collection": "contacts",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "company": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "company": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_contacts",
+        "name": "list_contacts",
+        "version": 1,
+        "operation": "list",
+        "collection": "contacts"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_contact",
+        "name": "update_contact",
+        "version": 1,
+        "operation": "update",
+        "collection": "contacts"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "c-1",
+        "collection": "contacts",
+        "data": {
+          "name": "Ana Ruiz",
+          "email": "ana@acme.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-2",
+        "collection": "contacts",
+        "data": {
+          "name": "Ben Okafor",
+          "email": "ben@acme.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-3",
+        "collection": "contacts",
+        "data": {
+          "name": "Cara Lind",
+          "email": "cara@globex.test",
+          "company": "Globex"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-4",
+        "collection": "contacts",
+        "data": {
+          "name": "Eli Moss",
+          "email": "eli@mail.test",
+          "company": "Independent"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-5",
+        "collection": "contacts",
+        "data": {
+          "name": "Fay Chen",
+          "email": "fay@globex.test",
+          "company": "Globex"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-6",
+        "collection": "contacts",
+        "data": {
+          "name": "Gus Hale",
+          "email": "gus@acmeco.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-7",
+        "collection": "contacts",
+        "data": {
+          "name": "Hal Brandt",
+          "email": "hal@acme.test",
+          "company": "Acme"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "c-new",
+        "collection": "contacts",
+        "data": {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "home",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Contacts",
+              "collection": "contacts",
+              "fields": [
+                "name",
+                "email"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "page_id": "home",
+        "version": 2,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "Contacts",
+              "collection": "contacts",
+              "fields": [
+                "name",
+                "company",
+                "email"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "v2",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "success": true
+      },
+      {
+        "id": "fill-1",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_contact",
+        "success": true,
+        "arguments": {
+          "record_id": "c-1",
+          "revision": 1,
+          "company": "Acme"
+        }
+      },
+      {
+        "id": "layout",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_layout",
+        "success": true
+      },
+      {
+        "id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "arguments": {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "v2",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "fill-1",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_contact",
+        "success": true,
+        "data": {
+          "record_id": "c-1",
+          "revision": 1,
+          "company": "Acme"
+        }
+      },
+      {
+        "call_id": "layout",
+        "page_id": "home",
+        "chat_id": "author-chat",
+        "tool": "achilles__update_layout",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "add",
+        "page_id": "home",
+        "chat_id": "fresh-chat",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Dee Park",
+          "email": "dee@example.test",
+          "company": "Globex",
+          "record_id": "c-new",
+          "revision": 1
+        }
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "contacts"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-add_contact",
+          "name": "add_contact",
+          "version": 1,
+          "operation": "insert",
+          "collection": "contacts",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ],
+            "additionalProperties": false
+          },
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ]
+          }
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_contacts",
+          "name": "list_contacts",
+          "version": 1,
+          "operation": "list",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_contact",
+          "name": "update_contact",
+          "version": 1,
+          "operation": "update",
+          "collection": "contacts"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "c-1",
+          "collection": "contacts",
+          "data": {
+            "name": "Ana Ruiz",
+            "email": "ana@acme.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-2",
+          "collection": "contacts",
+          "data": {
+            "name": "Ben Okafor",
+            "email": "ben@acme.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-3",
+          "collection": "contacts",
+          "data": {
+            "name": "Cara Lind",
+            "email": "cara@globex.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-4",
+          "collection": "contacts",
+          "data": {
+            "name": "Eli Moss",
+            "email": "eli@mail.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-5",
+          "collection": "contacts",
+          "data": {
+            "name": "Fay Chen",
+            "email": "fay@globex.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-6",
+          "collection": "contacts",
+          "data": {
+            "name": "Gus Hale",
+            "email": "gus@acmeco.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "c-7",
+          "collection": "contacts",
+          "data": {
+            "name": "Hal Brandt",
+            "email": "hal@acme.test"
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "page_id": "home",
+          "version": 1,
+          "document": {
+            "blocks": [
+              {
+                "type": "list",
+                "title": "Contacts",
+                "collection": "contacts",
+                "fields": [
+                  "name",
+                  "email"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "turns": 8
+  }
+}
