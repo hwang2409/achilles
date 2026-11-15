@@ -119,7 +119,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
 
     const onPageKeyDown = (event: KeyboardEvent) => {
       if (modelRef.current.state === "read-only" || focusedRef.current || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event)) return;
-      if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
+      if (document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"]')) return;
       if (event.key === "i" || event.key === "Enter") {
         event.preventDefault(); view.focus();
         if (event.key === "i" && vimMode(view) === "normal") Vim.handleKey(cm!, "i", "user");

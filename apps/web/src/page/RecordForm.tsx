@@ -1,5 +1,5 @@
 import { useId, useRef, useState, useSyncExternalStore } from "react";
-import { formArguments, formErrors, formFields, keepValues, type FormField, type FormValues } from "./formSchema";
+import { formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { usePageTools, type PageTool } from "./usePageTools";
 
 export type { PageTool };
@@ -7,13 +7,26 @@ type FieldError = { path: string; expected: string };
 
 const writes = new Map<string, number>();
 const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+const notify = () => { for (const listener of listeners) listener(); };
 function notifyRecordWrite(pageId: string) {
   writes.set(pageId, (writes.get(pageId) ?? 0) + 1);
-  for (const listener of listeners) listener();
+  notify();
 }
 // Record blocks add this to their refresh key, so a form write reloads them without a chat turn.
 export function useRecordWrites(pageId: string): number {
-  return useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => writes.get(pageId) ?? 0);
+  return useSyncExternalStore(subscribe, () => writes.get(pageId) ?? 0);
+}
+
+// One selected row per page: the record table sets it, an update form on the same page edits it.
+export type SelectedRow = { collection: string; record: Record<string, unknown> };
+const selections = new Map<string, SelectedRow>();
+export function selectRow(pageId: string, row: SelectedRow | null) {
+  if (row) selections.set(pageId, row); else selections.delete(pageId);
+  notify();
+}
+export function useSelectedRow(pageId: string): SelectedRow | null {
+  return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
 export function FormBlock({ title, toolName, pageId, credential, refreshKey }: { title: string; toolName: string; pageId: string; credential: string; refreshKey: string }) {
@@ -26,20 +39,27 @@ export function FormBlock({ title, toolName, pageId, credential, refreshKey }: {
   if (tools !== null) last.current = tools;
   const shown = tools ?? last.current;
   const tool = shown === null ? undefined : shown.find((item) => item.name === toolName) ?? null;
+  const selected = useSelectedRow(pageId);
+  const row = tool && selected?.collection === tool.collection ? selected.record : null;
+  const onReloadTool = () => setReload((value) => value + 1);
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
-    : tool.operation !== "insert" ? <p aria-disabled="true">edit forms need a selected row</p>
-    : <RecordForm tool={tool} pageId={pageId} credential={credential} onReloadTool={() => setReload((value) => value + 1)} />;
+    : tool.operation === "insert" ? <RecordForm tool={tool} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
+    : row ? <RecordForm key={String(row.record_id)} tool={tool} row={row} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : <p aria-disabled="true">select a row in the table to edit it</p>;
   return <section className="record-form"><h2>{title}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
-export function RecordForm({ tool, pageId, credential, onReloadTool }: { tool: PageTool; pageId: string; credential: string; onReloadTool: () => void }) {
+// With a row, the form edits that record: record_id and revision come from the row and are never inputs.
+export function RecordForm({ tool, row, pageId, credential, onReloadTool }: { tool: PageTool; row?: Record<string, unknown>; pageId: string; credential: string; onReloadTool: () => void }) {
   const mapped = formFields(tool.input_schema);
-  const fields = "fields" in mapped ? mapped.fields : [];
+  const fields = "fields" in mapped ? mapped.fields.filter((field) => !row || (field.name !== "record_id" && field.name !== "revision")) : [];
+  // typed holds only what the user changed, so a reloaded row shows its new values under the user's edits
   const [typed, setTyped] = useState<FormValues>({});
-  const values = keepValues(fields, typed);
+  const values = keepValues(fields, row ? { ...recordValues(fields, row), ...typed } : typed);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState<{ kind: "status" | "alert" | "conflict"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ kind: "status" | "alert" | "conflict" | "row-conflict"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const idPrefix = useId();
@@ -59,33 +79,53 @@ export function RecordForm({ tool, pageId, credential, onReloadTool }: { tool: P
       const response = await fetch(`/api/pages/${pageId}/tools/${encodeURIComponent(tool.name)}/invoke`, {
         method: "POST",
         headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ arguments: formArguments(fields, values), version: tool.version }),
+        body: JSON.stringify({ arguments: { ...formArguments(fields, values), ...(row && { record_id: row.record_id, revision: row.revision }) }, version: tool.version }),
       });
-      const body = await response.json().catch(() => null) as { error?: FieldError; detail?: string } | null;
+      const body = await response.json().catch(() => null) as ({ error?: FieldError; detail?: string } & Record<string, unknown>) | null;
+      if (response.status === 409 && row && body?.error?.path === "/revision") { setMessage({ kind: "row-conflict", text: "this row changed since you selected it. your edits are kept." }); return; }
       if (response.status === 409) { setMessage({ kind: "conflict", text: "this tool changed; reload" }); return; }
       if (!response.ok) {
         const path = body?.error?.path ?? "";
         const name = path.split("/")[1];
         if (body?.error && fields.some((field) => field.name === name)) { setFieldErrors({ [name]: body.error.expected }); focusField(name); }
-        else setMessage({ kind: "alert", text: body?.error ? `${path || "input"}: ${body.error.expected}` : body?.detail ?? `could not add (${response.status})` });
+        else setMessage({ kind: "alert", text: body?.error ? `${path || "input"}: ${body.error.expected}` : body?.detail ?? `could not ${row ? "save" : "add"} (${response.status})` });
         return;
       }
       setTyped({});
-      setMessage({ kind: "status", text: "added" });
+      setMessage({ kind: "status", text: row ? "saved" : "added" });
+      // the saved record (new revision) stays selected, so the next save does not conflict with itself
+      if (row && body) selectRow(pageId, { collection: tool.collection, record: body });
       notifyRecordWrite(pageId);
-      focusField();
+      if (!row) focusField();
     } catch (caught) {
       setMessage({ kind: "alert", text: caught instanceof Error ? caught.message : String(caught) });
     } finally {
       setBusy(false);
     }
   };
+  // shortcut: finds the row in the newest 100 records (the table's own limit); a by-id read would need a new route.
+  const reloadRow = async () => {
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/pages/${pageId}/records/${encodeURIComponent(tool.collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" });
+      if (!response.ok) throw new Error(`could not reload the row (${response.status})`);
+      const records = await response.json() as Record<string, unknown>[];
+      const current = Array.isArray(records) ? records.find((record) => record.record_id === row?.record_id) : undefined;
+      if (!current) { setMessage({ kind: "alert", text: "this row is no longer in the table" }); return; }
+      selectRow(pageId, { collection: tool.collection, record: current });
+      notifyRecordWrite(pageId);
+      focusField();
+    } catch (caught) {
+      setMessage({ kind: "alert", text: caught instanceof Error ? caught.message : String(caught) });
+    }
+  };
 
   return <form ref={form} noValidate onSubmit={(event) => void submit(event)}>
     {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name]} error={fieldErrors[field.name] ?? null} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
-      <button type="submit" className="primary" disabled={busy}>{busy ? "adding…" : "add"}</button>
+      <button type="submit" className="primary" disabled={busy}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
       {message && <p role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
+      {message?.kind === "row-conflict" && <button type="button" onClick={() => void reloadRow()}>reload row</button>}
       {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
     </div>
   </form>;
