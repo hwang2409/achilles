@@ -342,6 +342,23 @@ def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
         ).fetchall() == [("session-old", "existing", "created", "updated")]
 
 
+def test_old_audit_table_gains_actor_and_record_id(tmp_path) -> None:
+    with sqlite3.connect(tmp_path / "achilles.sqlite3") as db:
+        db.execute(
+            "CREATE TABLE audit (id INTEGER PRIMARY KEY, page_id TEXT NOT NULL, "
+            "action TEXT NOT NULL, version_digest TEXT, created_at TEXT NOT NULL)"
+        )
+        db.execute("INSERT INTO audit(page_id,action,created_at) VALUES('home','old','then')")
+    store = PageStore(tmp_path)
+    with store.transaction() as db:
+        # the insert older code runs still works on the new columns.
+        db.execute("INSERT INTO audit(page_id,action,created_at) VALUES('home','older','now')")
+        rows = db.execute(
+            "SELECT action, actor, record_id FROM audit WHERE action LIKE 'old%' ORDER BY id"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [("old", None, None), ("older", None, None)]
+
+
 def test_update_layout_rejects_stale_and_unknown_tool_without_writes(tmp_path):
     store = PageStore(tmp_path)
     page_id = _update_page(store)
@@ -416,7 +433,7 @@ def test_update_layout_preserves_records_tools_and_chats(tmp_path):
     store = PageStore(tmp_path)
     page_id = _update_page(store)
     store.register_chat(page_id, "synthetic-chat")
-    call_record(store, page_id, "add_book", {"title": "one"}, 1)
+    call_record(store, page_id, "add_book", {"title": "one"}, 1, "agent")
     with store._connect() as db:
         before = {
             table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]

@@ -206,7 +206,7 @@ def test_legacy_tool_uses_derived_output_schema_at_call_time(tmp_path):
             (stored_digest, json.dumps(legacy), row["tool_id"], row["version"]),
         )
 
-    result = call_record(store, "home", "annotate_trace", {"text": "legacy"}, 1)
+    result = call_record(store, "home", "annotate_trace", {"text": "legacy"}, 1, "agent")
     assert result["text"] == "legacy"
     assert result["record_id"]
     assert result["revision"] == 1
@@ -222,7 +222,9 @@ def test_generated_tool_versions_and_page_scope(tmp_path):
     store.set_create_mode("home", True)
     created, _, _ = store.create_tool("home", BUNDLE)
     assert created["version"] == 1
-    assert call_record(store, "home", "annotate_trace", {"text": "one"}, 1)["text"] == "one"
+    assert (
+        call_record(store, "home", "annotate_trace", {"text": "one"}, 1, "agent")["text"] == "one"
+    )
     with store._connect() as db:
         assert len(db.execute("SELECT * FROM page_record").fetchall()) == 1
     version_two = {
@@ -239,7 +241,9 @@ def test_generated_tool_versions_and_page_scope(tmp_path):
     store.rollback_tool("home", "annotate_trace", 1, 2)
     assert store.page_tools("home")[0]["version"] == 1
     store.set_create_mode("home", False)
-    assert call_record(store, "home", "annotate_trace", {"text": "late"}, 1)["text"] == "late"
+    assert (
+        call_record(store, "home", "annotate_trace", {"text": "late"}, 1, "agent")["text"] == "late"
+    )
 
 
 def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
@@ -248,7 +252,7 @@ def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
     store.create_tool("home", BUNDLE)
 
     def write_record(index):
-        return call_record(store, "home", "annotate_trace", {"text": str(index)}, 1)
+        return call_record(store, "home", "annotate_trace", {"text": str(index)}, 1, "agent")
 
     def write_page(index):
         return store.save_session(
@@ -275,7 +279,9 @@ def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
         assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 20
 
     store.set_create_mode("home", False)
-    assert call_record(store, "home", "annotate_trace", {"text": "late"}, 1)["text"] == "late"
+    assert (
+        call_record(store, "home", "annotate_trace", {"text": "late"}, 1, "agent")["text"] == "late"
+    )
     with store._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM page_record").fetchone()[0] == 21
 
@@ -361,7 +367,7 @@ def test_stale_record_revision_cannot_overwrite_or_audit(tmp_path):
     }
     store.create_tool("home", BUNDLE)
     store.create_tool("home", update_bundle)
-    call_record(store, "home", "annotate_trace", {"text": "first"}, 1)
+    call_record(store, "home", "annotate_trace", {"text": "first"}, 1, "agent")
     barrier = Barrier(2)
 
     def update(text):
@@ -375,6 +381,7 @@ def test_stale_record_revision_cannot_overwrite_or_audit(tmp_path):
                 "update_annotation",
                 {"record_id": record["record_id"], "revision": record["revision"], "text": text},
                 1,
+                "agent",
             )
         except VersionConflict as exc:
             return exc
@@ -427,9 +434,13 @@ def test_record_id_is_authoritative(tmp_path):
         },
     }
     store.create_tool("home", bundle)
-    result = call_record(store, "home", "annotate_trace", {"text": "x", "record_id": "forged"}, 1)
+    result = call_record(
+        store, "home", "annotate_trace", {"text": "x", "record_id": "forged"}, 1, "agent"
+    )
     assert result["record_id"] != "forged"
-    second = call_record(store, "home", "annotate_trace", {"text": "y", "record_id": "forged"}, 1)
+    second = call_record(
+        store, "home", "annotate_trace", {"text": "y", "record_id": "forged"}, 1, "agent"
+    )
     assert second["record_id"] != "forged"
 
 

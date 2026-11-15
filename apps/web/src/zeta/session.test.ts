@@ -5,7 +5,7 @@ import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
     const methods: string[] = [];
-    const client = { request: async (method: string) => {
+    const client = { features: [], request: async (method: string) => {
       methods.push(method);
       if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
       if (method === "status") return { state: "running" };
@@ -18,7 +18,7 @@ describe("applyApprovalMode", () => {
 
   test("does not inspect or write a mode that already matches", async () => {
     const methods: string[] = [];
-    const client = { request: async (method: string) => {
+    const client = { features: [], request: async (method: string) => {
       methods.push(method);
       return { model: "offline", approval_mode: "allow" };
     } };
@@ -37,7 +37,7 @@ describe("openHomeSession", () => {
 
   test("reports a missing resumed chat without creating a replacement", async () => {
     const methods: string[] = [];
-    const client = { request: async (method: string) => {
+    const client = { features: [], request: async (method: string) => {
       methods.push(method);
       if (method === "status") return { state: "idle" };
       throw { data: { code: "session_not_found" } };
@@ -49,7 +49,7 @@ describe("openHomeSession", () => {
 
   test("preserves a resumed chat mode when the server does not force ask", async () => {
     const methods: string[] = [];
-    const client = { request: async (method: string) => {
+    const client = { features: [], request: async (method: string) => {
       methods.push(method);
       if (method === "status") return { state: "idle" };
       if (method === "resume") return { session: { name: "existing" } };
@@ -64,7 +64,7 @@ describe("openHomeSession", () => {
 
   test("resumes once more when the other turn ended between resume and status", async () => {
     const methods: string[] = []; let resumes = 0;
-    const client = { request: async (method: string) => {
+    const client = { features: [], request: async (method: string) => {
       methods.push(method);
       if (method === "status") return methods.length === 1 ? { session: { session_id: "other" }, state: "running" } : { state: "idle" };
       if (method === "resume" && ++resumes === 1) throw Object.assign(new Error("a turn is already running"), { code: -32004 });

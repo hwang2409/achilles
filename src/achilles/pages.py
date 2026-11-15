@@ -620,6 +620,9 @@ class PageStore:
             "TEXT",
             "UPDATE chat SET first_title=title WHERE NOT titled_by_user",
         )
+        # who wrote a record and which one; older rows and older code leave both NULL.
+        ensure_column(db, "audit", "actor", "TEXT")
+        ensure_column(db, "audit", "record_id", "TEXT")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
