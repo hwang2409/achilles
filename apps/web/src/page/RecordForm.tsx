@@ -20,13 +20,11 @@ export function useRecordWrites(pageId: string): number {
 }
 
 // One selected row per page: the record table sets it, an update form on the same page edits it.
-export type SelectedRow = { collection: string; record: Record<string, unknown> };
+// opener is the exact table row the user picked: two tables on a page can show the same collection.
+export type SelectedRow = { collection: string; record: Record<string, unknown>; opener?: HTMLElement };
 const selections = new Map<string, SelectedRow>();
-// The exact row element that opened the form: two tables on a page can show the same collection.
-const openers = new Map<string, HTMLElement>();
-export function selectRow(pageId: string, row: SelectedRow | null, opener?: HTMLElement) {
-  if (row) selections.set(pageId, row); else { selections.delete(pageId); openers.delete(pageId); }
-  if (opener) openers.set(pageId, opener);
+export function selectRow(pageId: string, row: SelectedRow | null) {
+  if (row) selections.set(pageId, row); else selections.delete(pageId);
   notify();
 }
 // A table reload (after an agent write, for example) carries the newest copy of the selected record; the form follows it.
@@ -35,7 +33,7 @@ export function refreshSelection(pageId: string, collection: string, records: Re
   const current = selections.get(pageId);
   if (current?.collection !== collection) return;
   const fresh = records.find((record) => record.record_id === current.record.record_id);
-  if (fresh && Number(fresh.revision) > Number(current.record.revision)) selectRow(pageId, { collection, record: fresh });
+  if (fresh && Number(fresh.revision) > Number(current.record.revision)) selectRow(pageId, { ...current, record: fresh });
 }
 export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
@@ -55,8 +53,8 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
   const section = useRef<HTMLElement>(null);
   // a row picked far below the form (or at 390 px) would change a form the user cannot see
-  const editing = tool?.operation === "update" && row ? row.record_id : undefined;
-  useEffect(() => { if (editing !== undefined) section.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [editing]);
+  const picked = tool?.operation === "update" && row ? selected?.opener : undefined;
+  useEffect(() => { if (picked) section.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [picked]);
   const onReloadTool = () => setReload((value) => value + 1);
   // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
@@ -67,7 +65,7 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
     : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
   return <section ref={section} className="record-form"><h2>{heading}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
@@ -82,14 +80,13 @@ function editingLabel(tool: PageTool, order: string[] | undefined, row: Record<s
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
 // table of the collection (App.tsx marks each table with its collection and each row with its record id; ids are unique per collection).
-const tableRow = (pageId: string, collection: string, recordId: unknown) => {
-  const opener = openers.get(pageId);
+const tableRow = (opener: HTMLElement | undefined, collection: string, recordId: unknown) => {
   if (opener?.isConnected && opener.dataset.recordId === String(recordId)) return opener;
   return document.querySelector<HTMLElement>(`table[data-collection="${CSS.escape(collection)}"] tr[data-record-id="${CSS.escape(String(recordId))}"]`);
 };
 
 // With a row, the form edits that record: record_id and revision come from the row and are never inputs.
-export function RecordForm({ tool, order, row, pageId, credential, onReloadTool }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; pageId: string; credential: string; onReloadTool: () => void }) {
+export function RecordForm({ tool, order, row, opener, pageId, credential, onReloadTool }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; opener?: HTMLElement; pageId: string; credential: string; onReloadTool: () => void }) {
   const mapped = formFields(tool.input_schema, order);
   const fields = "fields" in mapped ? mapped.fields.filter((field) => !row || (field.name !== "record_id" && field.name !== "revision")) : [];
   // typed holds only what the user changed, so a reloaded row shows its new values under the user's edits
@@ -110,7 +107,7 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
   const idPrefix = useId();
   // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863); a
   // successful save on a row scrolls to the row instead, since that is what "saved" means to the user here
-  useEffect(() => { if (!message) return; (row && message.kind === "status" ? tableRow(pageId, tool.collection, row.record_id) : form.current?.querySelector(".record-form-actions"))?.scrollIntoView({ block: "nearest" }); }, [message]);
+  useEffect(() => { if (!message) return; (row && message.kind === "status" ? tableRow(opener, tool.collection, row.record_id) : form.current?.querySelector(".record-form-actions"))?.scrollIntoView({ block: "nearest" }); }, [message]);
   if ("unsupported" in mapped) return <p aria-disabled="true">this form needs the chat: unsupported field {mapped.unsupported}</p>;
 
   const focusField = (name?: string) => form.current?.querySelector<HTMLElement>(name ? `[name="${CSS.escape(name)}"]` : "[name]")?.focus();
@@ -118,7 +115,7 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
   // The row is often off screen (a long table below the form); focus() scrolls it into view.
   const cancel = () => {
     if (!row) return;
-    const target = tableRow(pageId, tool.collection, row.record_id);
+    const target = tableRow(opener, tool.collection, row.record_id);
     selectRow(pageId, null);
     target?.focus();
   };
@@ -150,7 +147,7 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
       setTyped({});
       setMessage({ kind: "status", text: row ? "saved" : "added" });
       // the saved record (new revision) stays selected, so the next save does not conflict with itself; the effect above scrolls it into view
-      if (row && body) { chosenRevision.current = body.revision; selectRow(pageId, { collection: tool.collection, record: body }); }
+      if (row && body) { chosenRevision.current = body.revision; selectRow(pageId, { collection: tool.collection, record: body, opener }); }
       notifyRecordWrite(pageId);
       if (!row) focusField();
     } catch (caught) {
@@ -169,7 +166,7 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
       const current = Array.isArray(records) ? records.find((record) => record.record_id === row?.record_id) : undefined;
       if (!current) { setMessage({ kind: "alert", text: "this row is no longer in the table" }); return; }
       chosenRevision.current = current.revision;
-      selectRow(pageId, { collection: tool.collection, record: current });
+      selectRow(pageId, { collection: tool.collection, record: current, opener });
       notifyRecordWrite(pageId);
       focusField();
     } catch (caught) {
@@ -181,8 +178,9 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
     <form ref={form} noValidate onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === "Escape" && row && !event.defaultPrevented && !event.nativeEvent.isComposing) { event.preventDefault(); cancel(); } }}>
     {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name]} error={fieldErrors[field.name] ?? null} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
-      {/* not disabled while busy: a disabled button drops the focus a mouse click gave it; submit() ignores a second click */}
-      <button type="submit" className="primary" aria-disabled={busy || undefined}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
+      {/* a mouse save keeps focus where the user was (webkit never focuses a clicked button), and the button is not disabled
+          while busy, since a disabled button drops focus; submit() ignores a second click */}
+      <button type="submit" className="primary" aria-disabled={busy || undefined} onMouseDown={(event) => event.preventDefault()}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
       {row && <button type="button" onClick={cancel}>cancel</button>}
       {message && <p role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
       {message?.kind === "row-changed" && <button type="button" onClick={() => { setTyped({}); setMessage(null); focusField(); }}>discard</button>}
