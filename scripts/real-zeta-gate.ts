@@ -261,13 +261,16 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async (error) => { throw new Error(`${error}\nassistant missing body=${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
   await waitFor(async () => (await approval.count()) > approvalBefore, "initial approval");
-  // A reload while the turn waits for approval re-attaches the running chat without `resume` (zeta answers it with
-  // -32004) and shows the same pending approval, so the turn can still finish.
-  const resumesOf = (sessionId: string) => requests().filter((frame) => frame.method === "resume" && frame.params?.session_id === sessionId).length;
-  const resumesBeforeReload = resumesOf(first);
+  // A reload while the turn waits for approval attaches to the live turn with `resume` (`resume_attach`): the page
+  // binding comes back at once and the same pending approval shows, so the approved page tool runs.
+  const framesBeforeReload = requests().length;
   await gateWait.playwright(page, "reload");
   await waitFor(async () => (await approval.count()) > approvalBefore, "pending approval after reload").catch(async (error) => { throw new Error(`${error}\nreload during approval body=${redact(await page.locator("body").innerText())}`); });
-  if (resumesOf(first) !== resumesBeforeReload) throw new Error("reload sent resume while the turn waited for approval");
+  const reloadFrames = requests().slice(framesBeforeReload);
+  const reloadResume = reloadFrames.find((frame) => frame.method === "resume" && frame.params?.session_id === first);
+  if (!reloadResume?.params?.mcp_bindings?.length) throw new Error("reload did not resume the waiting chat with the page binding");
+  const reloadAttach = reloadFrames.slice(reloadFrames.indexOf(reloadResume) + 1).find((frame) => frame.id === reloadResume.id && (frame.result || frame.error));
+  if (reloadAttach?.result?.attached !== "live_turn") throw new Error(`reload resume did not attach to the live turn: ${redact(JSON.stringify(reloadAttach?.error ?? reloadAttach?.result ?? null))}`);
   if (await page.getByText("a turn is already running").count()) throw new Error("reload during approval showed the busy error");
   // "new chat" while this turn waits keeps the chat and its approval, and says why no chat was created.
   await page.getByRole("button", { name: "new chat" }).first().click();
@@ -306,7 +309,8 @@ try {
     }, { timeout: 20_000 }).catch(() => { throw new Error("timed out waiting for older chats response after turn-completion refresh"); });
     await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
     await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
-    await waitFor(async () => resumesOf(first) > resumesBeforeReload, "page binding re-sent after the approved turn");
+    const approvedPageTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "proof-inspect");
+    if (!approvedPageTool || approvedPageTool.is_error) throw new Error(`page tool approved after a reload did not run: ${redact(JSON.stringify(approvedPageTool ?? null))}`);
     releaseOlder();
     await olderRefresh;
     await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])'), "waitFor", { timeout: 20_000 });
@@ -1346,7 +1350,6 @@ try {
   const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
   console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
-  console.log("known gap: an achilles__* tool approved after a reload runs without the page binding; it needs zeta resume_attach");
 
   await homeMcp(14, "tools/list", {});
   const lateAnnotation = await homeMcp(15, "tools/call", { name: "annotate_trace", arguments: { text: "after create mode", id: "late-annotation" } });

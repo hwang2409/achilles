@@ -195,7 +195,8 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     turns = [
         ScriptedTurn(
             content=[TextContent("assistant ready")],
-            tool_calls=[ToolCall("proof-read", "read", {"path": str(cwd / "fixture.txt")})],
+            # a page tool: an approval answered after a reload must run it with the page binding
+            tool_calls=[ToolCall("proof-inspect", "achilles__inspect_page", {})],
         ),
         ScriptedTurn(content=[TextContent("approval complete")]),
         ScriptedTurn(
