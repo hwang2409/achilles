@@ -1,5 +1,6 @@
 {
   "id": "harness-smoke",
+"suite": "core",
   "page_plan": [
     {
       "alias": "home",

@@ -1,5 +1,6 @@
 {
   "id": "browser-controller-slot",
+"suite": "focused",
   "page_plan": [
     {
       "alias": "home",

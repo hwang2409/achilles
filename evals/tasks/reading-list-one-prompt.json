@@ -1,5 +1,6 @@
 {
   "id": "reading-list-one-prompt",
+"suite": "core",
   "prompt": "make a page that tracks my reading list",
   "page_plan": [
     {
