@@ -361,6 +361,26 @@ try {
   };
   const focusRows: Array<{ name: string; run: () => Promise<void> }> = [
     {
+      name: "new chat row stays in view",
+      run: async () => {
+        // a new chat's row is inserted above the list's first row; it must stay visible below the sticky heads
+        await reloadShell();
+        const back = page.url();
+        const rows = page.locator(".chat-row");
+        await gateWait.playwright(rows.nth(49), "waitFor");
+        const firstBefore = await rows.first().getAttribute("data-chat-id");
+        await page.locator("button.new-chat").click();
+        await waitFor(async () => await rows.first().getAttribute("data-chat-id") !== firstBefore && await rows.first().evaluate((row) => row.classList.contains("current")), "new chat row on top of the list");
+        const view = await page.locator(".chat-list").evaluate(async (list) => {
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const heads = list.querySelector(".chat-group h2")!.getBoundingClientRect().bottom;
+          return { scrollTop: list.scrollTop, rowTop: list.querySelector(".chat-row.current")!.getBoundingClientRect().top, heads };
+        });
+        if (view.scrollTop !== 0 || view.rowTop < view.heads - 1) throw new Error(`new chat row is hidden under the sticky list heads: ${JSON.stringify(view)}`);
+        await page.goto(back);
+      },
+    },
+    {
       name: "chat load-older success",
       run: async () => {
         await reloadShell();
