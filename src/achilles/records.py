@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from typing import Any
+from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
 
@@ -99,7 +99,7 @@ def call_record(
     tool_name: str,
     arguments: dict[str, Any],
     expected_version: int,
-    actor: str,
+    actor: Literal["form", "agent"],
 ) -> Any:
     if not isinstance(arguments, dict):
         raise ValueError("tool arguments must be an object")

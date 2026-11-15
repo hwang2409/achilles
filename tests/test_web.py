@@ -250,7 +250,7 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
         rows = db.execute(
             "SELECT actor, record_id FROM audit WHERE action='invoke:update_note' ORDER BY id"
         ).fetchall()
-    assert [tuple(row) for row in rows] == [("user", "note-1"), ("agent", "note-1")]
+    assert [tuple(row) for row in rows] == [("form", "note-1"), ("agent", "note-1")]
 
 
 def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_path: Path) -> None:
