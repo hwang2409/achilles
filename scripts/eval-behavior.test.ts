@@ -36,7 +36,7 @@ async function checkout() {
 }
 
 async function runEval(target: string, task: string, extraEnv: Record<string, string> = {}) {
-  const report = join(target, "report");
+  const report = extraEnv.REPORT_DIR ?? join(target, "report");
   const child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", task], {
     cwd: target,
     env: { ...process.env, EVAL_BACKEND: "scripted", EVAL_SKIP_BROWSER_INSTALL: "1", REPORT_DIR: report, PATH: `${join(target, "test-bin")}:${process.env.PATH}`, ...extraEnv },
@@ -84,6 +84,35 @@ test("the scripted eval repairs missing target web assets before zeta starts", a
     const result = await runEval(target, "preflight-build");
     expect(result.task.status, JSON.stringify(result.task)).toBe("pass");
     expect(await Bun.file(marker).text(), `zeta did not start after the target build\n${result.stdout}\n${result.stderr}`).toBe("built");
+  } finally { await rm(parent, { recursive: true, force: true }); }
+}, 55_000);
+
+test("two evals in one checkout do not break each other's target web repair", async () => {
+  if (!await fixturesReady()) return;
+  const { parent, target } = await checkout();
+  try {
+    await rm(join(target, "apps", "web", "dist"), { recursive: true, force: true });
+    const builds = join(parent, "builds"); await mkdir(builds);
+    const packagePath = join(target, "apps", "web", "package.json");
+    const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
+    packageJson.scripts.build = "bun ../../scripts/test-web-build.ts";
+    await writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    // forces the bad order: the second build empties dist after the first build wrote it, before the first eval checks it
+    await writeFile(join(target, "scripts", "test-web-build.ts"), `
+import { mkdir, rm, writeFile } from "node:fs/promises";
+const builds = ${JSON.stringify(builds)}; const dist = new URL("../apps/web/dist/", import.meta.url).pathname;
+const waitFor = async (path: string) => { for (let i = 0; i < 60 && !await Bun.file(path).exists(); i++) await Bun.sleep(50); };
+const write = async () => { await mkdir(dist, { recursive: true }); await writeFile(dist + "index.html", "<!doctype html><body>smoke</body>"); };
+if (await mkdir(builds + "/first").then(() => true, () => false)) { await waitFor(builds + "/second-started"); await write(); await waitFor(builds + "/second-emptied"); }
+else { await writeFile(builds + "/second-started", ""); await waitFor(dist + "index.html"); await rm(dist, { recursive: true, force: true }); await writeFile(builds + "/second-emptied", ""); await Bun.sleep(2_000); await write(); }
+`);
+    const task = JSON.parse(await readFile(join(target, "evals", "tasks", "harness-smoke.json"), "utf8"));
+    task.id = "shared-build"; task.checks = [{ id: "page", type: "page_exists", page: "smoke" }];
+    await writeFile(join(target, "evals", "tasks", "shared-build.json"), JSON.stringify(task));
+
+    const results = await Promise.all(["a", "b"].map(name => runEval(target, "shared-build", { REPORT_DIR: join(parent, `report-${name}`) })));
+    for (const result of results) expect(result.task.status, JSON.stringify(result.task)).toBe("pass");
+    expect(await Bun.file(join(builds, "second-started")).exists(), "the second eval rebuilt web assets the first eval had already repaired").toBe(false);
   } finally { await rm(parent, { recursive: true, force: true }); }
 }, 55_000);
 
