@@ -587,17 +587,20 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [state, updateReady]);
 
   const refreshPage = useCallback(async () => {
-    if (state.phase !== "ready") return;
+    // Runs for a page with no chat started yet (phase "empty") as well as a ready chat, so a
+    // form write refreshes computed layout values (count metrics) even before the first message.
+    if (state.phase !== "ready" && state.phase !== "empty") return;
     const current = state; const token = owner.current.token();
     try {
       const response = await fetch(`/api/pages/${current.page.id}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`could not refresh page (${response.status})`);
       const page = await response.json() as Page;
-      updateReady(token, (value) => value.page.id === page.id ? { ...value, page: { ...page, approval_mode: value.page.approval_mode } } : value);
+      if (!owner.current.current(token)) return;
+      setState((value) => (value.phase === "ready" || value.phase === "empty") && value.page.id === page.id ? { ...value, page: { ...page, approval_mode: value.page.approval_mode } } : value);
     } catch (caught) {
       if (owner.current.current(token)) console.error("could not refresh page", caught);
     }
-  }, [state, updateReady]);
+  }, [state]);
 
   const settleApprovalMode = useCallback(async () => {
     if (!client || state.phase !== "ready" || !state.pendingApprovalMode) return;

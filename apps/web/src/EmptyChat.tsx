@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Page } from "./useActiveChat";
+import { usePageTools, type PageTool } from "./page/usePageTools";
 
-type PageTool = { name: string; operation: string };
 type Starter = { text: string; tag?: string; onSelect: () => void };
 
 const VERB_BY_OPERATION: Record<string, string> = {
@@ -18,21 +18,6 @@ function toolStarterText(tool: PageTool): string {
   return `${VERB_BY_OPERATION[tool.operation] ?? "use"} ${tool.name}`;
 }
 
-// null while loading; the app has no other place that already holds this page's tool list.
-function usePageTools(pageId: string, credential: string): PageTool[] | null {
-  const [tools, setTools] = useState<PageTool[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    setTools(null);
-    void fetch(`/api/pages/${pageId}/tools`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" })
-      .then((response) => (response.ok ? response.json() as Promise<{ tools: PageTool[] }> : { tools: [] }))
-      .then((value) => { if (live) setTools(value.tools ?? []); })
-      .catch(() => { if (live) setTools([]); });
-    return () => { live = false; };
-  }, [pageId, credential]);
-  return tools;
-}
-
 function useHasWaitingChat(): boolean {
   const [hasWaiting, setHasWaiting] = useState(false);
   useEffect(() => {
@@ -46,13 +31,15 @@ function useHasWaitingChat(): boolean {
   return hasWaiting;
 }
 
-export function EmptyChat({ page, send, continueWaiting, credential }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void>; credential: string }) {
-  const tools = usePageTools(page.id, credential);
+export function EmptyChat({ page, send, continueWaiting, credential, refreshKey }: { page: Page; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void>; credential: string; refreshKey: string }) {
+  const { tools, error } = usePageTools(page.id, credential, refreshKey);
   const hasWaitingChat = useHasWaitingChat();
   const send1 = (text: string) => void send(text, { steer: false }, () => {});
-  const pageStarters = tools && tools.length > 0
-    ? tools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), tag: tool.name, onSelect: () => send1(toolStarterText(tool)) }))
-    : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => send1(text) }));
+  const resolvedTools = error ? [] : tools;
+  const pageStarters = resolvedTools === null ? []
+    : resolvedTools.length > 0
+      ? resolvedTools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), tag: tool.name, onSelect: () => send1(toolStarterText(tool)) }))
+      : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => send1(text) }));
   const starters: Starter[] = [
     ...pageStarters,
     ...(hasWaitingChat ? [{ text: "continue your waiting chat", tag: "waiting chat", onSelect: () => void continueWaiting() }] : []),
