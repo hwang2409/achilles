@@ -37,7 +37,7 @@ export function formArguments(fields: FormField[], values: FormValues): Record<s
     if (field.kind === "boolean") { result[field.name] = value === true; continue; }
     const text = typeof value === "string" ? value : "";
     if (text === "") continue;
-    if (field.kind === "enum") result[field.name] = field.options[Number(text)];
+    if (field.kind === "enum") result[field.name] = JSON.parse(text) as unknown;
     else if (field.kind === "string") result[field.name] = text;
     else result[field.name] = text.trim() !== "" && Number.isFinite(Number(text)) ? Number(text) : text;
   }

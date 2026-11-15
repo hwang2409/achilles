@@ -85,6 +85,8 @@ export function App() {
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
+  const recordWrites = useRecordWrites(activePage?.id ?? "");
+  const previousRecordWrites = useRef(recordWrites);
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
@@ -136,6 +138,14 @@ export function App() {
     previousRefreshKey.current = refreshKey;
     void active.refreshPage();
   }, [refreshKey]);
+  useEffect(() => {
+    // A form insert does not advance refreshKey (no chat turn), so count metrics computed into
+    // the page layout would stay stale; record list/detail blocks already refetch on their own
+    // through useRecordWrites in LayoutBlock, so this only refreshes the page object itself.
+    if (previousRecordWrites.current === recordWrites) return;
+    previousRecordWrites.current = recordWrites;
+    void active.refreshPage();
+  }, [recordWrites]);
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
@@ -225,7 +235,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
     if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
     return <p>{String(block.title)}: {fields.join(", ")}</p>;
   }
-  if (block.type === "form") return <FormBlock title={String(block.title)} toolName={String(block.tool)} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
+  if (block.type === "form") return <FormBlock key={`${pageId}:${String(block.tool)}`} title={String(block.title)} toolName={String(block.tool)} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
   return null;
 }
 export function RecordList({ title, collection, pageId, credential, refreshKey }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string }) {

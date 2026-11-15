@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { formFields } from "./formSchema";
+import { formArguments, formFields, type FormField, type FormValues } from "./formSchema";
 
 const rows: [string, unknown, ReturnType<typeof formFields>][] = [
   ["flat scalars with required marks", { type: "object", properties: { title: { type: "string", description: "book title" }, pages: { type: "integer" }, rating: { type: "number" }, done: { type: "boolean" } }, required: ["title", "pages"] }, { fields: [
@@ -30,4 +30,13 @@ const rows: [string, unknown, ReturnType<typeof formFields>][] = [
 
 test.each(rows)("formFields: %s", (_name, schema, expected) => {
   expect(formFields(schema)).toEqual(expected);
+});
+
+const argumentRows: [string, FormField[], FormValues, Record<string, unknown>][] = [
+  ["enum sends the selected value, not its index", [{ name: "status", kind: "enum", required: true, options: ["to read", "done"] }], { status: JSON.stringify("done") }, { status: "done" }],
+  ["empty string and empty enum selection are omitted", [{ name: "title", kind: "string", required: true }, { name: "stars", kind: "enum", required: false, options: [1, 2, 3] }], { title: "", stars: "" }, {}],
+];
+
+test.each(argumentRows)("formArguments: %s", (_name, fields, values, expected) => {
+  expect(formArguments(fields, values)).toEqual(expected);
 });

@@ -94,7 +94,7 @@ function Field({ id, field, value, error, onChange }: { id: string; field: FormF
   const described = [field.description ? `${id}-help` : "", error ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined;
   const common = { id, name: field.name, "aria-required": field.required, "aria-invalid": error ? true : undefined, "aria-describedby": described };
   const control = field.kind === "boolean" ? <input {...common} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
-    : field.kind === "enum" ? <select {...common} value={String(value)} onChange={(event) => onChange(event.target.value)}><option value="">{field.required ? "choose…" : "none"}</option>{field.options.map((option, index) => <option key={index} value={String(index)}>{String(option)}</option>)}</select>
+    : field.kind === "enum" ? <select {...common} value={String(value)} onChange={(event) => onChange(event.target.value)}><option value="">{field.required ? "choose…" : "none"}</option>{field.options.map((option, index) => <option key={index} value={JSON.stringify(option)}>{String(option)}</option>)}</select>
     : <input {...common} type={field.kind === "string" ? "text" : "number"} step={field.kind === "integer" ? 1 : "any"} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
   return <div className={`record-field${field.kind === "boolean" ? " record-field-check" : ""}`}>
     <label htmlFor={id}>{field.name}{field.required && <span className="required-mark" aria-hidden="true"> *</span>}</label>
