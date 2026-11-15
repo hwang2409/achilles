@@ -468,6 +468,68 @@ def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
     assert client.get("/api/chats?before=missing").status_code == 400
 
 
+def test_chat_order_and_time_follow_the_last_message_only(monkeypatch) -> None:
+    clock = iter(f"2025-01-01T00:00:{second:02d}" for second in range(60))
+    monkeypatch.setattr("achilles.pages.now", lambda: next(clock))
+    client = chat_client()
+
+    def order():
+        return [row["session_id"] for row in client.get("/api/chats").json()["chats"]]
+
+    def stamp(session_id):
+        return client.get(f"/api/chats?include={session_id}").json()["chats"]
+
+    for session_id in ("old", "new"):
+        client.post("/api/pages/home/chats", json={"session_id": session_id})
+        client.patch(f"/api/chats/{session_id}", json={"first_message": session_id})
+        client.patch(f"/api/chats/{session_id}", json={"last_state": "running"})
+        client.patch(f"/api/chats/{session_id}", json={"last_state": "idle"})
+    assert order() == ["new", "old"]
+    before = {row["session_id"]: row["updated_at"] for row in stamp("old")}
+    # opening the older chat: attach, re-register, history repair and re-reported states
+    assert client.put("/api/pages/home/session", json={"session_id": "old"}).status_code == 200
+    client.post("/api/pages/home/chats", json={"session_id": "old"})
+    client.patch("/api/chats/old", json={"first_message": "repaired"})
+    client.patch("/api/chats/old", json={"last_state": "idle"})
+    client.patch("/api/chats/old", json={"title": "zeta auto name"})
+    # renaming and clearing a name
+    client.patch("/api/chats/old", json={"title": "renamed", "titled_by_user": True})
+    client.patch("/api/chats/old", json={"title": None, "titled_by_user": False})
+    assert order() == ["new", "old"]
+    assert {row["session_id"]: row["updated_at"] for row in stamp("old")} == before
+    # a new message starts a turn, so the chat moves up and its time changes
+    client.patch("/api/chats/old", json={"last_state": "running"})
+    assert order() == ["old", "new"]
+    client.patch("/api/chats/old", json={"last_state": "approval"})
+    client.patch("/api/chats/new", json={"last_state": "failed"})
+    assert order() == ["new", "old"]
+    # re-reporting the same waiting state on attach does not move it again
+    client.patch("/api/chats/old", json={"last_state": "approval"})
+    assert order() == ["new", "old"]
+
+
+def test_chat_search_pages_across_equal_times_without_gaps_or_repeats(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    with store.transaction() as db:
+        for index in range(7):
+            db.execute(
+                "INSERT INTO chat(session_id,page_id,title,created_at,updated_at) "
+                "VALUES(?,?,?,?,?)",
+                (f"s{index}", "home", f"topic {index}", "2025-01-01", "2025-01-01"),
+            )
+    client = chat_client()
+    for query in ("", "&q=topic"):
+        seen, cursor = [], None
+        while True:
+            suffix = f"&before={cursor}" if cursor else ""
+            page = client.get(f"/api/chats?limit=3{query}{suffix}").json()
+            seen += [row["session_id"] for row in page["chats"]]
+            cursor = page["next"]
+            if cursor is None:
+                break
+        assert seen == [f"s{index}" for index in reversed(range(7))]
+
+
 def test_chat_search_escapes_like_wildcards(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     with store.transaction() as db:
@@ -508,7 +570,7 @@ def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) ->
         db.execute("UPDATE chat SET updated_at='old' WHERE session_id='new-session'")
     response = client.post(path, json={"session_id": "new-session"})
     assert response.status_code == 200
-    assert response.json()["updated_at"] != "old"
+    assert response.json()["updated_at"] == "old"
     with store.transaction() as db:
         assert (
             db.execute("SELECT COUNT(*) FROM chat WHERE session_id='new-session'").fetchone()[0]

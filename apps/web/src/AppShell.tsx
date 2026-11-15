@@ -89,10 +89,12 @@ function groupLabel(value: string) {
   return date.toLocaleDateString(undefined, { month: "long", year: date.getFullYear() === now.getFullYear() ? undefined : "numeric" }).toLowerCase();
 }
 
+// one lowercase style for every age: "10:23 pm", "mon", "nov 7"
 function timeLabel(value: string) {
   const date = new Date(value);
   const group = groupLabel(value);
-  return group === "today" ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : group === "yesterday" || group === "this week" ? date.toLocaleDateString([], { weekday: "short" }) : date.toLocaleDateString([], { month: "short", day: "numeric" }).toLowerCase();
+  const label = group === "today" ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : group === "yesterday" || group === "this week" ? date.toLocaleDateString([], { weekday: "short" }) : date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return label.toLowerCase();
 }
 
 const initialPageListState = initialListState<PageLink, null>(null);
