@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { usePageTools, type PageTool } from "./usePageTools";
 
@@ -62,19 +62,8 @@ export function RecordForm({ tool, row, pageId, credential, onReloadTool }: { to
   const [message, setMessage] = useState<{ kind: "status" | "alert" | "conflict" | "row-conflict"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
-  const messageRef = useRef<HTMLParagraphElement>(null);
-  const reloadToolRef = useRef<HTMLButtonElement>(null);
-  const reloadRowRef = useRef<HTMLButtonElement>(null);
   const idPrefix = useId();
   if ("unsupported" in mapped) return <p aria-disabled="true">this form needs the chat: unsupported field {mapped.unsupported}</p>;
-
-  // A non-status notice (409 "tool changed", a row conflict, a save error) can land below the fold of the
-  // page's layout band; bring it on screen and move focus there, so the user sees it right after Enter.
-  useEffect(() => {
-    if (!message || message.kind === "status") return;
-    messageRef.current?.scrollIntoView({ block: "nearest" });
-    (reloadToolRef.current ?? reloadRowRef.current ?? messageRef.current)?.focus();
-  }, [message]);
 
   const focusField = (name?: string) => form.current?.querySelector<HTMLElement>(name ? `[name="${CSS.escape(name)}"]` : "[name]")?.focus();
   const submit = async (event: React.FormEvent) => {
@@ -135,9 +124,9 @@ export function RecordForm({ tool, row, pageId, credential, onReloadTool }: { to
     {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name]} error={fieldErrors[field.name] ?? null} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
       <button type="submit" className="primary" disabled={busy}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
-      {message && <p ref={messageRef} tabIndex={-1} role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
-      {message?.kind === "row-conflict" && <button ref={reloadRowRef} type="button" onClick={() => void reloadRow()}>reload row</button>}
-      {message?.kind === "conflict" && <button ref={reloadToolRef} type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
+      {message && <p role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
+      {message?.kind === "row-conflict" && <button type="button" onClick={() => void reloadRow()}>reload row</button>}
+      {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
     </div>
   </form>;
 }
