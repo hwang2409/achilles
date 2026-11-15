@@ -65,4 +65,8 @@
   .settings-toggle[aria-checked="true"] { background: transparent; }
   .settings-toggle[aria-checked="true"] span { background: var(--fulcrum-accent); transform: none; }
   .settings-toggle[aria-checked="true"] span::after { background: var(--fulcrum-bg); transform: translateX(14px); }
+  .font-options { grid-template-columns: 1fr; row-gap: 6px; }
+  .font-options .settings-segments { flex-direction: column; width: 100%; }
+  .font-options .settings-segments button { width: 100%; border-right: 1px solid var(--fulcrum-border); border-bottom: 0; }
+  .font-options .settings-segments button:last-child { border-bottom: 1px solid var(--fulcrum-border); }
 }
