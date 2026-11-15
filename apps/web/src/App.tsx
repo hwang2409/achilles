@@ -7,6 +7,7 @@ import { AppShell } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
 import { DetailRecord, type DetailFilter } from "./DetailRecord";
+import { FormBlock, useRecordWrites } from "./page/RecordForm";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget } from "./keyboard";
 import { useSettings } from "./settings";
@@ -87,6 +88,8 @@ export function App() {
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
+  const recordWrites = useRecordWrites(activePage?.id ?? "");
+  const previousRecordWrites = useRef(recordWrites);
   const emptyStore = useMemo(() => empty ? createRunStore() : null, [empty?.page.id]);
   const store = ready?.lease.store ?? null;
   const activeStore = store ?? emptyStore;
@@ -138,6 +141,14 @@ export function App() {
     void active.refreshPage();
   }, [refreshKey]);
   useEffect(() => {
+    // A form insert does not advance refreshKey (no chat turn), so count metrics computed into
+    // the page layout would stay stale; record list/detail blocks already refetch on their own
+    // through useRecordWrites in LayoutBlock, so this only refreshes the page object itself.
+    if (previousRecordWrites.current === recordWrites) return;
+    previousRecordWrites.current = recordWrites;
+    void active.refreshPage();
+  }, [recordWrites]);
+  useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
   useEffect(() => {
@@ -184,7 +195,7 @@ export function App() {
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         {activePage.layout.blocks.length > 0 && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
-        <section ref={ready ? transcriptRef : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat page={activePage} send={send} continueWaiting={active.continueWaitingChat} credential={(ready ?? empty)!.credential} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
+        <section ref={ready ? transcriptRef : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat page={activePage} send={send} continueWaiting={active.continueWaitingChat} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={() => { setFollowRequest((value) => value + 1); const scroll = transcriptRef.current?.querySelector('[data-part="timeline-scroll"]'); scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" }); }}>jump to latest</button>}</section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
       </RunProvider>}
   </>;
@@ -226,7 +237,8 @@ function ConnectionBanner({ state, connection, compact = false }: { state: Conne
   return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{text}{"attempt" in state && <span className="attempt-count"> · tried {state.attempt} times</span>}</p><h1>{state.phase === "not_running" ? "start zeta, and this page connects by itself." : text}</h1>{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
+  const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p className="layout-metric"><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
   if (block.type === "list") return <RecordList key={`${pageId}:${String(block.collection)}`} title={String(block.title)} collection={String(block.collection)} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
@@ -236,7 +248,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey }: { block: 
     if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
     return <p>{String(block.title)}: {fields.join(", ")}</p>;
   }
-  if (block.type === "form") return <p aria-disabled="true">{String(block.title)}: no tool assigned</p>;
+  if (block.type === "form") return <FormBlock key={`${pageId}:${String(block.tool)}`} title={String(block.title)} toolName={String(block.tool)} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
   return null;
 }
 export function RecordList({ title, collection, pageId, credential, refreshKey }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string }) {

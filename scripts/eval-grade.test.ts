@@ -401,6 +401,21 @@ test("workflow, approval, and reconnect checks use page-local structured evidenc
   expect(gradeCheck({ id: "resume", type: "reconnect", page: "p" }, { pages, reconnects: [{ page_id: "p1", original_session_id: "s", resumed_session_id: "s", history_continuity: true }] }).pass).toBe(true);
 });
 
+test("assigned_tools_only rejects calls to tools the page does not assign", () => {
+  const check = { id: "assigned", type: "assigned_tools_only" as const, page: "p" };
+  const base = { pages: [{ id: "p1", alias: "p" }], tool_versions: [{ page_id: "p1", name: "add_contact" }, { page_id: "other", name: "delete_all" }] };
+  const grade = (...tools: string[]) => gradeCheck(check, { ...base, calls: tools.map(tool => ({ page_id: "p1", tool })) });
+  const rows: Array<[string, ReturnType<typeof grade>, boolean]> = [
+    ["assigned tool only", grade("achilles__add_contact"), true],
+    ["tool discovery is allowed", grade("mcp_discover", "achilles__add_contact"), true],
+    ["authoring tool attempt", grade("achilles__create_tool", "achilles__add_contact"), false],
+    ["another page's tool", grade("achilles__delete_all"), false],
+    ["host tool", grade("bash"), false],
+  ];
+  for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
+  expect(gradeCheck(check, { ...base, calls: [{ page_id: "other", tool: "achilles__create_tool" }] }).pass).toBe(true);
+});
+
 test("layout_restore requires a restore_version that appends a copy of v1", () => {
   const check = { id: "restored", type: "layout_restore" as const, page: "p" };
   const v1 = { blocks: [{ type: "text", text: "Team tasks" }, { type: "list", title: "All tasks", collection: "tasks" }] };
@@ -411,6 +426,7 @@ test("layout_restore requires a restore_version that appends a copy of v1", () =
   const grade = (active: number, layouts: unknown[], results: unknown[]) => gradeCheck(check, { pages: [{ id: "p1", alias: "p", active_layout_version: active }], layouts, results } as never);
   const rows: Array<[string, ReturnType<typeof grade>, boolean]> = [
     ["restore appends v1 copy", grade(3, [layout(1, v1), layout(2, v2), layout(3, v1)], [update(2), restore(3)]), true],
+    ["layout restore then a tool restore", grade(3, [layout(1, v1), layout(2, v2), layout(3, v1)], [update(2), restore(3), { page_id: "p1", tool: "achilles__restore_version", success: true, data: { kind: "tool", version: 3, restored_from: 1 } }]), true],
     ["hand rebuild with update_layout", grade(3, [layout(1, v1), layout(2, v2), layout(3, v1)], [update(2), update(3)]), false],
     ["restore then another change", grade(4, [layout(1, v1), layout(2, v2), layout(3, v1), layout(4, v2)], [update(2), restore(3), update(4)]), false],
     ["restore to the wrong version", grade(3, [layout(1, v1), layout(2, v2), layout(3, v2)], [update(2), restore(3)]), false],
