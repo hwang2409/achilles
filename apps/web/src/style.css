@@ -97,8 +97,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
 .header-overflow, .header-menu { display: none; }
 /* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
-   width): 112ch of header leaves the title about 30ch beside the full actions; ch follows the ui font size. */
-@container (max-width: 112ch) {
+   width): 64em of header leaves the title about 30 characters beside the full actions. em follows the
+   ui font size; ch would also follow the font face, and a wide fallback face folded them at 1440. */
+@container (max-width: 64em) {
   .chat-actions > .approval-mode, .chat-actions > button:not(.header-overflow) { display: none; }
   .chat-actions { position: relative; gap: 12px; }
   .header-overflow { display: block; width: 40px; height: 40px; padding: 0; }
