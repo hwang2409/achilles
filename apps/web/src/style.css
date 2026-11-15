@@ -155,7 +155,10 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .record-field { display: grid; gap: 4px; min-width: 0; }
 .record-field label { color: var(--fulcrum-muted); overflow-wrap: anywhere; }
 .record-field input:not([type="checkbox"]), .record-field select { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface, transparent); }
-.record-field-check input { justify-self: start; width: 18px; height: 18px; margin: 6px 0; }
+.record-field-check { grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: center; }
+.record-field-check input { grid-row: 1; grid-column: 1; width: 18px; height: 18px; margin: 6px 0; }
+.record-field-check label { grid-row: 1; grid-column: 2; }
+.record-field-check small, .record-field-check .field-error { grid-column: 1 / -1; }
 .record-field [aria-invalid="true"] { border-color: var(--fulcrum-danger); }
 .record-field small { color: var(--fulcrum-muted); }
 .required-mark { color: var(--fulcrum-warn); }

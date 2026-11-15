@@ -1,5 +1,5 @@
 import { useId, useRef, useState, useSyncExternalStore } from "react";
-import { emptyValues, formArguments, formFields, type FormField, type FormValues } from "./formSchema";
+import { formArguments, formErrors, formFields, keepValues, type FormField, type FormValues } from "./formSchema";
 import { usePageTools, type PageTool } from "./usePageTools";
 
 export type { PageTool };
@@ -21,20 +21,24 @@ export function FormBlock({ title, toolName, pageId, credential, refreshKey }: {
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
   const { tools, error } = usePageTools(pageId, credential, reload > 0 ? `${refreshKey}:${reload}` : refreshKey);
-  const tool = tools === null ? undefined : tools.find((item) => item.name === toolName) ?? null;
-  const body = error ? <p role="alert">{error}</p>
-    : tool === undefined ? <p role="status">loading form…</p>
+  // A refetch (chat turn end, "reload tool") keeps the last list on screen, so the form stays mounted with what the user typed.
+  const last = useRef<PageTool[] | null>(null);
+  if (tools !== null) last.current = tools;
+  const shown = tools ?? last.current;
+  const tool = shown === null ? undefined : shown.find((item) => item.name === toolName) ?? null;
+  const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
     : tool.operation !== "insert" ? <p aria-disabled="true">edit forms need a selected row</p>
     : <RecordForm tool={tool} pageId={pageId} credential={credential} onReloadTool={() => setReload((value) => value + 1)} />;
-  return <section className="record-form"><h2>{title}</h2>{body}</section>;
+  return <section className="record-form"><h2>{title}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 export function RecordForm({ tool, pageId, credential, onReloadTool }: { tool: PageTool; pageId: string; credential: string; onReloadTool: () => void }) {
   const mapped = formFields(tool.input_schema);
   const fields = "fields" in mapped ? mapped.fields : [];
-  const [values, setValues] = useState<FormValues>(() => emptyValues(fields));
-  const [fieldError, setFieldError] = useState<FieldError | null>(null);
+  const [typed, setTyped] = useState<FormValues>({});
+  const values = keepValues(fields, typed);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ kind: "status" | "alert" | "conflict"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -45,7 +49,12 @@ export function RecordForm({ tool, pageId, credential, onReloadTool }: { tool: P
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
-    setBusy(true); setFieldError(null); setMessage(null);
+    setMessage(null);
+    const errors = formErrors(fields, values);
+    setFieldErrors(errors);
+    const first = Object.keys(errors)[0];
+    if (first !== undefined) { focusField(first); return; }
+    setBusy(true);
     try {
       const response = await fetch(`/api/pages/${pageId}/tools/${encodeURIComponent(tool.name)}/invoke`, {
         method: "POST",
@@ -57,11 +66,11 @@ export function RecordForm({ tool, pageId, credential, onReloadTool }: { tool: P
       if (!response.ok) {
         const path = body?.error?.path ?? "";
         const name = path.split("/")[1];
-        if (body?.error && fields.some((field) => field.name === name)) { setFieldError(body.error); focusField(name); }
+        if (body?.error && fields.some((field) => field.name === name)) { setFieldErrors({ [name]: body.error.expected }); focusField(name); }
         else setMessage({ kind: "alert", text: body?.error ? `${path || "input"}: ${body.error.expected}` : body?.detail ?? `could not add (${response.status})` });
         return;
       }
-      setValues(emptyValues(fields));
+      setTyped({});
       setMessage({ kind: "status", text: "added" });
       notifyRecordWrite(pageId);
       focusField();
@@ -73,11 +82,11 @@ export function RecordForm({ tool, pageId, credential, onReloadTool }: { tool: P
   };
 
   return <form ref={form} noValidate onSubmit={(event) => void submit(event)}>
-    {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name] ?? (field.kind === "boolean" ? false : "")} error={fieldError?.path === `/${field.name}` ? fieldError.expected : null} onChange={(value) => setValues((current) => ({ ...current, [field.name]: value }))} />)}
+    {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name]} error={fieldErrors[field.name] ?? null} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
       <button type="submit" className="primary" disabled={busy}>{busy ? "adding…" : "add"}</button>
       {message && <p role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
-      {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); }}>reload tool</button>}
+      {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
     </div>
   </form>;
 }
