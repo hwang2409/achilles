@@ -94,8 +94,17 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-header > [role="alert"] { position: absolute; top: 56px; right: 16px; color: var(--fulcrum-danger); }
 .create-mode-alert { position: relative; z-index: 2; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-danger); background: var(--fulcrum-bg); border-bottom: 1px solid var(--fulcrum-border); }
 .create-mode-alert button { flex: 0 0 auto; }
-.layout-blocks { flex: 0 1 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; column-gap: 16px; overflow-y: auto; padding: 16px max(24px, calc((100% - 880px) / 2)); border-bottom: 1px solid var(--fulcrum-border); }
+.layout-blocks { flex: 0 1 auto; max-height: 50%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; column-gap: 16px; overflow-y: auto; padding: 16px max(24px, calc((100% - 880px) / 2)); border-bottom: 1px solid var(--fulcrum-border); }
 .layout-blocks > :not(.layout-metric) { grid-column: 1 / -1; }
+/* below 1100px (or with no blocks) the page stacks as before: .page-chat adds no box, so blocks,
+   transcript and composer share .page-view's column. at 1100px+ the chat docks right and each side scrolls alone. */
+.page-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.page-chat { display: contents; }
+@media (min-width: 1100px) {
+  .page-view.docked { flex-direction: row; }
+  .page-view.docked > .layout-blocks { flex: 1 1 0; min-width: 0; max-height: none; align-content: start; padding: 16px 24px; border-bottom: 0; border-right: 1px solid var(--fulcrum-border); }
+  .page-view.docked > .page-chat { flex: 0 0 clamp(380px, 40%, 460px); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+}
 .layout-metric { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .record-detail h2 { margin: 0 0 12px; font-size: 16px; text-wrap: balance; }
 .record-detail dl { display: grid; grid-template-columns: minmax(96px, .35fr) minmax(0, 1fr); gap: 8px 16px; margin: 0; }
@@ -103,10 +112,11 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .record-detail dt { color: var(--fulcrum-muted); }
 .record-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .record-detail .match-note { margin: 12px 0 0; color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
-/* a page's own layout blocks (forms, lists, metrics) can be tall; .transcript keeps a usable
-   floor so the chat and the empty-chat starters stay reachable, and .layout-blocks (which
-   already scrolls) gives up space first. */
-.transcript { position: relative; flex: 1 1 auto; min-height: min(260px, 40dvh); overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+/* a page's own layout blocks (forms, lists, metrics) can be tall: stacked, they keep their own
+   height up to half the page (M-2 in firstrun-2a2a863: a 160-210px band cut forms and notices);
+   .transcript takes the rest but keeps a usable floor, so the chat and the empty-chat starters
+   stay reachable, and .layout-blocks (which scrolls) gives up space first. */
+.transcript { position: relative; flex: 1 1 0; min-height: min(260px, 40dvh); overflow: hidden; padding: 0 max(24px, calc((100% - 880px) / 2)); font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 /* one jump control: fulcrum's counts only new rows, so achilles owns it and text-only growth is covered too */
 .transcript [data-part="jump-to-latest-lane"] { display: none; }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
@@ -115,7 +125,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript :is(code, pre) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 .transcript :is([data-part="md-code-inline"], [data-part="md-code-block"]) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
-.main-pane > [data-part="composer"], .main-pane > div[data-part="composer"] { flex: 0 0 auto; width: min(880px, calc(100% - 48px)); margin: 12px auto 20px; font: var(--achilles-ui-size, 14px) / 1.55 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.page-chat > [data-part="composer"], .page-chat > div[data-part="composer"] { flex: 0 0 auto; width: min(880px, calc(100% - 48px)); margin: 12px auto 20px; font: var(--achilles-ui-size, 14px) / 1.55 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
 .main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
@@ -218,7 +228,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .run-state { width: 9px; overflow: hidden; color: transparent; }
   .run-state::before { margin: 0; }
   .transcript { padding: 14px 12px; }
-  .main-pane > [data-part="composer"], .main-pane > div[data-part="composer"] { width: calc(100% - 24px); margin: 8px 12px 12px; }
+  .page-chat > [data-part="composer"], .page-chat > div[data-part="composer"] { width: calc(100% - 24px); margin: 8px 12px 12px; }
   [data-part="approval"] [data-part="actions"] { display: grid; grid-template-columns: 1fr 1fr; }
   [data-part="approval"] button { min-height: 40px; }
   .connection-banner { align-items: flex-start; padding: 8px 12px; }
