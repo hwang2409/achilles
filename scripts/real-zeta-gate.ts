@@ -1183,7 +1183,7 @@ try {
   const secondCatalog = await mcp(secondCredential, 10, "tools/list", {});
   const secondNames =
     secondCatalog.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
-  if (JSON.stringify(secondNames) !== JSON.stringify(["add_book", "list_books", "update_book"]))
+  if (JSON.stringify(secondNames) !== JSON.stringify(["inspect_page", "add_book", "list_books", "update_book"]))
     throw new Error(`reading page tools were not created atomically: ${JSON.stringify(secondNames)}`);
   const secondRecords = await (
     await fetch(`${origin}/api/pages/${createdPageId}/records/books`, {
