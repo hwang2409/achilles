@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { classifyTaskSupport, finalAnswer, insertForms, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { approvalDecision, classifyTaskSupport, finalAnswer, insertForms, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
 import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
@@ -106,6 +106,11 @@ test("suite selection validates every task and sums one command budget", async (
   expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());
   expect(reserveTurns(tasks, 1)).toBe(tasks.reduce((total, task) => total + task.agent_turns, 0));
   expect(() => assertTurnBudget(reserveTurns(tasks, 50))).toThrow("command budget");
+  expect(tasks.every(task => task.suite === "core")).toBe(true);
+  const hard = await selectTasks(undefined, undefined, "hard");
+  expect(hard.length).toBeGreaterThan(0);
+  expect(hard.every(task => task.suite === "hard")).toBe(true);
+  expect(() => assertTurnBudget(reserveTurns(hard, 3))).not.toThrow();
 });
 
 test("turn reservation is command-wide", () => {
@@ -237,4 +242,11 @@ test("insertForms finds the active insert tool behind each form block, in render
     ],
   };
   expect(insertForms(snapshot, "p")).toEqual([{ index: 1, tool: "add_book", collection: "books", input_schema: schema("title"), fields: ["title"] }]);
+});
+
+test("a decision list answers the n-th request of its tool and approves the rest", () => {
+  let n = 0; const next = () => n++; const rule = { tool: "achilles__update_ticket", decisions: ["approve", "deny"] as Array<"approve" | "deny"> };
+  expect(["achilles__list_tickets", "achilles__update_ticket", "achilles__update_ticket", "achilles__update_ticket"].map(tool => approvalDecision(rule, tool, next))).toEqual(["approve", "approve", "deny", "approve"]);
+  expect(approvalDecision("deny", "achilles__anything", next)).toBe("deny");
+  expect(approvalDecision(undefined, "achilles__anything", next)).toBe("approve");
 });

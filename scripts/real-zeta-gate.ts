@@ -217,6 +217,8 @@ try {
       })
       .filter(Boolean);
   const zetaSessionCount = () => requests().filter((frame) => frame.method === "new_session").length;
+  // `/` or a page route with no chat named opens that page's most recent chat in the sidebar's order
+  const newestChatId = async (pageId: string) => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: { session_id: string; page_id: string }[] }).chats.find((chat) => chat.page_id === pageId)?.session_id;
   const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: unknown[] }).chats.length;
   const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
     const messages = requests();
@@ -1054,6 +1056,9 @@ try {
 
   await page.goto(origin);
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
+  // `/` opens the newest home chat, not the home chat: the sends below run in it and must not move page.zeta_session_id
+  const newestHome = await newestChatId("home");
+  if (!newestHome || newestHome === first || await homeSessionId() !== newestHome) throw new Error(`/ did not open the most recent home chat: ${newestHome} shown ${await homeSessionId()}`);
   const catalog = await homeMcp(2, "tools/list", {});
   const names =
     catalog.result?.tools?.map(
@@ -1288,8 +1293,10 @@ try {
     return reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list")
       && (await page.locator("body").innerText()).includes("Synthetic Book");
   }, "reading page inserted book render");
+  const homeOpened = await newestChatId("home");
+  if (!homeOpened) throw new Error("no listed home chat before achilles restart");
   const homeIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
-    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeOpened)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
   }).catch(() => { throw new Error("missing home idle state write before achilles restart"); });
   await page.goto(origin);
@@ -1324,8 +1331,8 @@ try {
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
-  if (await homeSessionId() !== homeAfterRestart) throw new Error("achilles restart changed home session id");
-  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
+  if (await homeSessionId() !== homeOpened) throw new Error("achilles restart changed the open home chat");
+  if (approvalModeResponse("session_settings", homeOpened) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
   const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
   const restartedToggleResponse = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
@@ -1343,7 +1350,7 @@ try {
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
   const reconnectIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
-    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterRestart)}`) return false;
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeOpened)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
   }).catch(() => { throw new Error("missing reconnect idle state write before achilles restart"); });
   await field.fill("post-reconnect catalog"); await field.press("Enter");

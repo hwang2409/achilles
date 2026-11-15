@@ -1,0 +1,241 @@
+{
+  "id": "rename-field-migrate",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "books",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 16,
+  "steps": [
+    {
+      "id": "rename",
+      "kind": "prompt",
+      "page": "books",
+      "chat": "author-chat",
+      "prompt": "rename the state field to status everywhere on this page: the tools, the existing books, the list column, and the done metric. also change the values: todo becomes to_read and done becomes finished, so the metric counts finished books. then check the metric"
+    },
+    {
+      "id": "use",
+      "kind": "prompt",
+      "page": "books",
+      "chat": "fresh-chat",
+      "prompt": "add Piranesi with status to_read"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_book",
+        "operation": "insert",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "list_books",
+        "operation": "list",
+        "collection": "books"
+      },
+      {
+        "name": "update_book",
+        "operation": "update",
+        "collection": "books",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_id",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "records": [
+      {
+        "id": "b-1",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "state": "done"
+        }
+      },
+      {
+        "id": "b-2",
+        "collection": "books",
+        "data": {
+          "title": "Emma",
+          "state": "todo"
+        }
+      },
+      {
+        "id": "b-3",
+        "collection": "books",
+        "data": {
+          "title": "Beloved",
+          "state": "done"
+        }
+      },
+      {
+        "id": "b-4",
+        "collection": "books",
+        "data": {
+          "title": "Kindred",
+          "state": "todo"
+        }
+      },
+      {
+        "id": "b-5",
+        "collection": "books",
+        "data": {
+          "title": "Middlemarch",
+          "state": "todo"
+        }
+      }
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "metric",
+          "label": "Done",
+          "collection": "books",
+          "count": true,
+          "where": {
+            "field": "state",
+            "equals": "done"
+          }
+        },
+        {
+          "type": "list",
+          "title": "Books",
+          "collection": "books",
+          "fields": [
+            "title",
+            "state"
+          ]
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "migrated",
+      "type": "records_exact",
+      "page": "books",
+      "value": [
+        {
+          "title": "Dune",
+          "status": "finished"
+        },
+        {
+          "title": "Emma",
+          "status": "to_read"
+        },
+        {
+          "title": "Beloved",
+          "status": "finished"
+        },
+        {
+          "title": "Kindred",
+          "status": "to_read"
+        },
+        {
+          "title": "Middlemarch",
+          "status": "to_read"
+        },
+        {
+          "title": "Piranesi",
+          "status": "to_read"
+        }
+      ]
+    },
+    {
+      "id": "new-book",
+      "type": "successful_result",
+      "page": "books",
+      "chat": "fresh-chat",
+      "tool": "achilles__add_book",
+      "value": {
+        "title": "Piranesi",
+        "status": "to_read"
+      }
+    },
+    {
+      "id": "status-column",
+      "type": "list_shows",
+      "page": "books",
+      "collection": "books",
+      "fields": [
+        "title",
+        "status"
+      ]
+    },
+    {
+      "id": "done-metric",
+      "type": "metric_count",
+      "page": "books",
+      "value": {
+        "collection": "books",
+        "where": {
+          "field": "status",
+          "equals": "finished"
+        },
+        "count": 2,
+        "position": "first"
+      }
+    }
+  ]
+}
