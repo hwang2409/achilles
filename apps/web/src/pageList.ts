@@ -110,11 +110,14 @@ export function createListOwner<K, T, M>(
     const keyChanged = activeKey === undefined || !Object.is(activeKey, key);
     const currentDepth = state.items?.length ?? 0;
     const requestedDepth = replacementDepth(currentDepth, operation);
+    // a same-key replacement loads the joined depth, so it also answers the pending more() calls.
+    const carried = !keyChanged && operation ? operation.waiters.splice(0) : [];
     stop();
     generation += 1;
     activeKey = key;
     const loadedDepth = keyChanged ? 0 : Math.max(firstPageSize, currentDepth, requestedDepth);
     const { candidate, done } = makeOperation("refresh", loadedDepth);
+    candidate.waiters.push(...carried);
     update(keyChanged ? { ...state, next: null, loading: true, error: false } : { ...state, loading: true, error: false });
     void runRefresh(candidate, key, keyChanged);
     return done;
