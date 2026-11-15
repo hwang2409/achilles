@@ -473,6 +473,7 @@ def build_mcp(store: PageStore):
                 params.name,
                 args,
                 listed_versions[params.name],
+                "agent",
             )
         except ValidationError as exc:
             if exc.code == "conflict" and exc.path == "/version":
