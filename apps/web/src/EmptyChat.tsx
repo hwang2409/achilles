@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { draftStore } from "./draftStore";
+import { keyboardFocusToComposer } from "./keyboard";
 import type { Page } from "./useActiveChat";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 
@@ -88,6 +89,6 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   return <div className="empty-chat">
     <h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1>
     <p>create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
-    <div className="chat-starters">{starters.map((starter, index) => <button key={index} disabled={sending} onClick={() => void select(starter.onSelect)}><b>{index + 1}</b><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
+    <div className="chat-starters">{starters.map((starter, index) => <button key={index} disabled={sending} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><b>{index + 1}</b><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
   </div>;
 }
