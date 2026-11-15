@@ -144,7 +144,7 @@ export async function attachPage(
       page.approval_mode = session.approvalMode;
       const storedChat = selectedChat ?? (await findChat(session.id)); requireCurrent(owner, token);
       const userTitled = Boolean(storedChat?.titled_by_user);
-      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || "untitled chat";
+      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || "new chat";
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
       if (!userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
@@ -547,7 +547,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (pendingSelection.current?.sessionId === current.sessionId) pendingSelection.current = null;
       throw error;
     }
-    if (!owner.current.current(token) || current.title !== "untitled chat") return;
+    if (!owner.current.current(token) || current.title !== "new chat") return;
     const nextTitle = text.trim().slice(0, 200);
     persistUntitledChatTitle(current.sessionId, nextTitle, () => {
       updateReady(token, (value) => ({ ...value, title: nextTitle }));
@@ -578,7 +578,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const trimmed = nextTitle.trim().slice(0, 200);
     const titledByUser = trimmed.length > 0;
     // clearing the open chat stores its zeta name, so the sidebar and the header show the same title
-    const fallback = state.phase === "ready" && state.sessionId === sessionId && state.autoTitle !== "untitled chat" ? state.autoTitle : null;
+    const fallback = state.phase === "ready" && state.sessionId === sessionId && state.autoTitle !== "new chat" ? state.autoTitle : null;
     const saved = await persistChatTitle(sessionId, titledByUser ? trimmed : fallback, titledByUser);
     if (!saved) return false;
     updateReady(token, (value) => value.sessionId !== sessionId ? value : { ...value, title: titledByUser ? trimmed : value.autoTitle });

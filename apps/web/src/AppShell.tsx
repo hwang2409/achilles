@@ -23,6 +23,7 @@ type Props = {
   sessionId: string | null;
   waiting: number;
   serverForcesAsk?: boolean;
+  hasComposer: boolean;
   children: ReactNode;
   onNewChat: () => Promise<void>;
   onToggleCreateMode: () => Promise<void>;
@@ -43,7 +44,7 @@ const chatHref = (chat: Chat) => {
   url.searchParams.set("chat", chat.session_id);
   return `${url.pathname}${url.search}`;
 };
-const titleOf = (chat: Chat) => chat.title?.trim() || "untitled chat";
+const titleOf = (chat: Chat) => chat.title?.trim() || "new chat";
 const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
 const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 // in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
@@ -102,7 +103,7 @@ function Highlight({ value, query }: { value: string; query: string }) {
   return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
 }
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -141,7 +142,10 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       return { items: result.chats, next: result.next, meta: result.approval_count };
     }, (item) => item.session_id, setChatList, 50, 200);
   }
-  const chats = chatList.items ?? [];
+  const rawChats = chatList.items ?? [];
+  // a chat with no message ever sent keeps a null title (see chatCreation.ts); hide it from browsing
+  // unless it is the chat currently open, so "new chat" clicks don't pile up empty rows.
+  const chats = useMemo(() => rawChats.filter((chat) => chat.title !== null || chat.session_id === sessionId), [rawChats, sessionId]);
   const loading = chatList.items === null && !chatList.error;
   const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
   const openSettings = (opener: Element | null) => {
@@ -254,13 +258,17 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   };
   const loadOlderChats = async (initiator: HTMLButtonElement) => {
     const firstChat = await chatListOwner.current!.more();
-    if (firstChat) requestFocus(() => document.activeElement === initiator || (!initiator.isConnected && document.activeElement === document.body)
-      ? document.querySelector<HTMLAnchorElement>(`[data-chat-id="${CSS.escape(firstChat.session_id)}"]`)
-      : null);
+    if (firstChat) requestFocus(() => {
+      if (document.activeElement !== initiator && !(!initiator.isConnected && document.activeElement === document.body)) return null;
+      // the newly loaded chat can itself be hidden (empty, not current); fall back to the button that stays in place.
+      const row = document.querySelector<HTMLAnchorElement>(`[data-chat-id="${CSS.escape(firstChat.session_id)}"]`) ?? (initiator.isConnected ? initiator : null);
+      row?.scrollIntoView({ block: "nearest" });
+      return row;
+    });
   };
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
-    <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>skip to message</a>
+    <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span>{!narrow && <button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button>}</div>
@@ -273,7 +281,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
           {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload(null)}>retry</button></div> : pageList.items === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}</>}
         </div>
       </section>
-      <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
+      <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={rawChats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
         {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
@@ -304,7 +312,7 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { 
   };
   return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
-    <span title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
+    <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>
     <button type="button" tabIndex={-1} className="chat-row-rename" aria-label={`rename ${titleOf(chat)}`} onClick={startRename}>✎</button>
   </a>;
 }
