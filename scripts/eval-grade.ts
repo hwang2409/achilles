@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "no_unrecovered_error" | "tool_evolution";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -31,7 +31,7 @@ export type EvalSnapshot = {
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "no_unrecovered_error", "tool_evolution"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -349,6 +349,23 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   no_unrecovered_error: ({ check, snapshot, page }) => {
     const attempts = rows(snapshot, "results").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && row.tool === "achilles__update_layout");
     return attempts.length === 0 || (attempts.at(-1)?.success === true && attempts.every((attempt, index) => attempt.success !== false || attempts.slice(index + 1).some(later => later.success === true)));
+  },
+  assigned_tools_only: ({ snapshot, page, owned }) => {
+    const assigned = new Set(owned("tool_versions").map(row => `achilles__${String(row.name)}`));
+    const other = rows(snapshot, "calls").filter(row => row.page_id === page && row.tool !== "mcp_discover" && !assigned.has(String(row.tool))).map(row => String(row.tool));
+    return other.length ? { reason: `called tools the page does not assign: ${[...new Set(other)].join(", ")}` } satisfies CheckFailure : true;
+  },
+  layout_restore: ({ snapshot, page }) => {
+    const layouts = rows(snapshot, "layouts").filter(row => row.page_id === page).sort((a, b) => Number(a.version) - Number(b.version));
+    const activeVersion = rows(snapshot, "pages").find(row => row.id === page)?.active_layout_version;
+    const original = layouts[0]; const active = layouts.at(-1);
+    if (!original || original.version !== 1 || !active || active.version !== activeVersion || layouts.some((row, index) => row.version !== index + 1)) return { reason: `layout history is not versions 1..${String(activeVersion)} with the last one active` } satisfies CheckFailure;
+    if (!layouts.slice(1, -1).some(row => !sameSeedValue(row.document, original.document))) return { reason: "no layout change before the undo" } satisfies CheckFailure;
+    if (!sameSeedValue(active.document, original.document)) return { reason: `active layout v${String(active.version)} is not a copy of v1` } satisfies CheckFailure;
+    // the active version is the last one appended, so a restore result that made it implies the order; tool restores do not count
+    const restored = rows(snapshot, "results").some(row => row.page_id === page && successful(row) && row.tool === "achilles__restore_version" && structurallyContains(row.data ?? row.result, { kind: "layout", version: active.version }));
+    if (!restored) return { reason: `no successful restore_version made layout v${String(active.version)}` } satisfies CheckFailure;
+    return true;
   },
   browser_text: ({ check, owned }) => owned("browser").some(row => check.synonyms ? String(row.text ?? "").split(/[\t\r\n]+/).some(cell => [check.text!, ...check.synonyms!].some(value => normalizeToken(cell.trim()) === normalizeToken(value))) : String(row.text ?? "").includes(String(check.text))),
   prompt: ({ check, owned }) => owned("chats").some(row => row.prompt === check.text || row.first_prompt === check.text),

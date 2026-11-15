@@ -391,6 +391,59 @@ describe("active chat attachment", () => {
   });
 });
 
+describe("attachment while a turn runs", () => {
+  const busyError = () => Object.assign(new Error("a turn is already running"), { code: -32004 });
+  const pageFetch = (chats: object[]) => (async (resource: string | URL | Request) => {
+    const url = String(resource);
+    if (url === "/api/pages/home") return Response.json(page("waiting"));
+    if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+    if (url.startsWith("/api/chats?")) return Response.json({ chats, next: null });
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  test("a reload during a pending approval attaches the running chat without resume", async () => {
+    const methods: string[] = []; let events: Array<{ type: string; request_id?: string }> = [];
+    const running = { session: { session_id: "waiting" }, state: "running", pending_approvals: [{ request_id: "c1", tool_call: { id: "t1", name: "bash", arguments: {} }, delegated: false }] };
+    const client = {
+      ...attachmentClient(),
+      request: async (method: string) => {
+        methods.push(method);
+        if (method === "resume") throw busyError();
+        if (method === "status") return running;
+        if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+        if (method === "session_history") return { messages: [], next_offset: null };
+        throw new Error(`unexpected ${method}`);
+      },
+      replay: async (_id: string, refresh: () => Promise<typeof events>) => { events = await refresh(); return { store: { resync(next: typeof events) { events = next; } }, release() {} }; },
+    };
+    const owner = createAttachmentOwner();
+    try {
+      const result = await withFetch(pageFetch([{ session_id: "waiting", page_id: "home", title: "waiting chat" }]), () => attachPage(client as never, "home", "waiting", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("reload", true)))
+        .catch((caught: Error) => ({ phase: "error", error: caught.message }));
+      expect(result).toMatchObject({ phase: "ready", sessionId: "waiting", rebind: true });
+      expect(events.filter((event) => event.type === "approval_request").map((event) => event.request_id)).toEqual(["c1"]);
+      expect(methods).not.toContain("resume");
+    } finally { owner.clear(); }
+  });
+
+  test("a new chat while another turn runs names the running chat", async () => {
+    const client = attachmentClient((method) => { if (method === "new_session") throw busyError(); });
+    client.request = (async (method: string) => {
+      if (method === "new_session") throw busyError();
+      if (method === "status") return { session: { session_id: "waiting" }, state: "running" };
+      throw new Error(`unexpected ${method}`);
+    }) as typeof client.request;
+    const owner = createAttachmentOwner();
+    const creation = createChatCreationOwner(new MemoryStorage());
+    try {
+      const result = await withFetch(pageFetch([]), () => attachPage(client as never, "home", null, owner, creation, owner.begin("new", true), true, undefined, undefined, true))
+        .catch((caught: Error) => ({ phase: "error", error: caught.message }));
+      expect(result).toMatchObject({ phase: "busy", busySessionId: "waiting" });
+      expect(creation.status("home").pending).toBeFalsy();
+    } finally { owner.clear(); }
+  });
+});
+
 describe("chat creation lifecycle", () => {
   test.each([
     { name: "success" },

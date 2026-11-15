@@ -65,7 +65,8 @@ the 12 core tasks (full runs):
 
 focused-only tasks (run with `TASK=<name>`, never in a full run):
 
-- `browser-controller-slot`, `second-chat-tools`
+- `browser-controller-slot`, `page-tool-without-create-mode`, `second-chat-tools`,
+  `undo-layout-change`
 
 rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
 a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
@@ -174,7 +175,7 @@ grader rules, as rules:
 
 ## the tasks
 
-the 14 tasks in `evals/tasks/` (12 core, 2 focused-only — see "core vs
+the 16 tasks in `evals/tasks/` (12 core, 4 focused-only — see "core vs
 focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
@@ -188,6 +189,8 @@ focused-only" above):
   is authored and used.
 - `judge-page-and-annotate`: build a review page with list and detail blocks, then
   author and use annotation tools.
+- `page-tool-without-create-mode`: with create mode off, add a contact using only
+  the page's assigned insert tool.
 - `reading-list-one-prompt`: from one prompt, build a reading-list page, then add,
   update, and list a book.
 - `reading-metric-count`: add a metric that counts "done" books and verify it.
@@ -196,5 +199,7 @@ focused-only" above):
 - `second-chat-tools`: two chats on one page both read the seeded note.
 - `tool-version-fresh-chat`: add an optional field to a tool while old records keep
   working.
+- `undo-layout-change`: change a page layout, then undo it with `restore_version`
+  so the active layout is a copy of v1.
 - `update-layout-from-page-chat`: use `update_layout` to add a list block for the
   page's records.

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./session";
+import { createRunStore } from "@fulcrum/core";
+import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError, watchTurnEnd } from "./session";
 
 describe("applyApprovalMode", () => {
   test("defers a mode change while the session is running", async () => {
@@ -38,17 +39,19 @@ describe("openHomeSession", () => {
     const methods: string[] = [];
     const client = { request: async (method: string) => {
       methods.push(method);
+      if (method === "status") return { state: "idle" };
       throw { data: { code: "session_not_found" } };
     } };
 
     await expect(openHomeSession(client as never, "missing", "credential", "/tmp", "allow")).rejects.toBeInstanceOf(SessionNotFoundError);
-    expect(methods).toEqual(["resume"]);
+    expect(methods).toEqual(["status", "resume"]);
   });
 
   test("preserves a resumed chat mode when the server does not force ask", async () => {
     const methods: string[] = [];
     const client = { request: async (method: string) => {
       methods.push(method);
+      if (method === "status") return { state: "idle" };
       if (method === "resume") return { session: { name: "existing" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
       throw new Error(`unexpected ${method}`);
@@ -56,7 +59,74 @@ describe("openHomeSession", () => {
 
     const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow");
     expect(result.approvalMode).toBe("ask");
-    expect(methods).toEqual(["resume", "session_settings"]);
+    expect(methods).toEqual(["status", "resume", "session_settings"]);
+  });
+
+  test("resumes once more when the other turn ended between resume and status", async () => {
+    const methods: string[] = []; let resumes = 0;
+    const client = { request: async (method: string) => {
+      methods.push(method);
+      if (method === "status") return methods.length === 1 ? { session: { session_id: "other" }, state: "running" } : { state: "idle" };
+      if (method === "resume" && ++resumes === 1) throw Object.assign(new Error("a turn is already running"), { code: -32004 });
+      if (method === "resume") return { session: { name: "existing" } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      throw new Error(`unexpected ${method}`);
+    } };
+
+    const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow").catch((caught: Error) => ({ error: caught.message }));
+    expect(result).toMatchObject({ id: "existing", name: "existing", rebind: false });
+    expect(methods).toEqual(["status", "resume", "status", "resume", "session_settings"]);
+  });
+});
+
+describe("watchTurnEnd", () => {
+  const watched = (status: { state: string; session?: { session_id: string } }) => {
+    const store = createRunStore((callback) => queueMicrotask(callback)); let released = 0;
+    const client = { forSession: () => ({ store, release: () => { released += 1; } }), request: async () => status };
+    return { store, client, released: () => released };
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test("fires on agent_end of a turn the store joined mid-way, once", async () => {
+    const { store, client, released } = watched({ session: { session_id: "other" }, state: "running" });
+    let ended = 0;
+    watchTurnEnd(client as never, "other", () => { ended += 1; });
+    await settle();
+    expect(ended).toBe(0);
+    store.dispatch({ type: "turn_end" });
+    await settle();
+    expect(ended).toBe(0); // the run_start mark keeps a store that missed agent_start running until agent_end
+    store.dispatch({ type: "run_end" }); store.dispatch({ type: "run_end" });
+    await settle();
+    expect(ended).toBe(1);
+    expect(released()).toBe(1);
+  });
+
+  test("fires when the turn already ended before the watch, and leaves the store idle", async () => {
+    const { store, client } = watched({ state: "idle" });
+    let ended = 0;
+    watchTurnEnd(client as never, "other", () => { ended += 1; });
+    await settle();
+    expect(ended).toBe(1);
+    expect(store.getState().agent).toBe("idle");
+  });
+
+  test("keeps the last outcome when it undoes its mark", async () => {
+    const { store, client } = watched({ state: "idle" });
+    store.dispatch({ type: "run_start" }); store.dispatch({ type: "run_end", outcome: "failed" });
+    watchTurnEnd(client as never, "other", () => {});
+    await settle();
+    expect(store.getState().endOutcome).toBe("failed");
+  });
+
+  test("cancel stops it", async () => {
+    const { store, client, released } = watched({ session: { session_id: "other" }, state: "running" });
+    let ended = 0;
+    watchTurnEnd(client as never, "other", () => { ended += 1; })();
+    store.dispatch({ type: "run_end" });
+    await settle();
+    expect(ended).toBe(0);
+    expect(released()).toBe(1);
   });
 });
 

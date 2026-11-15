@@ -1,0 +1,81 @@
+{
+  "id": "page-tool-without-create-mode",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "contacts",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 6,
+  "steps": [
+    {
+      "id": "add-contact",
+      "kind": "prompt",
+      "page": "contacts",
+      "chat": "contacts-chat",
+      "prompt": "please add Ada Lovelace to my contacts, her email is ada@example.com"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "record",
+      "type": "records_exact",
+      "page": "contacts",
+      "value": [
+        {
+          "name": "Ada Lovelace",
+          "email": "ada@example.com"
+        }
+      ]
+    },
+    {
+      "id": "written-by-assigned-tool",
+      "type": "successful_result",
+      "page": "contacts",
+      "tool": "achilles__add_contact",
+      "value": {
+        "name": "Ada Lovelace",
+        "email": "ada@example.com"
+      }
+    },
+    {
+      "id": "assigned-tools-only",
+      "type": "assigned_tools_only",
+      "page": "contacts"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "contacts"
+    }
+  ]
+}
