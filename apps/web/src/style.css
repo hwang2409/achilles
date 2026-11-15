@@ -115,16 +115,18 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .header-menu .approval-mode { min-height: 40px; display: flex; align-items: center; padding: 0 10px; }
   .header-menu button { display: block; text-align: left; }
   /* the full controls fold into the menu above, but an enabled mode must not become invisible: a word mark
-     (only rendered when that mode is on) stays beside ••• in the header itself. */
-  /* a divider keeps the marks from reading as part of the run state word */
-  .fold-indicator { display: flex; gap: 12px; align-items: center; }
-  .fold-indicator:not(:empty) { padding-left: 12px; border-left: 1px solid var(--fulcrum-border); }
+     (only rendered when that mode is on) stays beside ••• in the header itself, at every width. the divider
+     (rendered only with a mark) keeps the marks from reading as part of the run state word. */
+  .fold-indicator { display: flex; gap: 12px; align-items: center; padding-left: 12px; border-left: 1px solid var(--fulcrum-border); }
   .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
   .fold-mark-approve { color: var(--fulcrum-warn); }
   .fold-mark-approve::before { background: var(--fulcrum-warn); }
   /* a hollow square in the text color, so it never reads as the filled accent "running" mark; the menu repeats
      both marks in front of their full names, so it works as a legend */
   .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { box-shadow: inset 0 0 0 1px currentColor; }
+  /* the gap sits on the word, so the square alone (tight header) has no trailing space */
+  .fold-mark-create::before { margin-right: 0; }
+  .fold-mark-create .fold-long { margin-left: 8px; }
   /* the title keeps a minimum width; the marks get shorter instead of pushing it off-screen */
   .chat-heading { min-width: 6em; }
 }
@@ -289,7 +291,10 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .connection-state h1 { margin-top: 16px; }
   .connection-state > .primary { margin-top: 16px; }
 }
-/* spec: below 760px create mode lives only in the overflow menu; auto-approve stays visible (tools run without asking) */
-@media (max-width: 760px) { .fold-mark-create { display: none; } }
+/* short landscape phones: the not-running screen (command block + retry) must fit without scrolling */
+@media (max-height: 420px) {
+  .full-state { padding-block: 16px; }
+  .connection-state h1 { margin: 8px 0; font-size: 26px; }
+}
 
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }

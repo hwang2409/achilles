@@ -306,8 +306,10 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
     : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   // the fold hides the full controls into the ••• menu below 64em, but an enabled mode must stay visible
   // without opening it (spec.md:36, :109): a short word mark per mode that is on sits beside •••.
-  // "auto-approve" shortens to "auto" when the header is tight (the -approve part is CSS-hidden).
-  const foldMarkers = <span className="fold-indicator">{page.approval_mode === "allow" && <span className="fold-mark fold-mark-approve" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" title="create mode is on">create</span>}</span>;
+  // when the header is tight the CSS-hidden .fold-long parts drop: "auto-approve" becomes "auto" and
+  // "create mode" becomes its hollow square alone; role="img" plus aria-label keeps the full name for screen readers.
+  const autoApprove = page.approval_mode === "allow";
+  const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
   return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state}</span>{foldMarkers}<button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
