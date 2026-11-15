@@ -213,7 +213,8 @@ function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionI
   const open = !here && busy.chat;
   const text = here ? "this chat is still running. approve or stop it, then try again."
     : open ? `"${busy.chat!.title?.trim() || "untitled chat"}" is still running. open it to approve or stop it, then try again.`
-    : "another chat is still running. approve or stop it, then try again.";
+    : busy.sessionId ? "another chat is still running. approve or stop it, then try again."
+    : "zeta was busy a moment ago and is ready now. try again.";
   return <div className="create-mode-alert" role="alert"><span>{text}</span><span>{open && <button type="button" onClick={onOpen}>open it</button>}<button type="button" onClick={onRetry}>try again</button></span></div>;
 }
 

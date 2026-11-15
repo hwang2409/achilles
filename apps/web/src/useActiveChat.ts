@@ -5,7 +5,7 @@ import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
 import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
-import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, rebindPage, runningSession, SessionNotFoundError } from "./zeta/session";
+import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, rebindPage, runningSession, SessionNotFoundError, watchTurnEnd } from "./zeta/session";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
@@ -558,7 +558,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyPendingCreateMode, client, publishReady, showBusy]);
 
   const bindPage = useCallback(async (current: ReadyState, token: number) => {
-    if (!client || !current.rebind) return;
+    if (!client || !current.rebind || !owner.current.current(token)) return; // a late settle must not resume a chat the user left
     try { await rebindPage(client, current.sessionId, pageBinding(current.credential, current.page.workspace)); }
     catch (caught) { if (errorCode(caught) === TURN_RUNNING) return; throw caught; } // still running: a later idle retries
     updateReady(token, (value) => value.sessionId === current.sessionId ? { ...value, rebind: false } : value);
@@ -635,13 +635,16 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     }
   }, [state]);
 
+  const [settleWait, setSettleWait] = useState<{ sessionId: string } | null>(null);
+  const [settleWake, setSettleWake] = useState(0);
   const settleAfterTurn = useCallback(async () => {
     if (!client || state.phase !== "ready") return;
     const current = state; const mode = state.pendingApprovalMode; const token = owner.current.token();
     const busyHere = busy?.sessionId === current.sessionId;
     if (!current.rebind && !mode && !busyHere) return;
     try {
-      if (await runningSession(client) !== null) return; // an early idle render: a later one retries
+      const running = await runningSession(client);
+      if (running !== null) { setSettleWait({ sessionId: running }); return; } // settles again when that turn ends
       if (busyHere) setBusy(null);
       await bindPage(current, token);
       if (!mode) return;
@@ -649,6 +652,17 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, pendingApprovalMode: result.pending ? mode : null }));
     } catch (caught) { if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) }); }
   }, [bindPage, busy, client, state, updateReady]);
+
+  useEffect(() => { if (client && settleWait) return watchTurnEnd(client, settleWait.sessionId, () => setSettleWake((value) => value + 1)); }, [client, settleWait]);
+  useEffect(() => { if (settleWake > 0) void settleAfterTurn(); }, [settleWake]); // this render's settleAfterTurn sees the current state
+
+  // The notice for another running chat clears itself when that turn ends; a blocked attach then retries.
+  const openSessionId = state.phase === "ready" ? state.sessionId : null;
+  useEffect(() => {
+    if (!client || !busy?.sessionId || busy.sessionId === openSessionId) return;
+    const retry = busy.retry;
+    return watchTurnEnd(client, busy.sessionId, () => { setBusy(null); if (retry === "attach") retryAttachment(); });
+  }, [busy, client, openSessionId, retryAttachment]);
 
   const recordLastState = useCallback((lastState: string) => {
     if (lastState === "running" && pendingSelection.current) pendingSelection.current.sawRunning = true;

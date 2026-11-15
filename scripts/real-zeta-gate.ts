@@ -1371,7 +1371,7 @@ try {
   const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
   console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
-  console.log("expected skip: reload during pending approval waits for fulcrum hello params");
+  console.log("known gap: an achilles__* tool approved after a reload runs without the page binding; it needs zeta resume_attach");
 
   await homeMcp(14, "tools/list", {});
   const lateAnnotation = await homeMcp(15, "tools/call", { name: "annotate_trace", arguments: { text: "after create mode", id: "late-annotation" } });
