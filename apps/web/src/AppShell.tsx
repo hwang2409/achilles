@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { CommandPalette, Highlight, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
-import { isEditableTarget } from "./keyboard";
+import { updateSettings, useSettings } from "./settings";
+import { firstFocusable, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
 
@@ -48,22 +50,6 @@ const chatHref = (chat: Chat) => {
 };
 // a sent chat with no title (an older row) is "untitled"; "new chat" means nothing was sent yet
 export const titleOf = (chat: Pick<Chat, "title" | "first_title" | "message_sent">) => chat.title?.trim() || chat.first_title?.trim() || (chat.message_sent ? "untitled chat" : "new chat");
-const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
-const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
-// in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
-const tabbable = (element: HTMLElement) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true });
-const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
-const restorableFocus = (...candidates: Array<Element | null>) => candidates.find((element): element is HTMLElement => {
-  if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement || !element.isConnected || element.matches("[disabled], :disabled") || element.closest("[inert], [aria-hidden='true']")) return false;
-  const rect = element.getBoundingClientRect();
-  const style = getComputedStyle(element);
-  return (element.tabIndex >= 0 || element.matches(nativelyFocusable)) && style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
-}) ?? null;
-
-export const restoreFocus = (...candidates: Array<Element | null>) => {
-  restorableFocus(...candidates)?.focus();
-};
-
 function useFocusAfterCommit() {
   const pending = useRef<(() => HTMLElement | null) | null>(null);
   useLayoutEffect(() => {
@@ -95,16 +81,23 @@ function timeLabel(value: string) {
   return group === "today" ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : group === "yesterday" || group === "this week" ? date.toLocaleDateString([], { weekday: "short" }) : date.toLocaleDateString([], { month: "short", day: "numeric" }).toLowerCase();
 }
 
+// the one GET /api/chats loader: the sidebar list and the palette each own a list over it
+const chatPage = (include: () => string | null) => async (search: string, before: string | null, signal: AbortSignal, limit = 50) => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  // the server lists only chats with a sent message, plus the open chat named here
+  const open = include();
+  if (open) params.set("include", open);
+  if (search) params.set("q", search);
+  if (before) params.set("before", before);
+  const response = await fetch(`/api/chats?${params}`, { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`could not load chats (${response.status})`);
+  const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
+  return { items: result.chats, next: result.next, meta: result.approval_count };
+};
+
 const initialPageListState = initialListState<PageLink, null>(null);
 const initialChatListState = initialListState<Chat, number>(0);
 const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : state.loading || state.items === null ? "loading" : "ready";
-
-function Highlight({ value, query }: { value: string; query: string }) {
-  if (!query) return value;
-  const index = value.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
-  if (index < 0) return value;
-  return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
-}
 
 export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
@@ -116,11 +109,16 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   const [pageList, setPageList] = useState(initialPageListState);
   const [activeResult, setActiveResult] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const settings = useSettings();
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const chatListElement = useRef<HTMLElement>(null);
   const settingsOpener = useRef<Element>(null);
+  const paletteOpener = useRef<Element | null>(null);
+  const shortcutsOpener = useRef<Element | null>(null);
   const requestFocus = useFocusAfterCommit();
   const pageListOwner = useRef<ListOwner<null, PageLink, null> | null>(null);
   const chatListOwner = useRef<ListOwner<string, Chat, number> | null>(null);
@@ -137,17 +135,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     }, (item) => item.id, setPageList, 20, 200);
   }
   if (!chatListOwner.current) {
-    chatListOwner.current = createListOwner(initialChatListState, async (search, before, signal, limit = 50) => {
-      const params = new URLSearchParams({ limit: String(limit) });
-      // the server lists only chats with a sent message, plus the open chat named here
-      if (openChat.current) params.set("include", openChat.current);
-      if (search) params.set("q", search);
-      if (before) params.set("before", before);
-      const response = await fetch(`/api/chats?${params}`, { cache: "no-store", signal });
-      if (!response.ok) throw new Error(`could not load chats (${response.status})`);
-      const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
-      return { items: result.chats, next: result.next, meta: result.approval_count };
-    }, (item) => item.session_id, setChatList, 50, 200);
+    chatListOwner.current = createListOwner(initialChatListState, chatPage(() => openChat.current), (item) => item.session_id, setChatList, 50, 200);
   }
   const chats = chatList.items ?? [];
   const loading = chatList.items === null && !chatList.error;
@@ -158,20 +146,26 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       return true;
     });
   };
+  const focusBack = (opener: { current: Element | null }) => requestFocus(() => {
+    const target = restorableFocus(
+      opener.current,
+      drawer ? firstFocusable(sidebar.current) : null,
+      document.querySelector(".main-pane textarea[aria-label='message']"),
+      document.querySelector(".settings-button"),
+    );
+    opener.current = null;
+    return target;
+  });
   const closeSettings = () => {
     if (!settingsOpen) return;
-    requestFocus(() => {
-      const target = restorableFocus(
-        settingsOpener.current,
-        drawer ? firstFocusable(sidebar.current) : null,
-        document.querySelector(".main-pane textarea[aria-label='message']"),
-        document.querySelector(".settings-button"),
-      );
-      settingsOpener.current = null;
-      return target;
-    });
+    focusBack(settingsOpener);
     setSettingsOpen(false);
   };
+  const activeElement = () => document.activeElement instanceof Element ? document.activeElement : null;
+  const openPalette = () => { if (!paletteOpen) paletteOpener.current = activeElement(); setPaletteOpen(true); };
+  const closePalette = () => { focusBack(paletteOpener); setPaletteOpen(false); };
+  const openShortcuts = (opener: Element | null) => { if (!shortcutsOpen) shortcutsOpener.current = opener; setShortcutsOpen(true); };
+  const closeShortcuts = () => { focusBack(shortcutsOpener); setShortcutsOpen(false); };
 
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
@@ -188,32 +182,37 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     if (query) layers.push(() => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); });
     if (drawer) layers.push(closeDrawer);
     if (settingsOpen) layers.push(closeSettings);
+    if (shortcutsOpen) layers.push(closeShortcuts);
+    if (paletteOpen) layers.push(closePalette);
     const top = layers.at(-1);
     if (!top) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || (event.target instanceof Element && event.target.closest("[data-inline-rename]"))) return;
+      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename]"))) return;
       event.preventDefault();
       event.stopPropagation();
       top();
     };
     document.addEventListener("keydown", escape, true);
     return () => document.removeEventListener("keydown", escape, true);
-  }, [drawer, query, settingsOpen]);
+  }, [drawer, query, settingsOpen, shortcutsOpen, paletteOpen]);
   useEffect(() => {
     if (!narrow || !drawer) return;
     const key = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || !sidebar.current?.contains(document.activeElement)) return;
-      const controls = Array.from(sidebar.current.querySelectorAll<HTMLElement>(focusable)).filter(tabbable);
-      if (!controls.length) return;
-      const next = event.shiftKey ? controls.at(-1) : controls[0];
-      const current = event.shiftKey ? controls[0] : controls.at(-1);
-      if (document.activeElement !== current) return;
-      event.preventDefault();
-      next?.focus();
+      if (sidebar.current?.contains(document.activeElement)) wrapTab(event, sidebar.current);
     };
     document.addEventListener("keydown", key, true);
     return () => document.removeEventListener("keydown", key, true);
   }, [drawer, narrow]);
+  useEffect(() => {
+    // capture on window runs before the composer (CodeMirror vim too) sees the key, so it only opens the palette
+    const key = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (paletteOpen) closePalette(); else openPalette();
+    };
+    addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
+  }, [paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); if (!narrow) setCollapsed((value) => !value); }
@@ -222,9 +221,10 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
       if (isEditableTarget(event)) return;
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
+      if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [loading, narrow, onNewChat, onToggleCreateMode, settingsOpen]);
+  }, [loading, narrow, onNewChat, onToggleCreateMode, settingsOpen, shortcutsOpen]);
 
   const pageRows = pageList.items ?? [];
   const waitingTotal = Math.max(waiting, chatList.meta);
@@ -234,6 +234,17 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     return [...values];
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
+  const commands: PaletteEntry[] = [
+    ...loading ? [] : [{ id: "new-chat", label: "new chat", detail: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
+    ...loading || !page ? [] : [{ id: "create-mode", label: "toggle create mode", detail: modKey("."), run: () => void onToggleCreateMode() }],
+    { id: "settings", label: "settings", detail: modKey(","), run: () => openSettings(paletteOpener.current) },
+    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
+    { id: "shortcuts", label: "keyboard shortcuts", detail: "?", run: () => openShortcuts(paletteOpener.current) },
+  ];
+  // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.
+  const pageEntries = pageRows.map((item): PaletteEntry => ({ id: `page:${item.id}`, label: item.title, detail: item.route, run: () => location.assign(pageHref(item.route)) }));
+  const searchChats = (search: string, before: string | null, signal: AbortSignal, limit = 20) => chatPage(() => null)(search, before, signal, limit)
+    .then((result) => ({ ...result, items: result.items.map((chat): PaletteEntry => ({ id: chat.session_id, label: titleOf(chat), detail: `${chat.page_title} · ${timeLabel(chat.updated_at)}`, run: () => select(chat) })) }));
   // a keyboard (F2) rename hands focus back to its row: once the editor closes, and again after the
   // list refresh moves the row; it lets go as soon as focus lands anywhere else.
   const renamedRow = useRef<string | null>(null);
@@ -307,13 +318,15 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
         {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} onKeyboardRename={startKeyboardRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} onKeyboardRename={startKeyboardRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
-      <footer><SettingsControl onOpen={openSettings} className="settings-button" /><kbd>⌘K</kbd></footer>
+      <footer><SettingsControl onOpen={openSettings} className="settings-button" /><button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
     </aside>
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => { requestFocus(() => firstFocusable(sidebar.current)); setDrawer(true); }}>☰</button>
       {children}
     </main>
     <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} />
+    {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
+    {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
   </div>;
 }
 
