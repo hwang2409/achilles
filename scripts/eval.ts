@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
 import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup } from "./eval-grade";
-import { makeReport, reportJson, reportMarkdown } from "./eval-report";
+import { loadBaseReport, makeReport, reportJson, reportMarkdown, type BaseReport } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 
 export { startEvalStack, TOOL_POLICY } from "./eval-stack";
@@ -425,19 +425,19 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
   return { result: result!, snapshot, cleanup, catalog, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, failed, stop_suite: stopSuite };
 }
 
-async function writeReportArtifacts(staging: string, report: ReturnType<typeof makeReport>, repeats: RepeatResult[]) {
-  await Bun.write(join(staging, "report.json"), reportJson(report)); await Bun.write(join(staging, "report.md"), reportMarkdown(report)); await Bun.write(join(staging, "cleanup.json"), JSON.stringify(repeats.map(repeat => repeat.cleanup ?? null), null, 2));
+async function writeReportArtifacts(staging: string, report: ReturnType<typeof makeReport>, repeats: RepeatResult[], base?: BaseReport) {
+  await Bun.write(join(staging, "report.json"), reportJson(report)); await Bun.write(join(staging, "report.md"), reportMarkdown(report, base)); await Bun.write(join(staging, "cleanup.json"), JSON.stringify(repeats.map(repeat => repeat.cleanup ?? null), null, 2));
   await mkdir(join(staging, "snapshots")); const seen = new Map<string, number>(); for (const repeat of repeats) { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); await Bun.write(join(staging, "snapshots", `${repeat.result.task_id}-${number}.json`), JSON.stringify(repeat.snapshot ?? null, null, 2)); }
 }
-async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, hidden: string[]) {
+async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, hidden: string[], base?: BaseReport) {
   const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); const completedRepeats = Math.max(0, ...seen.values()); let publicationFailed = false; let report = makeReport({ run_id: runId, repeats: completedRepeats, agent: { provider: Bun.env.EVAL_BACKEND === "scripted" ? "scripted" : "configured", model: Bun.env.EVAL_BACKEND === "scripted" ? "offline" : Bun.env.MODEL ?? "configured", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
   const staging = await mkdtemp(join(Bun.env.TMPDIR ?? "/tmp", "achilles-eval-report-"));
   try {
-    await writeReportArtifacts(staging, report, repeats);
+    await writeReportArtifacts(staging, report, repeats, base);
     try { await scanArtifactTree(staging, hidden); }
     catch {
       publicationFailed = true; await rm(staging, { recursive: true, force: true }); await mkdir(staging);
-      report = makeReport({ ...report, tasks: repeats.map(repeat => failureResult(tasks.find(task => task.id === repeat.result.task_id)!, new Error("artifact secret scan failed"), [])) }); await writeReportArtifacts(staging, report, repeats.map(repeat => ({ ...repeat, snapshot: undefined }))); await scanArtifactTree(staging, hidden);
+      report = makeReport({ ...report, tasks: repeats.map(repeat => failureResult(tasks.find(task => task.id === repeat.result.task_id)!, new Error("artifact secret scan failed"), [])) }); await writeReportArtifacts(staging, report, repeats.map(repeat => ({ ...repeat, snapshot: undefined })), base); await scanArtifactTree(staging, hidden);
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
@@ -453,7 +453,7 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const base = Bun.env.BASE ? await loadBaseReport(resolve(Bun.env.BASE)) : undefined; const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {
@@ -461,7 +461,7 @@ async function main() {
     else {
       const runId = `${Date.now()}-${process.pid}`; const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("../evals/reports/", import.meta.url).pathname, runId)); const results: RepeatResult[] = [];
       suite: for (const task of tasks) for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break suite; const repeat = await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId: `${runId}-${task.id}`, signal: controller.signal, hidden }); results.push(repeat); if (repeat.stop_suite) break suite; }
-      if (!await publishReport(tasks, results, output, runId, hidden)) process.exitCode = 1;
+      if (!await publishReport(tasks, results, output, runId, hidden, base)) process.exitCode = 1;
     }
   } finally { process.off("SIGINT", onSigint); process.off("SIGTERM", onSigterm); if (signalCode) process.exitCode = signalCode; }
 }
