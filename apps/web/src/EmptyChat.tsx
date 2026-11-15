@@ -5,18 +5,12 @@ import { usePageTools, type PageTool } from "./page/usePageTools";
 
 type Starter = { text: string; tag?: string; onSelect: () => void | Promise<void> };
 
-const VERB_BY_OPERATION: Record<string, string> = {
-  insert: "add a record with",
-  update: "update a record with",
-  get: "look up a record with",
-  list: "list records with",
-  delete: "delete a record with",
-};
-
 const GENERIC_STARTERS = ["make a page that tracks something you care about", "add a tool to this page"];
 
+// The tool's own description is the starter text (it's written for a human); the tool name is
+// internal and only backs it up when a tool has no description.
 function toolStarterText(tool: PageTool): string {
-  return `${VERB_BY_OPERATION[tool.operation] ?? "use"} ${tool.name}`;
+  return tool.description.trim() || `use ${tool.name}`;
 }
 
 function useHasWaitingChat(): boolean {
@@ -57,7 +51,7 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   const resolvedTools = error ? [] : tools;
   const pageStarters = resolvedTools === null ? []
     : resolvedTools.length > 0
-      ? resolvedTools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), tag: tool.name, onSelect: () => send1(toolStarterText(tool)) }))
+      ? resolvedTools.slice(0, 2).map((tool): Starter => ({ text: toolStarterText(tool), onSelect: () => send1(toolStarterText(tool)) }))
       : GENERIC_STARTERS.map((text): Starter => ({ text, tag: "create mode", onSelect: () => sendWithCreateMode(text) }));
   const starters: Starter[] = [
     ...pageStarters,
@@ -75,6 +69,6 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   return <div className="empty-chat">
     <h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1>
     <p>create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
-    <div className="chat-starters">{starters.map((starter, index) => <button key={starter.text} disabled={sending} onClick={() => void select(starter.onSelect)}><b>{index + 1}</b><span>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
+    <div className="chat-starters">{starters.map((starter, index) => <button key={index} disabled={sending} onClick={() => void select(starter.onSelect)}><b>{index + 1}</b><span title={starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
   </div>;
 }
