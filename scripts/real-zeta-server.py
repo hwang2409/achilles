@@ -446,9 +446,9 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                     "bash",
                     {
                         "command": (
-                            "echo tool line before reload; "
+                            "echo tool-line \"before-reload\"; "
                             f"while [ ! -e {cwd / 'release-reload-tool'} ]; do sleep 0.05; done; "
-                            "echo tool line after reload"
+                            "echo tool-line \"after-reload\""
                         )
                     },
                 )

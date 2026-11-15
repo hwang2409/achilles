@@ -1466,13 +1466,14 @@ try {
   // A foreground tool still running across a reload: the output it printed before the reload shows on the reloaded
   // page while it runs (`in_flight_replay`), and every line shows once after it ends. The tool waits for a file.
   const transcript = page.locator(".transcript");
-  const toolLines = async () => { const text = await transcript.innerText(); return ["tool line before reload", "tool line after reload"].map((line) => text.split(line).length - 1); };
+  const toolLines = async () => { const text = await transcript.innerText(); return ["tool-line before-reload", "tool-line after-reload"].map((line) => text.split(line).length - 1); };
   await allowField.fill("run a tool across a reload");
   await allowField.press("Enter");
   await waitFor(async () => (await toolLines())[0] === 1, "running tool output shown before the reload");
   await page.reload();
   await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the running tool's turn");
-  await waitFor(async () => (await toolLines())[0] >= 1, "running tool output from before the reload shown on the reloaded page").catch(async (error) => {
+  const runningTool = page.locator('[data-part="tool"][data-state="streaming"]').filter({ hasText: "tool-line before-reload" });
+  await waitFor(async () => (await runningTool.count()) === 1, "running tool output from before the reload shown on the reloaded page while the tool runs").catch(async (error) => {
     throw new Error(`${error}\ntranscript after the reload during a running tool: ${redact((await transcript.innerText()).slice(-1500))}`);
   });
   if ((await toolLines())[0] !== 1) throw new Error(`running tool output showed ${(await toolLines())[0]} times after the reload, not once`);
