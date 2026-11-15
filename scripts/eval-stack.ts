@@ -114,13 +114,24 @@ async function prepareTargetWeb(owner: ProcessOwner, achillesDir: string) {
 }
 
 export function targetWebNeedsRepair(ok: boolean, body: string) { return !ok || /static file not found/i.test(body); }
+// evals sharing a checkout take turns: vite empties apps/web/dist while it builds, so a peer's repair breaks this check
+async function lockTargetWeb(owner: ProcessOwner, achillesDir: string) {
+  const path = join(achillesDir, ".cache", "eval-web.lock"); await mkdir(join(achillesDir, ".cache"), { recursive: true });
+  const holder = owner.spawn("uv", ["run", "--no-project", "python", "-c", "import fcntl, sys\nlock = open(sys.argv[1], 'a')\nfcntl.flock(lock, fcntl.LOCK_EX)\nprint('locked', flush=True)\nsys.stdin.read()", path], { stdio: ["pipe", "pipe", "ignore"] });
+  const exited = new Promise<void>(resolveExit => { holder.once("exit", () => resolveExit()); holder.once("error", () => resolveExit()); });
+  if (!await Promise.race([new Promise<boolean>(resolveLock => holder.stdout!.once("data", () => resolveLock(true))), exited.then(() => false)])) throw new Error(`could not lock ${path}`);
+  return async () => { holder.stdin!.end(); await exited; };
+}
 async function ensureTargetWeb(owner: ProcessOwner, achillesDir: string, origin: string) {
-  const response = await fetchDeadline(`${origin}/`);
-  const body = await response.text();
-  if (!targetWebNeedsRepair(response.ok, body)) return;
-  await prepareTargetWeb(owner, achillesDir);
-  const retry = await fetchDeadline(`${origin}/`); const retryBody = await retry.text();
-  if (targetWebNeedsRepair(retry.ok, retryBody)) throw new Error(`target web is unavailable; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
+  const release = await lockTargetWeb(owner, achillesDir);
+  try {
+    const response = await fetchDeadline(`${origin}/`);
+    const body = await response.text();
+    if (!targetWebNeedsRepair(response.ok, body)) return;
+    await prepareTargetWeb(owner, achillesDir);
+    const retry = await fetchDeadline(`${origin}/`); const retryBody = await retry.text();
+    if (targetWebNeedsRepair(retry.ok, retryBody)) throw new Error(`target web is unavailable; run: cd ${join(achillesDir, "apps/web")} && bun run build`);
+  } finally { await release(); }
 }
 
 async function startupFailure(root: string, label: string) {
