@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
 export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported" | "needs_review"; cap_hit?: boolean; gap?: string };
@@ -63,7 +65,7 @@ const usageText = (usage: unknown) => {
   const value = usage as TranscriptUsage;
   return `input ${value.input_tokens}; output ${value.output_tokens}; reasoning ${value.reasoning_output_tokens}; cache read ${value.cache_read_input_tokens}; cache write ${value.cache_creation_input_tokens}`;
 };
-export function reportMarkdown(report: EvalReport): string {
+export function reportMarkdown(report: EvalReport, base?: BaseReport): string {
   const grouped = aggregateTaskResults(report.tasks);
   const lines = [
     `# achilles eval ${report.run_id}`, "",
@@ -79,6 +81,7 @@ export function reportMarkdown(report: EvalReport): string {
     `unsupported: ${report.tasks.filter(task => task.status === "unsupported").length}`,
     `needs review: ${report.tasks.filter(task => task.status === "needs_review").length}`,
     `cap hits: ${report.tasks.filter(task => task.cap_hit).length}`,
+    `conflict seen (report only, not graded): ${report.tasks.filter(task => task.diagnostics?.conflict_seen !== undefined).map(task => `${task.task_id} ${task.diagnostics.conflict_seen ? "yes" : "no"}`).join(", ") || "n/a"}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
     "", "| task | status | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors | cap hit |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | --- |",
   ];
@@ -94,5 +97,83 @@ export function reportMarkdown(report: EvalReport): string {
   }
   lines.push("", "## grouped repeat metrics", "", "unsupported, needs-review, and harness-error runs are excluded from comparable task metrics.", "needs review: extend the value map or confirm agent fail", "", "| task | passes | repeats | pass rate | score range | median turns | median tool calls | median wall time | cap hits | action |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [task, value] of Object.entries(grouped)) lines.push(`| ${task} | ${value.passes} | ${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.score_min}–${value.score_max} | ${value.median_turns} | ${value.median_tool_calls} | ${value.median_wall_ms} ms | ${value.cap_hits} | ${value.cap_action} |`);
-  return lines.join("\n") + "\n";
+  return (base ? diffMarkdown(base, report) + "\n" : "") + lines.join("\n") + "\n";
+}
+
+// BASE: a saved report folder from an earlier run; its report.json is outside input, so check the fields the diff reads.
+export type BaseReport = { name: string; run_id: string; tasks: Array<{ task_id: string; pass: boolean; turns: number; status?: string; usage?: unknown }>; achilles_sha?: string; zeta_sha?: string };
+export function parseBaseReport(text: string, name: string): BaseReport {
+  const fail = (why: string): never => { throw new Error(`BASE ${name}: ${why}`); };
+  let data: unknown;
+  try { data = JSON.parse(text); } catch (error) { fail(`report.json is not valid json (${(error as Error).message})`); }
+  const report = data as { run_id?: unknown; tasks?: unknown; agent?: unknown };
+  if (!report || typeof report !== "object" || !Array.isArray(report.tasks)) fail("report.json has no tasks list");
+  const tasks = (report.tasks as unknown[]).map((task, index) => {
+    const row = task as { task_id?: unknown; pass?: unknown; turns?: unknown; status?: unknown };
+    if (!row || typeof row !== "object" || typeof row.task_id !== "string" || typeof row.pass !== "boolean" || typeof row.turns !== "number") fail(`task ${index} needs task_id, pass, and turns`);
+    return task as BaseReport["tasks"][number];
+  });
+  const agent = report.agent as { achilles_sha?: unknown; zeta_sha?: unknown } | undefined;
+  return {
+    name, run_id: typeof report.run_id === "string" ? report.run_id : "unknown", tasks,
+    achilles_sha: typeof agent?.achilles_sha === "string" ? agent.achilles_sha : undefined,
+    zeta_sha: typeof agent?.zeta_sha === "string" ? agent.zeta_sha : undefined,
+  };
+}
+export async function loadBaseReport(dir: string): Promise<BaseReport> {
+  const name = basename(dir);
+  let text: string;
+  try { text = await readFile(join(dir, "report.json"), "utf8"); } catch { throw new Error(`BASE ${name}: no readable report.json in that folder`); }
+  return parseBaseReport(text, name);
+}
+
+const totalTokens = (usage: unknown) => {
+  if (!usage || typeof usage !== "object") return undefined;
+  const values = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].map(key => (usage as Record<string, unknown>)[key]);
+  return values.every(value => typeof value === "number") ? (values as number[]).reduce((a, b) => a + b, 0) : undefined;
+};
+const percent = (from: number, to: number) => from === 0 ? (to === 0 ? 0 : Infinity) : (to - from) / from;
+// per task: pass rate, median turns, median total tokens over comparable runs (same exclusions as the grouped table).
+function summarize(tasks: BaseReport["tasks"]) {
+  const grouped = aggregateTaskResults(tasks.map(task => ({ ...task, score: 0, tool_calls: 0, wall_ms: 0 })));
+  return new Map(Object.entries(grouped).map(([id, value]) => {
+    const tokens = tasks.filter(task => task.task_id === id && !["harness_error", "unsupported", "needs_review"].includes(task.status ?? "")).map(task => totalTokens(task.usage));
+    return [id, { passes: value.passes, total: value.total, rate: value.pass_rate, turns: value.median_turns, tokens: tokens.every(token => token !== undefined) ? median(tokens as number[]) : undefined }];
+  }));
+}
+export function diffMarkdown(base: BaseReport, report: Pick<EvalReport, "tasks"> & { agent?: Partial<EvalReport["agent"]> }): string {
+  const before = summarize(base.tasks); const after = summarize(report.tasks);
+  const ids = (tasks: BaseReport["tasks"]) => new Set(tasks.map(task => task.task_id));
+  const baseIds = ids(base.tasks); const runIds = ids(report.tasks);
+  const shared = [...after.keys()].filter(id => before.has(id)).sort();
+  const rate = (value: { passes: number; total: number }) => `${value.passes}/${value.total}`;
+  const lines = [`# changes since ${base.name} (run ${base.run_id})`];
+  if (base.achilles_sha !== undefined || base.zeta_sha !== undefined) {
+    lines.push(`base revisions: achilles ${base.achilles_sha ?? "unknown"}, zeta ${base.zeta_sha ?? "unknown"}`);
+    const changed = ["achilles", "zeta"].filter(name => {
+      const baseSha = name === "achilles" ? base.achilles_sha : base.zeta_sha;
+      const runSha = name === "achilles" ? report.agent?.achilles_sha : report.agent?.zeta_sha;
+      return baseSha !== undefined && runSha !== undefined && baseSha !== runSha;
+    });
+    if (changed.length) lines.push(`this run uses a different ${changed.join(" and ")} revision than the base`);
+  }
+  lines.push("");
+  const section = (title: string, rows: string[]) => lines.push(`## ${title}`, "", ...(rows.length ? rows : ["none"]), "");
+  section("pass -> fail (pass rate fell)", shared.filter(id => after.get(id)!.rate < before.get(id)!.rate).map(id => `- ${id}: ${rate(before.get(id)!)} -> ${rate(after.get(id)!)}`));
+  section("fail -> pass (pass rate rose)", shared.filter(id => after.get(id)!.rate > before.get(id)!.rate).map(id => `- ${id}: ${rate(before.get(id)!)} -> ${rate(after.get(id)!)}`));
+  const deltas = shared.flatMap(id => {
+    const a = before.get(id)!; const b = after.get(id)!; const parts: string[] = [];
+    const change = (label: string, from: number, to: number) => { const delta = percent(from, to); if (Math.abs(delta) > 0.25) parts.push(`${label} ${from} -> ${to} (${delta === Infinity ? "from 0" : `${delta > 0 ? "+" : ""}${Math.round(delta * 100)}%`})`); };
+    change("median turns", a.turns, b.turns);
+    if (a.tokens !== undefined && b.tokens !== undefined) change("median tokens", a.tokens, b.tokens);
+    return parts.length ? [`- ${id}: ${parts.join("; ")}`] : [];
+  });
+  section("turn or token change over 25%", deltas);
+  const notComparable = [...baseIds].filter(id => runIds.has(id) && !(before.has(id) && after.has(id))).sort();
+  section("tasks not compared", [
+    ...[...baseIds].filter(id => !runIds.has(id)).sort().map(id => `- ${id}: only in base`),
+    ...[...runIds].filter(id => !baseIds.has(id)).sort().map(id => `- ${id}: only in this run`),
+    ...notComparable.map(id => `- ${id}: no comparable runs in one side (harness error, unsupported, or needs review)`),
+  ]);
+  return lines.join("\n");
 }

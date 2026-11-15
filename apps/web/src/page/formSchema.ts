@@ -9,7 +9,7 @@ const SCALARS = new Set(["string", "number", "integer", "boolean"]);
 const LIMITS = ["minimum", "maximum", "minLength", "maxLength"] as const;
 
 // The schema is written by an agent, so anything other than a flat object of scalars or enums is refused, not guessed.
-export function formFields(schema: unknown): { fields: FormField[] } | { unsupported: string } {
+export function formFields(schema: unknown, order: string[] = []): { fields: FormField[] } | { unsupported: string } {
   if (!isObject(schema) || schema.type !== "object") return { unsupported: "input" };
   const properties = schema.properties ?? {};
   if (!isObject(properties)) return { unsupported: "input" };
@@ -24,8 +24,10 @@ export function formFields(schema: unknown): { fields: FormField[] } | { unsuppo
     else if (typeof property.type === "string" && SCALARS.has(property.type) && !("enum" in property)) fields.push({ ...base, kind: property.type as "string" | "number" | "integer" | "boolean", ...limits });
     else return { unsupported: name };
   }
-  // Stored schemas come back with sorted keys, so the agent's order is lost; required fields lead instead.
-  return { fields: [...fields.filter((field) => field.required), ...fields.filter((field) => !field.required)] };
+  // Stored schemas come back with sorted keys, so the block's fields set the order; unlisted inputs follow, required first.
+  const listed = order.flatMap((name) => fields.filter((field) => field.name === name));
+  const rest = fields.filter((field) => !order.includes(field.name));
+  return { fields: [...listed, ...rest.filter((field) => field.required), ...rest.filter((field) => !field.required)] };
 }
 
 // Values typed for an older schema carry over to fields that still exist with a value that still fits; the rest start empty.
