@@ -75,6 +75,9 @@ function connectionFailure(state: ConnectionState): string | null {
     case "auth_failed": return state.reason === "origin" ? `this origin is not allowed by zeta. restart zeta serve with --ws-origin ${location.origin}.` : "zeta rejected this browser connection.";
     case "unresponsive": return "zeta is not responding.";
     case "incompatible": return "this zeta version is not compatible with achilles.";
+    // zeta allows one controller; a second tab (or gamma) gets refused here. zeta never promotes an
+    // observer to controller, so there is no take-over: the only path back in is the other tab closing.
+    case "controller_taken": return "achilles is open in another tab. close it there, then retry here.";
     default: return null;
   }
 }
