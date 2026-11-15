@@ -1,7 +1,6 @@
 import type { ComposerState } from "@fulcrum/react";
 
-export type ComposerError = { kind: "submit" | "stop" | "uncertain" | "dropped"; text: string };
-type UncertainDelivery = ComposerError & { kind: "uncertain"; draft: string };
+export type ComposerError = { kind: "submit" | "stop" | "dropped"; text: string };
 type Send = { attempt: number; sent: string; steer: boolean };
 
 export type ComposerModel = {
@@ -10,7 +9,6 @@ export type ComposerModel = {
   sending: boolean;
   stopping: boolean;
   error?: ComposerError;
-  uncertainDelivery?: UncertainDelivery;
   send?: Send;
   nextAttempt: number;
 };
@@ -24,7 +22,7 @@ export type ComposerEvent =
   | { type: "edit"; draft: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "confirm"; attempt: number }
-  | { type: "reject"; attempt: number; message: string; rejection?: "uncertain" | "dropped" }
+  | { type: "reject"; attempt: number; message: string; dropped?: boolean }
   | { type: "dismiss-error" }
   | { type: "settle"; attempt: number }
   | { type: "stop" }
@@ -48,16 +46,14 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
         ...model,
         draft: event.draft,
         send: model.sending ? model.send : undefined,
-        error: model.uncertainDelivery
-          ? event.draft === model.uncertainDelivery.draft ? model.uncertainDelivery : undefined
-          : model.error?.kind === "submit" && !model.sending ? undefined : model.error,
+        error: model.error?.kind === "submit" && !model.sending ? undefined : model.error,
       } };
     case "submit": {
       if (model.sending || !model.draft.trim() || model.state === "running" || model.state === "read-only") return { model };
       const attempt = model.nextAttempt;
       const steer = event.turnRunning;
       return {
-        model: { ...model, sending: true, error: model.error?.kind === "dropped" ? model.error : undefined, uncertainDelivery: undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
+        model: { ...model, sending: true, error: model.error?.kind === "dropped" ? model.error : undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
         effect: { type: "submit", attempt, text: model.draft, steer },
       };
     }
@@ -66,12 +62,10 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       return { model: { ...model, draft: unsentDraft(model.draft, model.send.sent), send: undefined, error: model.error?.kind === "submit" || model.error?.kind === "dropped" ? undefined : model.error } };
     case "reject": {
       if (model.send?.attempt !== event.attempt) return { model };
-      if (event.rejection !== "uncertain") return { model: { ...model, error: { kind: event.rejection === "dropped" ? "dropped" : "submit", text: event.message } } };
-      const uncertainDelivery: UncertainDelivery = { kind: "uncertain", text: event.message, draft: model.send.sent };
-      return { model: { ...model, error: uncertainDelivery, uncertainDelivery } };
+      return { model: { ...model, error: { kind: event.dropped ? "dropped" : "submit", text: event.message } } };
     }
     case "dismiss-error":
-      return { model: { ...model, error: undefined, uncertainDelivery: undefined } };
+      return { model: { ...model, error: undefined } };
     case "settle":
       if (model.send?.attempt !== event.attempt) return { model: { ...model, sending: false } };
       return { model: { ...model, sending: false, send: undefined } };
