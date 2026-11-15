@@ -1,5 +1,5 @@
 import type { ZetaClient } from "@fulcrum/zeta";
-import { applyApprovalMode } from "./zeta/session";
+import { applyApprovalMode, pageBinding } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
 const MODE_STORAGE_KEY = "achilles-pending-create-modes";
@@ -128,8 +128,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     const operation = (async () => {
       let record = existing;
       if (!record) {
-        const binding = { cwd: input.cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${input.credential}` } }] };
-        const result = await input.client.request("new_session", binding) as { session?: { session_id?: string } };
+        const result = await input.client.request("new_session", pageBinding(input.credential, input.cwd)) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
         record = { sessionId, pageId: input.pageId, mode: input.mode, stage: "created", ...(Object.hasOwn(input, "mapExpectedSessionId") ? { expectedSessionId: input.mapExpectedSessionId } : {}) }; save(record);

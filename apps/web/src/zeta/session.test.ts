@@ -38,17 +38,19 @@ describe("openHomeSession", () => {
     const methods: string[] = [];
     const client = { request: async (method: string) => {
       methods.push(method);
+      if (method === "status") return { state: "idle" };
       throw { data: { code: "session_not_found" } };
     } };
 
     await expect(openHomeSession(client as never, "missing", "credential", "/tmp", "allow")).rejects.toBeInstanceOf(SessionNotFoundError);
-    expect(methods).toEqual(["resume"]);
+    expect(methods).toEqual(["status", "resume"]);
   });
 
   test("preserves a resumed chat mode when the server does not force ask", async () => {
     const methods: string[] = [];
     const client = { request: async (method: string) => {
       methods.push(method);
+      if (method === "status") return { state: "idle" };
       if (method === "resume") return { session: { name: "existing" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
       throw new Error(`unexpected ${method}`);
@@ -56,7 +58,7 @@ describe("openHomeSession", () => {
 
     const result = await openHomeSession(client as never, "existing", "credential", "/tmp", "allow");
     expect(result.approvalMode).toBe("ask");
-    expect(methods).toEqual(["resume", "session_settings"]);
+    expect(methods).toEqual(["status", "resume", "session_settings"]);
   });
 });
 
