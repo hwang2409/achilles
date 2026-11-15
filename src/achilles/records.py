@@ -65,15 +65,12 @@ def list_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
         **input_schema,
         "properties": {
             **input_schema.get("properties", {}),
-            "where": {
-                **_EQUALITY_FILTER_SCHEMA,
-                "description": "Only records whose field equals this JSON scalar.",
-            },
+            "where": _EQUALITY_FILTER_SCHEMA,
             "limit": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": LIST_LIMIT,
-                "description": f"At most this many records, newest first. Default {LIST_LIMIT}.",
+                "description": f"Default {LIST_LIMIT}.",
             },
         },
     }

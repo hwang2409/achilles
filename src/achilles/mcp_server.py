@@ -17,7 +17,7 @@ from .pages import (
     PageStore,
     bounded_inspect,
 )
-from .records import LIST_LIMIT, call_record, list_input_schema
+from .records import call_record, list_input_schema
 from .tools import BUILTIN_TOOL_NAMES, CREATE_TOOL_SCHEMA, derived_output_schema
 from .validation import ValidationError, error_document, validate_schema
 
@@ -236,22 +236,18 @@ def build_mcp(store: PageStore):
             "when layout_complete is true, layout is the complete stored layout to edit "
             "and layout_version is the value for update_layout expected_version; when "
             "layout_complete is false, do not change the page and tell the user it is "
-            "too large to edit from chat; "
+            "too large to edit from chat"
             if page["create_mode"]
-            else "this page is not in create mode, so use this tool to answer questions "
-            "about the page; it cannot be changed from this chat; "
+            else "use it to answer questions about the page; this chat cannot change the page"
         )
         tools: list[Tool] = [
             Tool(
                 name="inspect_page",
                 description=(
-                    "read what is on this page: its route, title, layout blocks, record "
-                    "counts per collection, and tools; also pages it created. "
+                    "read-only: this page's route, title, layout blocks, record counts, "
+                    "tools, metric_values and detail_filter_matches (by block index), and "
+                    "pages it created. "
                     f"{inspect_edit_hint}"
-                    "metric_values reports computed counts and "
-                    "detail_filter_matches reports filtered detail match counts and "
-                    "repair hints, both by layout block index; legacy pages can inspect "
-                    "only themselves"
                 ),
                 inputSchema=INSPECT_PAGE_SCHEMA,
                 outputSchema=INSPECT_PAGE_OUTPUT_SCHEMA,
@@ -338,10 +334,7 @@ def build_mcp(store: PageStore):
             if bundle["implementation"]["operation"] == "update":
                 description += "; read or list first, then pass the returned revision"
             if bundle["implementation"]["operation"] == "list":
-                description += (
-                    "; returns records newest first, at most limit (default and max "
-                    f"{LIST_LIMIT}); optional where {{field, equals}} keeps exact matches"
-                )
+                description += "; newest first"
                 input_schema = list_input_schema(input_schema)
             tools.append(
                 Tool(
