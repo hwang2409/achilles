@@ -37,6 +37,12 @@ test.each(rows)("formFields: %s", (_name, schema, expected) => {
   expect(formFields(schema)).toEqual(expected);
 });
 
+test("formFields: block fields set the input order; unlisted inputs follow, required first; unknown names are skipped", () => {
+  const schema = { type: "object", properties: { author: { type: "string" }, pages: { type: "integer" }, status: { type: "string" }, title: { type: "string" } }, required: ["title"] };
+  const result = formFields(schema, ["status", "gone", "author"]);
+  expect("fields" in result && result.fields.map((field) => field.name)).toEqual(["status", "author", "title", "pages"]);
+});
+
 const argumentRows: [string, FormField[], FormValues, Record<string, unknown>][] = [
   ["enum sends the selected value, not its index", [{ name: "status", kind: "enum", required: true, options: ["to read", "done"] }], { status: JSON.stringify("done") }, { status: "done" }],
   ["empty string and empty enum selection are omitted", [{ name: "title", kind: "string", required: true }, { name: "stars", kind: "enum", required: false, options: [1, 2, 3] }], { title: "", stars: "" }, {}],
