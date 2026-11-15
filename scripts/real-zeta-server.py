@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from tests.support.fake_backend import FakeBackend, ScriptedTurn
+from zeta.mcp.server_actor import MCPServerActor
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
 from zeta.providers.completion import owned_completion
 from zeta.server.delivery import DeliveryRequests
@@ -67,6 +68,9 @@ class BarrierBackend(FakeBackend):
                     await asyncio.wait_for(inspect_turn_release.wait(), 30)
                 elif turn_index == 4:
                     await self._hold("turn_barrier")
+                elif any(call.get("id") == "reload-add-book" for call in returned):
+                    # the gate reloads the page while this reply, which carries the call, is held
+                    await self._hold("reload_tool_barrier")
             yield event
 
     async def _hold(self, barrier):
@@ -422,6 +426,17 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             tool_calls=[ToolCall("allow-read", "read", {"path": str(cwd / "fixture.txt")})],
         ),
         ScriptedTurn(content=[TextContent("allow complete")]),
+        # a page tool called while a reload has the page away must wait for its binding
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "reload-add-book",
+                    "achilles__add_book",
+                    {"title": "Reload Book", "status": "reading"},
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("reload book added")]),
         ScriptedTurn(content=[TextContent("stock complete")]),
         ScriptedTurn(content=[TextContent("vim complete")]),
         ScriptedTurn(content=[TextContent("focus complete")], delay=5),
@@ -563,6 +578,26 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 raise RuntimeError("late turn barrier release timed out after 15 seconds")
         await original_finalize_turn(instance, *args, **kwargs)
 
+    original_suspend = MCPServerActor.suspend
+
+    async def counted_suspend(actor, *args, **kwargs):
+        # a page binding left (its client disconnected): the gate waits for this
+        await original_suspend(actor, *args, **kwargs)
+        document = json.loads(control.read_text())
+        document["bound_suspends"] = document.get("bound_suspends", 0) + 1
+        write_control(control, document)
+
+    original_handle_call = MCPServerActor._handle_call
+
+    def recorded_handle_call(actor, request):
+        if request.tool_name == "add_book" and actor._binding_detached:
+            document = json.loads(control.read_text())
+            document["detached_add_book_calls"] = document.get("detached_add_book_calls", 0) + 1
+            write_control(control, document)
+        original_handle_call(actor, request)
+
+    MCPServerActor.suspend = counted_suspend
+    MCPServerActor._handle_call = recorded_handle_call
     DeliveryRequests.send = held_send
     DeliveryRequests.finalize_turn = held_finalize_turn
     await server.start()

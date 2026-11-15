@@ -1393,6 +1393,57 @@ try {
   const allowResult = afterAllowTurn.tool_results?.find((result: { call_id: string }) => result.call_id === "allow-read");
   if (!allowResult || allowResult.is_error) throw new Error(`allow-mode tool result missing: ${JSON.stringify(afterAllowTurn.tool_results)}`);
   if (await approval.count() !== allowApprovalBefore) throw new Error("allow-mode tool showed an approval card");
+
+  // A page tool called while a reload has the page away (the `turn_reconnect` grace) waits for the page binding and
+  // runs once on the binding the reloaded page re-sends. The backend holds the reply that carries the call until the
+  // old page's binding is gone, and the reloaded page cannot connect until the call was made with no binding.
+  await page.goto(`${origin}/reading`);
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
+  const readingChatBeforeReload = await homeSessionId();
+  await page.locator("button.new-chat").click();
+  await waitFor(async () => {
+    const current = await homeSessionId();
+    return Boolean(current && current !== readingChatBeforeReload);
+  }, "new allow-mode reading chat");
+  const reloadChat = await homeSessionId();
+  await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
+  const reloadBooks = async () => {
+    const response = await fetch(`${origin}/api/pages/${createdPage.id}/records/books?field=title&equals=${encodeURIComponent('"Reload Book"')}`, { headers: { Authorization: `Bearer ${readingCredential}` } });
+    if (!response.ok) throw new Error(`reload book query failed: ${response.status}`);
+    return (await response.json()) as unknown[];
+  };
+  if ((await reloadBooks()).length !== 0) throw new Error("Reload Book existed before the reload case");
+  const suspendsBeforeReload = JSON.parse(await Bun.file(control).text()).bound_suspends ?? 0;
+  await allowField.fill("add Reload Book across a reload");
+  await allowField.press("Enter");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).reload_tool_barrier === "held", "held reply carrying the add_book call");
+  const heldDiscovery: Route[] = [];
+  const holdDiscovery = (route: Route) => { heldDiscovery.push(route); };
+  await page.route(discoveryUrl, holdDiscovery);
+  const framesBeforeToolReload = requests().length;
+  await page.reload({ waitUntil: "commit" });
+  await waitFor(async () => (JSON.parse(await Bun.file(control).text()).bound_suspends ?? 0) > suspendsBeforeReload, "old page binding detached by the reload");
+  const heldToolControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...heldToolControl, release_reload_tool_barrier: true }));
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).detached_add_book_calls === 1, "add_book called with no page binding");
+  await page.unroute(discoveryUrl, holdDiscovery);
+  await Promise.all(heldDiscovery.map((route) => route.fallback()));
+  await gateWait.playwright(page.getByText("reload book added", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
+  const afterToolReload = JSON.parse(await Bun.file(control).text());
+  const reloadToolResult = afterToolReload.tool_results?.find((result: { call_id: string }) => result.call_id === "reload-add-book");
+  if (!reloadToolResult || reloadToolResult.is_error)
+    throw new Error(`add_book called during the reload grace did not run: ${JSON.stringify(afterToolReload.tool_results)}`);
+  const reloadBookRows = await reloadBooks();
+  if (reloadBookRows.length !== 1) throw new Error(`add_book during the reload grace wrote ${reloadBookRows.length} records, not 1`);
+  if (afterToolReload.detached_add_book_calls !== 1) throw new Error(`add_book reached zeta ${afterToolReload.detached_add_book_calls} times with no binding`);
+  const reloadResume = requests().slice(framesBeforeToolReload).find((frame) => frame.method === "resume" && frame.params?.session_id === reloadChat);
+  if (!reloadResume?.params?.mcp_bindings?.length) throw new Error("reloaded page did not re-send the page binding with resume");
+  if (requests().slice(framesBeforeToolReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"')))
+    throw new Error("zeta cancelled the turn on reload (reason disconnect)");
+  console.log("reload during a page tool call asserted: the call made with no binding waited, ran once on the reloaded page's binding, and the turn finished");
+  await page.goto(`${origin}/allow?chat=${allowSession}`);
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
   await gateSettings(page, origin, gateWait);
   await gateCreationApprovalDefaults(page, requests, approvalModeResponse, gateWait);
 
