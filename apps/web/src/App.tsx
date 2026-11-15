@@ -5,6 +5,7 @@ import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/rea
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
+import { chatQueues } from "./composer/chatQueues";
 import { draftStore } from "./draftStore";
 import { DetailRecord, type DetailFilter } from "./DetailRecord";
 import { FormBlock, selectRow, useRecordWrites, useSelectedRow } from "./page/RecordForm";
@@ -36,7 +37,10 @@ function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
 
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
 
-function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; focus: boolean; vim: boolean; props: ComposerProps }) {
+type ComposerActivity = { sending: boolean; queued: number };
+
+// `fromNewChat`: this chat was just created from the page's new-chat composer, so it takes that composer's queue
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
     (listener) => {
@@ -53,6 +57,9 @@ function ComposerSlot({ sessionId, focus, vim, props }: { sessionId: string; foc
     defaultValue: draft,
     onDraftChange: (text: string) => draftStore.set(sessionId, text),
     onDeliveryConfirm: (sent: string) => draftStore.confirm(sessionId, sent),
+    parkQueue: (queue: Parameters<typeof chatQueues.park>[1]) => chatQueues.park(sessionId, queue),
+    takeQueue: () => chatQueues.take(fromNewChat ? [fromNewChat, sessionId] : [sessionId]),
+    onActivity,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
@@ -66,6 +73,15 @@ function VimLoading() {
 
 function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
   return waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+}
+
+// the header shows what the user is waiting on: an approval first, then their own messages, then the turn
+function headerState(lost: boolean, lastState: string, outcome: string, activity: ComposerActivity) {
+  if (lost) return "offline";
+  if (lastState === "approval") return lastState;
+  if (activity.queued) return "queued";
+  if (activity.sending && lastState !== "running") return "sending";
+  return lastState === "idle" && (outcome === "cancelled" || outcome === "disconnected") ? "stopped" : lastState;
 }
 
 function activeComposerProps(
@@ -135,6 +151,9 @@ export function App() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
+  const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0 });
+  // after every slot has parked or taken its queue in this commit
+  useLayoutEffect(() => chatQueues.settleNewChats());
   const send: typeof active.send = (text, intent, track) => {
     setFollowRequest((value) => value + 1);
     return trackQueuedSteer(
@@ -216,7 +235,7 @@ export function App() {
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
   const hasComposer = !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
   const content = <>
-    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState === "idle" && (outcome === "cancelled" || outcome === "disconnected") ? "stopped" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity)} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}
@@ -238,7 +257,7 @@ export function App() {
           const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
         }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!ready || active.focusSessionId === ready.sessionId} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
         </div>
         </div>
       </RunProvider>}
@@ -260,7 +279,7 @@ function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
   return <div className="full-state not-found-state"><p role="alert">page not found</p><div><a className="primary" href="/">go home</a><button className="primary" onClick={() => void onNewChat()}>new chat</button></div></div>;
 }
 
-function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle, onRename }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void }) {
+function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled, toggle, onRename }: { page: Page; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void }) {
   const [overflow, setOverflow] = useState(false);
   const overflowButton = useRef<HTMLButtonElement>(null);
   const actions = useRef<HTMLDivElement>(null);
@@ -304,7 +323,7 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state === "queued" && queued > 1 ? `${queued} queued` : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {

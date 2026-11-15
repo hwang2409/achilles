@@ -7,7 +7,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { restoreFocus } from "../keyboard";
-import { enterAction } from "./composer-machine";
+import { composerStatus, enterAction, submitAction } from "./composer-machine";
+import { QueuedMessages } from "./QueuedMessages";
 import {
   useComposerDelivery,
   type ComposerAdapterProps,
@@ -28,32 +29,26 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const group = useRef<HTMLDivElement>(null);
   const focusLost = useRef(false);
   const stopFocused = useRef(false);
-  const { model, edit, dismissError, submit, stop } = useComposerDelivery(props);
+  const { model, edit, dismissError, submit, stop, retry, cancel } = useComposerDelivery(props);
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
-  const canSubmit =
-    model.draft.trim() !== "" &&
-    !model.sending &&
-    state !== "running" &&
-    state !== "read-only";
-  const message =
-    model.error?.text ??
-    (model.stopping
-      ? "stopping"
-      : model.queued
-        ? "queued to send next"
-        : model.sending
-        ? model.send?.steer
-          ? "queued for the next step"
-          : "sending"
-        : "");
+  const action = submitAction(model);
+  const queues = action === "queue" || (model.queue.length > 0 && !model.held);
+  const { text: message, tone } = composerStatus(model);
   const hint =
     state === "running"
       ? "a turn is running · stop it or wait to send"
-      : steer
-        ? "enter to steer · shift+enter new line"
-        : "enter to send · shift+enter for a new line";
+      : queues
+        ? "enter to queue · esc in an empty box cancels the last"
+        : steer
+          ? "enter to steer · shift+enter new line"
+          : "enter to send · shift+enter for a new line";
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape" && !model.draft && model.queue.length && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      cancel();
+      return;
+    }
     if (
       enterAction({
         key: event.key,
@@ -121,11 +116,12 @@ export function PlainComposer(props: ComposerAdapterProps) {
       data-pending={
         model.sending ? "submit" : model.stopping ? "stop" : undefined
       }
-      data-queued={model.queued || undefined}
+      data-queued={model.queue.length || undefined}
       aria-label={label}
       aria-busy={model.sending || model.stopping || undefined}
       onSubmit={onFormSubmit}
     >
+      <QueuedMessages model={model} onRetry={retry} onCancel={(id) => { cancel(id); input.current?.focus({ preventScroll: true }); }} />
       <div data-part="composer-field" data-value={model.draft}>
         <textarea
           ref={input}
@@ -141,7 +137,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       <div data-part="composer-bar">
         <p
           data-part="composer-status"
-          data-tone={model.error?.kind === "dropped" ? "warning" : model.error ? "danger" : message ? "busy" : undefined}
+          data-tone={tone}
           title={model.error?.text}
         >
           <span
@@ -176,11 +172,11 @@ export function PlainComposer(props: ComposerAdapterProps) {
         <button
           type="submit"
           data-part="composer-submit"
-          data-action={steer ? "steer" : "send"}
-          aria-label={steer ? "steer the running turn" : "send message"}
-          aria-disabled={!canSubmit || undefined}
+          data-action={queues ? "queue" : steer ? "steer" : "send"}
+          aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"}
+          aria-disabled={!action || undefined}
         >
-          {steer ? "steer" : "send"}
+          {queues ? "queue" : steer ? "steer" : "send"}
         </button>
       </div>
     </form>

@@ -107,6 +107,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .run-state.state-approval::before { background: var(--fulcrum-warn); }
 .run-state.state-failed::before { background: var(--fulcrum-danger); }
 .run-state.state-stopped::before { background: var(--fulcrum-warn); }
+.run-state.state-sending::before { background: var(--fulcrum-accent); }
+/* hollow, so "queued" differs from "running" by shape, not only color */
+.run-state.state-queued::before { background: transparent; outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .chat-header > [role="alert"] { position: absolute; top: 56px; right: 16px; color: var(--fulcrum-danger); }
 .create-mode-alert { position: relative; z-index: 2; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-danger); background: var(--fulcrum-bg); border-bottom: 1px solid var(--fulcrum-border); }
 .create-mode-alert button { flex: 0 0 auto; }
@@ -153,6 +156,23 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer"][data-error="dropped"] { border-color: var(--fulcrum-warn); }
 .main-pane [data-part="composer-status"][data-tone="warning"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; height: auto; min-height: 20px; padding: 8px; overflow: visible; border: 1px solid var(--fulcrum-warn); color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 9%, transparent); font-size: var(--achilles-ui-size, 14px); font-weight: 600; line-height: 1.4; white-space: normal; text-overflow: clip; }
 .main-pane [data-part="composer-status"][data-tone="warning"] [data-part="composer-message"] { flex: 1 1 320px; text-wrap: pretty; }
+[data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
+[data-part="composer-queued"] { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
+[data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
+[data-part="composer-queued-label"]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; vertical-align: 1px; outline: 1px solid currentColor; outline-offset: -1px; }
+[data-part="composer-queued"][data-sending] [data-part="composer-queued-label"]::before { background: currentColor; }
+[data-part="composer-queued"][data-failed] { border-left-color: var(--fulcrum-danger); }
+[data-part="composer-queued"][data-failed] [data-part="composer-queued-label"] { color: var(--fulcrum-danger); font-weight: 700; }
+[data-part="composer-queued"][data-failed] [data-part="composer-queued-label"]::before { background: currentColor; }
+[data-part="composer-queued-text"] { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+[data-part="composer-queued-error"] { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fulcrum-danger); white-space: nowrap; text-overflow: ellipsis; }
+[data-part="composer"] [data-part="composer-queued-retry"],
+[data-part="composer"] [data-part="composer-queued-cancel"] { --action: var(--fulcrum-muted); min-width: 0; min-height: 28px; padding: 0 8px; background: transparent; color: var(--fulcrum-fg); border-color: var(--fulcrum-border); font-size: 12px; }
+[data-part="composer"] [data-part="composer-queued-cancel"] { width: 28px; padding: 0; font-size: 16px; }
+@media (pointer: coarse), (max-width: 640px) {
+  [data-part="composer"] [data-part="composer-queued-retry"], [data-part="composer"] [data-part="composer-queued-cancel"] { min-height: 40px; }
+  [data-part="composer"] [data-part="composer-queued-cancel"] { width: 40px; }
+}
 .main-pane [data-part="composer-dismiss"] { --action: var(--fulcrum-warn); background: transparent; color: var(--fulcrum-warn); }
 /* fills the transcript's box exactly (never taller) and scrolls its own content, so a tall
    page above it (layout-blocks) or a short viewport never pushes starters under the composer;

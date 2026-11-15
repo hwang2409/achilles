@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createComposerModel, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
+import { QUEUE_LIMIT, createComposerModel, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
 
 const apply = (model: ComposerModel, ...events: ComposerEvent[]) => events.reduce((current, event) => transition(current, event).model, model);
 
@@ -16,12 +16,20 @@ describe("composer delivery machine", () => {
     }],
     ["enter while it cannot send keeps the draft and sends nothing", () => {
       const running = transition(createComposerModel("kept while running", "running"), { type: "submit", turnRunning: true });
-      expect(running).toEqual({ model: expect.objectContaining({ draft: "kept while running", queued: false }) });
+      expect(running).toEqual({ model: expect.objectContaining({ draft: "kept while running", queue: [] }) });
     }],
-    ["enter while a send is pending queues the draft", () => {
-      const pending = transition(transition(createComposerModel("kept while pending", "idle"), { type: "submit", turnRunning: false }).model, { type: "submit", turnRunning: false });
-      expect(pending).toEqual({ model: expect.objectContaining({ draft: "kept while pending", sending: true, queued: true }) });
-      expect(apply(pending.model, { type: "reject", attempt: 1, message: "denied" }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "kept while pending", queued: false, error: { kind: "submit" } });
+    ["enter while a send is pending moves only the new text out of the box into the queue", () => {
+      const pending = transition(createComposerModel("first", "idle"), { type: "submit", turnRunning: false }).model;
+      const queued = apply(pending, { type: "edit", draft: "first\nsecond" }, { type: "submit", turnRunning: false });
+      expect(queued).toMatchObject({ draft: "first", sending: true, queue: [{ id: 1, text: "second" }] });
+      expect(transition(queued, { type: "submit", turnRunning: false }).model.queue).toHaveLength(1);
+      expect(apply(queued, { type: "confirm", attempt: 1 }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "", queue: [{ text: "second" }] });
+    }],
+    ["the queue has a cap and says so", () => {
+      let model = transition(createComposerModel("first", "idle"), { type: "submit", turnRunning: false }).model;
+      for (let index = 0; index <= QUEUE_LIMIT; index += 1) model = apply(model, { type: "edit", draft: `m${index}` }, { type: "submit", turnRunning: false });
+      expect(model.queue).toHaveLength(QUEUE_LIMIT);
+      expect(model).toMatchObject({ draft: `m${QUEUE_LIMIT}`, error: { kind: "submit" } });
     }],
     ["remount or restart seeds the exact published draft", () => {
       const published = apply(createComposerModel("", "idle"), { type: "edit", draft: "first\n\n  third" });
