@@ -533,7 +533,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
             server.control._turn_end_published = False
             document["turn_start_barrier"] = "held"
             write_control(control, document)
-            # longer than the gate's 30 s wait, so a gate timeout is reported by the gate, not hidden by this error
+            # longer than the gate's 30 s wait, so the gate reports its own timeout first
             for _ in range(700):
                 document = json.loads(control.read_text())
                 if document.get("release_turn_start_barrier"):
