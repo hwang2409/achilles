@@ -260,6 +260,19 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await assistantReady.count()) > assistantReadyBefore, "assistant ready").catch(async (error) => { throw new Error(`${error}\nassistant missing body=${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")}`); });
   await waitFor(async () => (await approval.count()) > approvalBefore, "initial approval");
+  // A reload while the turn waits for approval re-attaches the running chat without `resume` (zeta answers it with
+  // -32004) and shows the same pending approval, so the turn can still finish.
+  const resumesOf = (sessionId: string) => requests().filter((frame) => frame.method === "resume" && frame.params?.session_id === sessionId).length;
+  const resumesBeforeReload = resumesOf(first);
+  await gateWait.playwright(page, "reload");
+  await waitFor(async () => (await approval.count()) > approvalBefore, "pending approval after reload").catch(async (error) => { throw new Error(`${error}\nreload during approval body=${redact(await page.locator("body").innerText())}`); });
+  if (resumesOf(first) !== resumesBeforeReload) throw new Error("reload sent resume while the turn waited for approval");
+  if (await page.getByText("a turn is already running").count()) throw new Error("reload during approval showed the busy error");
+  // "new chat" while this turn waits keeps the chat and its approval, and says why no chat was created.
+  await page.getByRole("button", { name: "new chat" }).first().click();
+  await gateWait.playwright(page.getByRole("alert").filter({ hasText: "this chat is still running" }), "waitFor", { timeout: 20_000 });
+  await waitFor(async () => (await approval.count()) > approvalBefore && await homeSessionId() === first, "pending approval after a busy new chat");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "busy-new-chat-1440x900.png") });
   const approvalComplete = page.getByText("approval complete", { exact: true });
   const approvalCompleteBefore = await approvalComplete.count();
   const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T{i // 60:02}:{i % 60:02}:00Z') for i in range(105)]); db.commit(); db.close()"], env);
@@ -292,6 +305,7 @@ try {
     }, { timeout: 20_000 }).catch(() => { throw new Error("timed out waiting for older chats response after turn-completion refresh"); });
     await approval.nth(approvalBefore).getByRole("button", { name: "approve", exact: true }).click();
     await waitFor(async () => (await approvalComplete.count()) > approvalCompleteBefore, "approval complete");
+    await waitFor(async () => resumesOf(first) > resumesBeforeReload, "page binding re-sent after the approved turn");
     releaseOlder();
     await olderRefresh;
     await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])'), "waitFor", { timeout: 20_000 });
@@ -1357,7 +1371,7 @@ try {
   const reconnectCrossPage = await mcp(credential, 6, "tools/call", { name: "create_page", arguments: { route: "/cross", title: "cross", layout: { blocks: [{ type: "form", title: "x", tool: "other-page" }] } } });
   if (!reconnectCrossPage.result?.isError || (await fetch(`${origin}/api/pages/cross`)).status !== 404) throw new Error("cross-page reference published");
   console.log("reconnect refresh asserted: achilles restarted mid-session; create mode and the next turn used the refreshed catalog without restarting zeta");
-  console.log("expected skip: reload during pending approval waits for fulcrum hello params");
+  console.log("known gap: an achilles__* tool approved after a reload runs without the page binding; it needs zeta resume_attach");
 
   await homeMcp(14, "tools/list", {});
   const lateAnnotation = await homeMcp(15, "tools/call", { name: "annotate_trace", arguments: { text: "after create mode", id: "late-annotation" } });

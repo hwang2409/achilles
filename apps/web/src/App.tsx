@@ -87,6 +87,7 @@ export function App() {
   const active = useActiveChat(client, connectionState.phase === "connected");
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
+  const busyPage = active.state.phase === "busy" ? active.state : null;
   const activePage = ready?.page ?? empty?.page ?? null;
   const recordWrites = useRecordWrites(activePage?.id ?? "");
   const previousRecordWrites = useRef(recordWrites);
@@ -172,12 +173,29 @@ export function App() {
   }, [ready?.sessionId, outlineLength]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
-    if (previous === "running" && turn === "idle") void active.settleApprovalMode();
-  }, [active.settleApprovalMode, turn]);
+    // A chat attached during a live turn re-sends its page binding as soon as it is idle, even if the edge was missed.
+    if (turn === "idle" && (previous === "running" || ready?.rebind)) void active.settleAfterTurn();
+  }, [active.settleAfterTurn, turn, ready?.rebind]);
   const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
+  const shownToggleError = useRef(active.toggleError);
+  useEffect(() => {
+    // a successful retry removes the notice and its focused button; give focus back to the visible header control
+    const hadNotice = shownToggleError.current !== null; shownToggleError.current = active.toggleError;
+    if (!hadNotice || active.toggleError !== null || document.activeElement !== document.body) return;
+    [...document.querySelectorAll<HTMLElement>(".chat-actions > button")].find((button) => button.offsetParent !== null)?.focus();
+  }, [active.toggleError]);
+  useEffect(() => {
+    // zeta ends a running turn when this tab disconnects: a reload, a close, or a full page load (a sidebar page link,
+    // or selectChat's location.assign to a chat on another page), so the browser asks first. an approval wait survives
+    // a reload (zeta keeps it for 90 s), so it does not ask then.
+    if (!connected || lastState !== "running") return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    addEventListener("beforeunload", warn);
+    return () => removeEventListener("beforeunload", warn);
+  }, [connected, lastState]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const appRenderers: Renderers = { ...renderers, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
@@ -187,10 +205,12 @@ export function App() {
     {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={lost ? "offline" : lastState} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
+    {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><button className="primary" onClick={active.retrySaving}>retry creating chat</button></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
+      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <div className="layout-blocks">{busyPage.page.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={refreshKey} />)}</div>}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
@@ -202,12 +222,34 @@ export function App() {
   return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
+function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null } | null }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {
+  const here = busy.sessionId !== null && busy.sessionId === openSessionId;
+  const open = !here && busy.chat;
+  const text = here ? "this chat is still running. approve or stop it, then try again."
+    : open ? `"${busy.chat!.title?.trim() || "untitled chat"}" is still running. open it to approve or stop it, then try again.`
+    : busy.sessionId ? "another chat is still running. approve or stop it, then try again."
+    : "zeta was busy a moment ago and is ready now. try again.";
+  return <div className="create-mode-alert" role="alert"><span>{text}</span><span>{open && <button type="button" onClick={onOpen}>open it</button>}<button type="button" onClick={onRetry}>try again</button></span></div>;
+}
+
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
   return <div className="full-state not-found-state"><p role="alert">page not found</p><div><a className="primary" href="/">go home</a><button className="primary" onClick={() => void onNewChat()}>new chat</button></div></div>;
 }
 
 function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle, onRename }: { page: Page; sessionId: string | null; title: string; state: string; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void }) {
   const [overflow, setOverflow] = useState(false);
+  const overflowButton = useRef<HTMLButtonElement>(null);
+  const actions = useRef<HTMLDivElement>(null);
+  const closeOverflow = () => { setOverflow(false); overflowButton.current?.focus(); };
+  useEffect(() => {
+    // the open menu covers the notice below the header, so Escape (from anywhere) and a tap outside close it
+    if (!overflow) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setOverflow(false); overflowButton.current?.focus(); } };
+    const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
+    addEventListener("keydown", onKey);
+    addEventListener("pointerdown", onDown);
+    return () => { removeEventListener("keydown", onKey); removeEventListener("pointerdown", onDown); };
+  }, [overflow]);
   const rename = useInlineRename();
   const startRename = () => { if (onRename && sessionId) rename.start(title === "untitled chat" ? "" : title, (value) => onRename(sessionId, value)); };
   // a chat switch closes the editor; its draft never moves to the next chat
@@ -223,11 +265,11 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
   const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : page.create_mode ? "create mode on" : "create mode off";
-  const controls = <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={toggle}>{modeLabel}</button></>;
+  const controls = (inMenu: boolean) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button></>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  return <header className="chat-header" onKeyDown={(event) => { if (event.key === "Escape") setOverflow(false); }}><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions">{controls}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {

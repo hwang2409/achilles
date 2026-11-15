@@ -5,8 +5,46 @@ type Status = { session?: { session_id: string } | null; state: "idle" | "runnin
 type HistoryPage = { messages?: unknown[]; next_offset?: number | null };
 type LoadedPage = { offset: number; rows: unknown[]; nextOffset: number | null };
 
-export async function rebindPage(client: ZetaClient, sessionId: string, binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> }) {
+export const pageBinding = (credential: string, cwd: string) => ({ cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] });
+
+export async function rebindPage(client: ZetaClient, sessionId: string, binding: ReturnType<typeof pageBinding>) {
   return client.request("resume", { session_id: sessionId, ...binding });
+}
+
+/** The session whose turn is still running, or null when zeta is idle. */
+export async function runningSession(client: ZetaClient): Promise<string | null> {
+  const status = await client.request("status", {}) as Status;
+  return status.state === "idle" ? null : status.session?.session_id ?? null;
+}
+
+/** zeta refuses `resume` and `new_session` (-32004) while a turn runs; sessionId names the running chat. */
+export class ChatBusyError extends Error {
+  constructor(readonly sessionId: string | null) { super(sessionId ? "another chat is still running" : "zeta was busy a moment ago and is ready now"); }
+}
+
+/**
+ * Calls `ended` once when zeta stops running `sessionId`'s turn: on that session's `agent_end`, never by polling.
+ * A store that joined mid-turn missed `agent_start`, so it is marked running first; one status check after the mark
+ * covers an end that arrived before it. Returns a cancel function.
+ */
+export function watchTurnEnd(client: ZetaClient, sessionId: string, ended: () => void): () => void {
+  const lease = client.forSession(sessionId);
+  const { store } = lease;
+  let done = false;
+  let unsubscribe = () => {};
+  const stop = () => { if (done) return false; done = true; unsubscribe(); lease.release(); return true; };
+  const finish = () => { if (stop()) ended(); };
+  const { agent, endOutcome } = store.getState();
+  const marked = agent !== "running";
+  try { if (marked) store.dispatch({ type: "run_start" }); }
+  catch { stop(); return () => {}; } // a store under replay refuses events: the notice keeps its "try again"
+  unsubscribe = store.subscribe(() => { if (store.getState().agent !== "running") finish(); });
+  void runningSession(client).then((running) => {
+    if (done || running === sessionId) return;
+    try { if (marked) store.dispatch({ type: "run_end", ...(endOutcome ? { outcome: endOutcome } : {}) }); } catch { /* evicted store: nothing to undo */ }
+    finish();
+  }, () => {});
+  return () => { stop(); };
 }
 
 type SessionSettings = { model: string; approval_mode?: string | null };
@@ -34,18 +72,27 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
 export class SessionNotFoundError extends Error {}
 
 export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null) {
-  const binding = { cwd, mcp_bindings: [{ server: "achilles", headers: { Authorization: `Bearer ${credential}` } }] };
   let name: string | null = null;
-  try {
-    const resumed = await rebindPage(client, id, binding) as { session?: { name?: string | null } };
-    name = resumed.session?.name ?? null;
-  } catch (caught) {
-    if ((caught as { data?: { code?: string } }).data?.code === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
-    throw caught;
+  // A live turn on this chat (for example one waiting for approval after a reload) blocks `resume`, so attach without
+  // it: the transcript and pending approval come from status and history. `rebind` re-sends the page binding later.
+  let rebind = await runningSession(client) === id;
+  for (let retried = false; !rebind; retried = true) {
+    try {
+      const resumed = await rebindPage(client, id, pageBinding(credential, cwd)) as { session?: { name?: string | null } };
+      name = resumed.session?.name ?? null;
+      break;
+    } catch (caught) {
+      if ((caught as { data?: { code?: string } }).data?.code === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
+      if ((caught as { code?: unknown }).code !== -32004) throw caught;
+      const running = await runningSession(client);
+      rebind = running === id;
+      // null: the other turn ended between `resume` and `status`, so zeta is idle now and one more `resume` works
+      if (!rebind && (running !== null || retried)) throw new ChatBusyError(running);
+    }
   }
-  if (serverMode === "ask") return { id, name, ...await applyApprovalMode(client, id, "ask") };
+  if (serverMode === "ask") return { id, name, rebind, ...await applyApprovalMode(client, id, "ask") };
   const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
-  return { id, name, approvalMode: settings.approval_mode, pending: false };
+  return { id, name, rebind, approvalMode: settings.approval_mode, pending: false };
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
