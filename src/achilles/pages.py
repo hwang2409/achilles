@@ -998,6 +998,9 @@ class PageStore:
         if sent:
             # the first send marks the chat sent and keeps the first title; repeats change nothing
             assignments.append("message_sent=1,first_title=COALESCE(first_title,?)")
+        elif changes.get("last_state") in ("running", "approval", "failed"):
+            # a turn ran, so the chat was sent even when the client never recorded its first message
+            assignments.append("message_sent=1")
         with self.transaction() as db:
             updated = db.execute(
                 f"UPDATE chat SET {','.join(assignments)},updated_at=? WHERE session_id=?",

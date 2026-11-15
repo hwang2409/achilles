@@ -50,6 +50,18 @@ export function createAttachmentOwner(release: (lease: SessionLease) => void = (
   };
 }
 
+// the server stores at most 200 characters; cut by code points so an emoji at the edge never leaves half a surrogate pair
+export const cutTitle = (text: string) => Array.from(text.trim()).slice(0, 200).join("");
+
+// the first user message text in a loaded history, or "" when it has none
+export function firstUserText(store: SessionLease["store"]): string {
+  for (const { id } of store.getState().outline) {
+    const item = store.getItem(id);
+    if (item?.type === "user" && item.event.type === "user_message" && item.event.text.trim()) return item.event.text;
+  }
+  return "";
+}
+
 // marks the chat sent (it joins the chat list) and stores its first-message title once
 export function persistFirstMessage(sessionId: string, firstMessage: string, onSuccess: () => void): void {
   void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ first_message: firstMessage }) })
@@ -148,7 +160,10 @@ export async function attachPage(
       page.approval_mode = session.approvalMode;
       const storedChat = selectedChat ?? (await findChat(session.id)); requireCurrent(owner, token);
       const userTitled = Boolean(storedChat?.titled_by_user);
-      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || storedChat?.first_title?.trim() || "new chat";
+      // a chat whose first-message record was lost (a failed PATCH, a closed tab) is repaired from its history
+      const historyTitle = storedChat && !userTitled && !(storedChat.message_sent && (storedChat.title || storedChat.first_title)) ? cutTitle(firstUserText(lease.store)) : "";
+      if (historyTitle) persistFirstMessage(session.id, historyTitle, () => {});
+      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || storedChat?.first_title?.trim() || historyTitle || "new chat";
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
       if (!userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
@@ -588,7 +603,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     }
     // not gated on the owner token: a chat switch mid-send must still record the send
     if (current.sent) return;
-    const firstTitle = text.trim().slice(0, 200);
+    const firstTitle = cutTitle(text);
     persistFirstMessage(current.sessionId, firstTitle, () => {
       updateReady(token, (value) => value.sessionId !== current.sessionId ? value : {
         ...value, sent: true,
@@ -619,7 +634,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   const rename = useCallback(async (sessionId: string, nextTitle: string): Promise<boolean> => {
     const token = owner.current.token();
-    const trimmed = nextTitle.trim().slice(0, 200);
+    const trimmed = cutTitle(nextTitle);
     const titledByUser = trimmed.length > 0;
     // clearing the open chat stores its zeta name, so the sidebar and the header show the same title
     const fallback = state.phase === "ready" && state.sessionId === sessionId && state.autoTitle !== "new chat" ? state.autoTitle : null;

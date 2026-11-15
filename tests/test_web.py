@@ -875,6 +875,37 @@ def test_chat_list_shows_a_chat_only_after_its_first_message(tmp_path: Path) -> 
         assert client.patch("/api/chats/sent", json=body).status_code == 400
 
 
+def test_a_chat_whose_turn_ran_is_listed_without_its_first_message_record() -> None:
+    client = chat_client()
+    for session_id in ("ran", "draft"):
+        client.post("/api/pages/home/chats", json={"session_id": session_id})
+    # the first-message PATCH was lost, but the run state proves a turn ran
+    assert client.patch("/api/chats/ran", json={"last_state": "running"}).json()["message_sent"]
+    assert not client.patch("/api/chats/draft", json={"last_state": "idle"}).json()["message_sent"]
+    listed = client.get("/api/chats").json()["chats"]
+    assert [row["session_id"] for row in listed] == ["ran"]
+
+
+def test_a_first_message_cut_through_an_emoji_is_stored_without_the_half() -> None:
+    client = chat_client()
+    client.post("/api/pages/home/chats", json={"session_id": "cut"})
+    # a lone surrogate (half an emoji) must never reach sqlite, which cannot encode it
+    body = '{"first_message": "' + "a" * 199 + '\\ud83d"}'
+    response = client.patch(
+        "/api/chats/cut", content=body, headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 200
+    assert response.json()["first_title"] == "a" * 199
+    assert response.json()["message_sent"] is True
+    renamed = client.patch(
+        "/api/chats/cut",
+        content='{"title": "x\\ude00", "titled_by_user": true}',
+        headers={"content-type": "application/json"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "x"
+
+
 def test_chats_from_a_database_without_the_sent_marker_stay_listed(tmp_path: Path) -> None:
     home = tmp_path / "achilles"
     home.mkdir(mode=0o700)
