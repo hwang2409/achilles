@@ -18,7 +18,9 @@ export function useInlineRename() {
     autoFocus: true,
     // the shell's capture-phase escape layer skips this marker, so esc reaches the input
     "data-inline-rename": "",
-    onFocus: (event: FocusEvent<HTMLInputElement>) => event.currentTarget.select(),
+    // select all so typing replaces the title, but scroll back to the start: select() alone leaves
+    // a long value scrolled to the caret at the end, hiding the start of the title
+    onFocus: (event: FocusEvent<HTMLInputElement>) => { const input = event.currentTarget; input.select(); input.scrollLeft = 0; },
     onChange: (event: ChangeEvent<HTMLInputElement>) => setDraft(event.target.value),
     onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => {
       // the input owns its keys: list roving focus, F2, and vim page keys must not see them
