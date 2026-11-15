@@ -78,8 +78,9 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const idPrefix = useId();
-  // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863)
-  useEffect(() => { if (message) form.current?.querySelector(".record-form-actions")?.scrollIntoView({ block: "nearest" }); }, [message]);
+  // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863); a
+  // successful save on a row scrolls to the row instead, since that is what "saved" means to the user here
+  useEffect(() => { if (!message) return; (row && message.kind === "status" ? tableRow(row.record_id) : form.current?.querySelector(".record-form-actions"))?.scrollIntoView({ block: "nearest" }); }, [message]);
   if ("unsupported" in mapped) return <p aria-disabled="true">this form needs the chat: unsupported field {mapped.unsupported}</p>;
 
   const focusField = (name?: string) => form.current?.querySelector<HTMLElement>(name ? `[name="${CSS.escape(name)}"]` : "[name]")?.focus();
@@ -117,8 +118,8 @@ export function RecordForm({ tool, order, row, pageId, credential, onReloadTool 
       }
       setTyped({});
       setMessage({ kind: "status", text: row ? "saved" : "added" });
-      // the saved record (new revision) stays selected, so the next save does not conflict with itself; scroll it into view, since edits can happen off screen
-      if (row && body) { selectRow(pageId, { collection: tool.collection, record: body }); tableRow(body.record_id)?.scrollIntoView({ block: "nearest" }); }
+      // the saved record (new revision) stays selected, so the next save does not conflict with itself; the effect above scrolls it into view
+      if (row && body) selectRow(pageId, { collection: tool.collection, record: body });
       notifyRecordWrite(pageId);
       if (!row) focusField();
     } catch (caught) {
