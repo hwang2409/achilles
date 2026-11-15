@@ -202,6 +202,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .record-form-actions .primary { min-height: 36px; padding: 6px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
 .record-form-actions button:not(.primary) { min-height: 36px; padding: 6px 12px; }
 .record-form-actions button:disabled { opacity: .6; cursor: default; }
+.record-form-selected { display: none; margin: 0 0 8px; color: var(--fulcrum-muted); }
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
 /* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px) below) */
 @media (min-width: 761px) {
@@ -217,6 +218,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 
 @media (max-width: 760px) {
   .record-form-actions button { min-height: 40px; }
+  .record-form-selected { display: block; }
   .app-shell { display: block; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 320px; max-width: calc(100vw - 48px); transform: translateX(-100%); transition: transform 140ms ease-out; }
   .drawer-open .sidebar { transform: translateX(0); }
