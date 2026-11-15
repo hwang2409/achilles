@@ -548,9 +548,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyPendingCreateMode, client, publishReady, showBusy]);
 
   const bindPage = useCallback(async (current: ReadyState, token: number) => {
-    if (!client || !current.rebind || await runningSession(client) !== null) return; // still running: the next idle render retries
+    if (!client || !current.rebind) return;
     try { await rebindPage(client, current.sessionId, pageBinding(current.credential, current.page.workspace)); }
-    catch (caught) { if (errorCode(caught) === TURN_RUNNING) return; throw caught; }
+    catch (caught) { if (errorCode(caught) === TURN_RUNNING) return; throw caught; } // still running: a later idle retries
     updateReady(token, (value) => value.sessionId === current.sessionId ? { ...value, rebind: false } : value);
   }, [client, updateReady]);
 
@@ -612,14 +612,17 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const settleAfterTurn = useCallback(async () => {
     if (!client || state.phase !== "ready") return;
     const current = state; const mode = state.pendingApprovalMode; const token = owner.current.token();
-    setBusy((value) => value?.sessionId === current.sessionId ? null : value);
+    const busyHere = busy?.sessionId === current.sessionId;
+    if (!current.rebind && !mode && !busyHere) return;
     try {
+      if (await runningSession(client) !== null) return; // an early idle render: a later one retries
+      if (busyHere) setBusy(null);
       await bindPage(current, token);
       if (!mode) return;
       const result = await applyApprovalMode(client, current.sessionId, mode);
       updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, pendingApprovalMode: result.pending ? mode : null }));
     } catch (caught) { if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) }); }
-  }, [bindPage, client, state, updateReady]);
+  }, [bindPage, busy, client, state, updateReady]);
 
   const recordLastState = useCallback((lastState: string) => {
     if (lastState === "running" && pendingSelection.current) pendingSelection.current.sawRunning = true;
