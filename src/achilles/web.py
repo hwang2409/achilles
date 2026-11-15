@@ -278,8 +278,12 @@ def create_app() -> Starlette:
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
         body = await request.json()
-        if not isinstance(body, dict) or not body or not set(body) <= {"title", "last_state"}:
-            raise HTTPException(400, "provide only title or last_state")
+        if (
+            not isinstance(body, dict)
+            or not body
+            or not set(body) <= {"title", "last_state", "titled_by_user"}
+        ):
+            raise HTTPException(400, "provide only title, last_state, or titled_by_user")
         title = body.get("title")
         if "title" in body and (title is not None and not isinstance(title, str)):
             raise HTTPException(400, "title must be a string or null")
@@ -288,6 +292,10 @@ def create_app() -> Starlette:
         state = body.get("last_state")
         if "last_state" in body and state not in {None, "idle", "running", "approval", "failed"}:
             raise HTTPException(400, "invalid last_state")
+        if "titled_by_user" in body and not isinstance(body["titled_by_user"], bool):
+            raise HTTPException(400, "titled_by_user must be a boolean")
+        if body.get("titled_by_user") is True and not (isinstance(title, str) and title.strip()):
+            raise HTTPException(400, "a user title must not be blank")
         try:
             row = await anyio.to_thread.run_sync(
                 store.update_chat, request.path_params["session_id"], body
@@ -408,13 +416,25 @@ def create_app() -> Starlette:
         principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            error = ValidationError("", "valid JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        if not isinstance(body, dict):
+            error = ValidationError("", "JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
         try:
             await anyio.to_thread.run_sync(
-                store.rollback_tool, page_id, request.path_params["name"], body["version"]
+                store.rollback_tool,
+                page_id,
+                request.path_params["name"],
+                body.get("version"),
+                body.get("expected_version"),
             )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        except ValidationError as exc:
+            status = 409 if exc.code == "conflict" else 400
+            return JSONResponse({"error": error_document(exc)}, status_code=status)
         await notify_tools_changed(page_id)
         return JSONResponse({"ok": True})
 

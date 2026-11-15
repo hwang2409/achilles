@@ -3,13 +3,14 @@ import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
+import { draftStore } from "./draftStore";
 import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, creationApprovalMode, loadSession, openHomeSession, SessionNotFoundError } from "./zeta/session";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
 type EmptyState = PageAttachment & { phase: "empty" };
-type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string };
+type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string; autoTitle: string };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState;
 const ATTACH_SLOW_MS = 15_000;
 type AttachmentClock = Pick<typeof globalThis, "setTimeout" | "clearTimeout">;
@@ -50,6 +51,13 @@ export function persistUntitledChatTitle(sessionId: string, title: string, onSuc
   void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) })
     .then((response) => { if (response.ok) onSuccess(); })
     .catch((error) => console.error("could not update chat title", error));
+}
+
+export async function persistChatTitle(sessionId: string, title: string | null, titledByUser: boolean, fetchFn: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const response = await fetchFn(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, titled_by_user: titledByUser }) });
+    return response.ok;
+  } catch { return false; }
 }
 
 export async function persistChatState(sessionId: string, lastState: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
@@ -134,10 +142,13 @@ export async function attachPage(
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
       page.approval_mode = session.approvalMode;
-      const title = session.name?.trim() || selectedChat?.title?.trim() || (await findChat(session.id))?.title?.trim() || "untitled chat"; requireCurrent(owner, token);
-      if (session.name?.trim() && session.name.trim() !== selectedChat?.title?.trim())
+      const storedChat = selectedChat ?? (await findChat(session.id)); requireCurrent(owner, token);
+      const userTitled = Boolean(storedChat?.titled_by_user);
+      const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || "untitled chat";
+      const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
+      if (!userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title };
+      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle };
     };
 
     const creationStatus = creation.status(page.id);
@@ -272,6 +283,8 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
       const result = awaited ? await awaited : null;
       if (blockedWithoutRun || (result && (result.generation !== mine || result.cancelled || result.outcome.blocked))) throw new Error("send is off until page tools refresh. retry create mode.");
     },
+    // The chat whose tools are stale, and the create mode its header keeps until a refresh succeeds.
+    stale() { return retry ? { sessionId: retry.input.sessionId, createMode: !retry.input.enabled, idle: !active } : null; },
     reset() {
       generation += 1;
       if (active) active.cancelled = true;
@@ -370,8 +383,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const applyPendingCreateMode = useCallback(async (ready: ReadyState, enabled: boolean) => {
     if (!client) throw new Error("zeta is not connected");
     const result = await modeToggle.current.run({ client, pageId: ready.page.id, sessionId: ready.sessionId, enabled });
-    if (result.createMode === null) throw new Error(result.error ?? "could not apply create mode");
-    return { ...ready, page: { ...ready.page, create_mode: result.createMode } };
+    // A failed tool refresh keeps the new chat: the inline notice offers retry instead of a full-page error.
+    if (result.blocked && modeToggle.current.stale()?.sessionId === ready.sessionId) { setToggleError(result.error); setToggleBlocked(true); setToggleRetryable(result.retryable); }
+    return { ...ready, page: { ...ready.page, create_mode: result.createMode ?? !enabled } };
   }, [client]);
 
   const publishReady = useCallback((ready: ReadyState, token: number, replace = false, focus = false, select = true) => {
@@ -389,7 +403,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   useEffect(() => {
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
-    modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false);
+    // Selecting a chat whose tool refresh failed re-attaches it; its retry notice stays until a refresh succeeds.
+    const stale = modeToggle.current.stale();
+    const keepStale = stale?.idle && stale.sessionId === selectedId ? stale : null;
+    if (!keepStale) { modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false); }
+    const shown = <T extends EmptyState | ReadyState>(next: T): T => keepStale && next.phase === "ready" && next.sessionId === keepStale.sessionId && modeToggle.current.stale()
+      ? { ...next, page: { ...next.page, create_mode: keepStale.createMode } } : next;
     setCreationPageId(null);
     setAttachSlow(false);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
@@ -397,11 +416,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, false, applyPendingCreateMode, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token);
-      else setState(next);
+      else setState(shown(next));
     }).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
-      setState(next);
+      setState(shown(next));
     }).catch((caught) => {
       if (caught instanceof PendingCreationError && owner.current.current(token)) {
         setCreationPageId(caught.input.pageId);
@@ -486,12 +505,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setState((current) => current.phase === "ready" ? update(current) : current);
   }, []);
 
-  const createFirstChat = useCallback(async (empty: EmptyState, token: number) => {
+  const createFirstChat = useCallback(async (empty: EmptyState, token: number, text: string) => {
     if (!client) throw new Error("zeta is not connected");
     const focusClaim = claimComposerFocus();
     setCreationPageId(empty.page.id);
     try {
-      let handedOff: ReadyState | null = null;
+      let handedOff = null as ReadyState | null;
       const attached = await attachPage(
         client,
         keyFromPath(),
@@ -504,6 +523,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         async (ready) => { handedOff = ready; },
       );
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
+      if (modeToggle.current.stale()?.sessionId === attached.sessionId) { // clear the composer draft only when it was the sent text; a starter button must not erase typed text
+        draftStore.set(attached.sessionId, text); if (draftStore.get(`new:${empty.page.id}`) === text) draftStore.set(`new:${empty.page.id}`, ""); }
       publishReady(attached, token, true, focusClaim.owns(), false);
       return attached;
     } finally {
@@ -516,7 +537,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     await modeToggle.current.beforeSend();
     const token = owner.current.token();
     const steer = pageDeliverySteer(state.phase, intent);
-    const current = state.phase === "ready" ? state : await createFirstChat(state, token);
+    const current = state.phase === "ready" ? state : await createFirstChat(state, token, text);
+    if (state.phase === "empty") await modeToggle.current.beforeSend();
     const delivery_id = crypto.randomUUID();
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
     try {
@@ -544,12 +566,25 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const current = state; const token = owner.current.token();
     const enabled = !current.page.create_mode;
     if (current.phase === "empty") { setPendingCreateMode(current, enabled); return; }
-    setToggleError(null); setToggling(true);
+    setToggling(true); // a shown refresh notice stays until the retry settles, so a second failure never flickers or stacks
     const result = await modeToggle.current.run({ client, pageId: current.page.id, sessionId: current.sessionId, enabled });
     if (!owner.current.current(token)) return;
     if (result.createMode !== null) updateReady(token, (value) => ({ ...value, page: { ...value.page, create_mode: result.createMode! } }));
     setToggleError(result.error); setToggleBlocked(result.blocked); setToggleRetryable(result.retryable); setToggling(false);
   }, [client, setPendingCreateMode, state, toggleBlocked, toggleRetryable, updateReady]);
+
+  const rename = useCallback(async (sessionId: string, nextTitle: string): Promise<boolean> => {
+    const token = owner.current.token();
+    const trimmed = nextTitle.trim().slice(0, 200);
+    const titledByUser = trimmed.length > 0;
+    // clearing the open chat stores its zeta name, so the sidebar and the header show the same title
+    const fallback = state.phase === "ready" && state.sessionId === sessionId && state.autoTitle !== "untitled chat" ? state.autoTitle : null;
+    const saved = await persistChatTitle(sessionId, titledByUser ? trimmed : fallback, titledByUser);
+    if (!saved) return false;
+    updateReady(token, (value) => value.sessionId !== sessionId ? value : { ...value, title: titledByUser ? trimmed : value.autoTitle });
+    setListRefresh((value) => value + 1);
+    return true;
+  }, [state, updateReady]);
 
   const refreshPage = useCallback(async () => {
     // Runs for a page with no chat started yet (phase "empty") as well as a ready chat, so a
@@ -588,5 +623,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, settleApprovalMode, recordLastState, rename };
 }

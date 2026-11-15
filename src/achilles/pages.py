@@ -141,6 +141,40 @@ UPDATE_LAYOUT_SCHEMA = {
     "required": ["layout", "expected_version"],
     "additionalProperties": False,
 }
+_VERSION_NUMBER = {"type": "integer", "minimum": 1}
+RESTORE_VERSION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {"enum": ["layout", "tool"]},
+        "name": {"type": "string", "description": "The tool name; required when kind is tool."},
+        "version": {
+            **_VERSION_NUMBER,
+            "description": (
+                "The version to restore: a layout_versions entry or an earlier tool version "
+                "from achilles__inspect_page."
+            ),
+        },
+        "expected_version": {
+            **_VERSION_NUMBER,
+            "description": (
+                "The current version from achilles__inspect_page: layout_version for a layout, "
+                "the tool's version for a tool. On a conflict, inspect again and retry."
+            ),
+        },
+        "route": {
+            "type": "string",
+            "description": "Optional; must be this page's route.",
+        },
+    },
+    "required": ["kind", "version", "expected_version"],
+    "additionalProperties": False,
+}
+_RESTORE_ARGS_SCHEMA = {
+    "type": "object",
+    "properties": {"version": _VERSION_NUMBER, "expected_version": _VERSION_NUMBER},
+    "required": ["version", "expected_version"],
+}
+LAYOUT_HISTORY_LIMIT = 20
 INSPECT_MAX_BYTES = 8 * 1024
 DETAIL_SUGGESTION_RECORD_LIMIT = 200
 
@@ -173,6 +207,7 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
         "detail_filter_matches": list(value["detail_filter_matches"]),
         "tools": list(value["tools"]),
         "collections": dict(value["collections"]),
+        "layout_versions": list(value["layout_versions"]),
     }
 
     def serialize() -> str:
@@ -184,7 +219,14 @@ def bounded_inspect(value: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
     result["truncated"] = True
     result["omitted"] = {}
-    for key in ("metric_values", "detail_filter_matches", "tools", "collections", "title"):
+    for key in (
+        "layout_versions",
+        "metric_values",
+        "detail_filter_matches",
+        "tools",
+        "collections",
+        "title",
+    ):
         omitted = result.pop(key)
         result["omitted"][key] = len(omitted) if not isinstance(omitted, str) else 1
         encoded = serialize()
@@ -505,6 +547,7 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -660,6 +703,7 @@ class PageStore:
         detail_filter_matches: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         collections: dict[str, int],
+        layout_versions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         version, digest, document = active
         return {
@@ -681,6 +725,7 @@ class PageStore:
                 for tool in tools
             ],
             "collections": collections,
+            "layout_versions": layout_versions,
         }
 
     @staticmethod
@@ -736,6 +781,19 @@ class PageStore:
         detail_filter_matches = self._detail_filter_matches(
             db, page_id, document, _collection_fields(tools)
         )
+        history = db.execute(
+            "SELECT version, created_at, document FROM layout_version WHERE page_id=? "
+            "ORDER BY version DESC LIMIT ?",
+            (page_id, LAYOUT_HISTORY_LIMIT),
+        ).fetchall()
+        layout_versions = [
+            {
+                "version": row[0],
+                "created_at": row[1],
+                "block_types": [block["type"] for block in json.loads(row[2])["blocks"]],
+            }
+            for row in history
+        ]
         return self._inspect_projection(
             row,
             (version, digest, document),
@@ -743,6 +801,7 @@ class PageStore:
             detail_filter_matches,
             tools,
             {collection: count for collection, count in counts},
+            layout_versions,
         )
 
     def inspect_page(self, page_id: str) -> dict[str, Any]:
@@ -857,12 +916,12 @@ class PageStore:
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = db.execute(
                 "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
-                "c.title,c.created_at,c.updated_at,c.last_state FROM chat c "
+                "c.title,c.created_at,c.updated_at,c.last_state,c.titled_by_user FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
                 (*parameters, limit + 1),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [{**dict(row), "titled_by_user": bool(row["titled_by_user"])} for row in rows]
 
     def approval_count(self) -> int:
         with self._connect() as db:
@@ -891,16 +950,23 @@ class PageStore:
     def chat(self, session_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
-                "SELECT session_id,page_id,title,created_at,updated_at,last_state "
+                "SELECT session_id,page_id,title,created_at,updated_at,last_state,titled_by_user "
                 "FROM chat WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if row is None:
             raise KeyError(session_id)
-        return dict(row)
+        return {**dict(row), "titled_by_user": bool(row["titled_by_user"])}
 
-    def update_chat(self, session_id: str, changes: dict[str, str | None]) -> dict[str, Any]:
-        assignments = [f"{key}=?" for key in changes]
+    def update_chat(self, session_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        # a title-only write is an automatic name; it never replaces a title the user chose
+        keep_user_title = "title" in changes and "titled_by_user" not in changes
+        assignments = [
+            "title=CASE WHEN titled_by_user THEN title ELSE ? END"
+            if key == "title" and keep_user_title
+            else f"{key}=?"
+            for key in changes
+        ]
         with self.transaction() as db:
             updated = db.execute(
                 f"UPDATE chat SET {','.join(assignments)},updated_at=? WHERE session_id=?",
@@ -1013,6 +1079,7 @@ class PageStore:
                             for bundle in sorted(bundles, key=lambda item: item["name"])
                         ],
                         {},
+                        [],
                     )
                 )
                 hook = getattr(self, "before_create_commit", None)
@@ -1117,6 +1184,32 @@ class PageStore:
         validate_schema(
             {"layout": layout, "expected_version": expected_version}, UPDATE_LAYOUT_SCHEMA
         )
+        return self._append_layout(page_id, layout, expected_version, "update_layout")
+
+    def restore_layout(
+        self, page_id: str, version: Any, expected_version: Any
+    ) -> tuple[int, str, list[dict[str, Any]]]:
+        """Append a copy of an old layout version; history is never rewritten."""
+        validate_schema(
+            {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
+        )
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT document FROM layout_version WHERE page_id=? AND version=?",
+                (page_id, version),
+            ).fetchone()
+        if row is None:
+            raise ValidationError(
+                "/version",
+                "an existing layout version",
+                "not_found",
+                "Call inspect_page and pick a version from layout_versions.",
+            )
+        return self._append_layout(page_id, json.loads(row[0]), expected_version, "restore_layout")
+
+    def _append_layout(
+        self, page_id: str, layout: dict[str, Any], expected_version: int, action: str
+    ) -> tuple[int, str, list[dict[str, Any]]]:
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         with self.transaction() as db:
@@ -1167,7 +1260,7 @@ class PageStore:
             )
             db.execute(
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
-                (page_id, "update_layout", digest, stamp),
+                (page_id, action, digest, stamp),
             )
         return version, digest, detail_summary
 
@@ -1228,21 +1321,45 @@ class PageStore:
         with self._connect() as db:
             return self._page_tools(db, page_id)
 
-    def rollback_tool(self, page_id: str, name: str, version: int) -> None:
+    def rollback_tool(
+        self, page_id: str, name: str, version: Any, expected_version: Any
+    ) -> dict[str, Any]:
+        """Make an earlier tool version active if the active one is still expected_version."""
+        validate_schema(
+            {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
+        )
         with self.transaction() as db:
             row = db.execute(
-                """SELECT pt.tool_id FROM page_tool pt JOIN tool t ON t.id=pt.tool_id
-                WHERE pt.page_id=? AND t.name=? AND EXISTS (
-                  SELECT 1 FROM tool_version v WHERE v.tool_id=pt.tool_id AND v.version=?
-                )""",
-                (page_id, name, version),
+                """SELECT pt.tool_id, pt.active_version, v.digest FROM page_tool pt
+                JOIN tool t ON t.id=pt.tool_id
+                JOIN tool_version v ON v.tool_id=pt.tool_id AND v.version=?
+                WHERE pt.page_id=? AND t.name=?""",
+                (version, page_id, name),
             ).fetchone()
             if row is None:
-                raise ValueError("unknown tool version")
+                raise ValidationError(
+                    "/version",
+                    "an existing version of a tool on this page",
+                    "not_found",
+                    "Call inspect_page and pick a tool name and an earlier version.",
+                )
+            if row["active_version"] != expected_version:
+                raise ValidationError(
+                    "/expected_version",
+                    "current active tool version",
+                    "conflict",
+                    "Call inspect_page, set expected_version to the tool's version, and retry.",
+                )
+            stamp = now()
             db.execute(
                 "UPDATE page_tool SET active_version=? WHERE page_id=? AND tool_id=?",
-                (version, page_id, row[0]),
+                (version, page_id, row["tool_id"]),
             )
+            db.execute(
+                "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
+                (page_id, "restore_tool", row["digest"], stamp),
+            )
+        return {"name": name, "version": version}
 
     def tool_bundle(self, page_id: str, name: str) -> dict[str, Any] | None:
         with self._connect() as db:
