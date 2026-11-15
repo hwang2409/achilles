@@ -9,6 +9,7 @@ import { createGateWait } from "./gate-diagnostics";
 import { formFields } from "../apps/web/src/page/formSchema";
 import { loadBaseReport, makeReport, reportJson, reportMarkdown, type BaseReport } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
+import { createBrowserDriver, type BrowserDriver } from "./eval-browser";
 
 export { startEvalStack, TOOL_POLICY } from "./eval-stack";
 export { assertTurnBudget, reserveTurns, REQUIRED_FEATURES, connectEvalProtocol, enforceTurnBudget } from "./eval-protocol";
@@ -76,7 +77,7 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
 
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;
 async function preflightBrowser(tasks: EvalTask[]) {
-  if (!tasks.some(task => task.checks.some(check => ["browser_text", "form_submit"].includes(check.type)))) return;
+  if (!tasks.some(task => task.checks.some(check => ["browser_text", "form_submit"].includes(check.type)) || task.steps.some(step => step.kind === "browser_prompt"))) return;
   try { const { chromium } = await import(playwrightModule()); const browser = await chromium.launch({ headless: true }); await browser.close(); }
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
@@ -169,6 +170,11 @@ export async function preparePage(stack: EvalStack, task: EvalTask, signal: Abor
   for (const page of task.page_plan.filter(page => page.source !== "created")) if (page.route) await setCreateMode(stack, pages.get(page.alias)!, page, signal);
   if (plan) await setCreateMode(stack, "home", plan, signal);
   return pages;
+}
+// the observer token from the private zeta serve's own connection file; never logged
+async function observerToken(stack: EvalStack, hidden: string[]) {
+  const row = JSON.parse(await readFile(join(stack.root, "zeta-home/run/serve.ws.json"), "utf8")) as { observer_token?: string };
+  if (!row.observer_token) throw new Error("zeta serve offers no observer token"); hidden.push(row.observer_token, `zeta.bearer.${row.observer_token}`); return row.observer_token;
 }
 async function pageBinding(stack: EvalStack, pageId: string, hidden: string[], signal: AbortSignal) {
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}`, {}, signal); if (!response.ok) throw new Error(`page ${pageId} is unavailable`);
@@ -426,20 +432,29 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
-  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
+  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
-  const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
+  // a browser task: the real page is zeta's controller and the harness watches as an observer
+  let browser: BrowserDriver | undefined;
+  if (task.steps.some(step => step.kind === "browser_prompt")) {
+    const { chromium } = await import(playwrightModule()); const ask = task.approval_mode === "ask";
+    browser = createBrowserDriver({ chromium, origin: stack.achillesOrigin, ask, signal, observer: () => protocol, failure: () => fatal });
+  }
+  const approvals: Record<string, unknown>[] = []; const abortAll = async () => { browser?.wake(); if (browser) return browser.stop(); await Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined))); };
   const onEvent = (event: Record<string, any>) => {
-    events.push(event);
+    events.push(event); browser?.onEvent(event);
     const eventFailure = new Error(JSON.stringify(event)); if (!fatal && stopsSuite(eventFailure)) { fatal = eventFailure; void abortAll(); return; }
     if (event.event === "turn_start" && ++turns > task.agent_turns && !fatal) { fatal = new TurnCapFailure("task model turn limit exceeded"); void abortAll(); }
     if (event.event !== "approval_request") return;
     const session = [...sessions.entries()].find(([, value]) => value.id === event.session_id); const requestId = event.data?.request_id ?? event.request_id;
+    // zeta announces a still-pending request again when a controller attaches (a reload); it is one request
+    if (requestId && approvals.some(row => row.request_id === requestId)) return;
     if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
-    const request = event.data ?? event; const decision = approvalDecision(approvalRule, request.tool_call?.name, () => ruleRequests++); approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision }); void protocol.decide(session[1].id, String(requestId), decision).catch(error => { fatal = error; });
+    const request = event.data ?? event; const decision = approvalDecision(approvalRule, request.tool_call?.name, () => ruleRequests++); approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision });
+    if (browser) browser.decide(session[1].id, String(requestId), decision); else void protocol.decide(session[1].id, String(requestId), decision).catch(error => { fatal = error; });
   };
-  protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const started = Date.now();
+  protocol = await connectEvalProtocol(browser ? { url: discovery.url, controller_token: await observerToken(stack, hidden) } : discovery, onEvent, { retryCapacity: true, signal, role: browser ? "observer" : "controller" }); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
     if (sessions.has(chat)) return sessions.get(chat)!; const plan = task.page_plan.find(page => page.alias === alias)!;
     let pageId = plan.source === "created" ? undefined : pages.get(alias)!;
@@ -454,8 +469,13 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   try {
     for (const step of task.steps) {
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect" && step.kind !== "user_write") throw new TurnCapFailure("task model turn limit has no remaining turn");
-      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
+      if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding!); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       if (step.kind === "user_write") { const write = await userWrite(stack, step, pages.get(step.page), hidden, signal); userWrites.push(write); if (!write.ok || write.revision_after !== Number(write.revision_before) + 1) throw new Error(`user write ${step.id} failed (${write.status})`); continue; }
+      if (browser && step.kind === "browser_prompt") {
+        const pageId = pages.get(step.page)!; const route = String(initial.pages?.find(page => page.id === pageId)?.route ?? "/"); approvalRule = step.approval; ruleRequests = 0;
+        const turn = await browser.prompt(step, pageId, route, id => sessions.set(step.chat, { id, alias: step.page, page_id: pageId }));
+        terminals.set(turn.sessionId, turn.history.filter((row: any) => row.event === "served_turn_end").length); const answer = finalAnswer(turn.history, turn.history.filter((row: any) => row.event === "served_turn_end").length - 1); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, turn.history); await turn.check(answer); continue;
+      }
       const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
@@ -465,9 +485,9 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
-    await protocol.close(signal);
+    await browser?.close(); await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -475,8 +495,8 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }
-    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, user_writes: userWrites, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
-  } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
+    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], user_writes: userWrites, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
+  } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await browser?.close(); await protocol.close(); }
 }
 
 export function validateCatalog(names: string[], required?: string) {

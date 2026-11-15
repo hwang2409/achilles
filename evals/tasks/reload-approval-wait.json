@@ -1,0 +1,113 @@
+{
+  "id": "reload-approval-wait",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "tickets",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 10,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "close",
+      "kind": "browser_prompt",
+      "page": "tickets",
+      "chat": "tickets-chat",
+      "prompt": "set status to closed on the tickets Export drops last row and Payment webhook retries. leave the other tickets as they are.",
+      "reload": {
+        "on": "approval_request",
+        "tool": "achilles__update_ticket",
+        "nth": 1
+      }
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_tickets",
+        "operation": "list",
+        "collection": "tickets"
+      },
+      {
+        "name": "update_ticket",
+        "operation": "update",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "id": "t-1",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-2",
+        "collection": "tickets",
+        "data": {
+          "title": "Export drops last row",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-3",
+        "collection": "tickets",
+        "data": {
+          "title": "Dark mode contrast",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-4",
+        "collection": "tickets",
+        "data": {
+          "title": "Payment webhook retries",
+          "status": "open"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "reload",
+      "type": "reload",
+      "page": "tickets",
+      "step": "close"
+    },
+    {
+      "id": "approvals",
+      "type": "approval",
+      "page": "tickets",
+      "tool": "achilles__update_ticket",
+      "count": 2
+    },
+    {
+      "id": "outcomes",
+      "type": "approval_outcomes",
+      "page": "tickets",
+      "tool": "achilles__update_ticket",
+      "collection": "tickets",
+      "value": {
+        "records": [
+          "t-2",
+          "t-4"
+        ],
+        "set": {
+          "status": "closed"
+        }
+      }
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "tickets",
+      "tool": "achilles__update_ticket"
+    }
+  ]
+}

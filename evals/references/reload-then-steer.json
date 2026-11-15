@@ -1,0 +1,525 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "calls": [
+      {
+        "id": "c0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c3",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c5",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "c0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test",
+          "record_id": "r0",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test",
+          "record_id": "r1",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test",
+          "record_id": "r2",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c3",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test",
+          "record_id": "r3",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test",
+          "record_id": "r4",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c5",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test",
+          "record_id": "r5",
+          "revision": 1
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r0",
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r1",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r2",
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r3",
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r4",
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r5",
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "write",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [],
+    "errors": [],
+    "tools": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_contact",
+          "operation": "insert",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "name": "list_contacts",
+          "operation": "list",
+          "collection": "contacts"
+        }
+      ],
+      "records": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "calls": [
+      {
+        "id": "c0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c3",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "c5",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "cx",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "c0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test",
+          "record_id": "r0",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test",
+          "record_id": "r1",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test",
+          "record_id": "r2",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c3",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test",
+          "record_id": "r3",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test",
+          "record_id": "r4",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "c5",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test",
+          "record_id": "r5",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "cx",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test",
+          "record_id": "rx",
+          "revision": 1
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r0",
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r1",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r2",
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r3",
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r4",
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r5",
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "rx",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "write",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [],
+    "errors": [],
+    "tools": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_contact",
+          "operation": "insert",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "name": "list_contacts",
+          "operation": "list",
+          "collection": "contacts"
+        }
+      ],
+      "records": []
+    }
+  }
+}

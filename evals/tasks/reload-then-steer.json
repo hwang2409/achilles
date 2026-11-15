@@ -1,0 +1,97 @@
+{
+  "id": "reload-then-steer",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "contacts",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "steps": [
+    {
+      "id": "write",
+      "kind": "browser_prompt",
+      "page": "contacts",
+      "chat": "contacts-chat",
+      "prompt": "add these 5 contacts with add_contact, one call per contact, using the fields name and email: Ada Lovelace (ada@example.test), Grace Hopper (grace@example.test), Alan Turing (alan@example.test), Katherine Johnson (katherine@example.test), Edsger Dijkstra (edsger@example.test).",
+      "reload": {
+        "on": "tool_start",
+        "tool": "achilles__add_contact",
+        "nth": 1
+      },
+      "follow_up": "also add a sixth contact the same way: Barbara Liskov (barbara@example.test)"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts"
+      },
+      {
+        "name": "list_contacts",
+        "operation": "list",
+        "collection": "contacts"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "reload",
+      "type": "reload",
+      "page": "contacts",
+      "step": "write"
+    },
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "contacts",
+      "value": [
+        {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        },
+        {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        },
+        {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      ]
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "contacts",
+      "tool": "achilles__add_contact",
+      "collection": "contacts",
+      "fields": [
+        "email"
+      ]
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "contacts"
+    }
+  ]
+}

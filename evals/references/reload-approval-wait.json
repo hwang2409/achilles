@@ -1,0 +1,435 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tickets"
+      }
+    ],
+    "calls": [
+      {
+        "id": "l",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_tickets",
+        "arguments": {},
+        "success": true
+      },
+      {
+        "id": "u2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "arguments": {
+          "record_id": "t-2",
+          "revision": 1,
+          "status": "closed"
+        },
+        "success": true
+      },
+      {
+        "id": "u4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "arguments": {
+          "record_id": "t-4",
+          "revision": 1,
+          "status": "closed"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "l",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_tickets",
+        "success": true,
+        "data": []
+      },
+      {
+        "call_id": "u2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-2",
+          "revision": 2,
+          "title": "Export drops last row",
+          "status": "closed"
+        }
+      },
+      {
+        "call_id": "u4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-4",
+          "revision": 2,
+          "title": "Payment webhook retries",
+          "status": "closed"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-1",
+        "data": {
+          "title": "Login page times out",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-2",
+        "data": {
+          "title": "Export drops last row",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-3",
+        "data": {
+          "title": "Dark mode contrast",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-4",
+        "data": {
+          "title": "Payment webhook retries",
+          "status": "closed"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "close",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "u2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      }
+    ],
+    "errors": [],
+    "tools": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_tickets",
+          "operation": "list",
+          "collection": "tickets"
+        },
+        {
+          "page_id": "home",
+          "name": "update_ticket",
+          "operation": "update",
+          "collection": "tickets"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-1",
+          "collection": "tickets",
+          "data": {
+            "title": "Login page times out",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-2",
+          "collection": "tickets",
+          "data": {
+            "title": "Export drops last row",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-3",
+          "collection": "tickets",
+          "data": {
+            "title": "Dark mode contrast",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-4",
+          "collection": "tickets",
+          "data": {
+            "title": "Payment webhook retries",
+            "status": "open"
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tickets"
+      }
+    ],
+    "calls": [
+      {
+        "id": "l",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_tickets",
+        "arguments": {},
+        "success": true
+      },
+      {
+        "id": "u2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "arguments": {
+          "record_id": "t-2",
+          "revision": 1,
+          "status": "closed"
+        },
+        "success": true
+      },
+      {
+        "id": "u4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "arguments": {
+          "record_id": "t-4",
+          "revision": 1,
+          "status": "closed"
+        },
+        "success": true
+      },
+      {
+        "id": "u2b",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "arguments": {
+          "record_id": "t-2",
+          "revision": 2,
+          "status": "closed"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "l",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_tickets",
+        "success": true,
+        "data": []
+      },
+      {
+        "call_id": "u2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-2",
+          "revision": 2,
+          "title": "Export drops last row",
+          "status": "closed"
+        }
+      },
+      {
+        "call_id": "u4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-4",
+          "revision": 2,
+          "title": "Payment webhook retries",
+          "status": "closed"
+        }
+      },
+      {
+        "call_id": "u2b",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-2",
+          "revision": 3,
+          "status": "closed"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-1",
+        "data": {
+          "title": "Login page times out",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-2",
+        "data": {
+          "title": "Export drops last row",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-3",
+        "data": {
+          "title": "Dark mode contrast",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tickets",
+        "id": "t-4",
+        "data": {
+          "title": "Payment webhook retries",
+          "status": "closed"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "close",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "u2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u4",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u2b",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      }
+    ],
+    "errors": [],
+    "tools": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "list_tickets",
+          "operation": "list",
+          "collection": "tickets"
+        },
+        {
+          "page_id": "home",
+          "name": "update_ticket",
+          "operation": "update",
+          "collection": "tickets"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-1",
+          "collection": "tickets",
+          "data": {
+            "title": "Login page times out",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-2",
+          "collection": "tickets",
+          "data": {
+            "title": "Export drops last row",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-3",
+          "collection": "tickets",
+          "data": {
+            "title": "Dark mode contrast",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-4",
+          "collection": "tickets",
+          "data": {
+            "title": "Payment webhook retries",
+            "status": "open"
+          }
+        }
+      ]
+    }
+  }
+}
