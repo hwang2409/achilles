@@ -246,11 +246,11 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
   const commands: PaletteEntry[] = [
-    ...loading ? [] : [{ id: "new-chat", label: "new chat", detail: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
-    ...loading || !page ? [] : [{ id: "create-mode", label: "toggle create mode", detail: modKey("."), run: () => void onToggleCreateMode() }],
-    { id: "settings", label: "settings", detail: modKey(","), run: () => openSettings(paletteOpener.current) },
+    ...loading ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
+    ...loading || !page ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
+    { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
     { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
-    { id: "shortcuts", label: "keyboard shortcuts", detail: "?", run: () => openShortcuts(paletteOpener.current) },
+    { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
   ];
   // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.
   const pageEntries = pageRows.map((item): PaletteEntry => ({ id: `page:${item.id}`, label: item.title, detail: item.route, run: () => location.assign(pageHref(item.route)) }));
@@ -347,9 +347,13 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRe
   // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
+  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
   if (rename.editing) {
+    // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
+      <strong aria-hidden="true">{titleOf(chat)}</strong>
       <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind()} />
+      {meta}
     </div>;
   }
   // F2 or the pencil both start a rename the same way, so focus returns to the row either way (onRenameStart marks it)
@@ -361,7 +365,7 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRe
   };
   return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
-    <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>
+    {meta}
     <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>
   </a>;
 }

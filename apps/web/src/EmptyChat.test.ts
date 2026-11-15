@@ -3,9 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { EmptyChat } from "./EmptyChat";
+import { EmptyChat, toolStarterText } from "./EmptyChat";
 import { draftStore } from "./draftStore";
 import type { Page } from "./useActiveChat";
+import type { PageTool } from "./page/usePageTools";
 
 const originalFetch = globalThis.fetch;
 
@@ -56,6 +57,23 @@ async function renderEmptyChat(props: {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return result;
 }
+
+function tool(description: string): PageTool {
+  return { name: "add_thing", description, operation: "create", collection: "things", input_schema: {}, version: 1 };
+}
+
+const textRows: [string, string, string][] = [
+  ["multi-sentence: cuts at the first '. ', trailing period dropped", "Add a book to the list. It also validates ISBN.", "Add a book to the list"],
+  ["newline: cuts at the first newline", "Add a book\nvalidates isbn", "Add a book"],
+  ["2000-char run-on with no sentence end: hard-capped at 80 chars, at a word boundary", "word ".repeat(400).trim(), "word word word word word word word word word word word word word word word word"],
+  ["blank (whitespace/punctuation only): falls back to the tool name", "   .  ", "use add_thing"],
+];
+
+test.each(textRows)("toolStarterText: %s", (_name, description, expected) => {
+  const text = toolStarterText(tool(description));
+  expect(text).toBe(expected);
+  expect(text.length).toBeLessThanOrEqual(80);
+});
 
 describe("EmptyChat starters", () => {
   test("keeps the starter's text as the composer draft when the toggle is already blocked and send rejects", async () => {
