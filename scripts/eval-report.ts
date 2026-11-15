@@ -100,19 +100,24 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport): string {
 }
 
 // BASE: a saved report folder from an earlier run; its report.json is outside input, so check the fields the diff reads.
-export type BaseReport = { name: string; run_id: string; tasks: Array<{ task_id: string; pass: boolean; turns: number; status?: string; usage?: unknown }> };
+export type BaseReport = { name: string; run_id: string; tasks: Array<{ task_id: string; pass: boolean; turns: number; status?: string; usage?: unknown }>; achilles_sha?: string; zeta_sha?: string };
 export function parseBaseReport(text: string, name: string): BaseReport {
   const fail = (why: string): never => { throw new Error(`BASE ${name}: ${why}`); };
   let data: unknown;
   try { data = JSON.parse(text); } catch (error) { fail(`report.json is not valid json (${(error as Error).message})`); }
-  const report = data as { run_id?: unknown; tasks?: unknown };
+  const report = data as { run_id?: unknown; tasks?: unknown; agent?: unknown };
   if (!report || typeof report !== "object" || !Array.isArray(report.tasks)) fail("report.json has no tasks list");
   const tasks = (report.tasks as unknown[]).map((task, index) => {
     const row = task as { task_id?: unknown; pass?: unknown; turns?: unknown; status?: unknown };
     if (!row || typeof row !== "object" || typeof row.task_id !== "string" || typeof row.pass !== "boolean" || typeof row.turns !== "number") fail(`task ${index} needs task_id, pass, and turns`);
     return task as BaseReport["tasks"][number];
   });
-  return { name, run_id: typeof report.run_id === "string" ? report.run_id : "unknown", tasks };
+  const agent = report.agent as { achilles_sha?: unknown; zeta_sha?: unknown } | undefined;
+  return {
+    name, run_id: typeof report.run_id === "string" ? report.run_id : "unknown", tasks,
+    achilles_sha: typeof agent?.achilles_sha === "string" ? agent.achilles_sha : undefined,
+    zeta_sha: typeof agent?.zeta_sha === "string" ? agent.zeta_sha : undefined,
+  };
 }
 export async function loadBaseReport(dir: string): Promise<BaseReport> {
   const name = basename(dir);
@@ -135,19 +140,29 @@ function summarize(tasks: BaseReport["tasks"]) {
     return [id, { passes: value.passes, total: value.total, rate: value.pass_rate, turns: value.median_turns, tokens: tokens.every(token => token !== undefined) ? median(tokens as number[]) : undefined }];
   }));
 }
-export function diffMarkdown(base: BaseReport, report: Pick<EvalReport, "tasks">): string {
+export function diffMarkdown(base: BaseReport, report: Pick<EvalReport, "tasks"> & { agent?: Partial<EvalReport["agent"]> }): string {
   const before = summarize(base.tasks); const after = summarize(report.tasks);
   const ids = (tasks: BaseReport["tasks"]) => new Set(tasks.map(task => task.task_id));
   const baseIds = ids(base.tasks); const runIds = ids(report.tasks);
   const shared = [...after.keys()].filter(id => before.has(id)).sort();
   const rate = (value: { passes: number; total: number }) => `${value.passes}/${value.total}`;
-  const lines = [`# changes since ${base.name} (run ${base.run_id})`, ""];
+  const lines = [`# changes since ${base.name} (run ${base.run_id})`];
+  if (base.achilles_sha !== undefined || base.zeta_sha !== undefined) {
+    lines.push(`base revisions: achilles ${base.achilles_sha ?? "unknown"}, zeta ${base.zeta_sha ?? "unknown"}`);
+    const changed = ["achilles", "zeta"].filter(name => {
+      const baseSha = name === "achilles" ? base.achilles_sha : base.zeta_sha;
+      const runSha = name === "achilles" ? report.agent?.achilles_sha : report.agent?.zeta_sha;
+      return baseSha !== undefined && runSha !== undefined && baseSha !== runSha;
+    });
+    if (changed.length) lines.push(`this run uses a different ${changed.join(" and ")} revision than the base`);
+  }
+  lines.push("");
   const section = (title: string, rows: string[]) => lines.push(`## ${title}`, "", ...(rows.length ? rows : ["none"]), "");
   section("pass -> fail (pass rate fell)", shared.filter(id => after.get(id)!.rate < before.get(id)!.rate).map(id => `- ${id}: ${rate(before.get(id)!)} -> ${rate(after.get(id)!)}`));
   section("fail -> pass (pass rate rose)", shared.filter(id => after.get(id)!.rate > before.get(id)!.rate).map(id => `- ${id}: ${rate(before.get(id)!)} -> ${rate(after.get(id)!)}`));
   const deltas = shared.flatMap(id => {
     const a = before.get(id)!; const b = after.get(id)!; const parts: string[] = [];
-    const change = (label: string, from: number, to: number) => { const delta = percent(from, to); if (Math.abs(delta) > 0.25) parts.push(`${label} ${from} -> ${to} (${delta === Infinity ? "new" : `${delta > 0 ? "+" : ""}${Math.round(delta * 100)}%`})`); };
+    const change = (label: string, from: number, to: number) => { const delta = percent(from, to); if (Math.abs(delta) > 0.25) parts.push(`${label} ${from} -> ${to} (${delta === Infinity ? "from 0" : `${delta > 0 ? "+" : ""}${Math.round(delta * 100)}%`})`); };
     change("median turns", a.turns, b.turns);
     if (a.tokens !== undefined && b.tokens !== undefined) change("median tokens", a.tokens, b.tokens);
     return parts.length ? [`- ${id}: ${parts.join("; ")}`] : [];

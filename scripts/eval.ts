@@ -1,4 +1,5 @@
 import { cp, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
@@ -453,7 +454,7 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const base = Bun.env.BASE ? await loadBaseReport(resolve(Bun.env.BASE)) : undefined; const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const expandHome = (path: string) => path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path; const base = Bun.env.BASE ? await loadBaseReport(resolve(expandHome(Bun.env.BASE))) : undefined; const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {

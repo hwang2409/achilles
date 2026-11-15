@@ -71,6 +71,22 @@ test("diff aggregates repeats by pass rate and skips harness errors", () => {
   expect(diff).toContain("- b: no comparable runs in one side");
 });
 
+test("zero base median prints 'from 0' instead of 'new'", () => {
+  const diff = diffMarkdown(base([row("z", false, 0)]), { tasks: [row("z", false, 4)] } as never);
+  expect(diff).toContain("- z: median turns 0 -> 4 (from 0)");
+});
+
+test("header shows base achilles/zeta revisions when present, and flags a changed revision", () => {
+  const baseWithShas = parseBaseReport(JSON.stringify({ run_id: "old", agent: { achilles_sha: "aaa111", zeta_sha: "bbb222" }, tasks: [row("a", true)] }), "old-report");
+  const sameShas = diffMarkdown(baseWithShas, { tasks: [row("a", true)], agent: { achilles_sha: "aaa111", zeta_sha: "bbb222" } } as never);
+  expect(sameShas).toContain("base revisions: achilles aaa111, zeta bbb222");
+  expect(sameShas).not.toContain("this run uses a different");
+  const changedShas = diffMarkdown(baseWithShas, { tasks: [row("a", true)], agent: { achilles_sha: "ccc333", zeta_sha: "bbb222" } } as never);
+  expect(changedShas).toContain("this run uses a different achilles revision than the base");
+  const noShas = diffMarkdown(base([row("a", true)]), { tasks: [row("a", true)] } as never);
+  expect(noShas).not.toContain("base revisions:");
+});
+
 test("malformed base gives a clear error", async () => {
   expect(() => parseBaseReport("{", "x")).toThrow("BASE x: report.json is not valid json");
   expect(() => parseBaseReport("[]", "x")).toThrow("BASE x: report.json has no tasks list");
