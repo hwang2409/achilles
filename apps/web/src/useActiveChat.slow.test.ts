@@ -81,7 +81,7 @@ function client(firstResume?: Promise<unknown>) {
         return { session: { name: "new attachment" } };
       }
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      if (method === "session_history") return { messages: [], next_offset: null };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
       throw new Error(`unexpected ${method}`);
     },
@@ -183,7 +183,7 @@ async function refreshFailureHarness(failures: number) {
       if (method === "new_session") { state.created = true; return { session: { session_id: "fresh" } }; }
       if (method === "resume") return { session: { name: null } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      if (method === "session_history") return { messages: [], next_offset: null };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: "fresh" }, state: "idle" };
       if (method === "mcp_refresh_tools") {
         state.refreshes += 1;
@@ -314,7 +314,7 @@ test("a reload during a pending approval re-binds the page tools, so the approve
       }
       if (method === "status") return { session: { session_id: "chat" }, state: "running", pending_approvals: [{ request_id: "c1", tool_call: { id: "t1", name: "achilles__list_pages", arguments: {} }, delegated: false }] };
       if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
-      if (method === "session_history") return { messages: [], next_offset: null };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       throw new Error(`unexpected ${method}`);
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },

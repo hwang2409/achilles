@@ -131,66 +131,49 @@ describe("watchTurnEnd", () => {
 });
 
 describe("loadSession", () => {
-  test("releases an acquired lease when replay finalization fails", async () => {
-    let statusRequests = 0;
-    let releases = 0;
-    const client = {
-      request: async (method: string) => {
-        if (method === "session_history") return { messages: [], next_offset: null };
-        statusRequests += 1;
-        if (statusRequests > 1) throw new Error("status failed after acquire");
-        return { session: { session_id: "s" }, state: "idle" };
-      },
-      replay: async (_id: string, refresh: () => Promise<unknown[]>) => {
-        await refresh();
-        return { store: { resync() {} }, release() { releases += 1; } };
-      },
-      replayRevision: () => 1,
-      finishReplay: () => true,
-    };
-    await expect(loadSession(client as never, "s")).rejects.toThrow("status failed after acquire");
-    expect(releases).toBe(1);
-  });
-
-  test("reconciles a tail event that arrives during refresh", async () => {
-    let revision = 0;
-    let historyRequests = 0;
+  const replayClient = (request: (method: string, params: Record<string, unknown>) => unknown, revision: () => number = () => 0) => {
     const snapshots: unknown[][] = [];
     const client = {
-      request: async (method: string) => {
-        if (method === "status") return { session: { session_id: "s" }, state: "idle" };
-        historyRequests += 1;
-        if (historyRequests === 2) revision += 1;
-        return { messages: historyRequests > 2 ? [{ role: "assistant", content: "later" }] : [], next_offset: null };
-      },
-      replay: async (_id: string, refresh: (signal: AbortSignal) => Promise<unknown[]>) => {
-        revision = 1;
-        await refresh(new AbortController().signal);
-        return { store: { resync: (events: unknown[]) => snapshots.push(events) }, release() {} };
-      },
-      replayRevision: () => revision,
-      finishReplay: (_id: string, expected: number) => expected === revision,
+      request: async (method: string, params: Record<string, unknown>) => request(method, params),
+      replay: async (_id: string, load: () => Promise<unknown[]>) => { snapshots.push(await load()); return { store: {}, release() {} }; },
+      replayRevision: revision,
     };
-    const lease = await loadSession(client as never, "s");
-    expect(historyRequests).toBe(3);
-    expect(snapshots.at(-1)).toBeDefined();
-    expect(lease.store).toBeDefined();
+    return { client: client as never, snapshots };
+  };
+  const joined = (state: string, messages: unknown[] = [], next_before: number | null = null) => ({ messages, next_before, history_validator: { end: 1, entry_id: "e", repair_generation: null }, status: { state, pending_approvals: [] }, replay: { stream_id: "r", history_seq: 0 } });
+
+  test("joins again when an event arrives while older pages load", async () => {
+    let revision = 0;
+    let joins = 0;
+    const { client, snapshots } = replayClient((method) => {
+      if (method === "session_history_and_subscribe") { joins += 1; return joins === 1 ? joined("running", [], 3) : joined("running", [{ id: "a", role: "assistant", content: [{ type: "text", text: "later" }] }]); }
+      if (method === "session_history") { revision += 1; return { messages: [], next_before: null }; }
+      throw new Error(`unexpected ${method}`);
+    }, () => revision);
+    await loadSession(client, "s");
+    expect(joins).toBe(2);
+    expect(JSON.stringify(snapshots.at(-1))).toContain("later");
+  });
+
+  test("joins again after a stale join", async () => {
+    let joins = 0;
+    const { client } = replayClient((method) => {
+      joins += 1;
+      if (joins === 1) throw Object.assign(new Error("stale"), { code: -32009 });
+      return method === "session_history_and_subscribe" ? joined("running") : null;
+    });
+    await loadSession(client, "s");
+    expect(joins).toBe(2);
   });
 
   test("ends the snapshot with the kept turn or with how zeta stopped the last one", async () => {
-    const tail = async (status: object) => {
-      const snapshots: unknown[][] = [];
-      const client = {
-        request: async (method: string) => method === "status" ? status : { messages: [], next_offset: null },
-        replay: async (_id: string, refresh: () => Promise<unknown[]>) => { snapshots.push(await refresh()); return { store: { resync: (events: unknown[]) => snapshots.push(events) }, release() {} }; },
-        replayRevision: () => 1,
-        finishReplay: () => true,
-      };
-      await loadSession(client as never, "s");
+    const tail = async (status: { state: string }) => {
+      const { client, snapshots } = replayClient((method) => method === "status" ? status : joined(status.state));
+      await loadSession(client, "s");
       return snapshots.at(-1);
     };
     const ended = (reason: string, session = "s") => ({ session: { session_id: session }, state: "idle", last_turn_outcome: { turn_id: "t", reason } });
-    expect(await tail({ session: { session_id: "s" }, state: "running" })).toEqual([{ type: "run_start" }, { type: "turn_start" }]);
+    expect(await tail({ session: { session_id: "s" }, state: "running" } as never)).toEqual([{ type: "run_start" }, { type: "turn_start" }]);
     expect(await tail(ended("disconnect"))).toEqual([{ type: "run_end", outcome: "disconnected" }]);
     expect(await tail(ended("user_stop"))).toEqual([{ type: "run_end", outcome: "cancelled" }]);
     expect(await tail(ended("completed"))).toEqual([{ type: "run_end" }]);
