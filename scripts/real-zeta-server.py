@@ -438,7 +438,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ]
         ),
         ScriptedTurn(content=[TextContent("reload book added")]),
-        # a foreground tool still running across a reload: its output so far shows once on the reloaded page
+        # a foreground tool running across a reload: its output so far shows once after it
         ScriptedTurn(
             tool_calls=[
                 ToolCall(
@@ -446,9 +446,9 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                     "bash",
                     {
                         "command": (
-                            "echo tool-line \"before-reload\"; "
+                            'echo tool-line "before-reload"; '
                             f"while [ ! -e {cwd / 'release-reload-tool'} ]; do sleep 0.05; done; "
-                            "echo tool-line \"after-reload\""
+                            'echo tool-line "after-reload"'
                         )
                     },
                 )
@@ -626,7 +626,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
 
     def held_history(original):
         async def handler(client, request_id, params):
-            # the reloaded page's first history read waits until the reply was published without its row
+            # the reloaded page's first history read waits until the reply is published, rowless
             document = json.loads(control.read_text())
             if (
                 document.get("hold_reload_history") == params.get("session_id")
@@ -637,13 +637,19 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
 
         return handler
 
-    for method in (MethodDescriptor.SESSION_HISTORY, MethodDescriptor.SESSION_HISTORY_AND_SUBSCRIBE):
+    for method in (
+        MethodDescriptor.SESSION_HISTORY,
+        MethodDescriptor.SESSION_HISTORY_AND_SUBSCRIBE,
+    ):
         HANDLERS[method] = held_history(HANDLERS[method])
     original_append_reply = AgentLoop._append_turn_message_with_approvals
 
     async def held_append_reply(loop, message, *args, **kwargs):
         # zeta publishes assistant_message before it writes the reply's row: hold that row write
-        if any(isinstance(block, TextContent) and block.text == "reload book added" for block in message.content):
+        if any(
+            isinstance(block, TextContent) and block.text == "reload book added"
+            for block in message.content
+        ):
             await hold(control, "reload_row_barrier")
         return await original_append_reply(loop, message, *args, **kwargs)
 
