@@ -346,7 +346,13 @@ def create_app() -> Starlette:
             return JSONResponse({"error": error_document(error)}, status_code=400)
         try:
             result = await anyio.to_thread.run_sync(
-                call_record, store, page_id, request.path_params["name"], arguments, version
+                call_record,
+                store,
+                page_id,
+                request.path_params["name"],
+                arguments,
+                version,
+                "form",
             )
         except VersionConflict as exc:
             return JSONResponse({"error": error_document(exc)}, status_code=409)

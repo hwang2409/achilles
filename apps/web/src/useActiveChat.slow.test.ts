@@ -284,3 +284,49 @@ test("a page refresh keeps the header create mode while the tool refresh still f
   expect(harness.active.toggleBlocked).toBe(true);
   expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "fresh", page: { create_mode: false } });
 });
+
+test("a reload during a pending approval re-binds the page tools, so the approved page tool runs", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, last_state: "approval" }], next: null });
+      if (url === "/api/chats/chat") return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  // zeta after a reload: the turn waits for approval of a page tool, and the page binding left with the old socket
+  let bound = false;
+  const zeta = {
+    features: ["session_mcp_bindings", "resume_attach"],
+    request: async (method: string, params?: { session_id?: string; mcp_bindings?: unknown[] }) => {
+      if (method === "resume") {
+        if (params?.session_id !== "chat") throw Object.assign(new Error("a turn is already running"), { code: -32004 });
+        bound = Boolean(params.mcp_bindings?.length);
+        return { session: { session_id: "chat", name: null }, attached: "live_turn" };
+      }
+      if (method === "status") return { session: { session_id: "chat" }, state: "running", pending_approvals: [{ request_id: "c1", tool_call: { id: "t1", name: "achilles__list_pages", arguments: {} }, delegated: false }] };
+      if (method === "session_settings") return { model: "offline", approval_mode: "ask" };
+      if (method === "session_history") return { messages: [], next_offset: null };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase !== "loading");
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
+  // the user approves now: zeta runs achilles__list_pages with the page binding, or returns a tool error without it
+  expect(bound ? "tool ran" : "tool error: MCP server achilles is not attached").toBe("tool ran");
+});

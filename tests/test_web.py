@@ -213,6 +213,16 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
             headers=mcp_headers,
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
+        agent = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "update_note", "arguments": {**arguments, "revision": 2}},
+            },
+        ).json()["result"]
         stale_mcp = client.post(
             "/mcp/",
             headers=mcp_headers,
@@ -234,6 +244,13 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
     assert stale_browser.json()["error"] == expected
     assert stale_mcp["isError"] is True
     assert json.loads(stale_mcp["content"][0]["text"]) == expected
+    assert not agent.get("isError")
+    # each write is audited with who made it and which record; conflicts write no audit row.
+    with store.transaction() as db:
+        rows = db.execute(
+            "SELECT actor, record_id FROM audit WHERE action='invoke:update_note' ORDER BY id"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [("form", "note-1"), ("agent", "note-1")]
 
 
 def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_path: Path) -> None:
