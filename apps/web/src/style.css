@@ -64,7 +64,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .sidebar > footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
 .sidebar > footer > button { flex: 1; height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
 .sidebar > footer > button kbd { margin-left: auto; }
-.sidebar > footer > kbd { border: 1px solid var(--fulcrum-border); padding: 8px; }
+.sidebar > footer > .palette-button { flex: 0 0 auto; padding: 0 10px; }
+.sidebar > footer > .palette-button kbd { margin: 0; }
 .sidebar-skeleton { padding: 8px 16px; }
 .search-skeleton { flex: 0 0 40px; margin: 12px 16px 0; border: 1px solid var(--fulcrum-border); background: linear-gradient(90deg, transparent, var(--fulcrum-surface), transparent); }
 .shell-loading .new-chat { color: var(--fulcrum-muted); border-color: var(--fulcrum-border); background: transparent; }
@@ -203,7 +204,7 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
   .sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
   .sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
-  .sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed .sidebar > footer .settings-label, .sidebar-collapsed .sidebar > footer > kbd { display: none; }
+  .sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .chat-list, .sidebar-collapsed .sidebar > footer .settings-label, .sidebar-collapsed .sidebar > footer > .palette-button { display: none; }
   .sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 40px; justify-content: center; margin: 12px 6px 0; padding: 0; }
   .sidebar-collapsed .waiting-count { display: grid; place-items: center; width: 32px; height: 32px; margin: 12px 9px; border: 1px solid var(--fulcrum-warn); }
   .sidebar-collapsed .sidebar > footer { margin-top: auto; padding: 6px; }
