@@ -1,5 +1,6 @@
 {
   "id": "approval-once",
+"suite": "core",
   "page_plan": [
     {
       "alias": "approval",
