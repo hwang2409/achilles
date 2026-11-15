@@ -548,9 +548,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [applyPendingCreateMode, client, publishReady, showBusy]);
 
   const bindPage = useCallback(async (current: ReadyState, token: number) => {
-    if (!client || !current.rebind) return;
+    if (!client || !current.rebind || await runningSession(client) !== null) return; // still running: the next idle render retries
     try { await rebindPage(client, current.sessionId, pageBinding(current.credential, current.page.workspace)); }
-    catch (caught) { if (errorCode(caught) === TURN_RUNNING) return; throw caught; } // still running: the next turn end retries
+    catch (caught) { if (errorCode(caught) === TURN_RUNNING) return; throw caught; }
     updateReady(token, (value) => value.sessionId === current.sessionId ? { ...value, rebind: false } : value);
   }, [client, updateReady]);
 
