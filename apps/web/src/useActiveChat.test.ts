@@ -248,6 +248,38 @@ describe("untitled chat delivery", () => {
 });
 
 describe("active chat attachment", () => {
+  test("a user-set title is not overwritten by a later zeta auto-name", async () => {
+    const originalFetch = globalThis.fetch;
+    let patched = false;
+    globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("chat"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ session_id: "chat", page_id: "home", title: "my custom title", titled_by_user: true }], next: null });
+      if (url === "/api/chats/chat" && init?.method === "PATCH") { patched = true; return new Response(null, { status: 200 }); }
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const client = {
+      features: ["session_mcp_bindings"],
+      request: async (method: string) => {
+        if (method === "resume") return { session: { name: "zeta auto name" } };
+        if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
+        throw new Error(`unexpected ${method}`);
+      },
+      replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { resync() {} }, release() {} }; },
+      replayRevision: () => 1,
+      finishReplay: () => true,
+    };
+    const owner = createAttachmentOwner();
+    try {
+      const ready = await attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
+      expect(ready).toMatchObject({ phase: "ready", title: "my custom title" });
+      expect(patched).toBe(false);
+    } finally { owner.clear(); globalThis.fetch = originalFetch; }
+  });
+
   test("releases an acquired lease when the attachment becomes stale", async () => {
     const originalFetch = globalThis.fetch;
     let releases = 0; let statusRequests = 0; let reached!: () => void; let release!: () => void;

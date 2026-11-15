@@ -415,3 +415,25 @@ test("assigned_tools_only rejects calls to tools the page does not assign", () =
   for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
   expect(gradeCheck(check, { ...base, calls: [{ page_id: "other", tool: "achilles__create_tool" }] }).pass).toBe(true);
 });
+
+test("layout_restore requires a restore_version that appends a copy of v1", () => {
+  const check = { id: "restored", type: "layout_restore" as const, page: "p" };
+  const v1 = { blocks: [{ type: "text", text: "Team tasks" }, { type: "list", title: "All tasks", collection: "tasks" }] };
+  const v2 = { blocks: [{ type: "metric", label: "Tasks", collection: "tasks", count: true }, { type: "list", title: "All tasks", collection: "tasks" }] };
+  const layout = (version: number, document: unknown) => ({ page_id: "p1", version, document });
+  const update = (version: number) => ({ page_id: "p1", tool: "achilles__update_layout", success: true, data: { version } });
+  const restore = (version: number) => ({ page_id: "p1", tool: "achilles__restore_version", success: true, data: { kind: "layout", version, restored_from: 1 } });
+  const grade = (active: number, layouts: unknown[], results: unknown[]) => gradeCheck(check, { pages: [{ id: "p1", alias: "p", active_layout_version: active }], layouts, results } as never);
+  const rows: Array<[string, ReturnType<typeof grade>, boolean]> = [
+    ["restore appends v1 copy", grade(3, [layout(1, v1), layout(2, v2), layout(3, v1)], [update(2), restore(3)]), true],
+    ["hand rebuild with update_layout", grade(3, [layout(1, v1), layout(2, v2), layout(3, v1)], [update(2), update(3)]), false],
+    ["restore then another change", grade(4, [layout(1, v1), layout(2, v2), layout(3, v1), layout(4, v2)], [update(2), restore(3), update(4)]), false],
+    ["restore to the wrong version", grade(3, [layout(1, v1), layout(2, v2), layout(3, v2)], [update(2), restore(3)]), false],
+    ["no change before the undo", grade(2, [layout(1, v1), layout(2, v1)], [restore(2)]), false],
+    ["active pointer moved back instead of appending", grade(1, [layout(1, v1), layout(2, v2)], [update(2), restore(1)]), false],
+    ["history rewritten", grade(3, [layout(1, v1), layout(3, v1)], [update(2), restore(3)]), false],
+    ["restore result names another version", grade(3, [layout(1, v1), layout(2, v2), layout(3, v1)], [update(2), restore(2)]), false],
+    ["superset of v1 is not a copy", grade(3, [layout(1, v1), layout(2, v2), layout(3, { blocks: [...v1.blocks, { type: "text", text: "x" }] })], [update(2), restore(3)]), false],
+  ];
+  for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
+});
