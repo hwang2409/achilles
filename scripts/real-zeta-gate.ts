@@ -354,9 +354,9 @@ try {
         await assertActive("chat load-older button", loadOlder);
         const boundaryChat = await rows.last().getAttribute("data-chat-id");
         if (!boundaryChat) throw new Error("chat pagination boundary is missing its id");
-        const continuation = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await loadOlder.click();
-        await waitForListChange(".chat-list", 50, continuation, "older chats");
+        await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]:not([data-loaded-count="50"])'), "waitFor", { timeout: 20_000 });
+        if (await rows.count() <= 50) throw new Error("load 50 older did not add chat rows");
         const firstNewlyLoaded = page.locator(`[data-chat-id="${boundaryChat}"] + .chat-row`);
         await gateWait.playwright(firstNewlyLoaded, "waitFor", { state: "attached" });
         await assertActive("chat load-older success", firstNewlyLoaded);
@@ -368,18 +368,22 @@ try {
         await reloadShell();
         const search = page.locator(".chat-search input");
         await gateWait.playwright(search, "waitFor");
+        // the server has only the first page now: a before= request gets an empty batch, and a chat-list
+        // reload (which can answer the click instead) gets at most 50 rows and no next cursor.
         const emptyOlder = async (route: Route) => {
           const url = new URL(route.request().url());
-          if (url.searchParams.has("before")) await route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
-          else await route.continue();
+          if (url.searchParams.has("before")) return route.fulfill({ json: { chats: [], next: null, approval_count: 0 } });
+          if (url.searchParams.has("q")) return route.continue();
+          url.searchParams.set("limit", String(Math.min(50, Number(url.searchParams.get("limit") ?? 50))));
+          const response = await route.fetch({ url: url.toString() });
+          // a newer list reload may have cancelled this request already.
+          await route.fulfill({ response, json: { ...(await response.json()), next: null } }).catch(() => {});
         };
         await page.route("**/api/chats?**", emptyOlder);
         const before = Number(await page.locator(".chat-list").getAttribute("data-loaded-count"));
-        const emptyResponse = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("before"));
         await page.getByRole("button", { name: "load 50 older" }).click();
-        await emptyResponse;
-        await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`), "waitFor", { timeout: 20_000 });
         await gateWait.playwright(page.getByRole("button", { name: "load 50 older" }), "waitFor", { state: "detached" });
+        await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"][data-loaded-count="${before}"]`), "waitFor", { timeout: 20_000 });
         await page.unroute("**/api/chats?**", emptyOlder);
         const refreshed = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/chats" && new URL(response.url()).searchParams.has("q"));
         await search.fill("older chat 54");
@@ -537,23 +541,9 @@ try {
       },
     },
   ];
-  // each reload saves the chat state twice, and each save reloads the chat list. a "load 50 older" click
-  // inside the first list reload joins it; the second replaces both with one request that has no
-  // before= cursor (apps/web/src/pageList.ts reload/more). hold the saves so every row clicks a settled list.
-  const heldStateSaves: Route[] = [];
-  const holdStateSave = async (route: Route) => {
-    if (route.request().method() === "PATCH") heldStateSaves.push(route);
-    else await route.fallback();
-  };
-  await page.route("**/api/chats/*", holdStateSave);
-  try {
-    for (const row of focusRows) {
-      await row.run();
-      console.log(`focus after commit: ${row.name}`);
-    }
-  } finally {
-    await page.unroute("**/api/chats/*", holdStateSave);
-    for (const route of heldStateSaves) await route.continue().catch(() => {});
+  for (const row of focusRows) {
+    await row.run();
+    console.log(`focus after commit: ${row.name}`);
   }
   await reloadShell();
   await gateTranscript(page, waitFor, requests, control, gateWait);
