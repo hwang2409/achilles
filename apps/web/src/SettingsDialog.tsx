@@ -11,6 +11,7 @@ import {
   type ThemeChoice,
   type UiFont,
 } from "./settings";
+import { wrapTab } from "./keyboard";
 import "./settings-dialog.css";
 
 const swatches = ["bg", "fg", "accent", "ok", "warn", "danger"];
@@ -86,14 +87,7 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
     aria-labelledby="settings-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}
     onClick={(event) => { if (event.target === dialog.current) onClose(); }}
-    onKeyDown={(event) => {
-      if (event.key !== "Tab") return;
-      const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled):not([tabindex='-1']), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])")];
-      const first = controls[0];
-      const last = controls.at(-1);
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-    }}
+    onKeyDown={(event) => wrapTab(event, event.currentTarget)}
   >
     <div className="settings-panel">
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="settings-title">settings</h2></div><div><span>saved in this browser</span><button type="button" onClick={onClose}>esc</button></div></div>

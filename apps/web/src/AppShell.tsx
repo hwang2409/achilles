@@ -206,7 +206,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   useEffect(() => {
     // capture on window runs before the composer (CodeMirror vim too) sees the key, so it only opens the palette
     const key = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
+      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
       event.preventDefault();
       event.stopPropagation();
       if (paletteOpen) closePalette(); else openPalette();
@@ -216,7 +217,12 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); if (!narrow) setCollapsed((value) => !value); }
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+        event.preventDefault();
+        const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
+        if (paletteOpen) closePalette();
+        openSettings(opener);
+      }
       if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
       if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
       if (isEditableTarget(event)) return;
@@ -224,7 +230,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [loading, narrow, onNewChat, onToggleCreateMode, settingsOpen, shortcutsOpen]);
+  }, [loading, narrow, onNewChat, onToggleCreateMode, settingsOpen, shortcutsOpen, paletteOpen]);
 
   const pageRows = pageList.items ?? [];
   const waitingTotal = Math.max(waiting, chatList.meta);
