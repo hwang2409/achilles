@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { expectationTokens, gradeCheck, gradeReference, gradeTask, structurallyContains, validateTask } from "./eval-grade";
+import { expectationTokens, gradeCheck, gradeReference, gradeTask, mentions, structurallyContains, validateTask } from "./eval-grade";
+import countTaskJson from "../evals/tasks/count-question.json";
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
 import metricTaskJson from "../evals/tasks/reading-metric-count.json";
 import readingListTaskJson from "../evals/tasks/reading-list-one-prompt.json";
@@ -438,4 +439,42 @@ test("layout_restore requires a restore_version that appends a copy of v1", () =
     ["superset of v1 is not a copy", grade(3, [layout(1, v1), layout(2, v2), layout(3, { blocks: [...v1.blocks, { type: "text", text: "x" }] })], [update(2), restore(3)]), false],
   ];
   for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
+});
+
+test("answer_mentions matches any value case-insensitively as a whole token", () => {
+  const rows: Array<[string, string, boolean]> = [
+    ["3 of your 5 books are done", "3", true],
+    ["You have **3** finished books.", "3", true],
+    ["done: 3.", "3", true],
+    ["3/5 are done", "3", true],
+    ["THREE books are done", "three", true],
+    ["Three.", "three", true],
+    ["120 books", "12", false],
+    ["312 books", "12", false],
+    ["12.5 books", "12", false],
+    ["1,120 books", "120", false],
+    ["the 12th book", "12", false],
+    ["v12 shipped", "12", false],
+    ["threefold", "three", false],
+    ["thirty-three books", "three", false],
+    ["5", "3", false],
+  ];
+  for (const [answer, value, expected] of rows) expect(mentions(answer, value), `${JSON.stringify(value)} in ${JSON.stringify(answer)}`).toBe(expected);
+  const task = validateTask(countTaskJson); const check = task.checks.find(item => item.type === "answer_mentions")!;
+  const grade = (answers?: Record<string, string>) => gradeCheck(check, { pages: [{ id: "home", alias: "books" }], answers });
+  expect(grade({ ask: "3 of your 5 books are done" }).pass).toBe(true);
+  expect(grade({ ask: "three are done" }).pass).toBe(true);
+  expect(grade({ ask: "5" }).pass).toBe(false);
+  expect(grade({ ask: "13 are done" }).pass).toBe(false);
+  expect(grade(undefined).reason).toBe("no final answer captured for step ask");
+});
+
+test("answer_mentions only expects facts the seeded records hold, on a real prompt step", () => {
+  const withCheck = (check: Record<string, unknown>) => () => validateTask({ ...countTaskJson, checks: [{ id: "answer", type: "answer_mentions", page: "books", step: "ask", ...check }] });
+  expect(withCheck({ value: ["5", "five", "Dune", "dune"] })).not.toThrow();
+  expect(withCheck({ value: ["4"] })).toThrow("not a seeded record value or count");
+  expect(withCheck({ value: ["four"] })).toThrow("not a seeded record value or count");
+  expect(withCheck({ value: ["Neuromancer"] })).toThrow("not a seeded record value or count");
+  expect(withCheck({ value: ["3"], step: "missing" })).toThrow("names step missing");
+  expect(withCheck({ value: [] })).toThrow("needs a step and non-empty mention values");
 });
