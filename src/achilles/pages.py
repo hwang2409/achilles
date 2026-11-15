@@ -969,7 +969,6 @@ class PageStore:
             ).fetchone()
             if row["page_id"] != page_id:
                 raise ValueError("session belongs to another page")
-            db.execute("UPDATE chat SET updated_at=? WHERE session_id=?", (stamp, session_id))
         return self.chat(session_id)
 
     def chat(self, session_id: str) -> dict[str, Any]:
@@ -995,16 +994,29 @@ class PageStore:
             else f"{key}=?"
             for key in changes
         ]
+        # updated_at is the last message time, so the list order and time follow messages only:
+        # renames, automatic titles and re-reported states (an attach) never move a chat
+        active = changes.get("last_state") in ("running", "approval", "failed")
+        message = "NOT message_sent" if sent else "0"
+        if active:
+            message += " OR last_state IS NOT ?"
+        assignments.append(f"updated_at=CASE WHEN {message} THEN ? ELSE updated_at END")
         if sent:
             # the first send marks the chat sent and keeps the first title; repeats change nothing
             assignments.append("message_sent=1,first_title=COALESCE(first_title,?)")
-        elif changes.get("last_state") in ("running", "approval", "failed"):
+        elif active:
             # a turn ran, so the chat was sent even when the client never recorded its first message
             assignments.append("message_sent=1")
         with self.transaction() as db:
             updated = db.execute(
-                f"UPDATE chat SET {','.join(assignments)},updated_at=? WHERE session_id=?",
-                (*changes.values(), *([first_title] if sent else []), now(), session_id),
+                f"UPDATE chat SET {','.join(assignments)} WHERE session_id=?",
+                (
+                    *changes.values(),
+                    *([changes["last_state"]] if active else []),
+                    now(),
+                    *([first_title] if sent else []),
+                    session_id,
+                ),
             ).rowcount
             if not updated:
                 raise KeyError(session_id)
@@ -1037,8 +1049,7 @@ class PageStore:
                     raise ValueError("session belongs to another page")
                 db.execute(
                     "INSERT INTO chat(session_id,page_id,created_at,updated_at,message_sent) "
-                    "VALUES(?,?,?,?,0) "
-                    "ON CONFLICT(session_id) DO UPDATE SET updated_at=excluded.updated_at",
+                    "VALUES(?,?,?,?,0) ON CONFLICT(session_id) DO NOTHING",
                     (session_id, page_id, stamp, stamp),
                 )
             return updated == 1, row[0]
