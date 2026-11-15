@@ -1,5 +1,6 @@
 {
   "id": "reading-metric-count",
+"suite": "core",
   "page_plan": [
     {
       "alias": "reading",

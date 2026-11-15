@@ -1,5 +1,6 @@
 {
   "id": "second-chat-tools",
+"suite": "focused",
   "page_plan": [
     {
       "alias": "shared",
