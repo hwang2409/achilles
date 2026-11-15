@@ -8,7 +8,7 @@ test("report aggregates pass rate per task and states tools", () => {
   const report = makeReport({ run_id: "run", repeats: 2, agent: { provider: "claude", model: "claude-opus-5-5", tool_policy: "achilles__*,mcp_discover", observed_catalog: ["achilles__list_notes"] }, totals: { turns: 5, wall_ms: 30 }, tasks: rows.map((row) => ({ ...row, approvals: 0, usage, checks: [], host_tools_gap: false })) as never });
   const markdown = reportMarkdown(report);
   expect(markdown).toContain("observed catalog");
-  expect(markdown).toContain("50–100");
+  expect(markdown).toContain("| a | 2 | 1/2 | 50% | 75 | 2.5 | 0 | 0 |");
   expect(markdown).toContain("provider credentials are read from the configured account home");
   expect(markdown).toContain("suite tokens: input 20; output unavailable at this zeta pin; reasoning 8; cache read 6; cache write 4");
   expect(reportJson(report)).toContain('"input_tokens": 20');
@@ -48,6 +48,14 @@ test("unsupported runs are excluded and repeated cap hits request a higher cap",
   ];
   expect(aggregateTaskResults(rows).capped.cap_action).toBe("raise cap");
   expect(aggregateTaskResults(rows).newer).toBeUndefined();
+});
+
+test("per-task table counts harness errors and cap hits over every run", () => {
+  const run = (pass: boolean, status: string, extra = {}) => ({ task_id: "hard", pass, status, score: pass ? 100 : 40, turns: 6, tool_calls: 1, wall_ms: 1, approvals: 0, checks: [], host_tools_gap: false, usage: "unavailable", ...extra });
+  const report = makeReport({ run_id: "run", repeats: 3, agent: { provider: "scripted", model: "offline", tool_policy: "achilles__*", observed_catalog: [] }, tasks: [run(true, "pass"), run(false, "agent_fail", { cap_hit: true }), run(false, "harness_error", { score: 0, turns: 0 }), { ...run(false, "harness_error"), task_id: "broken" }] as never });
+  const markdown = reportMarkdown(report);
+  expect(markdown).toContain("| hard | 3 | 1/2 | 50% | 70 | 6.0 | 1 | 1 |");
+  expect(markdown).toContain("| broken | 1 | 0/0 | n/a | n/a | n/a | 0 | 1 |");
 });
 
 const row = (task_id: string, pass: boolean, turns = 4, input_tokens = 100) => ({ task_id, pass, turns, usage: { input_tokens, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } });

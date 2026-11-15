@@ -8,6 +8,8 @@ import staleRevisionTaskJson from "../evals/tasks/stale-revision-after-form-edit
 import staleRevisionReferences from "../evals/references/stale-revision-after-form-edit.json";
 import deniedTaskJson from "../evals/tasks/denied-write-stops.json";
 import deniedReferences from "../evals/references/denied-write-stops.json";
+import bulkEditTaskJson from "../evals/tasks/bulk-edit-deny-midway.json";
+import bulkEditReferences from "../evals/references/bulk-edit-deny-midway.json";
 import createModeOffTaskJson from "../evals/tasks/create-mode-off-request.json";
 import createModeOffReferences from "../evals/references/create-mode-off-request.json";
 
@@ -525,8 +527,14 @@ test("a denied step accepts only ask-mode prompt steps, and approval max bounds 
   expect(withStep({}, "allow")).toThrow("approval_mode ask");
   const { approval_mode: _, ...noMode } = deniedTaskJson;
   expect(() => validateTask(noMode)).toThrow("approval_mode ask");
-  expect(withStep({ approval: "maybe" })).toThrow("approve or deny");
-  expect(withStep({ kind: "reconnect", prompt: undefined })).toThrow("approve or deny");
+  expect(withStep({ approval: "maybe" })).toThrow("approve, deny, or");
+  expect(withStep({ kind: "reconnect", prompt: undefined })).toThrow("approve, deny, or");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["approve", "deny"] } })).not.toThrow();
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: [] } })).toThrow("{ tool, decisions }");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["skip"] } })).toThrow("{ tool, decisions }");
+  expect(withStep({ approval: { tool: "add_note", decisions: ["deny"] } })).toThrow("{ tool, decisions }");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["deny"], extra: 1 } })).toThrow("unknown key extra");
+  expect(withStep({ approval: { tool: "achilles__add_note", decisions: ["deny"] } }, "allow")).toThrow("approval_mode ask");
   const withCheck = (change: Record<string, unknown>) => () => validateTask({ ...deniedTaskJson, checks: [{ id: "a", type: "approval", page: "notes", tool: "achilles__add_note", ...change }] });
   expect(withCheck({ max: 0 })).toThrow("count or max");
   expect(withCheck({ max: 2, count: 1 })).toThrow("count or max");
@@ -560,4 +568,34 @@ test("form_submit needs a value map of input strings", () => {
   expect(withValue({ integer: "2" })).toThrow("string value");
   expect(withValue({ string: "x", integer: "2.5" })).toThrow("integer string");
   expect(withValue({ string: "x", date: "2026" })).toThrow("unknown key date");
+});
+
+test("approval_outcomes grades targets, denied retries, and untouched records from the approvals log", () => {
+  const task = validateTask(bulkEditTaskJson); const good = bulkEditReferences.good as EvalSnapshot & Record<string, any>;
+  const grade = (snapshot: EvalSnapshot) => gradeCheck(task.checks[0], snapshot);
+  expect(grade(good).pass).toBe(true);
+  const records = (change: (row: Record<string, any>) => void) => good.records!.map(row => { const copy = structuredClone(row); change(copy); return copy; });
+  expect(grade({ ...good, records: records(row => { if (row.id === "t-02") row.data.status = "escalated"; }) }).reason).toBe("record t-02 changed without an approved write");
+  expect(grade({ ...good, records: records(row => { if (row.id === "t-05") row.data.status = "escalated"; }) }).reason).toBe("record t-05 changed without an approved write");
+  expect(grade({ ...good, records: records(row => { if (row.id === "t-07") row.data.status = "open"; }) }).reason).toContain("approved record t-07 does not have");
+  expect(grade({ ...good, calls: good.calls!.map(call => call.id === "update-0" ? { ...call, arguments: { status: "escalated" } } : call) }).reason).toContain("has no record_id");
+  expect(grade({ ...good, approvals: good.approvals!.filter(row => !["update-2", "update-4"].includes(String(row.request_id))) }).reason).toBe('asked to write ["t-01","t-04"], expected ["t-01","t-04","t-07"]');
+  const withValue = (value: unknown) => () => validateTask({ ...bulkEditTaskJson, checks: [{ ...bulkEditTaskJson.checks[0], value }] });
+  expect(withValue({ records: ["t-01", "t-99"], set: { status: "escalated" } })).toThrow("not seeded in tickets");
+  expect(withValue({ records: ["t-01"], set: { status: "archived" } })).toThrow("without a prompt quote");
+  expect(withValue({ records: [], set: { status: "escalated" } })).toThrow("unique record ids");
+  expect(withValue({ records: ["t-01"], set: {} })).toThrow("non-empty set");
+});
+
+test("list_shows fields need the exact column order and a prompt or schema source", () => {
+  const check = { id: "cols", type: "list_shows" as const, page: "tickets", collection: "tickets", fields: ["title", "status"] };
+  const snapshot = (fields: string[]) => ({ pages: [{ id: "home", alias: "tickets" }], layouts: [{ page_id: "home", version: 2, document: { blocks: [{ type: "list", title: "T", collection: "tickets", fields }] } }] });
+  expect(gradeCheck(check, snapshot(["title", "status"])).pass).toBe(true);
+  expect(gradeCheck(check, snapshot(["status", "title"])).reason).toContain("in that order");
+  expect(gradeCheck(check, snapshot(["title", "status", "priority"])).pass).toBe(false);
+  const withCheck = (change: Record<string, unknown>) => () => validateTask({ ...bulkEditTaskJson, checks: [{ ...check, ...change }] });
+  expect(withCheck({})).not.toThrow();
+  expect(withCheck({ fields: ["title", "owner"] })).toThrow("list field \"owner\"");
+  expect(withCheck({ collection: undefined, value: "Login page times out" })).toThrow("fields must be a list_shows check");
+  expect(withCheck({ type: "record", value: {} })).toThrow("fields must be a list_shows check");
 });

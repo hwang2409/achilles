@@ -1,0 +1,182 @@
+{
+  "id": "stale-revision-multi-edit",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "tickets",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "show",
+      "kind": "prompt",
+      "page": "tickets",
+      "chat": "tickets-chat",
+      "prompt": "show me the high priority tickets that are still open"
+    },
+    {
+      "id": "form-edit",
+      "kind": "user_write",
+      "page": "tickets",
+      "chat": "tickets-form",
+      "tool": "update_ticket",
+      "arguments": {
+        "record_id": "t-05",
+        "assignee": "lee"
+      }
+    },
+    {
+      "id": "escalate",
+      "kind": "prompt",
+      "page": "tickets",
+      "chat": "tickets-chat",
+      "prompt": "go ahead and set the status of each of those to escalated. you already listed them, so no need to list them again"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_tickets",
+        "operation": "list",
+        "collection": "tickets"
+      },
+      {
+        "name": "update_ticket",
+        "operation": "update",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "id": "t-01",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out",
+          "priority": "high",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-02",
+        "collection": "tickets",
+        "data": {
+          "title": "Export drops last row",
+          "priority": "low",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-03",
+        "collection": "tickets",
+        "data": {
+          "title": "Dark mode contrast",
+          "priority": "medium",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-04",
+        "collection": "tickets",
+        "data": {
+          "title": "Payment webhook retries",
+          "priority": "high",
+          "status": "closed"
+        }
+      },
+      {
+        "id": "t-05",
+        "collection": "tickets",
+        "data": {
+          "title": "Search ignores accents",
+          "priority": "high",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-06",
+        "collection": "tickets",
+        "data": {
+          "title": "Invite email typo",
+          "priority": "low",
+          "status": "closed"
+        }
+      },
+      {
+        "id": "t-07",
+        "collection": "tickets",
+        "data": {
+          "title": "Report totals off by one",
+          "priority": "high",
+          "status": "open"
+        }
+      },
+      {
+        "id": "t-08",
+        "collection": "tickets",
+        "data": {
+          "title": "Avatar upload fails",
+          "priority": "medium",
+          "status": "closed"
+        }
+      },
+      {
+        "id": "t-09",
+        "collection": "tickets",
+        "data": {
+          "title": "Slow dashboard load",
+          "priority": "high",
+          "status": "closed"
+        }
+      },
+      {
+        "id": "t-10",
+        "collection": "tickets",
+        "data": {
+          "title": "Broken help link",
+          "priority": "low",
+          "status": "open"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "escalated-targets",
+      "type": "approval_outcomes",
+      "page": "tickets",
+      "tool": "achilles__update_ticket",
+      "collection": "tickets",
+      "value": {
+        "records": [
+          "t-01",
+          "t-05",
+          "t-07"
+        ],
+        "set": {
+          "status": "escalated"
+        }
+      }
+    },
+    {
+      "id": "user-edit-kept",
+      "type": "record",
+      "page": "tickets",
+      "value": {
+        "title": "Search ignores accents",
+        "assignee": "lee",
+        "status": "escalated"
+      }
+    },
+    {
+      "id": "updates-recovered",
+      "type": "no_unrecovered_error",
+      "page": "tickets",
+      "tool": "achilles__update_ticket"
+    }
+  ]
+}
