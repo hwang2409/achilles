@@ -32,6 +32,8 @@ _EQUALITY_FILTER_SCHEMA = {
     "additionalProperties": False,
 }
 
+_BLOCK_FIELDS_SCHEMA = {"type": "array", "items": {"type": "string"}, "uniqueItems": True}
+
 _LAYOUT_BLOCK_SCHEMA = {
     "oneOf": [
         {
@@ -40,6 +42,13 @@ _LAYOUT_BLOCK_SCHEMA = {
                 "type": {"const": "list"},
                 "title": {"type": "string"},
                 "collection": {"type": "string"},
+                "fields": {
+                    **_BLOCK_FIELDS_SCHEMA,
+                    "description": (
+                        "Columns, in order, from the collection's data schema. Leave it out "
+                        "to show required fields first, then the rest sorted."
+                    ),
+                },
             },
             "required": ["type", "title", "collection"],
             "additionalProperties": False,
@@ -69,6 +78,13 @@ _LAYOUT_BLOCK_SCHEMA = {
                 "type": {"const": "form"},
                 "title": {"type": "string"},
                 "tool": {"type": "string"},
+                "fields": {
+                    **_BLOCK_FIELDS_SCHEMA,
+                    "description": (
+                        "Input order, from the tool's input schema; inputs you leave out "
+                        "follow, required first."
+                    ),
+                },
             },
             "required": ["type", "title", "tool"],
             "additionalProperties": False,
@@ -287,6 +303,7 @@ def validate_layout(
     prefix: str = "",
     collection_fields: dict[str, set[str]] | None = None,
     suggest_field: Callable[[str, str, Any, set[str]], str | None] | None = None,
+    tool_fields: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     validate_schema(layout, LAYOUT_SCHEMA, prefix)
     tools = assigned_tools or set()
@@ -320,7 +337,36 @@ def validate_layout(
                 ),
             )
         _validate_layout_filter(block, index, prefix, collection_fields, suggest_field)
+        _validate_block_fields(block, index, prefix, collection_fields, tool_fields)
     return layout
+
+
+def _validate_block_fields(
+    block: dict[str, Any],
+    index: int,
+    prefix: str,
+    collection_fields: dict[str, set[str]] | None,
+    tool_fields: dict[str, set[str]] | None,
+) -> None:
+    if "fields" not in block:
+        return
+    if block["type"] == "list" and collection_fields is not None:
+        known = collection_fields.get(block["collection"], set())
+        source = f"the {block['collection']} collection schema"
+    elif block["type"] == "form" and tool_fields is not None:
+        known = tool_fields.get(block["tool"], set())
+        source = f"the {block['tool']} tool input schema"
+    else:
+        return
+    for position, field in enumerate(block["fields"]):
+        if field in known:
+            continue
+        listed = ", ".join(sorted(known)) or "(none)"
+        raise ValidationError(
+            f"{prefix}/blocks/{index}/fields/{position}",
+            f"field in {source}",
+            hint=f"Use a field from {source}. Unknown field: {field}. Fields: {listed}.",
+        )
 
 
 def _validate_layout_filter(
@@ -362,6 +408,10 @@ def _validate_layout_filter(
         "field in collection schema",
         hint=hint,
     )
+
+
+def _tool_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
+    return {bundle["name"]: set(bundle["input_schema"].get("properties", {})) for bundle in bundles}
 
 
 def _collection_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
@@ -1076,6 +1126,7 @@ class PageStore:
             {bundle["implementation"]["collection"] for bundle in bundles},
             "/layout",
             fields,
+            tool_fields=_tool_fields(bundles),
         )
         encoded = json.dumps(layout, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
@@ -1290,6 +1341,7 @@ class PageStore:
                 lambda collection, field, value, collection_fields: _suggest_filter_field(
                     db, page_id, collection, field, value, collection_fields
                 ),
+                _tool_fields(bundles),
             )
             if expected_version != active_version:
                 raise ValidationError(
