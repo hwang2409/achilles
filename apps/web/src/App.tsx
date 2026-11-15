@@ -246,7 +246,7 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   useEffect(() => {
     // the open menu covers the notice below the header, so Escape (from anywhere) and a tap outside close it
     if (!overflow) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setOverflow(false); overflowButton.current?.focus(); } };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { setOverflow(false); overflowButton.current?.focus(); } };
     const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
     addEventListener("keydown", onKey);
     addEventListener("pointerdown", onDown);
