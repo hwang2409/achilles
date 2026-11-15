@@ -17,7 +17,7 @@ export type TaskCheck = {
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
 export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect"; page: string; chat: string; prompt?: string };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
-export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[] };
+export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" };
 export type EvalSnapshot = {
   pages?: Array<Record<string, unknown>>; tools?: Array<Record<string, unknown>>; assignments?: Array<Record<string, unknown>>;
   records?: Array<Record<string, unknown>>; layouts?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
@@ -161,9 +161,10 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
 
 export function validateTask(value: unknown): EvalTask {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("task must be an object");
-  own(value, ["id", "prompt", "page_plan", "agent_turns", "steps", "checks", "setup", "approval_mode", "requires", "goal_capabilities"], "task"); const task = value as Record<string, unknown>;
+  own(value, ["id", "prompt", "page_plan", "agent_turns", "steps", "checks", "setup", "approval_mode", "requires", "goal_capabilities", "suite"], "task"); const task = value as Record<string, unknown>;
   if (typeof task.id !== "string" || !/^[a-z0-9-]+$/.test(task.id)) throw new Error("task.id must be kebab-case");
   if (task.prompt !== undefined && typeof task.prompt !== "string") throw new Error("task.prompt must be a string");
+  if (task.suite !== undefined && !["core", "focused"].includes(String(task.suite))) throw new Error("task.suite must be core or focused");
   if (!Number.isInteger(task.agent_turns) || (task.agent_turns as number) < 1 || (task.agent_turns as number) > 20) throw new Error("agent_turns must be 1..20");
   if (task.approval_mode !== undefined && !["allow", "ask"].includes(String(task.approval_mode))) throw new Error("approval_mode must be allow or ask");
   if (task.requires !== undefined && (!Array.isArray(task.requires) || !task.requires.length || !task.requires.every(identifier) || new Set(task.requires).size !== task.requires.length)) throw new Error("requires must name unique capabilities");
@@ -172,7 +173,7 @@ export function validateTask(value: unknown): EvalTask {
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt); const checks = validateChecks(task.checks, aliases);
   validateExpectations(checks, [prompt, ...steps.flatMap(step => step.prompt ?? [])].join(" "), setup, task.requires as string[] ?? []);
-  return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks };
+  return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused" };
 }
 
 const rows = (snapshot: EvalSnapshot, type: keyof EvalSnapshot): Array<Record<string, unknown>> => (snapshot[type] as Array<Record<string, unknown>> | undefined) ?? [];

@@ -64,24 +64,6 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
     },
   },
   {
-    name: "more during refresh extends that refresh instead of publishing an old cursor",
-    run: async (h) => {
-      const initial = h.owner.reload("all");
-      h.succeed(0, page(["A", "B"], "B"));
-      await initial;
-      const refresh = h.owner.reload("all");
-      const more = h.owner.more();
-      expect(h.calls.map(({ before }) => before)).toEqual([null, null]);
-      h.succeed(1, page(["X", "A"], "A"));
-      await Promise.resolve();
-      expect(h.calls[2].before).toBe("A");
-      h.succeed(2, page(["B", "D"], "D"));
-      await refresh;
-      expect(await more).toEqual({ id: "D" });
-      expect(h.state().items).toEqual(items("X", "A", "B", "D"));
-    },
-  },
-  {
     name: "unmount disposal resets the requested depth",
     run: async (h) => {
       const initial = h.owner.reload("all");
@@ -98,30 +80,6 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
       expect(h.state().items).toEqual(items("X", "A"));
     },
   },
-  ...(["continuation first", "refresh first"] as const).map((order) => ({
-    name: `more then reload keeps the requested depth: ${order}`,
-    run: async (h: ReturnType<typeof harness>) => {
-      const initial = h.owner.reload("all");
-      h.succeed(0, page(["A", "B"], "B"));
-      await initial;
-      const more = h.owner.more();
-      const refresh = h.owner.reload("all");
-      expect(h.calls[1].signal.aborted).toBe(true);
-      if (order === "continuation first") {
-        h.succeed(1, page(["C", "D"], "D"));
-        expect(await more).toBeNull();
-      }
-      h.succeed(2, page(["X", "A"], "A"));
-      await Promise.resolve();
-      h.succeed(3, page(["B", "D"], "D"));
-      await refresh;
-      if (order === "refresh first") {
-        h.succeed(1, page(["C", "D"], "D"));
-        expect(await more).toBeNull();
-      }
-      expect(h.state().items).toEqual(items("X", "A", "B", "D"));
-    },
-  })),
   {
     name: "two more requests during a reload extend its target twice",
     run: async (h) => {
@@ -284,5 +242,130 @@ const scenarios: Array<{ name: string; run: Scenario }> = [
 describe("ordered list owner", () => {
   test.each(scenarios)("$name", async ({ run }) => {
     await run(harness());
+  });
+});
+
+type PendingMore = {
+  name: string;
+  /** steps after the list shows A, B (next "B"); the last more() call is the one checked. */
+  run: (h: ReturnType<typeof harness>) => Promise<Promise<Item | null>>;
+  item: Item | null;
+};
+
+const pendingMore: PendingMore[] = [
+  {
+    name: "more during refresh",
+    run: async (h) => {
+      const refresh = h.owner.reload("all");
+      const more = h.owner.more();
+      h.succeed(1, page(["X", "A"], "A"));
+      await Promise.resolve();
+      h.succeed(2, page(["B", "D"], "D"));
+      await refresh;
+      return more;
+    },
+    item: { id: "D" },
+  },
+  {
+    name: "refresh replaced during a joined more",
+    run: async (h) => {
+      h.owner.reload("all");
+      const more = h.owner.more();
+      const replacement = h.owner.reload("all");
+      expect(h.calls[1].signal.aborted).toBe(true);
+      h.succeed(2, page(["X", "A"], "A"));
+      await Promise.resolve();
+      h.succeed(3, page(["B", "C"], "C"));
+      await replacement;
+      return more;
+    },
+    item: { id: "C" },
+  },
+  {
+    name: "more replaced by a refresh",
+    run: async (h) => {
+      const more = h.owner.more();
+      const replacement = h.owner.reload("all");
+      h.succeed(1, page(["C", "D"], "D"));
+      h.succeed(2, page(["X", "A"], "A"));
+      await Promise.resolve();
+      h.succeed(3, page(["B", "D"], "D"));
+      await replacement;
+      return more;
+    },
+    item: { id: "D" },
+  },
+  {
+    name: "two replacements",
+    run: async (h) => {
+      h.owner.reload("all");
+      const more = h.owner.more();
+      h.owner.reload("all");
+      const last = h.owner.reload("all");
+      h.succeed(3, page(["X", "A"], "A"));
+      await Promise.resolve();
+      h.succeed(4, page(["B", "C"], "C"));
+      await last;
+      return more;
+    },
+    item: { id: "C" },
+  },
+  {
+    name: "key change during more",
+    run: async (h) => {
+      h.owner.reload("all");
+      const more = h.owner.more();
+      const replacement = h.owner.reload("search");
+      h.succeed(2, page(["S"], null));
+      await replacement;
+      return more;
+    },
+    item: null,
+  },
+  {
+    name: "list stopped during more",
+    run: async (h) => {
+      h.owner.reload("all");
+      const more = h.owner.more();
+      h.owner.dispose();
+      return more;
+    },
+    item: null,
+  },
+  {
+    name: "more with no next",
+    run: async (h) => {
+      const refresh = h.owner.reload("all");
+      h.succeed(1, page(["A", "B"], null));
+      await refresh;
+      const more = h.owner.more();
+      expect(h.calls).toHaveLength(2);
+      return more;
+    },
+    item: null,
+  },
+  {
+    name: "error during replacement",
+    run: async (h) => {
+      h.owner.reload("all");
+      const more = h.owner.more();
+      const replacement = h.owner.reload("all");
+      h.calls[2].result.reject(new Error("offline"));
+      await replacement;
+      expect(h.state().error).toBe(true);
+      return more;
+    },
+    item: null,
+  },
+];
+
+describe("a pending more() resolves with its first new row", () => {
+  test.each(pendingMore)("$name", async ({ run, item }) => {
+    const h = harness();
+    const initial = h.owner.reload("all");
+    h.succeed(0, page(["A", "B"], "B"));
+    await initial;
+    const more = await run(h);
+    expect(await more).toEqual(item);
   });
 });

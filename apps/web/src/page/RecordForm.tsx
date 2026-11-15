@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { emptyValues, formArguments, formFields, type FormField, type FormValues } from "./formSchema";
+import { usePageTools, type PageTool } from "./usePageTools";
 
-export type PageTool = { name: string; operation: string; collection: string; input_schema: unknown; version: number };
+export type { PageTool };
 type FieldError = { path: string; expected: string };
 
 const writes = new Map<string, number>();
@@ -16,20 +17,9 @@ export function useRecordWrites(pageId: string): number {
 }
 
 export function FormBlock({ title, toolName, pageId, credential, refreshKey }: { title: string; toolName: string; pageId: string; credential: string; refreshKey: string }) {
-  const [tool, setTool] = useState<PageTool | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  useEffect(() => {
-    let live = true;
-    void fetch(`/api/pages/${pageId}/tools`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`could not load tools (${response.status})`);
-        const body = await response.json() as { tools?: PageTool[] };
-        if (live) { setTool(body.tools?.find((item) => item.name === toolName) ?? null); setError(null); }
-      })
-      .catch((caught) => { if (live) setError(caught instanceof Error ? caught.message : String(caught)); });
-    return () => { live = false; };
-  }, [credential, pageId, toolName, refreshKey, reload]);
+  const { tools, error } = usePageTools(pageId, credential, `${refreshKey}:${reload}`);
+  const tool = tools === null ? undefined : tools.find((item) => item.name === toolName) ?? null;
   const body = error ? <p role="alert">{error}</p>
     : tool === undefined ? <p role="status">loading form…</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>

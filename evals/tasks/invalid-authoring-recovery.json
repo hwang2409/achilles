@@ -1,5 +1,6 @@
 {
   "id": "invalid-authoring-recovery",
+"suite": "core",
   "page_plan": [
     {
       "alias": "authoring",
