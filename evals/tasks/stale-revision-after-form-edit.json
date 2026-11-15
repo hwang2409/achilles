@@ -1,0 +1,90 @@
+{
+  "id": "stale-revision-after-form-edit",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "books",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 6,
+  "steps": [
+    {
+      "id": "show",
+      "kind": "prompt",
+      "page": "books",
+      "chat": "books-chat",
+      "prompt": "show me Dune"
+    },
+    {
+      "id": "form-edit",
+      "kind": "user_write",
+      "page": "books",
+      "chat": "books-form",
+      "tool": "update_book",
+      "arguments": {
+        "record_id": "dune",
+        "status": "done"
+      }
+    },
+    {
+      "id": "set-pages",
+      "kind": "prompt",
+      "page": "books",
+      "chat": "books-chat",
+      "prompt": "set Dune's pages to 412"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "get_book",
+        "operation": "get",
+        "collection": "books"
+      },
+      {
+        "name": "list_books",
+        "operation": "list",
+        "collection": "books"
+      },
+      {
+        "name": "update_book",
+        "operation": "update",
+        "collection": "books"
+      }
+    ],
+    "records": [
+      {
+        "id": "dune",
+        "collection": "books",
+        "data": {
+          "title": "Dune",
+          "status": "reading",
+          "pages": 400
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "user-edit-kept",
+      "type": "records_exact",
+      "page": "books",
+      "value": [
+        {
+          "title": "Dune",
+          "status": "done",
+          "pages": 412
+        }
+      ]
+    },
+    {
+      "id": "update-recovered",
+      "type": "no_unrecovered_error",
+      "page": "books",
+      "tool": "achilles__update_book"
+    }
+  ]
+}

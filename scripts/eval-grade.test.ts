@@ -3,6 +3,8 @@ import { expectationTokens, gradeCheck, gradeReference, gradeTask, structurallyC
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
 import metricTaskJson from "../evals/tasks/reading-metric-count.json";
 import readingListTaskJson from "../evals/tasks/reading-list-one-prompt.json";
+import staleRevisionTaskJson from "../evals/tasks/stale-revision-after-form-edit.json";
+import staleRevisionReferences from "../evals/references/stale-revision-after-form-edit.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -438,4 +440,19 @@ test("layout_restore requires a restore_version that appends a copy of v1", () =
     ["superset of v1 is not a copy", grade(3, [layout(1, v1), layout(2, v2), layout(3, { blocks: [...v1.blocks, { type: "text", text: "x" }] })], [update(2), restore(3)]), false],
   ];
   for (const [name, result, pass] of rows) expect(result.pass, `${name}: ${result.reason}`).toBe(pass);
+});
+
+test("user write steps grade the agent only after the user write bumped the revision", () => {
+  const staleTask = validateTask(staleRevisionTaskJson);
+  const { good, bad } = staleRevisionReferences as unknown as { good: Record<string, any>; bad: Record<string, any> };
+  const withWrite = (write: Record<string, unknown> | undefined) => ({ ...good, user_writes: write ? [{ ...good.user_writes[0], ...write }] : [] });
+  const rows: Array<[string, Record<string, any>, string]> = [
+    ["user edit kept after a recovered conflict", good, "pass"],
+    ["lost update puts the status back", bad, "agent_fail"],
+    ["user write rejected", withWrite({ ok: false, status: 409, revision_after: null }), "harness_error"],
+    ["user write did not bump the revision", withWrite({ revision_after: 1 }), "harness_error"],
+    ["user write never ran", withWrite(undefined), "harness_error"],
+  ];
+  for (const [name, snapshot, status] of rows) expect(gradeReference(staleTask, snapshot).status, name).toBe(status);
+  expect(() => validateTask({ ...staleRevisionTaskJson, steps: [{ id: "w", kind: "user_write", page: "books", chat: "form", tool: "update_book", arguments: { record_id: "dune", revision: 1 } }] })).toThrow("no revision");
 });

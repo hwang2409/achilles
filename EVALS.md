@@ -66,7 +66,7 @@ the 12 core tasks (full runs):
 focused-only tasks (run with `TASK=<name>`, never in a full run):
 
 - `browser-controller-slot`, `page-awareness`, `page-tool-without-create-mode`,
-  `second-chat-tools`, `undo-layout-change`
+  `second-chat-tools`, `stale-revision-after-form-edit`, `undo-layout-change`
 
 rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
 a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
@@ -125,8 +125,17 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   `created`), `bind_chat`, `create_mode`, and an optional `route`.
 - `setup` (optional): the seeds. `tools` (name, operation, collection, optional
   `input_schema`), `records` (id, collection, data), and an `initial_layout`.
-- `steps`: the prompts. each has an `id`, a `kind` (`prompt`, `annotate`,
-  `reconnect`), the `page` and `chat`, and the `prompt` text.
+- `steps`: the prompts and events, in order. each has an `id`, a `kind`, the
+  `page`, and the `chat`. the kinds:
+  - `prompt` and `annotate`: send the `prompt` text to the chat.
+  - `reconnect`: drop the zeta connection and resume the chat's session.
+  - `user_write`: a user edits a record through the page form. the step names
+    a `tool` (an `update` tool) and its `arguments` (a `record_id` and the
+    changed fields, no `revision`). the harness reads the record's current
+    revision, posts the tool invoke with the page credential, and records the
+    result in the snapshot's `user_writes` (never the credential). if the write
+    fails or does not bump the revision, the run is `harness_error`. it uses no
+    model turn; `chat` only labels the actor.
 - `agent_turns`: the per-task turn cap.
 - `checks`: the acceptance table (see below). each has an `id`, a `type`, a
   `page`, and type-specific fields.
@@ -175,7 +184,7 @@ grader rules, as rules:
 
 ## the tasks
 
-the 17 tasks in `evals/tasks/` (12 core, 5 focused-only — see "core vs
+the 18 tasks in `evals/tasks/` (12 core, 6 focused-only — see "core vs
 focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
@@ -199,6 +208,10 @@ focused-only" above):
 - `reconnect-recovery`: write a note, reconnect, then read it back.
 - `record-crud`: insert two records, update one, then list all.
 - `second-chat-tools`: two chats on one page both read the seeded note.
+- `stale-revision-after-form-edit`: the agent reads Dune, a user marks it done
+  through the page form (a `user_write` step), then the agent sets its pages;
+  the user's edit must survive (a revision conflict the agent recovers from is
+  fine).
 - `tool-version-fresh-chat`: add an optional field to a tool while old records keep
   working.
 - `undo-layout-change`: change a page layout, then undo it with `restore_version`

@@ -15,7 +15,7 @@ export type TaskCheck = {
   synonyms?: string[];
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect"; page: string; chat: string; prompt?: string };
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown> };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" };
 export type EvalSnapshot = {
@@ -23,14 +23,14 @@ export type EvalSnapshot = {
   records?: Array<Record<string, unknown>>; layouts?: Array<Record<string, unknown>>; chats?: Array<Record<string, unknown>>;
   calls?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; approvals?: Array<Record<string, unknown>>;
   errors?: Array<Record<string, unknown>>; browser?: Array<Record<string, unknown>>; tool_versions?: Array<Record<string, unknown>>;
-  reconnects?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
+  reconnects?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
   initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
 
-const STEP_KINDS = new Set(["prompt", "annotate", "reconnect"]);
+const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write"]);
 const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
@@ -65,8 +65,12 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
   if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
-    own(item, ["id", "page", "chat", "prompt", "kind"], `steps[${i}]`); const step = item as TaskStep;
+    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
+    const isWrite = step.kind === "user_write"; const args = step.arguments;
+    // the harness fills the current revision, like a form that loaded the record
+    if (isWrite && (!identifier(step.tool) || !args || typeof args !== "object" || Array.isArray(args) || typeof args.record_id !== "string" || "revision" in args)) throw new Error(`steps[${i}] user_write needs tool and arguments with record_id and no revision`);
+    if (!isWrite && (step.tool !== undefined || args !== undefined)) throw new Error(`steps[${i}] only user_write takes tool and arguments`);
     const needsPrompt = step.kind === "prompt" || step.kind === "annotate"; const hasPrompt = typeof step.prompt === "string" && step.prompt.length > 0;
     if (!needsPrompt && hasPrompt) throw new Error(`steps[${i}] has invalid prompt source`);
     return step;
@@ -172,7 +176,7 @@ export function validateTask(value: unknown): EvalTask {
   const page_plan = validatePages(task.page_plan); const aliases = new Set(page_plan.map(page => page.alias));
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt); const checks = validateChecks(task.checks, aliases);
-  validateExpectations(checks, [prompt, ...steps.flatMap(step => step.prompt ?? [])].join(" "), setup, task.requires as string[] ?? []);
+  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", ...nestedTokens(step.arguments)])].join(" "), setup, task.requires as string[] ?? []);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused" };
 }
 
@@ -347,7 +351,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   }),
   no_error: ({ check, snapshot, page }) => rows(snapshot, "errors").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat)).length === 0,
   no_unrecovered_error: ({ check, snapshot, page }) => {
-    const attempts = rows(snapshot, "results").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && row.tool === "achilles__update_layout");
+    const attempts = rows(snapshot, "results").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && row.tool === (check.tool ?? "achilles__update_layout"));
     return attempts.length === 0 || (attempts.at(-1)?.success === true && attempts.every((attempt, index) => attempt.success !== false || attempts.slice(index + 1).some(later => later.success === true)));
   },
   assigned_tools_only: ({ snapshot, page, owned }) => {
@@ -483,9 +487,17 @@ export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot
   }
   return failures;
 }
+function userWriteFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
+  return task.steps.filter(step => step.kind === "user_write").flatMap(step => {
+    const write = rows(snapshot, "user_writes").find(row => row.step === step.id);
+    if (!write || write.ok !== true) return [`user write ${step.id} failed (${write?.status ?? "not run"})`];
+    return write.revision_after === Number(write.revision_before) + 1 ? [] : [`user write ${step.id} did not bump the revision`];
+  });
+}
 function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
-  if (!task.setup) return [];
-  const failures = snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"];
+  const failures = userWriteFailures(task, snapshot);
+  if (!task.setup) return failures;
+  failures.push(...(snapshot.initial ? setupPreconditionFailures(task, snapshot.initial) : ["setup precondition unverifiable"]));
   if (task.checks.some(check => check.type === "tool_evolution") && !Array.isArray(snapshot.tool_schema_validations)) failures.push(snapshot.tool_schema_validation_error ?? "product schema validation unavailable");
   return failures;
 }
