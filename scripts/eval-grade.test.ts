@@ -579,7 +579,7 @@ test("approval_outcomes grades targets, denied retries, and untouched records fr
   expect(grade({ ...good, records: records(row => { if (row.id === "t-05") row.data.status = "escalated"; }) }).reason).toBe("record t-05 changed without an approved write");
   expect(grade({ ...good, records: records(row => { if (row.id === "t-07") row.data.status = "open"; }) }).reason).toContain("approved record t-07 does not have");
   expect(grade({ ...good, calls: good.calls!.map(call => call.id === "update-0" ? { ...call, arguments: { status: "escalated" } } : call) }).reason).toContain("has no record_id");
-  expect(grade({ ...good, approvals: good.approvals!.filter(row => row.request_id !== "update-2") }).reason).toContain("expected");
+  expect(grade({ ...good, approvals: good.approvals!.filter(row => !["update-2", "update-4"].includes(String(row.request_id))) }).reason).toBe('asked to write ["t-01","t-04"], expected ["t-01","t-04","t-07"]');
   const withValue = (value: unknown) => () => validateTask({ ...bulkEditTaskJson, checks: [{ ...bulkEditTaskJson.checks[0], value }] });
   expect(withValue({ records: ["t-01", "t-99"], set: { status: "escalated" } })).toThrow("not seeded in tickets");
   expect(withValue({ records: ["t-01"], set: { status: "archived" } })).toThrow("without a prompt quote");
