@@ -136,6 +136,8 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   "12.5", or "12th"; "three" never matches "thirty-three"). each value must be a
   fact the seeded records hold: a record's string value, or a count of records
   (in a collection, or where one field equals one value) as digits or a word.
+  it is a weak signal (cannot see negation, a list marker, or a record id), so
+  every value must be a seeded fact, never free-form expected prose.
 - optional `requires` / `goal_capabilities`: capabilities that gate `unsupported`
   and the "goal not reachable" label on older revisions.
 

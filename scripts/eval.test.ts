@@ -212,7 +212,9 @@ test("each step's answer is the last assistant text of its own turn", () => {
     { role: "user", content: [{ type: "text", text: "second" }] }, text("let me check"),
     { role: "assistant", content: [{ type: "tool_use", tool_call: { id: "t1", name: "achilles__list_books" } }] },
     { role: "tool_result", content: [{ type: "text", text: "[]" }], tool_result: { tool_call_id: "t1", content: "[]" } },
-    text("3 are done"), { role: "system", event: "approval_end", content: [{ type: "text", text: "not an answer" }] }, end,
+    // an assistant-role row carrying an event (defensive: no observed row shape does this today)
+    // must still be excluded, or its text would wrongly win over "3 are done".
+    text("3 are done"), { role: "assistant", event: "approval_end", content: [{ type: "text", text: "not an answer" }] }, end,
   ];
   expect(finalAnswer(history, 0)).toBe("first answer");
   expect(finalAnswer(history, 1)).toBe("3 are done");

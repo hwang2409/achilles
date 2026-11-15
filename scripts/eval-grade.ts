@@ -157,6 +157,10 @@ function seededFact(value: string, setup?: TaskSetup) {
 // Case-insensitive mention of one value as a whole token: no letter or digit touches either end.
 // Digit values also skip decimals and digit groups ("12" never matches "120", "12.5", "1,12", or "12th");
 // word values also skip hyphenated compounds ("three" never matches "threefold" or "thirty-three").
+// shortcut: this is a plain substring scan, not language understanding. it cannot see negation
+// ("it's not 3, it's 2" still mentions "3"), a numbered list item ("1. Dune\n2. Emma\n3. Beloved"
+// mentions "3"), or a record id ("book-3" mentions "3"). only use this check where the other
+// plausible answers in the task are unlikely to appear this way in the same sentence.
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export function mentions(answer: string, value: string) {
   const edges = /^\d+$/.test(value) ? ["(?<!\\d[.,])", "(?![.,]\\d)"] : ["(?<![\\p{L}\\p{N}]-)", "(?!-[\\p{L}\\p{N}])"];
@@ -202,7 +206,7 @@ export function validateTask(value: unknown): EvalTask {
   const page_plan = validatePages(task.page_plan); const aliases = new Set(page_plan.map(page => page.alias));
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt); const checks = validateChecks(task.checks, aliases);
-  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && step.kind !== "reconnect")) throw new Error(`check ${check.id} names step ${check.step}, which is not a prompt step on page ${check.page}`);
+  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && ["prompt", "annotate"].includes(step.kind))) throw new Error(`check ${check.id} names step ${check.step}, which is not a prompt step on page ${check.page}`);
   validateExpectations(checks, [prompt, ...steps.flatMap(step => step.prompt ?? [])].join(" "), setup, task.requires as string[] ?? []);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused" };
 }
