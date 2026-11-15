@@ -212,7 +212,7 @@ export async function gateTranscript(
 export async function gateReloadMidTurn(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
-  requests: () => Array<{ id?: number | string; method?: string; params?: { session_id?: string; reason?: string; data?: { reason?: string } }; result?: { attached?: string; capabilities?: { features?: string[] } }; error?: unknown }>,
+  requests: () => Array<{ id?: number | string; method?: string; params?: { session_id?: string }; result?: { attached?: string; capabilities?: { features?: string[] } }; error?: unknown }>,
   gateWait: GateWait,
 ) {
   const field = page.getByRole("textbox", { name: "message", exact: true });
