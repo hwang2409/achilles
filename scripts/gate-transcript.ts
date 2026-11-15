@@ -208,7 +208,8 @@ export async function gateTranscript(
 }
 
 // A reload in the middle of a streaming reply keeps the turn (`turn_reconnect`): the reloaded page attaches to it with
-// `resume` and shows one reply that finishes, with each line once and no warning before the reload.
+// `resume`, shows it running with a stop control while later lines stream in, and ends with one reply, each line once,
+// and no warning before the reload.
 export async function gateReloadMidTurn(
   page: Page,
   waitFor: (check: () => Promise<boolean>, label: string) => Promise<void>,
@@ -266,7 +267,7 @@ export async function gateReloadMidTurn(
     const cancelled = requests().slice(framesBeforeReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"'));
     if (cancelled) throw new Error("zeta cancelled the turn on reload (reason disconnect)");
     if (await page.getByRole("alert").count()) throw new Error(`reload mid-turn showed a notice: ${await page.getByRole("alert").first().innerText()}`);
-    console.log("reload mid-turn asserted: the reloaded page took over the running turn; one reply, 80 lines once each, no warning, no notice");
+    console.log("reload mid-turn asserted: the reloaded page took over the running turn and showed it running, stoppable, and streaming; one reply, 80 lines once each, no warning, no notice");
   } finally {
     page.off("dialog", onDialog);
   }
