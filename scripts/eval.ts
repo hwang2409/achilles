@@ -118,7 +118,10 @@ with store.transaction() as db:
     for item in setup.get("records", []):
         stamp = now(); data = item["data"]
         db.execute("INSERT INTO page_record(page_id,collection,record_id,version,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (page_id,item["collection"],item["id"],1,json.dumps(data,sort_keys=True),stamp,stamp))
-layout = store.layout(page_id)
+# the stored document, not the computed view: count metrics render as values in store.layout
+with store.transaction() as db:
+    row = db.execute("SELECT lv.document FROM layout_version lv JOIN page p ON p.id=lv.page_id AND lv.version=p.active_layout_version WHERE p.id=?", (page_id,)).fetchone()
+layout = json.loads(row[0]) if row else {"blocks": []}
 if hasattr(store, "inspect_page"):
     summary = store.inspect_page(page_id)
 else:

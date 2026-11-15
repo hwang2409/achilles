@@ -1,6 +1,6 @@
 {
   "id": "stale-revision-multi-edit",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tickets",

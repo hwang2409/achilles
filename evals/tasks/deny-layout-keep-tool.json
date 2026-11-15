@@ -1,0 +1,127 @@
+{
+  "id": "deny-layout-keep-tool",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "tickets",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 12,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "change",
+      "kind": "prompt",
+      "page": "tickets",
+      "chat": "tickets-chat",
+      "prompt": "add an optional priority field to add_ticket, show priority as a list column after title, then add a ticket titled Billing page blank with priority high. I approve each change separately: if I reject one, skip just that change and do the rest",
+      "approval": {
+        "tool": "achilles__update_layout",
+        "decisions": [
+          "deny"
+        ]
+      }
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_ticket",
+        "operation": "insert",
+        "collection": "tickets",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "list_tickets",
+        "operation": "list",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "id": "t-1",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out"
+        }
+      }
+    ],
+    "initial_layout": {
+      "blocks": [
+        {
+          "type": "list",
+          "title": "Tickets",
+          "collection": "tickets",
+          "fields": [
+            "title"
+          ]
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "layout-not-retried",
+      "type": "approval",
+      "page": "tickets",
+      "tool": "achilles__update_layout",
+      "max": 1
+    },
+    {
+      "id": "layout-kept",
+      "type": "count",
+      "page": "tickets",
+      "name": "layouts",
+      "count": 1
+    },
+    {
+      "id": "ticket-added",
+      "type": "successful_result",
+      "page": "tickets",
+      "tool": "achilles__add_ticket",
+      "value": {
+        "title": "Billing page blank",
+        "priority": "high"
+      }
+    },
+    {
+      "id": "tickets",
+      "type": "records_exact",
+      "page": "tickets",
+      "value": [
+        {
+          "title": "Login page times out"
+        },
+        {
+          "title": "Billing page blank",
+          "priority": "high"
+        }
+      ]
+    }
+  ],
+  "requires": [
+    "update_layout"
+  ]
+}

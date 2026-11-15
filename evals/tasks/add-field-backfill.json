@@ -16,7 +16,7 @@
       "kind": "prompt",
       "page": "contacts",
       "chat": "author-chat",
-      "prompt": "my contacts need a company. add an optional company field to add_contact, show company in the contacts list between name and email, and fill it in for the existing contacts: Ana Ruiz and Ben Okafor work at Acme, Cara Lind works at Globex. leave the others without a company"
+      "prompt": "my contacts need a company. add an optional company field to add_contact, show company in the contacts list between name and email, and fill it in for the existing contacts from their email domain: acme.test is Acme and globex.test is Globex. leave contacts with any other domain without a company"
     },
     {
       "id": "use-company",
@@ -81,7 +81,7 @@
         "collection": "contacts",
         "data": {
           "name": "Ana Ruiz",
-          "email": "ana@example.test"
+          "email": "ana@acme.test"
         }
       },
       {
@@ -89,7 +89,7 @@
         "collection": "contacts",
         "data": {
           "name": "Ben Okafor",
-          "email": "ben@example.test"
+          "email": "ben@acme.test"
         }
       },
       {
@@ -97,7 +97,7 @@
         "collection": "contacts",
         "data": {
           "name": "Cara Lind",
-          "email": "cara@example.test"
+          "email": "cara@globex.test"
         }
       },
       {
@@ -105,7 +105,7 @@
         "collection": "contacts",
         "data": {
           "name": "Eli Moss",
-          "email": "eli@example.test"
+          "email": "eli@mail.test"
         }
       },
       {
@@ -113,7 +113,23 @@
         "collection": "contacts",
         "data": {
           "name": "Fay Chen",
-          "email": "fay@example.test"
+          "email": "fay@globex.test"
+        }
+      },
+      {
+        "id": "c-6",
+        "collection": "contacts",
+        "data": {
+          "name": "Gus Hale",
+          "email": "gus@acmeco.test"
+        }
+      },
+      {
+        "id": "c-7",
+        "collection": "contacts",
+        "data": {
+          "name": "Hal Brandt",
+          "email": "hal@acme.test"
         }
       }
     ],
@@ -139,23 +155,36 @@
       "value": [
         {
           "name": "Ana Ruiz",
+          "email": "ana@acme.test",
           "company": "Acme"
         },
         {
           "name": "Ben Okafor",
+          "email": "ben@acme.test",
           "company": "Acme"
         },
         {
           "name": "Cara Lind",
+          "email": "cara@globex.test",
           "company": "Globex"
         },
         {
           "name": "Eli Moss",
-          "email": "eli@example.test"
+          "email": "eli@mail.test"
         },
         {
           "name": "Fay Chen",
-          "email": "fay@example.test"
+          "email": "fay@globex.test",
+          "company": "Globex"
+        },
+        {
+          "name": "Gus Hale",
+          "email": "gus@acmeco.test"
+        },
+        {
+          "name": "Hal Brandt",
+          "email": "hal@acme.test",
+          "company": "Acme"
         },
         {
           "name": "Dee Park",

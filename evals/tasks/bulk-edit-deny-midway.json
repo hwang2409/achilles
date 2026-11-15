@@ -1,6 +1,6 @@
 {
   "id": "bulk-edit-deny-midway",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tickets",

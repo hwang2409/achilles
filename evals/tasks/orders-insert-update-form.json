@@ -1,6 +1,6 @@
 {
   "id": "orders-insert-update-form",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "home",

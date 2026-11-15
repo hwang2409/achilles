@@ -1,6 +1,6 @@
 {
   "id": "bulk-edit-approved",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tickets",
