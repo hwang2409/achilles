@@ -11,7 +11,7 @@ import { FormBlock, selectRow, useRecordWrites, useSelectedRow } from "./page/Re
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget, restoreFocus } from "./keyboard";
+import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
@@ -33,8 +33,6 @@ function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
   if (event?.mode === "steer" && event.delivery_id && !event.delivery_status && queued.has(event.delivery_id)) return null;
   return <Fallback id={id} />;
 }
-
-const composerField = () => document.querySelector('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
 
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
 
@@ -233,10 +231,9 @@ export function App() {
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
         <div className="page-chat">
-        <section ref={ready ? setTranscript : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onClick={(event) => {
-          // the button unmounts once the reader is at the bottom; keyboard activation (detail 0) moves focus to the composer, not to <body>.
-          // a mouse click or tap leaves focus alone: focusing the textarea on a tap opens the soft keyboard over the transcript
-          if (event.detail === 0 && document.activeElement === event.currentTarget) restoreFocus(composerField());
+        <section ref={ready ? setTranscript : undefined} className="transcript">{(!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+          // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
+          keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
           const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });

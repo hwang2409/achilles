@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
+import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
 
 export type { PageTool };
@@ -42,13 +43,16 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const selected = useSelectedRow(pageId);
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
   const onReloadTool = () => setReload((value) => value + 1);
-  const label = tool && tool.operation === "update" && row ? editingLabel(tool, fields, row) : "";
+  // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
+  // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
+  const order = fields ?? (tool && shown ? schemaColumns(shown, tool.collection) : undefined);
+  const label = tool && tool.operation === "update" && row ? editingLabel(tool, order, row) : "";
   const heading = label ? `${title} · ${label}` : title;
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
-    : tool.operation === "insert" ? <RecordForm tool={tool} order={fields} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={fields} row={row} label={label} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} label={label} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
   return <section className="record-form"><h2>{heading}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
