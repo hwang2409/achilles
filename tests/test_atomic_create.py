@@ -299,6 +299,9 @@ def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_
 
     catalog = mcp(client, page_headers, 4, "tools/list", {})
     assert sorted(tool["name"] for tool in catalog["tools"]) == ["add_book", "inspect_page"]
+    inspect = next(tool for tool in catalog["tools"] if tool["name"] == "inspect_page")
+    assert "update_layout" not in inspect["description"]
+    assert inspect["annotations"]["readOnlyHint"] is True
 
     before = state(root)
     inspected = mcp(
