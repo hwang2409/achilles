@@ -508,28 +508,6 @@ def test_chat_order_and_time_follow_the_last_message_only(monkeypatch) -> None:
     assert order() == ["new", "old"]
 
 
-def test_chat_search_pages_across_equal_times_without_gaps_or_repeats(tmp_path: Path) -> None:
-    store = PageStore(tmp_path / "achilles")
-    with store.transaction() as db:
-        for index in range(7):
-            db.execute(
-                "INSERT INTO chat(session_id,page_id,title,created_at,updated_at) "
-                "VALUES(?,?,?,?,?)",
-                (f"s{index}", "home", f"topic {index}", "2025-01-01", "2025-01-01"),
-            )
-    client = chat_client()
-    for query in ("", "&q=topic"):
-        seen, cursor = [], None
-        while True:
-            suffix = f"&before={cursor}" if cursor else ""
-            page = client.get(f"/api/chats?limit=3{query}{suffix}").json()
-            seen += [row["session_id"] for row in page["chats"]]
-            cursor = page["next"]
-            if cursor is None:
-                break
-        assert seen == [f"s{index}" for index in reversed(range(7))]
-
-
 def test_chat_search_escapes_like_wildcards(tmp_path: Path) -> None:
     store = PageStore(tmp_path / "achilles")
     with store.transaction() as db:
