@@ -102,6 +102,16 @@
         "document": {
           "blocks": [
             {
+              "type": "metric",
+              "label": "Pending",
+              "collection": "orders",
+              "count": true,
+              "where": {
+                "field": "status",
+                "equals": "pending"
+              }
+            },
+            {
               "type": "form",
               "title": "New order",
               "tool": "add_order"
@@ -115,6 +125,23 @@
                 "item",
                 "status"
               ]
+            }
+          ]
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "inspect",
+        "page_id": "pg-orders",
+        "chat_id": "orders-chat",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "metric_values": [
+            {
+              "block": 0,
+              "value": 1
             }
           ]
         }
@@ -215,6 +242,16 @@
         "document": {
           "blocks": [
             {
+              "type": "metric",
+              "label": "Pending",
+              "collection": "orders",
+              "count": true,
+              "where": {
+                "field": "status",
+                "equals": "pending"
+              }
+            },
+            {
               "type": "form",
               "title": "New order",
               "tool": "add_order"
@@ -228,6 +265,23 @@
                 "item",
                 "status"
               ]
+            }
+          ]
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "inspect",
+        "page_id": "pg-orders",
+        "chat_id": "orders-chat",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "metric_values": [
+            {
+              "block": 0,
+              "value": 2
             }
           ]
         }

@@ -9,6 +9,14 @@
     "tool_versions": [
       {
         "page_id": "home",
+        "tool_id": "tool-list_customers",
+        "name": "list_customers",
+        "version": 1,
+        "operation": "list",
+        "collection": "customers"
+      },
+      {
+        "page_id": "home",
         "tool_id": "tool-list_tickets",
         "name": "list_tickets",
         "version": 1,
@@ -27,12 +35,67 @@
     "records": [
       {
         "page_id": "home",
+        "id": "cu-1",
+        "collection": "customers",
+        "data": {
+          "name": "Northwind",
+          "plan": "enterprise"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-2",
+        "collection": "customers",
+        "data": {
+          "name": "Blue Fern",
+          "plan": "basic"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-3",
+        "collection": "customers",
+        "data": {
+          "name": "Halcyon Labs",
+          "plan": "enterprise"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-4",
+        "collection": "customers",
+        "data": {
+          "name": "Enterprise Rentals",
+          "plan": "basic"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-5",
+        "collection": "customers",
+        "data": {
+          "name": "Quill and Co",
+          "plan": "basic"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-6",
+        "collection": "customers",
+        "data": {
+          "name": "Orbit Freight",
+          "plan": "enterprise"
+        }
+      },
+      {
+        "page_id": "home",
         "id": "t-01",
         "collection": "tickets",
         "data": {
           "title": "Login page times out",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-1",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -41,8 +104,9 @@
         "collection": "tickets",
         "data": {
           "title": "Export drops last row",
-          "priority": "low",
-          "status": "open"
+          "customer_id": "cu-2",
+          "status": "open",
+          "priority": "normal"
         }
       },
       {
@@ -51,8 +115,9 @@
         "collection": "tickets",
         "data": {
           "title": "Dark mode contrast",
-          "priority": "medium",
-          "status": "open"
+          "customer_id": "cu-3",
+          "status": "closed",
+          "priority": "normal"
         }
       },
       {
@@ -61,8 +126,9 @@
         "collection": "tickets",
         "data": {
           "title": "Payment webhook retries",
-          "priority": "high",
-          "status": "closed"
+          "customer_id": "cu-3",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -71,8 +137,9 @@
         "collection": "tickets",
         "data": {
           "title": "Search ignores accents",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-4",
+          "status": "open",
+          "priority": "normal"
         }
       },
       {
@@ -81,8 +148,9 @@
         "collection": "tickets",
         "data": {
           "title": "Invite email typo",
-          "priority": "low",
-          "status": "closed"
+          "customer_id": "cu-6",
+          "status": "closed",
+          "priority": "normal"
         }
       },
       {
@@ -91,8 +159,9 @@
         "collection": "tickets",
         "data": {
           "title": "Report totals off by one",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-6",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -101,8 +170,9 @@
         "collection": "tickets",
         "data": {
           "title": "Avatar upload fails",
-          "priority": "medium",
-          "status": "closed"
+          "customer_id": "cu-5",
+          "status": "open",
+          "priority": "normal"
         }
       },
       {
@@ -111,8 +181,9 @@
         "collection": "tickets",
         "data": {
           "title": "Slow dashboard load",
-          "priority": "high",
-          "status": "closed"
+          "customer_id": "cu-1",
+          "status": "closed",
+          "priority": "normal"
         }
       },
       {
@@ -121,24 +192,50 @@
         "collection": "tickets",
         "data": {
           "title": "Broken help link",
-          "priority": "low",
-          "status": "open"
+          "customer_id": "cu-2",
+          "status": "closed",
+          "priority": "normal"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-11",
+        "collection": "tickets",
+        "data": {
+          "title": "CSV import hangs",
+          "customer_id": "cu-4",
+          "status": "open",
+          "priority": "normal"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-12",
+        "collection": "tickets",
+        "data": {
+          "title": "SSO redirect loop",
+          "customer_id": "cu-1",
+          "status": "waiting",
+          "priority": "normal"
         }
       }
     ],
     "calls": [
+      {
+        "id": "list-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_customers",
+        "success": true,
+        "arguments": {}
+      },
       {
         "id": "list-1",
         "page_id": "home",
         "chat_id": "tickets-chat",
         "tool": "achilles__list_tickets",
         "success": true,
-        "arguments": {
-          "where": {
-            "field": "priority",
-            "equals": "high"
-          }
-        }
+        "arguments": {}
       },
       {
         "id": "update-0",
@@ -159,7 +256,7 @@
         "tool": "achilles__update_ticket",
         "success": true,
         "arguments": {
-          "record_id": "t-05",
+          "record_id": "t-04",
           "revision": 1,
           "status": "escalated"
         }
@@ -179,6 +276,51 @@
     ],
     "results": [
       {
+        "call_id": "list-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_customers",
+        "success": true,
+        "data": [
+          {
+            "name": "Northwind",
+            "plan": "enterprise",
+            "record_id": "cu-1",
+            "revision": 1
+          },
+          {
+            "name": "Blue Fern",
+            "plan": "basic",
+            "record_id": "cu-2",
+            "revision": 1
+          },
+          {
+            "name": "Halcyon Labs",
+            "plan": "enterprise",
+            "record_id": "cu-3",
+            "revision": 1
+          },
+          {
+            "name": "Enterprise Rentals",
+            "plan": "basic",
+            "record_id": "cu-4",
+            "revision": 1
+          },
+          {
+            "name": "Quill and Co",
+            "plan": "basic",
+            "record_id": "cu-5",
+            "revision": 1
+          },
+          {
+            "name": "Orbit Freight",
+            "plan": "enterprise",
+            "record_id": "cu-6",
+            "revision": 1
+          }
+        ]
+      },
+      {
         "call_id": "list-1",
         "page_id": "home",
         "chat_id": "tickets-chat",
@@ -187,37 +329,98 @@
         "data": [
           {
             "title": "Login page times out",
-            "priority": "high",
+            "customer_id": "cu-1",
             "status": "open",
+            "priority": "normal",
             "record_id": "t-01",
             "revision": 1
           },
           {
-            "title": "Payment webhook retries",
-            "priority": "high",
+            "title": "Export drops last row",
+            "customer_id": "cu-2",
+            "status": "open",
+            "priority": "normal",
+            "record_id": "t-02",
+            "revision": 1
+          },
+          {
+            "title": "Dark mode contrast",
+            "customer_id": "cu-3",
             "status": "closed",
+            "priority": "normal",
+            "record_id": "t-03",
+            "revision": 1
+          },
+          {
+            "title": "Payment webhook retries",
+            "customer_id": "cu-3",
+            "status": "open",
+            "priority": "normal",
             "record_id": "t-04",
             "revision": 1
           },
           {
             "title": "Search ignores accents",
-            "priority": "high",
+            "customer_id": "cu-4",
             "status": "open",
+            "priority": "normal",
             "record_id": "t-05",
             "revision": 1
           },
           {
+            "title": "Invite email typo",
+            "customer_id": "cu-6",
+            "status": "closed",
+            "priority": "normal",
+            "record_id": "t-06",
+            "revision": 1
+          },
+          {
             "title": "Report totals off by one",
-            "priority": "high",
+            "customer_id": "cu-6",
             "status": "open",
+            "priority": "normal",
             "record_id": "t-07",
             "revision": 1
           },
           {
+            "title": "Avatar upload fails",
+            "customer_id": "cu-5",
+            "status": "open",
+            "priority": "normal",
+            "record_id": "t-08",
+            "revision": 1
+          },
+          {
             "title": "Slow dashboard load",
-            "priority": "high",
+            "customer_id": "cu-1",
             "status": "closed",
+            "priority": "normal",
             "record_id": "t-09",
+            "revision": 1
+          },
+          {
+            "title": "Broken help link",
+            "customer_id": "cu-2",
+            "status": "closed",
+            "priority": "normal",
+            "record_id": "t-10",
+            "revision": 1
+          },
+          {
+            "title": "CSV import hangs",
+            "customer_id": "cu-4",
+            "status": "open",
+            "priority": "normal",
+            "record_id": "t-11",
+            "revision": 1
+          },
+          {
+            "title": "SSO redirect loop",
+            "customer_id": "cu-1",
+            "status": "waiting",
+            "priority": "normal",
+            "record_id": "t-12",
             "revision": 1
           }
         ]
@@ -241,7 +444,7 @@
         "tool": "achilles__update_ticket",
         "success": true,
         "data": {
-          "record_id": "t-05",
+          "record_id": "t-04",
           "status": "escalated",
           "revision": 2
         }
@@ -260,6 +463,13 @@
       }
     ],
     "approvals": [
+      {
+        "request_id": "list-0",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__list_customers",
+        "decision": "approve"
+      },
       {
         "request_id": "list-1",
         "chat_id": "tickets-chat",
@@ -299,6 +509,14 @@
       "tool_versions": [
         {
           "page_id": "home",
+          "tool_id": "tool-list_customers",
+          "name": "list_customers",
+          "version": 1,
+          "operation": "list",
+          "collection": "customers"
+        },
+        {
+          "page_id": "home",
           "tool_id": "tool-list_tickets",
           "name": "list_tickets",
           "version": 1,
@@ -317,12 +535,67 @@
       "records": [
         {
           "page_id": "home",
+          "id": "cu-1",
+          "collection": "customers",
+          "data": {
+            "name": "Northwind",
+            "plan": "enterprise"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-2",
+          "collection": "customers",
+          "data": {
+            "name": "Blue Fern",
+            "plan": "basic"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-3",
+          "collection": "customers",
+          "data": {
+            "name": "Halcyon Labs",
+            "plan": "enterprise"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-4",
+          "collection": "customers",
+          "data": {
+            "name": "Enterprise Rentals",
+            "plan": "basic"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-5",
+          "collection": "customers",
+          "data": {
+            "name": "Quill and Co",
+            "plan": "basic"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-6",
+          "collection": "customers",
+          "data": {
+            "name": "Orbit Freight",
+            "plan": "enterprise"
+          }
+        },
+        {
+          "page_id": "home",
           "id": "t-01",
           "collection": "tickets",
           "data": {
             "title": "Login page times out",
-            "priority": "high",
-            "status": "open"
+            "customer_id": "cu-1",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -331,8 +604,9 @@
           "collection": "tickets",
           "data": {
             "title": "Export drops last row",
-            "priority": "low",
-            "status": "open"
+            "customer_id": "cu-2",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -341,8 +615,9 @@
           "collection": "tickets",
           "data": {
             "title": "Dark mode contrast",
-            "priority": "medium",
-            "status": "open"
+            "customer_id": "cu-3",
+            "status": "closed",
+            "priority": "normal"
           }
         },
         {
@@ -351,8 +626,9 @@
           "collection": "tickets",
           "data": {
             "title": "Payment webhook retries",
-            "priority": "high",
-            "status": "closed"
+            "customer_id": "cu-3",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -361,8 +637,9 @@
           "collection": "tickets",
           "data": {
             "title": "Search ignores accents",
-            "priority": "high",
-            "status": "open"
+            "customer_id": "cu-4",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -371,8 +648,9 @@
           "collection": "tickets",
           "data": {
             "title": "Invite email typo",
-            "priority": "low",
-            "status": "closed"
+            "customer_id": "cu-6",
+            "status": "closed",
+            "priority": "normal"
           }
         },
         {
@@ -381,8 +659,9 @@
           "collection": "tickets",
           "data": {
             "title": "Report totals off by one",
-            "priority": "high",
-            "status": "open"
+            "customer_id": "cu-6",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -391,8 +670,9 @@
           "collection": "tickets",
           "data": {
             "title": "Avatar upload fails",
-            "priority": "medium",
-            "status": "closed"
+            "customer_id": "cu-5",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -401,8 +681,9 @@
           "collection": "tickets",
           "data": {
             "title": "Slow dashboard load",
-            "priority": "high",
-            "status": "closed"
+            "customer_id": "cu-1",
+            "status": "closed",
+            "priority": "normal"
           }
         },
         {
@@ -411,8 +692,31 @@
           "collection": "tickets",
           "data": {
             "title": "Broken help link",
-            "priority": "low",
-            "status": "open"
+            "customer_id": "cu-2",
+            "status": "closed",
+            "priority": "normal"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-11",
+          "collection": "tickets",
+          "data": {
+            "title": "CSV import hangs",
+            "customer_id": "cu-4",
+            "status": "open",
+            "priority": "normal"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-12",
+          "collection": "tickets",
+          "data": {
+            "title": "SSO redirect loop",
+            "customer_id": "cu-1",
+            "status": "waiting",
+            "priority": "normal"
           }
         }
       ]
@@ -427,6 +731,14 @@
       }
     ],
     "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_customers",
+        "name": "list_customers",
+        "version": 1,
+        "operation": "list",
+        "collection": "customers"
+      },
       {
         "page_id": "home",
         "tool_id": "tool-list_tickets",
@@ -447,12 +759,67 @@
     "records": [
       {
         "page_id": "home",
+        "id": "cu-1",
+        "collection": "customers",
+        "data": {
+          "name": "Northwind",
+          "plan": "enterprise"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-2",
+        "collection": "customers",
+        "data": {
+          "name": "Blue Fern",
+          "plan": "basic"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-3",
+        "collection": "customers",
+        "data": {
+          "name": "Halcyon Labs",
+          "plan": "enterprise"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-4",
+        "collection": "customers",
+        "data": {
+          "name": "Enterprise Rentals",
+          "plan": "basic"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-5",
+        "collection": "customers",
+        "data": {
+          "name": "Quill and Co",
+          "plan": "basic"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "cu-6",
+        "collection": "customers",
+        "data": {
+          "name": "Orbit Freight",
+          "plan": "enterprise"
+        }
+      },
+      {
+        "page_id": "home",
         "id": "t-01",
         "collection": "tickets",
         "data": {
           "title": "Login page times out",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-1",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -461,8 +828,9 @@
         "collection": "tickets",
         "data": {
           "title": "Export drops last row",
-          "priority": "low",
-          "status": "open"
+          "customer_id": "cu-2",
+          "status": "open",
+          "priority": "normal"
         }
       },
       {
@@ -471,8 +839,9 @@
         "collection": "tickets",
         "data": {
           "title": "Dark mode contrast",
-          "priority": "medium",
-          "status": "open"
+          "customer_id": "cu-3",
+          "status": "closed",
+          "priority": "normal"
         }
       },
       {
@@ -481,8 +850,9 @@
         "collection": "tickets",
         "data": {
           "title": "Payment webhook retries",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-3",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -491,8 +861,9 @@
         "collection": "tickets",
         "data": {
           "title": "Search ignores accents",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-4",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -501,8 +872,9 @@
         "collection": "tickets",
         "data": {
           "title": "Invite email typo",
-          "priority": "low",
-          "status": "closed"
+          "customer_id": "cu-6",
+          "status": "closed",
+          "priority": "normal"
         }
       },
       {
@@ -511,8 +883,9 @@
         "collection": "tickets",
         "data": {
           "title": "Report totals off by one",
-          "priority": "high",
-          "status": "escalated"
+          "customer_id": "cu-6",
+          "status": "escalated",
+          "priority": "normal"
         }
       },
       {
@@ -521,8 +894,9 @@
         "collection": "tickets",
         "data": {
           "title": "Avatar upload fails",
-          "priority": "medium",
-          "status": "closed"
+          "customer_id": "cu-5",
+          "status": "open",
+          "priority": "normal"
         }
       },
       {
@@ -531,8 +905,9 @@
         "collection": "tickets",
         "data": {
           "title": "Slow dashboard load",
-          "priority": "high",
-          "status": "closed"
+          "customer_id": "cu-1",
+          "status": "closed",
+          "priority": "normal"
         }
       },
       {
@@ -541,24 +916,50 @@
         "collection": "tickets",
         "data": {
           "title": "Broken help link",
-          "priority": "low",
-          "status": "open"
+          "customer_id": "cu-2",
+          "status": "closed",
+          "priority": "normal"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-11",
+        "collection": "tickets",
+        "data": {
+          "title": "CSV import hangs",
+          "customer_id": "cu-4",
+          "status": "open",
+          "priority": "normal"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-12",
+        "collection": "tickets",
+        "data": {
+          "title": "SSO redirect loop",
+          "customer_id": "cu-1",
+          "status": "waiting",
+          "priority": "normal"
         }
       }
     ],
     "calls": [
+      {
+        "id": "list-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_customers",
+        "success": true,
+        "arguments": {}
+      },
       {
         "id": "list-1",
         "page_id": "home",
         "chat_id": "tickets-chat",
         "tool": "achilles__list_tickets",
         "success": true,
-        "arguments": {
-          "where": {
-            "field": "priority",
-            "equals": "high"
-          }
-        }
+        "arguments": {}
       },
       {
         "id": "update-0",
@@ -611,6 +1012,51 @@
     ],
     "results": [
       {
+        "call_id": "list-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_customers",
+        "success": true,
+        "data": [
+          {
+            "name": "Northwind",
+            "plan": "enterprise",
+            "record_id": "cu-1",
+            "revision": 1
+          },
+          {
+            "name": "Blue Fern",
+            "plan": "basic",
+            "record_id": "cu-2",
+            "revision": 1
+          },
+          {
+            "name": "Halcyon Labs",
+            "plan": "enterprise",
+            "record_id": "cu-3",
+            "revision": 1
+          },
+          {
+            "name": "Enterprise Rentals",
+            "plan": "basic",
+            "record_id": "cu-4",
+            "revision": 1
+          },
+          {
+            "name": "Quill and Co",
+            "plan": "basic",
+            "record_id": "cu-5",
+            "revision": 1
+          },
+          {
+            "name": "Orbit Freight",
+            "plan": "enterprise",
+            "record_id": "cu-6",
+            "revision": 1
+          }
+        ]
+      },
+      {
         "call_id": "list-1",
         "page_id": "home",
         "chat_id": "tickets-chat",
@@ -619,37 +1065,98 @@
         "data": [
           {
             "title": "Login page times out",
-            "priority": "high",
+            "customer_id": "cu-1",
             "status": "open",
+            "priority": "normal",
             "record_id": "t-01",
             "revision": 1
           },
           {
-            "title": "Payment webhook retries",
-            "priority": "high",
+            "title": "Export drops last row",
+            "customer_id": "cu-2",
+            "status": "open",
+            "priority": "normal",
+            "record_id": "t-02",
+            "revision": 1
+          },
+          {
+            "title": "Dark mode contrast",
+            "customer_id": "cu-3",
             "status": "closed",
+            "priority": "normal",
+            "record_id": "t-03",
+            "revision": 1
+          },
+          {
+            "title": "Payment webhook retries",
+            "customer_id": "cu-3",
+            "status": "open",
+            "priority": "normal",
             "record_id": "t-04",
             "revision": 1
           },
           {
             "title": "Search ignores accents",
-            "priority": "high",
+            "customer_id": "cu-4",
             "status": "open",
+            "priority": "normal",
             "record_id": "t-05",
             "revision": 1
           },
           {
+            "title": "Invite email typo",
+            "customer_id": "cu-6",
+            "status": "closed",
+            "priority": "normal",
+            "record_id": "t-06",
+            "revision": 1
+          },
+          {
             "title": "Report totals off by one",
-            "priority": "high",
+            "customer_id": "cu-6",
             "status": "open",
+            "priority": "normal",
             "record_id": "t-07",
             "revision": 1
           },
           {
+            "title": "Avatar upload fails",
+            "customer_id": "cu-5",
+            "status": "open",
+            "priority": "normal",
+            "record_id": "t-08",
+            "revision": 1
+          },
+          {
             "title": "Slow dashboard load",
-            "priority": "high",
+            "customer_id": "cu-1",
             "status": "closed",
+            "priority": "normal",
             "record_id": "t-09",
+            "revision": 1
+          },
+          {
+            "title": "Broken help link",
+            "customer_id": "cu-2",
+            "status": "closed",
+            "priority": "normal",
+            "record_id": "t-10",
+            "revision": 1
+          },
+          {
+            "title": "CSV import hangs",
+            "customer_id": "cu-4",
+            "status": "open",
+            "priority": "normal",
+            "record_id": "t-11",
+            "revision": 1
+          },
+          {
+            "title": "SSO redirect loop",
+            "customer_id": "cu-1",
+            "status": "waiting",
+            "priority": "normal",
+            "record_id": "t-12",
             "revision": 1
           }
         ]
@@ -705,6 +1212,13 @@
     ],
     "approvals": [
       {
+        "request_id": "list-0",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__list_customers",
+        "decision": "approve"
+      },
+      {
         "request_id": "list-1",
         "chat_id": "tickets-chat",
         "page_id": "home",
@@ -750,6 +1264,14 @@
       "tool_versions": [
         {
           "page_id": "home",
+          "tool_id": "tool-list_customers",
+          "name": "list_customers",
+          "version": 1,
+          "operation": "list",
+          "collection": "customers"
+        },
+        {
+          "page_id": "home",
           "tool_id": "tool-list_tickets",
           "name": "list_tickets",
           "version": 1,
@@ -768,12 +1290,67 @@
       "records": [
         {
           "page_id": "home",
+          "id": "cu-1",
+          "collection": "customers",
+          "data": {
+            "name": "Northwind",
+            "plan": "enterprise"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-2",
+          "collection": "customers",
+          "data": {
+            "name": "Blue Fern",
+            "plan": "basic"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-3",
+          "collection": "customers",
+          "data": {
+            "name": "Halcyon Labs",
+            "plan": "enterprise"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-4",
+          "collection": "customers",
+          "data": {
+            "name": "Enterprise Rentals",
+            "plan": "basic"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-5",
+          "collection": "customers",
+          "data": {
+            "name": "Quill and Co",
+            "plan": "basic"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "cu-6",
+          "collection": "customers",
+          "data": {
+            "name": "Orbit Freight",
+            "plan": "enterprise"
+          }
+        },
+        {
+          "page_id": "home",
           "id": "t-01",
           "collection": "tickets",
           "data": {
             "title": "Login page times out",
-            "priority": "high",
-            "status": "open"
+            "customer_id": "cu-1",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -782,8 +1359,9 @@
           "collection": "tickets",
           "data": {
             "title": "Export drops last row",
-            "priority": "low",
-            "status": "open"
+            "customer_id": "cu-2",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -792,8 +1370,9 @@
           "collection": "tickets",
           "data": {
             "title": "Dark mode contrast",
-            "priority": "medium",
-            "status": "open"
+            "customer_id": "cu-3",
+            "status": "closed",
+            "priority": "normal"
           }
         },
         {
@@ -802,8 +1381,9 @@
           "collection": "tickets",
           "data": {
             "title": "Payment webhook retries",
-            "priority": "high",
-            "status": "closed"
+            "customer_id": "cu-3",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -812,8 +1392,9 @@
           "collection": "tickets",
           "data": {
             "title": "Search ignores accents",
-            "priority": "high",
-            "status": "open"
+            "customer_id": "cu-4",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -822,8 +1403,9 @@
           "collection": "tickets",
           "data": {
             "title": "Invite email typo",
-            "priority": "low",
-            "status": "closed"
+            "customer_id": "cu-6",
+            "status": "closed",
+            "priority": "normal"
           }
         },
         {
@@ -832,8 +1414,9 @@
           "collection": "tickets",
           "data": {
             "title": "Report totals off by one",
-            "priority": "high",
-            "status": "open"
+            "customer_id": "cu-6",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -842,8 +1425,9 @@
           "collection": "tickets",
           "data": {
             "title": "Avatar upload fails",
-            "priority": "medium",
-            "status": "closed"
+            "customer_id": "cu-5",
+            "status": "open",
+            "priority": "normal"
           }
         },
         {
@@ -852,8 +1436,9 @@
           "collection": "tickets",
           "data": {
             "title": "Slow dashboard load",
-            "priority": "high",
-            "status": "closed"
+            "customer_id": "cu-1",
+            "status": "closed",
+            "priority": "normal"
           }
         },
         {
@@ -862,8 +1447,31 @@
           "collection": "tickets",
           "data": {
             "title": "Broken help link",
-            "priority": "low",
-            "status": "open"
+            "customer_id": "cu-2",
+            "status": "closed",
+            "priority": "normal"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-11",
+          "collection": "tickets",
+          "data": {
+            "title": "CSV import hangs",
+            "customer_id": "cu-4",
+            "status": "open",
+            "priority": "normal"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-12",
+          "collection": "tickets",
+          "data": {
+            "title": "SSO redirect loop",
+            "customer_id": "cu-1",
+            "status": "waiting",
+            "priority": "normal"
           }
         }
       ]

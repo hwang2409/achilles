@@ -16,21 +16,21 @@
       "route": "/orders"
     }
   ],
-  "agent_turns": 14,
+  "agent_turns": 16,
   "steps": [
     {
       "id": "build",
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "create /orders titled Orders. it keeps the orders collection, with tools add_order (fields customer, item, qty as an integer, status) and set_order_status (updates an order's status), a form block for add_order, and a list block of orders with fields customer, item, status in that order"
+      "prompt": "create /orders titled Orders. it keeps the orders collection, with tools add_order (fields customer, item, qty as an integer, status as one of pending or shipped) and set_order_status (updates an order's status). put first a metric block that counts orders whose status is pending, then a form block for add_order, then a list block of orders with fields customer, item, status in that order"
     },
     {
       "id": "use",
       "kind": "prompt",
       "page": "orders",
       "chat": "orders-chat",
-      "prompt": "add an order for customer Ana, item lamp, qty 2, status pending, and one for customer Ben, item desk, qty 1, status pending. then mark Ana's order shipped and list the orders"
+      "prompt": "add an order for customer Ana, item lamp, qty 2, status pending, and one for customer Ben, item desk, qty 1, status pending. then mark Ana's order shipped, list the orders, and check this page's metric"
     }
   ],
   "checks": [
@@ -80,6 +80,20 @@
       ]
     },
     {
+      "id": "pending-metric",
+      "type": "metric_count",
+      "page": "orders",
+      "value": {
+        "collection": "orders",
+        "where": {
+          "field": "status",
+          "equals": "pending"
+        },
+        "count": 1,
+        "position": "first"
+      }
+    },
+    {
       "id": "order-form",
       "type": "layout_contains",
       "page": "orders",
@@ -96,7 +110,6 @@
       "id": "form-adds",
       "type": "form_submit",
       "page": "orders",
-      "required": false,
       "value": {
         "string": "Cara",
         "integer": "3"

@@ -129,17 +129,12 @@
     ],
     "calls": [
       {
-        "id": "list-1",
+        "id": "list-0",
         "page_id": "home",
         "chat_id": "tickets-chat",
         "tool": "achilles__list_tickets",
         "success": true,
-        "arguments": {
-          "where": {
-            "field": "priority",
-            "equals": "high"
-          }
-        }
+        "arguments": {}
       },
       {
         "id": "update-0",
@@ -192,7 +187,7 @@
     ],
     "results": [
       {
-        "call_id": "list-1",
+        "call_id": "list-0",
         "page_id": "home",
         "chat_id": "tickets-chat",
         "tool": "achilles__list_tickets",
@@ -203,6 +198,20 @@
             "priority": "high",
             "status": "open",
             "record_id": "t-01",
+            "revision": 1
+          },
+          {
+            "title": "Export drops last row",
+            "priority": "low",
+            "status": "open",
+            "record_id": "t-02",
+            "revision": 1
+          },
+          {
+            "title": "Dark mode contrast",
+            "priority": "medium",
+            "status": "open",
+            "record_id": "t-03",
             "revision": 1
           },
           {
@@ -220,6 +229,13 @@
             "revision": 1
           },
           {
+            "title": "Invite email typo",
+            "priority": "low",
+            "status": "closed",
+            "record_id": "t-06",
+            "revision": 1
+          },
+          {
             "title": "Report totals off by one",
             "priority": "high",
             "status": "open",
@@ -227,10 +243,24 @@
             "revision": 1
           },
           {
+            "title": "Avatar upload fails",
+            "priority": "medium",
+            "status": "closed",
+            "record_id": "t-08",
+            "revision": 1
+          },
+          {
             "title": "Slow dashboard load",
             "priority": "high",
             "status": "closed",
             "record_id": "t-09",
+            "revision": 1
+          },
+          {
+            "title": "Broken help link",
+            "priority": "low",
+            "status": "open",
+            "record_id": "t-10",
             "revision": 1
           }
         ]
@@ -286,7 +316,7 @@
     ],
     "approvals": [
       {
-        "request_id": "list-1",
+        "request_id": "list-0",
         "chat_id": "tickets-chat",
         "page_id": "home",
         "tool": "achilles__list_tickets",
@@ -596,17 +626,12 @@
     ],
     "calls": [
       {
-        "id": "list-1",
+        "id": "list-0",
         "page_id": "home",
         "chat_id": "tickets-chat",
         "tool": "achilles__list_tickets",
         "success": true,
-        "arguments": {
-          "where": {
-            "field": "priority",
-            "equals": "high"
-          }
-        }
+        "arguments": {}
       },
       {
         "id": "update-0",
@@ -647,7 +672,7 @@
     ],
     "results": [
       {
-        "call_id": "list-1",
+        "call_id": "list-0",
         "page_id": "home",
         "chat_id": "tickets-chat",
         "tool": "achilles__list_tickets",
@@ -658,6 +683,20 @@
             "priority": "high",
             "status": "open",
             "record_id": "t-01",
+            "revision": 1
+          },
+          {
+            "title": "Export drops last row",
+            "priority": "low",
+            "status": "open",
+            "record_id": "t-02",
+            "revision": 1
+          },
+          {
+            "title": "Dark mode contrast",
+            "priority": "medium",
+            "status": "open",
+            "record_id": "t-03",
             "revision": 1
           },
           {
@@ -675,6 +714,13 @@
             "revision": 1
           },
           {
+            "title": "Invite email typo",
+            "priority": "low",
+            "status": "closed",
+            "record_id": "t-06",
+            "revision": 1
+          },
+          {
             "title": "Report totals off by one",
             "priority": "high",
             "status": "open",
@@ -682,10 +728,24 @@
             "revision": 1
           },
           {
+            "title": "Avatar upload fails",
+            "priority": "medium",
+            "status": "closed",
+            "record_id": "t-08",
+            "revision": 1
+          },
+          {
             "title": "Slow dashboard load",
             "priority": "high",
             "status": "closed",
             "record_id": "t-09",
+            "revision": 1
+          },
+          {
+            "title": "Broken help link",
+            "priority": "low",
+            "status": "open",
+            "record_id": "t-10",
             "revision": 1
           }
         ]
@@ -729,7 +789,7 @@
     ],
     "approvals": [
       {
-        "request_id": "list-1",
+        "request_id": "list-0",
         "chat_id": "tickets-chat",
         "page_id": "home",
         "tool": "achilles__list_tickets",

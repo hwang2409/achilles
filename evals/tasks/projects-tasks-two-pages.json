@@ -23,7 +23,7 @@
       "route": "/tasks"
     }
   ],
-  "agent_turns": 18,
+  "agent_turns": 16,
   "steps": [
     {
       "id": "build",

@@ -35,7 +35,7 @@
       "kind": "prompt",
       "page": "tickets",
       "chat": "tickets-chat",
-      "prompt": "set the status of each of those to escalated"
+      "prompt": "go ahead and set the status of each of those to escalated. you already listed them, so no need to list them again"
     }
   ],
   "setup": {

@@ -81,10 +81,11 @@ async function preflightBrowser(tasks: EvalTask[]) {
   catch { throw new Error("browser checks require Playwright and Chromium; run: cd apps/web && bun install --frozen-lockfile && bun node_modules/playwright/cli.js install chromium"); }
 }
 
-const bundle = (name: string, operation: string, collection: string, input_schema?: Record<string, unknown>, data_schema: Record<string, unknown> = { type: "object", additionalProperties: true }) => {
+// A seed with its own data_schema leaves output_schema out: the product derives it from the data schema.
+const bundle = (name: string, operation: string, collection: string, input_schema?: Record<string, unknown>, data_schema?: Record<string, unknown>) => {
   const record = { type: "object", additionalProperties: true, properties: { record_id: { type: "string" }, revision: { type: "integer" } }, required: ["record_id", "revision"] };
   const output_schema = operation === "list" ? { type: "array", items: record } : operation === "get" ? { anyOf: [record, { type: "null" }] } : record;
-  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: input_schema ?? (operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }), output_schema, implementation: { operation, collection, data_schema } };
+  return { format_version: 1, kind: "data_operation", name, description: `${operation} ${collection}`, input_schema: input_schema ?? (operation === "list" ? { type: "object", additionalProperties: false } : operation === "update" ? { type: "object", properties: { revision: { type: "integer" } }, required: ["revision"], additionalProperties: true } : { type: "object", additionalProperties: true }), ...(data_schema ? {} : { output_schema }), implementation: { operation, collection, data_schema: data_schema ?? { type: "object", additionalProperties: true } } };
 };
 const CAPABILITIES_SCRIPT = `
 import inspect, json
