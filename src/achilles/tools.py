@@ -14,7 +14,13 @@ MAX_BUNDLE_BYTES = 64 * 1024
 MAX_DESCRIPTION = 2_000
 _NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 _OPERATIONS = ["list", "get", "insert", "update"]
-BUILTIN_TOOL_NAMES = ("inspect_page", "create_page", "create_tool", "update_layout")
+BUILTIN_TOOL_NAMES = (
+    "inspect_page",
+    "create_page",
+    "create_tool",
+    "update_layout",
+    "restore_version",
+)
 _RESERVED_NAMES = BUILTIN_TOOL_NAMES
 
 _JSON_SCHEMA = {
