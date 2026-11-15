@@ -361,11 +361,10 @@ def _validate_block_fields(
     for position, field in enumerate(block["fields"]):
         if field in known:
             continue
-        listed = ", ".join(sorted(known)) or "(none)"
         raise ValidationError(
             f"{prefix}/blocks/{index}/fields/{position}",
             f"field in {source}",
-            hint=f"Use a field from {source}. Unknown field: {field}. Fields: {listed}.",
+            hint=unknown_field_hint(source, field, known),
         )
 
 
@@ -391,23 +390,28 @@ def _validate_layout_filter(
     if field in fields:
         return
 
-    listed = ", ".join(sorted(fields)) or "(none)"
-    hint = (
-        f"Use a field from the {block['collection']} collection schema. "
-        f"Unknown field: {field}. Collection fields: {listed}."
-    )
     suggestion = (
         suggest_field(block["collection"], field, field_filter["equals"], fields)
         if suggest_field is not None
         else None
     )
-    if suggestion is not None:
-        hint += f" Did you mean {suggestion}?"
     raise ValidationError(
         f"{prefix}/blocks/{index}/{filter_name}/field",
         "field in collection schema",
-        hint=hint,
+        hint=unknown_field_hint(
+            f"the {block['collection']} collection schema", field, fields, suggestion
+        ),
     )
+
+
+def unknown_field_hint(
+    source: str, field: str, fields: set[str], suggestion: str | None = None
+) -> str:
+    listed = ", ".join(sorted(fields)) or "(none)"
+    hint = f"Use a field from {source}. Unknown field: {field}. Fields: {listed}."
+    if suggestion is not None:
+        hint += f" Did you mean {suggestion}?"
+    return hint
 
 
 def _tool_fields(bundles: list[dict[str, Any]]) -> dict[str, set[str]]:
