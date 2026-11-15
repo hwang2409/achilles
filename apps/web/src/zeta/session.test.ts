@@ -176,4 +176,24 @@ describe("loadSession", () => {
     expect(snapshots.at(-1)).toBeDefined();
     expect(lease.store).toBeDefined();
   });
+
+  test("ends the snapshot with the kept turn or with how zeta stopped the last one", async () => {
+    const tail = async (status: object) => {
+      const snapshots: unknown[][] = [];
+      const client = {
+        request: async (method: string) => method === "status" ? status : { messages: [], next_offset: null },
+        replay: async (_id: string, refresh: () => Promise<unknown[]>) => { snapshots.push(await refresh()); return { store: { resync: (events: unknown[]) => snapshots.push(events) }, release() {} }; },
+        replayRevision: () => 1,
+        finishReplay: () => true,
+      };
+      await loadSession(client as never, "s");
+      return snapshots.at(-1);
+    };
+    const ended = (reason: string, session = "s") => ({ session: { session_id: session }, state: "idle", last_turn_outcome: { turn_id: "t", reason } });
+    expect(await tail({ session: { session_id: "s" }, state: "running" })).toEqual([{ type: "run_start" }, { type: "turn_start" }]);
+    expect(await tail(ended("disconnect"))).toEqual([{ type: "run_end", outcome: "disconnected" }]);
+    expect(await tail(ended("user_stop"))).toEqual([{ type: "run_end", outcome: "cancelled" }]);
+    expect(await tail(ended("completed"))).toEqual([{ type: "run_end" }]);
+    expect(await tail(ended("disconnect", "other"))).toEqual([{ type: "run_end" }]);
+  });
 });

@@ -1,4 +1,4 @@
-import { fromZetaEvent, fromZetaHistory, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
+import { fromZetaEvent, fromZetaHistory, statusTurnOutcome, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import type { RunEvent } from "@fulcrum/core";
 import { supportsFeature } from "./connection";
 
@@ -99,13 +99,19 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
 }
 
 const statusEvents = (id: string, status: Status): RunEvent[] => (status.pending_approvals ?? []).flatMap((item) => fromZetaEvent({ event: "approval_request", session_id: id, ...item, ...(item.resolution_pending ? { state: "resolving", status: "resolving…" } : {}) }));
-const terminal = (status: Status): RunEvent[] => status.state === "idle" ? [{ type: "run_end" }] : [{ type: "run_start" }];
+// A kept running turn (a reload during it) needs `turn_start` too: the composer stop control and header read `turn`.
+// An idle chat whose last turn zeta stopped (user stop, or no client back within the grace) says so in its outcome.
+const terminal = (id: string, status: Status): RunEvent[] => {
+  if (status.state !== "idle") return [{ type: "run_start" }, { type: "turn_start" }];
+  const outcome = status.session?.session_id === id ? statusTurnOutcome(status.last_turn_outcome) : undefined;
+  return [{ type: "run_end", ...(outcome === "cancelled" || outcome === "disconnected" ? { outcome } : {}) }];
+};
 
 export async function loadSession(client: ZetaClient, id: string): Promise<SessionLease> {
   let pages: LoadedPage[] = []; let lease!: SessionLease;
   const page = async (offset: number): Promise<LoadedPage> => { const value = await client.request("session_history", { session_id: id, offset }) as HistoryPage; return { offset, rows: value.messages ?? [], nextOffset: value.next_offset ?? null }; };
   const allRows = () => pages.flatMap((item) => item.rows);
-  const snapshot = (rows: unknown[], status: Status) => [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(status)];
+  const snapshot = (rows: unknown[], status: Status) => [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(id, status)];
   const loadAll = async () => { pages = []; for (let offset: number | null = 0; offset !== null;) { const next = await page(offset); pages.push(next); offset = next.nextOffset; } };
   const initial = await client.request("status", {}) as Status;
   try {
