@@ -362,9 +362,9 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (!original || original.version !== 1 || !active || active.version !== activeVersion || layouts.some((row, index) => row.version !== index + 1)) return { reason: `layout history is not versions 1..${String(activeVersion)} with the last one active` } satisfies CheckFailure;
     if (!layouts.slice(1, -1).some(row => !sameSeedValue(row.document, original.document))) return { reason: "no layout change before the undo" } satisfies CheckFailure;
     if (!sameSeedValue(active.document, original.document)) return { reason: `active layout v${String(active.version)} is not a copy of v1` } satisfies CheckFailure;
-    const changes = rows(snapshot, "results").filter(row => row.page_id === page && successful(row) && ["achilles__update_layout", "achilles__restore_version"].includes(String(row.tool)));
-    const last = changes.at(-1);
-    if (last?.tool !== "achilles__restore_version" || !structurallyContains(last.data ?? last.result, { kind: "layout", version: active.version })) return { reason: `the last layout change is ${String(last?.tool)}, not a restore_version that made v${String(active.version)}` } satisfies CheckFailure;
+    // the active version is the last one appended, so a restore result that made it implies the order; tool restores do not count
+    const restored = rows(snapshot, "results").some(row => row.page_id === page && successful(row) && row.tool === "achilles__restore_version" && structurallyContains(row.data ?? row.result, { kind: "layout", version: active.version }));
+    if (!restored) return { reason: `no successful restore_version made layout v${String(active.version)}` } satisfies CheckFailure;
     return true;
   },
   browser_text: ({ check, owned }) => owned("browser").some(row => check.synonyms ? String(row.text ?? "").split(/[\t\r\n]+/).some(cell => [check.text!, ...check.synonyms!].some(value => normalizeToken(cell.trim()) === normalizeToken(value))) : String(row.text ?? "").includes(String(check.text))),
