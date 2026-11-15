@@ -127,16 +127,40 @@ export function verifySetup(setup: TaskSetup, actual: Record<string, any>) {
   const failures = declaredSeedMismatches(setup, actual);
   if (failures.length) throw new Error(`task setup verification failed: ${failures.join(", ")}`);
 }
+// A fixture page with a route is a second, pre-existing page: created as home would create it, with one text block.
+const FIXTURE_PAGE_SCRIPT = `
+import json, sys
+from pathlib import Path
+from achilles.pages import PageStore
+root, route = sys.argv[1:]
+store = PageStore(Path(root)); store.set_create_mode("home", True)
+row = store.create_page(route, route[1:], {"blocks": [{"type": "text", "text": route[1:]}]})[0]
+print(json.dumps({"id": row["id"]}))
+`;
+async function setCreateMode(stack: EvalStack, pageId: string, plan: PagePlan, signal: AbortSignal) {
+  const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal);
+  if (!response.ok) throw new Error(`could not set create mode for ${plan.alias} (${response.status})`);
+}
+// Returns the page id of every non-created alias: home, or the fixture page at its route.
 export async function preparePage(stack: EvalStack, task: EvalTask, signal: AbortSignal) {
-  const plan = task.page_plan.find(page => page.source !== "created")!;
+  const pages = new Map<string, string>();
+  for (const plan of task.page_plan.filter(page => page.source === "fixture" && page.route)) {
+    const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", FIXTURE_PAGE_SCRIPT, join(stack.root, "achilles-home"), plan.route!], stack.achillesDir);
+    if (process.exitCode !== 0) throw new Error(`fixture page ${plan.alias} failed: ${process.stderr}`);
+    pages.set(plan.alias, (JSON.parse(process.stdout) as { id: string }).id);
+  }
+  const plan = task.page_plan.find(page => page.source !== "created" && !page.route);
   if (task.setup) {
     const setup = { tools: task.setup.tools.map(tool => bundle(tool.name, tool.operation, tool.collection, tool.input_schema)), records: task.setup.records, ...(task.setup.initial_layout ? { initial_layout: task.setup.initial_layout } : {}) };
     const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", SETUP_SCRIPT, join(stack.root, "achilles-home"), "home", JSON.stringify(setup)], stack.achillesDir);
     if (process.exitCode !== 0) throw new Error(`task setup failed: ${process.stderr}`);
     verifySetup(task.setup, JSON.parse(process.stdout));
   }
-  const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/home/create-mode`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: plan.create_mode }) }, signal);
-  if (!response.ok) throw new Error(`could not set create mode for ${plan.alias} (${response.status})`);
+  for (const page of task.page_plan.filter(page => page.source !== "created" && !pages.has(page.alias))) pages.set(page.alias, "home");
+  // home is set last: the fixture script turns its create mode on
+  for (const page of task.page_plan.filter(page => page.source !== "created")) if (page.route) await setCreateMode(stack, pages.get(page.alias)!, page, signal);
+  if (plan) await setCreateMode(stack, "home", plan, signal);
+  return pages;
 }
 async function pageBinding(stack: EvalStack, pageId: string, hidden: string[], signal: AbortSignal) {
   const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}`, {}, signal); if (!response.ok) throw new Error(`page ${pageId} is unavailable`);
@@ -318,12 +342,11 @@ async function browserRows(stack: EvalStack, task: EvalTask, pages: Map<string, 
 
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
-  await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
+  const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
-  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
+  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
-  for (const plan of task.page_plan.filter(page => page.source !== "created")) pages.set(plan.alias, "home");
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol;
   const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
   const onEvent = (event: Record<string, any>) => {
