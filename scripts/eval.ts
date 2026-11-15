@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
-import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup } from "./eval-grade";
+import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup, type TaskStep } from "./eval-grade";
 import { makeReport, reportJson, reportMarkdown } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 
@@ -145,6 +145,23 @@ async function pageBinding(stack: EvalStack, pageId: string, hidden: string[], s
   const credential = (await credentialResponse.json() as { credential: string }).credential; hidden.push(credential, `Bearer ${credential}`); return { page, credential };
 }
 
+const USER_WRITE_STATE_SCRIPT = `import json,sqlite3,sys
+c=sqlite3.connect(sys.argv[1]); page,tool,record=sys.argv[2:]
+v=c.execute("select pt.active_version from page_tool pt join tool t on t.id=pt.tool_id where pt.page_id=? and t.name=?",(page,tool)).fetchone()
+r=c.execute("select revision from page_record where page_id=? and record_id=?",(page,record)).fetchone()
+print(json.dumps({"version":v and v[0],"revision":r and r[0]}))`;
+// A user edits a record through the page's form: same endpoint and page credential as the browser.
+// The row never holds the credential; a failed write or a write that does not bump the revision stops the task.
+async function userWrite(stack: EvalStack, step: TaskStep, pageId: string | undefined, hidden: string[], signal: AbortSignal) {
+  if (!pageId) throw new Error(`user write ${step.id}: page ${step.page} is not available`);
+  const args = step.arguments!; const state = await stack.run("uv", ["run", "python", "-c", USER_WRITE_STATE_SCRIPT, join(stack.root, "achilles-home", "achilles.sqlite3"), pageId, step.tool!, String(args.record_id)]);
+  if (state.exitCode !== 0) throw new Error(`user write ${step.id}: state read failed: ${state.stderr}`);
+  const { version, revision } = JSON.parse(state.stdout) as { version: number | null; revision: number | null };
+  const { credential } = await pageBinding(stack, pageId, hidden, signal);
+  const response = await fetchDeadline(`${stack.achillesOrigin}/api/pages/${pageId}/tools/${step.tool}/invoke`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${credential}` }, body: JSON.stringify({ version, arguments: { ...args, revision } }) }, signal);
+  const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+  return { step: step.id, page_id: pageId, tool: step.tool, arguments: args, status: response.status, ok: response.ok, revision_before: revision, revision_after: typeof body.revision === "number" ? body.revision : null };
+}
 function toolEnd(event: Record<string, any>) {
   const call = event.tool_call ?? event.data?.tool_call ?? {}; const result = event.tool_result ?? event.data?.tool_result ?? {};
   const text = Array.isArray(result.content) ? result.content.map((item: any) => item.text ?? "").join("\n") : String(result.content ?? "");
@@ -305,7 +322,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const pages = new Map<string, string>();
-  const reconnects: Array<Record<string, any>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
+  const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   for (const plan of task.page_plan.filter(page => page.source !== "created")) pages.set(plan.alias, "home");
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol;
   const approvals: Record<string, unknown>[] = []; const abortAll = async () => Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined)));
@@ -332,8 +349,9 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   };
   try {
     for (const step of task.steps) {
-      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect") throw new TurnCapFailure("task model turn limit has no remaining turn");
+      signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect" && step.kind !== "user_write") throw new TurnCapFailure("task model turn limit has no remaining turn");
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
+      if (step.kind === "user_write") { const write = await userWrite(stack, step, pages.get(step.page), hidden, signal); userWrites.push(write); if (!write.ok || write.revision_after !== Number(write.revision_before) + 1) throw new Error(`user write ${step.id} failed (${write.status})`); continue; }
       const session = await getSession(step.chat, step.page); if (!session) break; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
@@ -345,7 +363,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -353,7 +371,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }
-    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
+    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, user_writes: userWrites, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await protocol.close(); }
 }
 

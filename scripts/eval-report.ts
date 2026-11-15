@@ -79,6 +79,7 @@ export function reportMarkdown(report: EvalReport): string {
     `unsupported: ${report.tasks.filter(task => task.status === "unsupported").length}`,
     `needs review: ${report.tasks.filter(task => task.status === "needs_review").length}`,
     `cap hits: ${report.tasks.filter(task => task.cap_hit).length}`,
+    `conflict seen (report only, not graded): ${report.tasks.filter(task => task.diagnostics?.conflict_seen !== undefined).map(task => `${task.task_id} ${task.diagnostics.conflict_seen ? "yes" : "no"}`).join(", ") || "n/a"}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
     "", "| task | status | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors | cap hit |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | --- |",
   ];

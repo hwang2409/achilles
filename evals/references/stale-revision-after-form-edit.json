@@ -1,0 +1,204 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "books"
+      }
+    ],
+    "user_writes": [
+      {
+        "step": "form-edit",
+        "page_id": "p",
+        "tool": "update_book",
+        "arguments": {
+          "record_id": "dune",
+          "status": "done"
+        },
+        "status": 200,
+        "ok": true,
+        "revision_before": 1,
+        "revision_after": 2
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__update_book",
+        "success": false,
+        "data": {
+          "error": {
+            "code": "conflict",
+            "path": "/revision",
+            "expected": "current record revision"
+          }
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__get_book",
+        "success": true,
+        "data": {
+          "title": "Dune",
+          "status": "done",
+          "pages": 400,
+          "record_id": "dune",
+          "revision": 2
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__update_book",
+        "success": true,
+        "data": {
+          "title": "Dune",
+          "status": "done",
+          "pages": 412,
+          "record_id": "dune",
+          "revision": 3
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "collection": "books",
+        "id": "dune",
+        "data": {
+          "title": "Dune",
+          "status": "done",
+          "pages": 412
+        }
+      }
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "get_book",
+          "operation": "get",
+          "collection": "books"
+        },
+        {
+          "page_id": "home",
+          "name": "list_books",
+          "operation": "list",
+          "collection": "books"
+        },
+        {
+          "page_id": "home",
+          "name": "update_book",
+          "operation": "update",
+          "collection": "books"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "dune",
+          "collection": "books",
+          "data": {
+            "title": "Dune",
+            "status": "reading",
+            "pages": 400
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "books"
+      }
+    ],
+    "user_writes": [
+      {
+        "step": "form-edit",
+        "page_id": "p",
+        "tool": "update_book",
+        "arguments": {
+          "record_id": "dune",
+          "status": "done"
+        },
+        "status": 200,
+        "ok": true,
+        "revision_before": 1,
+        "revision_after": 2
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__update_book",
+        "success": false,
+        "data": {
+          "error": {
+            "code": "conflict",
+            "path": "/revision",
+            "expected": "current record revision"
+          }
+        }
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__update_book",
+        "success": true,
+        "data": {
+          "title": "Dune",
+          "status": "reading",
+          "pages": 412,
+          "record_id": "dune",
+          "revision": 3
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "p",
+        "collection": "books",
+        "id": "dune",
+        "data": {
+          "title": "Dune",
+          "status": "reading",
+          "pages": 412
+        }
+      }
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "get_book",
+          "operation": "get",
+          "collection": "books"
+        },
+        {
+          "page_id": "home",
+          "name": "list_books",
+          "operation": "list",
+          "collection": "books"
+        },
+        {
+          "page_id": "home",
+          "name": "update_book",
+          "operation": "update",
+          "collection": "books"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "dune",
+          "collection": "books",
+          "data": {
+            "title": "Dune",
+            "status": "reading",
+            "pages": 400
+          }
+        }
+      ]
+    }
+  }
+}
