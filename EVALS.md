@@ -69,8 +69,9 @@ the 12 core tasks (full runs):
 focused-only tasks (run with `TASK=<name>`, never in a full run):
 
 - `browser-controller-slot`, `count-question`, `create-mode-off-request`,
-  `other-page-request`, `page-awareness`, `page-tool-without-create-mode`,
-  `second-chat-tools`, `stale-revision-after-form-edit`, `undo-layout-change`
+  `denied-write-stops`, `other-page-request`, `page-awareness`,
+  `page-tool-without-create-mode`, `second-chat-tools`,
+  `stale-revision-after-form-edit`, `undo-layout-change`
 
 rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
 a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
@@ -143,9 +144,17 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     result in the snapshot's `user_writes` (never the credential). if the write
     fails or does not bump the revision, the run is `harness_error`. it uses no
     model turn; `chat` only labels the actor.
+  - `approval` (optional, `"approve"` or `"deny"`, default `"approve"`): how
+    the harness answers every approval request during a `prompt` or
+    `annotate` step. `"deny"` sends zeta's real `deny`. it is valid only in a
+    task with `approval_mode: "ask"`; the lint rejects it anywhere else. the
+    snapshot's `approvals` rows record the `decision`.
 - `agent_turns`: the per-task turn cap.
 - `checks`: the acceptance table (see below). each has an `id`, a `type`, a
   `page`, and type-specific fields.
+- an `approval` check counts approval requests for a `tool`. give `count` for
+  an exact number, or `max` to pass when there is at least one request and at
+  most `max` (the agent tried, then stopped instead of looping).
 - `no_new_page` passes when every page after the run existed before it.
 - `answer_mentions` grades a step's final answer text (the snapshot keeps it as
   `answers[step_id]`). it names the `step` and a `value` list; any one value
@@ -200,7 +209,7 @@ grader rules, as rules:
 
 ## the tasks
 
-the 21 tasks in `evals/tasks/` (12 core, 9 focused-only — see "core vs
+the 22 tasks in `evals/tasks/` (12 core, 10 focused-only — see "core vs
 focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
@@ -213,6 +222,8 @@ focused-only" above):
   is created and only the page's own tools are called.
 - `create-and-use-tool-same-chat`: author a page-local insert tool and use it in
   the same chat.
+- `denied-write-stops`: with approval on, the user denies the `add_note` write;
+  no record is written and the agent asks for approval at most twice.
 - `harness-smoke`: the smoke task; create a page with one text block.
 - `invalid-authoring-recovery`: a reserved tool name is refused, then a valid tool
   is authored and used.
