@@ -6,6 +6,8 @@ import metricTaskJson from "../evals/tasks/reading-metric-count.json";
 import readingListTaskJson from "../evals/tasks/reading-list-one-prompt.json";
 import staleRevisionTaskJson from "../evals/tasks/stale-revision-after-form-edit.json";
 import staleRevisionReferences from "../evals/references/stale-revision-after-form-edit.json";
+import deniedTaskJson from "../evals/tasks/denied-write-stops.json";
+import deniedReferences from "../evals/references/denied-write-stops.json";
 import createModeOffTaskJson from "../evals/tasks/create-mode-off-request.json";
 import createModeOffReferences from "../evals/references/create-mode-off-request.json";
 
@@ -514,4 +516,24 @@ test("answer_mentions only expects facts the seeded records hold, on a real prom
   expect(withCheck({ value: ["Neuromancer"] })).toThrow("not a seeded record value or count");
   expect(withCheck({ value: ["3"], step: "missing" })).toThrow("names step missing");
   expect(withCheck({ value: [] })).toThrow("needs a step and non-empty mention values");
+});
+
+test("a denied step accepts only ask-mode prompt steps, and approval max bounds the retries", () => {
+  const step = deniedTaskJson.steps[0];
+  const withStep = (change: Record<string, unknown>, mode = "ask") => () => validateTask({ ...deniedTaskJson, approval_mode: mode, steps: [{ ...step, ...change }] });
+  expect(withStep({})).not.toThrow();
+  expect(withStep({}, "allow")).toThrow("approval_mode ask");
+  const { approval_mode: _, ...noMode } = deniedTaskJson;
+  expect(() => validateTask(noMode)).toThrow("approval_mode ask");
+  expect(withStep({ approval: "maybe" })).toThrow("approve or deny");
+  expect(withStep({ kind: "reconnect", prompt: undefined })).toThrow("approve or deny");
+  const withCheck = (change: Record<string, unknown>) => () => validateTask({ ...deniedTaskJson, checks: [{ id: "a", type: "approval", page: "notes", tool: "achilles__add_note", ...change }] });
+  expect(withCheck({ max: 0 })).toThrow("count or max");
+  expect(withCheck({ max: 2, count: 1 })).toThrow("count or max");
+  expect(() => validateTask({ ...deniedTaskJson, checks: [{ id: "r", type: "records_exact", page: "notes", value: [], max: 2 }] })).toThrow("only approval takes max");
+  const denied = validateTask(deniedTaskJson); const good = deniedReferences.good as Record<string, any>;
+  for (const [count, status] of [[0, "agent_fail"], [1, "pass"], [2, "pass"], [3, "agent_fail"]] as const) {
+    const snapshot = { ...good, approvals: Array.from({ length: count }, () => good.approvals[0]) };
+    expect(gradeReference(denied, snapshot).status, `${count} approvals`).toBe(status);
+  }
 });

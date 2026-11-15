@@ -1,0 +1,139 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "notes"
+      }
+    ],
+    "approvals": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "decision": "deny"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "data": "denied by user"
+      }
+    ],
+    "records": [],
+    "errors": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "message": "denied by user"
+      }
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_note",
+          "operation": "insert",
+          "collection": "notes"
+        }
+      ],
+      "records": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "p",
+        "alias": "notes"
+      }
+    ],
+    "approvals": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "decision": "deny"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "decision": "deny"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "decision": "deny"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "decision": "deny"
+      }
+    ],
+    "results": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "data": "denied by user"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "data": "denied by user"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "data": "denied by user"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "data": "denied by user"
+      }
+    ],
+    "records": [],
+    "errors": [
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "message": "denied by user"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "message": "denied by user"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "message": "denied by user"
+      },
+      {
+        "page_id": "p",
+        "tool": "achilles__add_note",
+        "success": false,
+        "message": "denied by user"
+      }
+    ],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_note",
+          "operation": "insert",
+          "collection": "notes"
+        }
+      ],
+      "records": []
+    }
+  }
+}
