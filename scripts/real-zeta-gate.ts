@@ -1428,15 +1428,23 @@ try {
   await page.reload({ waitUntil: "commit" });
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).bound_suspends ?? 0) > suspendsBeforeReload, "old page binding detached by the reload");
   const heldToolControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldToolControl, release_reload_tool_barrier: true }));
+  await Bun.write(control, JSON.stringify({ ...heldToolControl, release_reload_tool_barrier: true, hold_reload_history: reloadChat }));
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).detached_add_book_calls === 1, "add_book called with no page binding");
   await page.unroute(discoveryUrl, holdDiscovery);
   await Promise.all(heldDiscovery.map((route) => route.fallback()));
-  // the reply after the tool is held until the reloaded page shows the kept turn, so its text cannot race the attach
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).reload_reply_barrier === "held", "reply after add_book held");
+  // The reply commits while the reloaded page loads its history: zeta publishes assistant_message before it writes
+  // the reply's history row, so the test server holds the page's first history read until the reply was published
+  // with its row held, then holds the row until the page has loaded. The reply must still show.
+  await waitFor(async () => {
+    const document = JSON.parse(await Bun.file(control).text());
+    return document.reload_history_barrier === "held" && document.reload_row_barrier === "held"
+      && requests().slice(framesBeforeToolReload).some((frame) => frame.method === "event" && frame.params?.event === "assistant_message");
+  }, "reply published to the reloaded page while its history read and the reply's row are held");
+  const heldHistoryControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...heldHistoryControl, release_reload_history_barrier: true }));
   await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the kept turn running");
-  const heldReplyControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldReplyControl, release_reload_reply_barrier: true }));
+  const heldRowControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...heldRowControl, release_reload_row_barrier: true }));
   await gateWait.playwright(page.getByText("reload book added", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\npage after the reload during add_book: ${redact(await page.locator("body").innerText())}`);
   });
