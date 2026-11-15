@@ -252,6 +252,11 @@ export async function gateReloadMidTurn(
     // the reply streams on the reloaded page: a later line shows before the turn ends, not only at its final commit
     await waitFor(async () => (await messages.filter({ hasText: "reload line 050" }).count()) === 1, "reply streaming after reload");
     if (await turnEnded() || !(await runningWithStop())) throw new Error("reload line 050 showed only after the turn ended, not while it streamed");
+    // the text streamed before the reload shows on the reloaded page while the reply still streams (`in_flight_replay`), once
+    const streaming = await reply.innerText();
+    const lines = (text: string, last: number) => Array.from({ length: last + 1 }, (_, index) => text.split(`reload line ${String(index).padStart(3, "0")}`).length - 1);
+    if (await reply.count() !== 1 || lines(streaming, 50).some((count) => count !== 1))
+      throw new Error(`while the reply streamed after the reload, lines 000-050 showed ${JSON.stringify(lines(streaming, 50))} times in ${await reply.count()} messages, not once each`);
     await gateWait(() => page.getByText("reload line 079", { exact: false }).waitFor({ timeout: 30_000 }));
     await waitForIdleTurn(page, waitFor);
     if (await reply.count() !== 1) throw new Error(`reload split or duplicated the reply into ${await reply.count()} messages`);

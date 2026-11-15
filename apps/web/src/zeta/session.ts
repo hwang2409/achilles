@@ -109,28 +109,41 @@ type Joined = { messages?: unknown[]; next_before: number | null; history_valida
 
 /**
  * Opens `id` on a fresh store from one `session_history_and_subscribe` join (`session_replay_seq`). zeta streams every
- * event after the join, including a reply published before its history row was written, so nothing between the
- * snapshot and live events is lost. The snapshot is installed in the same task as the join reply when nothing else is
- * read; reads after the join (older pages, the idle outcome) are kept only when no event arrived during them.
+ * event after the join, including a reply published before its history row was written and, with `in_flight_replay`,
+ * the reply text and tool output streamed before the join. fulcrum drops events while the store loads, so the snapshot
+ * is installed in the same task as the join reply: rows older than the join's page are read first by an earlier join
+ * (they never change), and the join that finds them already read is used.
  */
 export async function loadSession(client: ZetaClient, id: string): Promise<SessionLease> {
+  const older = new Map<number, unknown[]>();
   const load = async (): Promise<RunEvent[]> => {
     for (;;) {
       try {
         const joined = await client.request("session_history_and_subscribe", { session_id: id }) as Joined;
         const revision = client.replayRevision(id);
-        const pages = [joined.messages ?? []];
-        for (let before = joined.next_before; before !== null;) {
-          const older = await client.request("session_history", { session_id: id, before, history_validator: joined.history_validator }) as Joined;
-          pages.unshift(older.messages ?? []);
-          before = older.next_before;
+        const cursor = joined.next_before;
+        if (cursor !== null && !older.has(cursor)) {
+          const pages: unknown[][] = [];
+          for (let before: number | null = cursor; before !== null;) {
+            const page = await client.request("session_history", { session_id: id, before, history_validator: joined.history_validator }) as Joined;
+            pages.unshift(page.messages ?? []);
+            before = page.next_before;
+          }
+          older.set(cursor, pages.flat());
+          continue; // events of this join were dropped while the older rows loaded: join again
         }
+        const rows = [...(cursor === null ? [] : older.get(cursor)!), ...(joined.messages ?? [])];
         // the join's status has no last turn outcome; an idle chat reads it, a running one has none to show
         let status = joined.status;
-        if (status.state === "idle") { const current = await client.request("status", {}) as Status; status = { ...status, session: current.session, last_turn_outcome: current.last_turn_outcome }; }
-        if (client.replayRevision(id) === revision) return [...fromZetaHistory(pages.flat()), ...statusEvents(id, status), ...terminal(id, status)];
+        if (status.state === "idle") {
+          const current = await client.request("status", {}) as Status;
+          if (client.replayRevision(id) !== revision) continue;
+          status = { ...status, session: current.session, last_turn_outcome: current.last_turn_outcome };
+        }
+        return [...fromZetaHistory(rows), ...statusEvents(id, status), ...terminal(id, status)];
       } catch (caught) {
-        if ((caught as { code?: unknown }).code !== -32009) throw caught; // stale join or history cursor: join again
+        if ((caught as { code?: unknown }).code !== -32009) throw caught; // stale join or history cursor: start again
+        older.clear();
       }
     }
   };

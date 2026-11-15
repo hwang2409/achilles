@@ -438,6 +438,23 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ]
         ),
         ScriptedTurn(content=[TextContent("reload book added")]),
+        # a foreground tool still running across a reload: its output so far shows once on the reloaded page
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "reload-bash",
+                    "bash",
+                    {
+                        "command": (
+                            "echo tool line before reload; "
+                            f"while [ ! -e {cwd / 'release-reload-tool'} ]; do sleep 0.05; done; "
+                            "echo tool line after reload"
+                        )
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("reload tool complete")]),
         ScriptedTurn(content=[TextContent("stock complete")]),
         ScriptedTurn(content=[TextContent("vim complete")]),
         ScriptedTurn(content=[TextContent("focus complete")], delay=5),

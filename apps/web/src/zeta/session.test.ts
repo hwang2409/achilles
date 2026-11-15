@@ -142,17 +142,22 @@ describe("loadSession", () => {
   };
   const joined = (state: string, messages: unknown[] = [], next_before: number | null = null) => ({ messages, next_before, history_validator: { end: 1, entry_id: "e", repair_generation: null }, status: { state, pending_approvals: [] }, replay: { stream_id: "r", history_seq: 0 } });
 
-  test("joins again when an event arrives while older pages load", async () => {
-    let revision = 0;
-    let joins = 0;
-    const { client, snapshots } = replayClient((method) => {
-      if (method === "session_history_and_subscribe") { joins += 1; return joins === 1 ? joined("running", [], 3) : joined("running", [{ id: "a", role: "assistant", content: [{ type: "text", text: "later" }] }]); }
-      if (method === "session_history") { revision += 1; return { messages: [], next_before: null }; }
+  test("reads older rows, then installs the join that finds them read, so no event of that join is dropped", async () => {
+    const text = (id: string) => ({ id, role: "assistant", content: [{ type: "text", text: id }] });
+    const requests: string[] = [];
+    const { client, snapshots } = replayClient((method, params) => {
+      requests.push(`${method}:${params.before ?? ""}`);
+      if (method === "session_history_and_subscribe") return joined("running", [text(requests.length === 1 ? "new" : "newer")], 3);
+      if (method === "session_history") return params.before === 3 ? { messages: [text("mid")], next_before: 1 } : { messages: [text("old")], next_before: null };
       throw new Error(`unexpected ${method}`);
-    }, () => revision);
+    });
     await loadSession(client, "s");
-    expect(joins).toBe(2);
-    expect(JSON.stringify(snapshots.at(-1))).toContain("later");
+    expect(requests).toEqual(["session_history_and_subscribe:", "session_history:3", "session_history:1", "session_history_and_subscribe:"]);
+    const shown = JSON.stringify(snapshots.at(-1));
+    const at = ["old", "mid", "newer"].map((id) => shown.indexOf(`"${id}"`));
+    expect(at[0]).toBeGreaterThan(-1);
+    expect(at[0] < at[1] && at[1] < at[2]).toBe(true);
+    expect(shown).not.toContain('"new"');
   });
 
   test("joins again after a stale join", async () => {
