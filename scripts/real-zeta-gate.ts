@@ -332,6 +332,7 @@ try {
   const reloadShell = async () => {
     await page.reload();
     await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]'), "waitFor", { timeout: 20_000 });
   };
   const waitForListChange = async (selector: ".chat-list" | ".page-list", before: number, response: Promise<unknown>, label: string) => {
     await response;
@@ -536,9 +537,23 @@ try {
       },
     },
   ];
-  for (const row of focusRows) {
-    await row.run();
-    console.log(`focus after commit: ${row.name}`);
+  // each reload saves the chat state twice, and each save reloads the chat list. a "load 50 older" click
+  // inside the first list reload joins it; the second replaces both with one request that has no
+  // before= cursor (apps/web/src/pageList.ts reload/more). hold the saves so every row clicks a settled list.
+  const heldStateSaves: Route[] = [];
+  const holdStateSave = async (route: Route) => {
+    if (route.request().method() === "PATCH") heldStateSaves.push(route);
+    else await route.fallback();
+  };
+  await page.route("**/api/chats/*", holdStateSave);
+  try {
+    for (const row of focusRows) {
+      await row.run();
+      console.log(`focus after commit: ${row.name}`);
+    }
+  } finally {
+    await page.unroute("**/api/chats/*", holdStateSave);
+    for (const route of heldStateSaves) await route.continue().catch(() => {});
   }
   await reloadShell();
   await gateTranscript(page, waitFor, requests, control, gateWait);
