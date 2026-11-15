@@ -166,7 +166,7 @@ describe("steer delivery confirmation", () => {
   ])("confirms $name", async ({ status }) => {
     const ids: string[] = [];
     const client = { request: async () => status };
-    const result = await confirmSteerDelivery(client as never, "session", "text", "initial", (id) => ids.push(id));
+    const result = await confirmSteerDelivery(client as never, "initial", (id) => ids.push(id));
     expect(result).toBe("initial");
     expect(ids).toEqual(["initial"]);
   });
@@ -176,7 +176,7 @@ describe("steer delivery confirmation", () => {
     { name: "evicted dropped", status: { status: "evicted", outcome: "dropped" } },
   ])("keeps the draft when $name", async ({ status }) => {
     const client = { request: async () => status };
-    await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {})).rejects.toThrow("message was not sent");
+    await expect(confirmSteerDelivery(client as never, "initial", () => {})).rejects.toThrow("message was not sent");
   });
 
   test.each([
@@ -184,17 +184,7 @@ describe("steer delivery confirmation", () => {
     { name: "evicted without outcome", statuses: [{ status: "evicted" }], error: "evicted" },
   ])("keeps the draft on $name", async ({ statuses, error }) => {
     const client = { request: async () => statuses.shift() };
-    await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {}, 5_000)).rejects.toThrow(error);
-  });
-
-  test("keeps the draft when queued past the deadline", async () => {
-    const originalNow = Date.now;
-    let now = 100;
-    Date.now = () => now;
-    try {
-      const client = { request: async () => { now = 102; return { status: "queued" }; } };
-      await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {}, 1)).rejects.toThrow("may still arrive with your next message");
-    } finally { Date.now = originalNow; }
+    await expect(confirmSteerDelivery(client as never, "initial", () => {})).rejects.toThrow(error);
   });
 
   test("keeps the draft when a status request times out", async () => {
@@ -203,7 +193,7 @@ describe("steer delivery confirmation", () => {
       timeoutMs = options?.timeoutMs ?? 0;
       throw new Error("request timed out");
     }};
-    await expect(confirmSteerDelivery(client as never, "session", "draft", "initial", () => {})).rejects.toThrow("timed out");
+    await expect(confirmSteerDelivery(client as never, "initial", () => {})).rejects.toThrow("timed out");
     expect(timeoutMs).toBeGreaterThan(0);
   });
 });

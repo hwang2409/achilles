@@ -325,9 +325,8 @@ export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   };
 }
 
-// Product decision: old Zeta can strand a queued steer; wait once, keep the draft, and never resend text automatically.
-const STUCK_STEER_WAIT_MS = 15_000;
-export class UncertainSteerDeliveryError extends Error {}
+// Never resend text automatically: zeta (>= 5c517d85) settles every accepted steer as delivered or dropped,
+// including one sent while the final reply streams (it starts the next turn).
 export class DroppedSteerDeliveryError extends Error {}
 
 const TURN_RUNNING = -32004;
@@ -351,43 +350,34 @@ export async function deliverChatMessage(
   try {
     await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId });
   } catch (error) {
+    // zeta serve-protocol: "A `send` that arrives right after `turn_end` either starts the turn that carries the steer,
+    // or gets `-32004` because that turn has already started; the client should then retry the text as a `steer`."
+    // A refused request records no delivery ID, so the one retry reuses it; a second refusal is shown, not retried.
     if (errorCode(error) !== (steer ? NO_TURN : TURN_RUNNING)) throw error;
     used = steer ? "send" : "steer";
     await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId });
   }
-  if (used === "steer") await confirmSteerDelivery(client, sessionId, text, deliveryId, track);
+  if (used === "steer") await confirmSteerDelivery(client, deliveryId, track);
   else track(deliveryId);
   return used;
 }
 
 export async function confirmSteerDelivery(
   client: Pick<ZetaClient, "request">,
-  _sessionId: string,
-  _text: string,
   deliveryId: string,
   track: (id: string) => void,
-  deadlineMs = STUCK_STEER_WAIT_MS,
 ): Promise<string> {
-  const deadline = Date.now() + deadlineMs;
-  const id = deliveryId;
-  track(id);
+  track(deliveryId);
   for (;;) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new UncertainSteerDeliveryError("this message may not have reached the assistant yet. it may still arrive with your next message, so sending it again could deliver it twice.");
-    let result: unknown;
-    try {
-      result = await client.request("delivery_status", { delivery_id: id }, { timeoutMs: Math.min(1_000, remaining) });
-    } catch (error) {
-      throw error instanceof Error ? error : new Error(String(error));
-    }
+    const result: unknown = await client.request("delivery_status", { delivery_id: deliveryId }, { timeoutMs: 1_000 });
     if (!result || typeof result !== "object") throw new Error("invalid steer delivery status");
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
-    if (outcome === "delivered") return id;
+    if (outcome === "delivered") return deliveryId;
     if (outcome === "dropped") throw new DroppedSteerDeliveryError("this message was not sent. your text is still here; press send to try again.");
-    if (status.status !== "queued" && !(status.status === "evicted" && status.outcome === "queued"))
-      throw new Error(`steer delivery status: ${status.status}`);
-    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+    if (outcome !== "queued") throw new Error(`steer delivery status: ${status.status}`);
+    // a steer waits for the next model step, which can follow a long tool run or an approval
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 

@@ -89,7 +89,8 @@ jobs:
         run: |
           git fetch --depth=1 origin 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
           git worktree add --detach .cache/achilles-baseline 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
-          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
+          # earlier steps let the pinned zeta create ~/.zeta at its storage epoch; an older baseline zeta refuses a newer home
+          ZETA_HOME="$RUNNER_TEMP/baseline-zeta-home" EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
       - run: |
           python - <<'PY'
           import json, os, subprocess
