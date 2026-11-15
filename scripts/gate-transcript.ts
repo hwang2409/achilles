@@ -99,18 +99,20 @@ export async function gateTranscript(
   await Bun.write(controlPath, JSON.stringify({ ...heldStartControl, release_turn_start_barrier: true }));
   const stream = messages.filter({ hasText: "stream line 000" });
   await waitFor(async () => await stream.count() === 1, "streaming reply for this turn");
-  await stream.last().evaluate((message) => {
+  // the scroll container only needs scrolling once enough lines have streamed in (one every 60ms,
+  // up to line 030 below), so poll instead of checking once right as the first line appears.
+  await waitFor(() => stream.last().evaluate((message) => {
     let element: HTMLElement | null = message as HTMLElement;
     while (element) {
       const style = getComputedStyle(element);
       if ((style.overflowY === "auto" || style.overflowY === "scroll") && element.scrollHeight > element.clientHeight) {
         element.dataset.gateScrollContainer = "follow";
-        return;
+        return true;
       }
       element = element.parentElement;
     }
-    throw new Error("could not find the transcript scroll container");
-  });
+    return false;
+  }), "transcript scroll container to start scrolling");
   const scroll = page.locator('[data-gate-scroll-container="follow"]');
   const distanceFromBottom = () => scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
   await waitFor(

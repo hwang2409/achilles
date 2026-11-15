@@ -1,4 +1,4 @@
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { usePageTools, type PageTool } from "./usePageTools";
 
@@ -63,6 +63,8 @@ export function RecordForm({ tool, row, pageId, credential, onReloadTool }: { to
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const idPrefix = useId();
+  // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863)
+  useEffect(() => { if (message) form.current?.querySelector(".record-form-actions")?.scrollIntoView({ block: "nearest" }); }, [message]);
   if ("unsupported" in mapped) return <p aria-disabled="true">this form needs the chat: unsupported field {mapped.unsupported}</p>;
 
   const focusField = (name?: string) => form.current?.querySelector<HTMLElement>(name ? `[name="${CSS.escape(name)}"]` : "[name]")?.focus();
