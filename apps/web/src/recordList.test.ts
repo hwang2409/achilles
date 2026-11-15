@@ -125,6 +125,8 @@ const books = [
   { author: "Le Guin", pages: 200, record_id: "b1", revision: 1, status: "to read", title: "The Dispossessed" },
 ];
 const bookSchema = { type: "object", properties: { author: { type: "string" }, pages: { type: "integer" }, status: { type: "string" }, title: { type: "string" } }, required: ["title", "status"] };
+// omits "author", which the books records have: this forces the render through extendColumns, not just through the schema.
+const bookSchemaWithoutAuthor = { type: "object", properties: { pages: { type: "integer" }, status: { type: "string" }, title: { type: "string" } }, required: ["title", "status"] };
 
 describe("list columns", () => {
   test("a list block with fields shows exactly those columns in that order", async () => {
@@ -159,10 +161,10 @@ describe("list columns", () => {
   });
 
   test("fields: [] behaves like no fields: schema order, then extra record keys, sorted", async () => {
-    routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchema }], books);
+    routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchemaWithoutAuthor }], books);
     const block = { type: "list", title: "reading", collection: "books", fields: [] };
     const result = render(React.createElement(LayoutBlock, { block, pageId: "page-empty-fields", credential: "secret", refreshKey: "0:0" }));
     await act(async () => {});
-    expect(headers(result)).toEqual(["title", "status", "author", "pages"]);
+    expect(headers(result)).toEqual(["title", "status", "pages", "author"]);
   });
 });

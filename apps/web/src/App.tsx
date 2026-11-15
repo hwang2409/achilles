@@ -286,11 +286,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p>{String(block.text)}</p>;
   if (block.type === "metric") return <p className="layout-metric"><strong>{String(block.label)}:</strong> {String(block.value)}</p>;
-  if (block.type === "list") {
-    const key = `${pageId}:${String(block.collection)}`;
-    const list = { title: String(block.title), collection: String(block.collection), pageId, credential, refreshKey };
-    return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} /> : <SchemaRecordList key={key} {...list} toolsKey={chatRefreshKey} />;
-  }
+  if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
     const filter = block.filter as DetailFilter | undefined;
@@ -300,6 +296,13 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   if (block.type === "form") return <FormBlock key={`${pageId}:${String(block.tool)}`} title={String(block.title)} toolName={String(block.tool)} fields={Array.isArray(block.fields) ? block.fields.map(String) : undefined} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
   return null;
 }
+
+function ListBlock({ block, pageId, credential, refreshKey, toolsKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
+  const key = `${pageId}:${String(block.collection)}`;
+  const list = { title: String(block.title), collection: String(block.collection), pageId, credential, refreshKey };
+  return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} /> : <SchemaRecordList key={key} {...list} toolsKey={toolsKey} />;
+}
+
 // Shares the page's tool list fetch with forms (same key), and keeps the last list so a chat turn does not blank the table.
 function SchemaRecordList({ toolsKey, ...list }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
   const { tools, error } = usePageTools(list.pageId, list.credential, toolsKey);
