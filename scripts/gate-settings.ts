@@ -106,8 +106,29 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.keyboard.press("Escape");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${origin}/allow`);
+  const menu = page.getByRole("button", { name: "open menu" });
+  await menu.click();
+  await page.getByRole("button", { name: "close menu" }).click({ position: { x: 370, y: 400 } });
+  await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu");
+  await menu.click();
+  const sidebar = page.locator(".sidebar");
+  // hold the drawer at the first frame of its slide-in, so Tab is pressed while the drawer is still off screen.
+  await sidebar.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
+  await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
+  const first = await page.evaluateHandle(() => document.activeElement);
+  const last = page.locator(".sidebar .settings-button");
+  await last.focus();
+  await page.keyboard.press("Tab");
+  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control, settings, escaped the sidebar");
+  await page.keyboard.press("Shift+Tab");
+  if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, settings");
+  await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+  if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
+  await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1440, height: 900 });
-  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, and focus return");
+  console.log("settings gate passed: live theme, persistence, query override, reset, layered escape, focus return, and drawer focus wrap");
 }
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };

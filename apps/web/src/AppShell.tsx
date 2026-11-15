@@ -46,6 +46,8 @@ const chatHref = (chat: Chat) => {
 const titleOf = (chat: Chat) => chat.title?.trim() || "untitled chat";
 const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
 const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
+// in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
+const tabbable = (element: HTMLElement) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true });
 const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
 const restorableFocus = (...candidates: Array<Element | null>) => candidates.find((element): element is HTMLElement => {
   if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement || !element.isConnected || element.matches("[disabled], :disabled") || element.closest("[inert], [aria-hidden='true']")) return false;
@@ -189,6 +191,21 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
     return () => document.removeEventListener("keydown", escape, true);
   }, [drawer, query, settingsOpen]);
   useEffect(() => {
+    if (!narrow || !drawer) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !sidebar.current?.contains(document.activeElement)) return;
+      const controls = Array.from(sidebar.current.querySelectorAll<HTMLElement>(focusable)).filter(tabbable);
+      if (!controls.length) return;
+      const next = event.shiftKey ? controls.at(-1) : controls[0];
+      const current = event.shiftKey ? controls[0] : controls.at(-1);
+      if (document.activeElement !== current) return;
+      event.preventDefault();
+      next?.focus();
+    };
+    document.addEventListener("keydown", key, true);
+    return () => document.removeEventListener("keydown", key, true);
+  }, [drawer, narrow]);
+  useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); setCollapsed((value) => !value); }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); openSettings(document.activeElement instanceof Element ? document.activeElement : null); }
@@ -242,7 +259,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   };
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
-    <a className="skip-link" href="#message-composer" onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
+    <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]')?.focus(); }}>skip to message</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span><button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button></div>

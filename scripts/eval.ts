@@ -58,9 +58,16 @@ export async function loadTask(id: string, dir = new URL("../evals/tasks/", impo
   if (task.id !== id) throw new Error(`task id ${task.id} does not match ${id}`); return task;
 }
 export async function selectTasks(selection?: string, dir = new URL("../evals/tasks/", import.meta.url).pathname) {
-  const ids = selection?.trim() ? selection.split(",").map(id => id.trim()).filter(Boolean) : (await readdir(dir)).filter(name => name.endsWith(".json")).map(name => name.slice(0, -5)).sort();
-  if (!ids.length || new Set(ids).size !== ids.length) throw new Error("TASK must select at least one unique task");
-  return Promise.all(ids.map(id => loadTask(id, dir)));
+  if (selection?.trim()) {
+    const ids = selection.split(",").map(id => id.trim()).filter(Boolean);
+    if (!ids.length || new Set(ids).size !== ids.length) throw new Error("TASK must select at least one unique task");
+    return Promise.all(ids.map(id => loadTask(id, dir)));
+  }
+  const ids = (await readdir(dir)).filter(name => name.endsWith(".json")).map(name => name.slice(0, -5)).sort();
+  const tasks = await Promise.all(ids.map(id => loadTask(id, dir)));
+  const core = tasks.filter(task => task.suite === "core");
+  if (!core.length) throw new Error("no core tasks found; set suite: \"core\" on at least one task");
+  return core;
 }
 
 const playwrightModule = () => pathToFileURL(join(new URL("..", import.meta.url).pathname, "apps/web/node_modules/playwright/index.mjs")).href;

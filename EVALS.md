@@ -31,7 +31,8 @@ web app, and a chromium for the browser checks on first use.
 
 - one task: `make eval TASK=harness-smoke`
 - several tasks: `make eval TASK=harness-smoke,record-crud`
-- the whole suite: `make eval` (no `TASK`)
+- the whole suite: `make eval` (no `TASK`) — runs only the core 12 (see
+  "core vs focused-only" below); `TASK=` still accepts any task, core or not
 - repeats: `make eval TASK=record-crud N=3` runs each task `N` times
 - override the model: `make eval TASK=record-crud MODEL=provider/model`
   (default resolves from the account home settings)
@@ -45,8 +46,30 @@ web app, and a chromium for the browser checks on first use.
 
 budget. each task has an `agent_turns` cap; a run that exceeds it is stopped and
 graded as `agent_fail` with `cap hit = yes`. the whole command has a 240-turn cap:
-`N * sum(agent_turns)` must be `<= 240` or the run refuses to start. the suite
-sums to 92 turns, so the full suite accepts `N` up to 2.
+`N * sum(agent_turns)` must be `<= 240` or the run refuses to start. the core
+suite sums to 82 turns, so a full run (`make eval`, no `TASK`) accepts `N` up to 2.
+
+## core vs focused-only
+
+each task file carries its own `suite` field (`"core"` or `"focused"`); this is
+the one place that decides membership — nothing else duplicates the list. a
+full run (`make eval` with no `TASK`) runs only tasks with `suite: "core"`.
+`make eval TASK=<name>` runs any task by name regardless of `suite`.
+
+the 12 core tasks (full runs):
+
+- `agent-data-access`, `approval-once`, `create-and-use-tool-same-chat`,
+  `harness-smoke`, `invalid-authoring-recovery`, `judge-page-and-annotate`,
+  `reading-list-one-prompt`, `reading-metric-count`, `reconnect-recovery`,
+  `record-crud`, `tool-version-fresh-chat`, `update-layout-from-page-chat`
+
+focused-only tasks (run with `TASK=<name>`, never in a full run):
+
+- `browser-controller-slot`, `second-chat-tools`
+
+rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
+a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
+focused-only.
 
 ## read the report
 
@@ -95,6 +118,8 @@ classify a failure before you act on it:
 a task is one json file in `evals/tasks/<id>.json`. fields:
 
 - `id`: matches the filename.
+- `suite` (optional, `"core"` or `"focused"`): defaults to `"focused"`. a new
+  task starts as focused-only; see "core vs focused-only" above.
 - `page_plan`: the pages. each has an `alias`, a `source` (`fixture`, `setup`, or
   `created`), `bind_chat`, `create_mode`, and an optional `route`.
 - `setup` (optional): the seeds. `tools` (name, operation, collection, optional
@@ -149,7 +174,8 @@ grader rules, as rules:
 
 ## the tasks
 
-the 14 tasks in `evals/tasks/`:
+the 14 tasks in `evals/tasks/` (12 core, 2 focused-only — see "core vs
+focused-only" above):
 
 - `agent-data-access`: a bound chat reads all seeded records with `list_records`.
 - `approval-once`: with approval on, add exactly one note after one approval.

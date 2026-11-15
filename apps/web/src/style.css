@@ -137,10 +137,12 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .command button { color: var(--fulcrum-fg); }
 .command code { grid-column: 1 / -1; overflow-x: auto; padding: 18px 12px; white-space: nowrap; }
 .connection-state > .primary { margin-top: 24px; padding: 12px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
+.full-state > .primary { min-height: 40px; }
 .record-list { margin: 1rem 0; overflow-x: auto; }
 .record-list h2 { font-size: 1rem; margin: 0 0 .5rem; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; border: 1px solid var(--fulcrum-border); padding: .4rem .5rem; vertical-align: top; }
+.record-list td.record-id { overflow-wrap: anywhere; }
 th { color: var(--fulcrum-muted); font-weight: 600; }
 .record-list p { color: var(--fulcrum-muted); }
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
