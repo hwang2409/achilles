@@ -233,6 +233,24 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     return [...values];
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
+  // a keyboard (F2) rename hands focus back to its row: once the editor closes, and again after the
+  // list refresh moves the row; it lets go as soon as focus lands anywhere else.
+  const renamedRow = useRef<string | null>(null);
+  const returnRowFocus = () => {
+    const id = renamedRow.current;
+    const row = id && document.activeElement === document.body ? document.querySelector<HTMLElement>(`a[data-chat-id="${CSS.escape(id)}"]`) : null;
+    row?.focus();
+    return row;
+  };
+  const startKeyboardRename = (id: string) => { renamedRow.current = id; };
+  useEffect(() => { if (returnRowFocus()) renamedRow.current = null; }, [chats]);
+  useEffect(() => {
+    const release = (event: FocusEvent) => {
+      if (renamedRow.current && (event.target as Element).closest?.("[data-chat-id]")?.getAttribute("data-chat-id") !== renamedRow.current) renamedRow.current = null;
+    };
+    addEventListener("focusin", release);
+    return () => removeEventListener("focusin", release);
+  }, []);
   const chatListKey = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (!["Home", "End", "ArrowDown", "ArrowUp"].includes(event.key)) return;
     const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(".chat-row")];
@@ -285,7 +303,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} onKeyboardRename={startKeyboardRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} onKeyboardRename={startKeyboardRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><kbd>⌘K</kbd></footer>
@@ -298,16 +316,10 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   </div>;
 }
 
-function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void }) {
+function ChatRow({ chat, current, active, index, query, onSelect, onRename, onKeyboardRename, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void; onKeyboardRename: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
-  const refocus = useRef(false);
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
-  // a keyboard rename hands focus back to its row, unless the user already moved focus elsewhere
-  useEffect(() => {
-    if (rename.editing || !refocus.current) return;
-    refocus.current = false;
-    if (document.activeElement === document.body) document.querySelector<HTMLElement>(`a[data-chat-id="${CSS.escape(chat.session_id)}"]`)?.focus();
-  }, [rename.editing, chat.session_id]);
+  useEffect(() => { if (!rename.editing) onRenameEnd(); }, [rename.editing]);
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   if (rename.editing) {
     return <div id={rowId} data-chat-id={chat.session_id} className={rowClass}>
@@ -320,7 +332,7 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { 
     rename.start(chat.title?.trim() || chat.first_title?.trim() || "", (value) => onRename(chat, value));
   };
   // F2 is the keyboard path to rename a row; the pencil is a pointer shortcut only
-  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") { refocus.current = true; startRename(event); } }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
+  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") { onKeyboardRename(chat.session_id); startRename(event); } }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>
     <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>
