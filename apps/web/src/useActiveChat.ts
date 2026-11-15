@@ -240,6 +240,13 @@ function refreshToolsError(caught: unknown): { message: string; blocked: boolean
   return { message: `could not refresh page tools: ${String(error.message ?? caught)}. retry the refresh.`, blocked: true, retryable: true };
 }
 
+// The one rule for the shown create mode: a chat whose tool refresh failed keeps its old mode until a refresh succeeds,
+// even though the server already stored the new one.
+function shownCreateMode<T extends EmptyState | ReadyState>(toggle: ReturnType<typeof createModeToggleOwner>, next: T): T {
+  const stale = toggle.stale();
+  return stale && next.phase === "ready" && next.sessionId === stale.sessionId ? { ...next, page: { ...next.page, create_mode: stale.createMode } } : next;
+}
+
 export function createModeToggleOwner(fetchFn: typeof fetch = fetch) {
   let generation = 0;
   let pending: Promise<CreateModeToggleRun> | null = null;
@@ -422,8 +429,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const stale = modeToggle.current.stale();
     const keepStale = stale?.idle && stale.sessionId === selectedId ? stale : null;
     if (!keepStale) { modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false); }
-    const shown = <T extends EmptyState | ReadyState>(next: T): T => keepStale && next.phase === "ready" && next.sessionId === keepStale.sessionId && modeToggle.current.stale()
-      ? { ...next, page: { ...next.page, create_mode: keepStale.createMode } } : next;
     setCreationPageId(null);
     setAttachSlow(false);
     setState((current) => current.phase === "ready" ? current : { phase: "loading" });
@@ -431,12 +436,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, false, applyPendingCreateMode, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token);
-      else setState(shown(next));
+      else setState(shownCreateMode(modeToggle.current, next));
     }).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
       if (next.phase === "busy") void showBusy(next.busySessionId, "attach");
-      setState(next.phase === "busy" ? next : shown(next));
+      setState(next.phase === "busy" ? next : shownCreateMode(modeToggle.current, next));
     }).catch((caught) => {
       if (caught instanceof PendingCreationError && owner.current.current(token)) {
         setCreationPageId(caught.input.pageId);
@@ -635,7 +640,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (!response.ok) throw new Error(`could not refresh page (${response.status})`);
       const page = await response.json() as Page;
       if (!owner.current.current(token)) return;
-      setState((value) => (value.phase === "ready" || value.phase === "empty") && value.page.id === page.id ? { ...value, page: { ...page, approval_mode: value.page.approval_mode } } : value);
+      setState((value) => (value.phase === "ready" || value.phase === "empty") && value.page.id === page.id ? shownCreateMode(modeToggle.current, { ...value, page: { ...page, approval_mode: value.page.approval_mode } }) : value);
     } catch (caught) {
       if (owner.current.current(token)) console.error("could not refresh page", caught);
     }

@@ -46,7 +46,7 @@ const chatHref = (chat: Chat) => {
   url.searchParams.set("chat", chat.session_id);
   return `${url.pathname}${url.search}`;
 };
-const titleOf = (chat: Chat) => chat.title?.trim() || chat.first_title?.trim() || "new chat";
+export const titleOf = (chat: Pick<Chat, "title" | "first_title">) => chat.title?.trim() || chat.first_title?.trim() || "new chat";
 const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
 const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 // in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
