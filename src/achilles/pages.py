@@ -452,7 +452,7 @@ class PageStore:
         self._database = root / "achilles.sqlite3"
         db = self._connect()
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3):
+        if version not in (0, 1, 2, 3, 4):
             raise RuntimeError(f"unsupported Achilles database version: {version}")
         db.executescript("""
         CREATE TABLE IF NOT EXISTS page (
@@ -505,6 +505,7 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
         stamp = now()
         db.execute(
             "INSERT OR IGNORE INTO page(id,route,title,created_at,updated_at) VALUES ('home','/','home',?,?)",  # noqa: E501
@@ -515,7 +516,7 @@ class PageStore:
             "SELECT zeta_session_id,id,created_at,updated_at FROM page "
             "WHERE zeta_session_id IS NOT NULL"
         )
-        db.execute("PRAGMA user_version = 3")
+        db.execute("PRAGMA user_version = 4")
         db.commit()
         db.close()
         self._chmod_db()
@@ -857,12 +858,12 @@ class PageStore:
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = db.execute(
                 "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
-                "c.title,c.created_at,c.updated_at,c.last_state FROM chat c "
+                "c.title,c.created_at,c.updated_at,c.last_state,c.titled_by_user FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
                 (*parameters, limit + 1),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [{**dict(row), "titled_by_user": bool(row["titled_by_user"])} for row in rows]
 
     def approval_count(self) -> int:
         with self._connect() as db:
@@ -891,15 +892,15 @@ class PageStore:
     def chat(self, session_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
-                "SELECT session_id,page_id,title,created_at,updated_at,last_state "
+                "SELECT session_id,page_id,title,created_at,updated_at,last_state,titled_by_user "
                 "FROM chat WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if row is None:
             raise KeyError(session_id)
-        return dict(row)
+        return {**dict(row), "titled_by_user": bool(row["titled_by_user"])}
 
-    def update_chat(self, session_id: str, changes: dict[str, str | None]) -> dict[str, Any]:
+    def update_chat(self, session_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         assignments = [f"{key}=?" for key in changes]
         with self.transaction() as db:
             updated = db.execute(

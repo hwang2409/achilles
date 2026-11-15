@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { isEditableTarget } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
+import { useInlineRename } from "./useInlineRename";
 
 export type PageLink = { id: string; route: string; title: string };
 
@@ -14,6 +15,7 @@ export type Chat = {
   created_at: string;
   updated_at: string;
   last_state: "idle" | "running" | "approval" | "failed" | null;
+  titled_by_user?: boolean;
 };
 
 type Props = {
@@ -25,6 +27,7 @@ type Props = {
   onNewChat: () => Promise<void>;
   onToggleCreateMode: () => Promise<void>;
   onSelectChat: (chat: Chat) => void;
+  onRenameChat: (chat: Chat, title: string) => void;
   refreshKey: number;
   pageRefreshKey: number;
 };
@@ -97,7 +100,7 @@ function Highlight({ value, query }: { value: string; query: string }) {
   return <>{value.slice(0, index)}<mark>{value.slice(index, index + query.length)}</mark>{value.slice(index + query.length)}</>;
 }
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onToggleCreateMode, onSelectChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -254,7 +257,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><kbd>⌘K</kbd></footer>
@@ -267,10 +270,24 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ch
   </div>;
 }
 
-function ChatRow({ chat, current, active, index, query, onSelect }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void }) {
-  return <a tabIndex={-1} id={index === undefined ? undefined : `chat-result-${index}`} data-chat-id={chat.session_id} className={`chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
+function ChatRow({ chat, current, active, index, query, onSelect, onRename }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void }) {
+  const rename = useInlineRename();
+  const rowId = index === undefined ? undefined : `chat-result-${index}`;
+  const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
+  if (rename.editing) {
+    return <div id={rowId} data-chat-id={chat.session_id} className={rowClass}>
+      <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind((value) => onRename(chat, value))} />
+    </div>;
+  }
+  const startRename = (event: { preventDefault(): void; stopPropagation(): void }) => {
+    event.preventDefault();
+    event.stopPropagation();
+    rename.start(chat.title?.trim() ?? "");
+  };
+  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     <span title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title} <i>{timeLabel(chat.updated_at)}</i></span>
+    <button type="button" className="chat-row-rename" aria-label={`rename ${titleOf(chat)}`} onClick={startRename}>✎</button>
   </a>;
 }
 
