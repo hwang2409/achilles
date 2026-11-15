@@ -1,0 +1,873 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tickets"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_tickets",
+        "name": "list_tickets",
+        "version": 1,
+        "operation": "list",
+        "collection": "tickets"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_ticket",
+        "name": "update_ticket",
+        "version": 1,
+        "operation": "update",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "t-01",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-02",
+        "collection": "tickets",
+        "data": {
+          "title": "Export drops last row",
+          "priority": "low",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-03",
+        "collection": "tickets",
+        "data": {
+          "title": "Dark mode contrast",
+          "priority": "medium",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-04",
+        "collection": "tickets",
+        "data": {
+          "title": "Payment webhook retries",
+          "priority": "high",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-05",
+        "collection": "tickets",
+        "data": {
+          "title": "Search ignores accents",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-06",
+        "collection": "tickets",
+        "data": {
+          "title": "Invite email typo",
+          "priority": "low",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-07",
+        "collection": "tickets",
+        "data": {
+          "title": "Report totals off by one",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-08",
+        "collection": "tickets",
+        "data": {
+          "title": "Avatar upload fails",
+          "priority": "medium",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-09",
+        "collection": "tickets",
+        "data": {
+          "title": "Slow dashboard load",
+          "priority": "high",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-10",
+        "collection": "tickets",
+        "data": {
+          "title": "Broken help link",
+          "priority": "low",
+          "status": "open"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "list-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_tickets",
+        "success": true,
+        "arguments": {
+          "where": {
+            "field": "priority",
+            "equals": "high"
+          }
+        }
+      },
+      {
+        "id": "update-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-01",
+          "revision": 1,
+          "status": "escalated"
+        }
+      },
+      {
+        "id": "update-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-05",
+          "revision": 1,
+          "status": "escalated"
+        }
+      },
+      {
+        "id": "update-2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-07",
+          "revision": 1,
+          "status": "escalated"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "list-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_tickets",
+        "success": true,
+        "data": [
+          {
+            "title": "Login page times out",
+            "priority": "high",
+            "status": "open",
+            "record_id": "t-01",
+            "revision": 1
+          },
+          {
+            "title": "Payment webhook retries",
+            "priority": "high",
+            "status": "closed",
+            "record_id": "t-04",
+            "revision": 1
+          },
+          {
+            "title": "Search ignores accents",
+            "priority": "high",
+            "status": "open",
+            "record_id": "t-05",
+            "revision": 1
+          },
+          {
+            "title": "Report totals off by one",
+            "priority": "high",
+            "status": "open",
+            "record_id": "t-07",
+            "revision": 1
+          },
+          {
+            "title": "Slow dashboard load",
+            "priority": "high",
+            "status": "closed",
+            "record_id": "t-09",
+            "revision": 1
+          }
+        ]
+      },
+      {
+        "call_id": "update-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-01",
+          "status": "escalated",
+          "revision": 2
+        }
+      },
+      {
+        "call_id": "update-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-05",
+          "status": "escalated",
+          "revision": 2
+        }
+      },
+      {
+        "call_id": "update-2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-07",
+          "status": "escalated",
+          "revision": 2
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "list-1",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tickets",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-0",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-1",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-2",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tickets"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_tickets",
+          "name": "list_tickets",
+          "version": 1,
+          "operation": "list",
+          "collection": "tickets"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_ticket",
+          "name": "update_ticket",
+          "version": 1,
+          "operation": "update",
+          "collection": "tickets"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-01",
+          "collection": "tickets",
+          "data": {
+            "title": "Login page times out",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-02",
+          "collection": "tickets",
+          "data": {
+            "title": "Export drops last row",
+            "priority": "low",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-03",
+          "collection": "tickets",
+          "data": {
+            "title": "Dark mode contrast",
+            "priority": "medium",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-04",
+          "collection": "tickets",
+          "data": {
+            "title": "Payment webhook retries",
+            "priority": "high",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-05",
+          "collection": "tickets",
+          "data": {
+            "title": "Search ignores accents",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-06",
+          "collection": "tickets",
+          "data": {
+            "title": "Invite email typo",
+            "priority": "low",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-07",
+          "collection": "tickets",
+          "data": {
+            "title": "Report totals off by one",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-08",
+          "collection": "tickets",
+          "data": {
+            "title": "Avatar upload fails",
+            "priority": "medium",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-09",
+          "collection": "tickets",
+          "data": {
+            "title": "Slow dashboard load",
+            "priority": "high",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-10",
+          "collection": "tickets",
+          "data": {
+            "title": "Broken help link",
+            "priority": "low",
+            "status": "open"
+          }
+        }
+      ]
+    },
+    "turns": 5
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tickets"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_tickets",
+        "name": "list_tickets",
+        "version": 1,
+        "operation": "list",
+        "collection": "tickets"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_ticket",
+        "name": "update_ticket",
+        "version": 1,
+        "operation": "update",
+        "collection": "tickets"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "t-01",
+        "collection": "tickets",
+        "data": {
+          "title": "Login page times out",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-02",
+        "collection": "tickets",
+        "data": {
+          "title": "Export drops last row",
+          "priority": "low",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-03",
+        "collection": "tickets",
+        "data": {
+          "title": "Dark mode contrast",
+          "priority": "medium",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-04",
+        "collection": "tickets",
+        "data": {
+          "title": "Payment webhook retries",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-05",
+        "collection": "tickets",
+        "data": {
+          "title": "Search ignores accents",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-06",
+        "collection": "tickets",
+        "data": {
+          "title": "Invite email typo",
+          "priority": "low",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-07",
+        "collection": "tickets",
+        "data": {
+          "title": "Report totals off by one",
+          "priority": "high",
+          "status": "escalated"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-08",
+        "collection": "tickets",
+        "data": {
+          "title": "Avatar upload fails",
+          "priority": "medium",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-09",
+        "collection": "tickets",
+        "data": {
+          "title": "Slow dashboard load",
+          "priority": "high",
+          "status": "closed"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-10",
+        "collection": "tickets",
+        "data": {
+          "title": "Broken help link",
+          "priority": "low",
+          "status": "open"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "list-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_tickets",
+        "success": true,
+        "arguments": {
+          "where": {
+            "field": "priority",
+            "equals": "high"
+          }
+        }
+      },
+      {
+        "id": "update-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-01",
+          "revision": 1,
+          "status": "escalated"
+        }
+      },
+      {
+        "id": "update-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-04",
+          "revision": 1,
+          "status": "escalated"
+        }
+      },
+      {
+        "id": "update-2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-05",
+          "revision": 1,
+          "status": "escalated"
+        }
+      },
+      {
+        "id": "update-3",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "arguments": {
+          "record_id": "t-07",
+          "revision": 1,
+          "status": "escalated"
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "list-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__list_tickets",
+        "success": true,
+        "data": [
+          {
+            "title": "Login page times out",
+            "priority": "high",
+            "status": "open",
+            "record_id": "t-01",
+            "revision": 1
+          },
+          {
+            "title": "Payment webhook retries",
+            "priority": "high",
+            "status": "closed",
+            "record_id": "t-04",
+            "revision": 1
+          },
+          {
+            "title": "Search ignores accents",
+            "priority": "high",
+            "status": "open",
+            "record_id": "t-05",
+            "revision": 1
+          },
+          {
+            "title": "Report totals off by one",
+            "priority": "high",
+            "status": "open",
+            "record_id": "t-07",
+            "revision": 1
+          },
+          {
+            "title": "Slow dashboard load",
+            "priority": "high",
+            "status": "closed",
+            "record_id": "t-09",
+            "revision": 1
+          }
+        ]
+      },
+      {
+        "call_id": "update-0",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-01",
+          "status": "escalated",
+          "revision": 2
+        }
+      },
+      {
+        "call_id": "update-1",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-04",
+          "status": "escalated",
+          "revision": 2
+        }
+      },
+      {
+        "call_id": "update-2",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-05",
+          "status": "escalated",
+          "revision": 2
+        }
+      },
+      {
+        "call_id": "update-3",
+        "page_id": "home",
+        "chat_id": "tickets-chat",
+        "tool": "achilles__update_ticket",
+        "success": true,
+        "data": {
+          "record_id": "t-07",
+          "status": "escalated",
+          "revision": 2
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "list-1",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tickets",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-0",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-1",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-2",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      },
+      {
+        "request_id": "update-3",
+        "chat_id": "tickets-chat",
+        "page_id": "home",
+        "tool": "achilles__update_ticket",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tickets"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_tickets",
+          "name": "list_tickets",
+          "version": 1,
+          "operation": "list",
+          "collection": "tickets"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_ticket",
+          "name": "update_ticket",
+          "version": 1,
+          "operation": "update",
+          "collection": "tickets"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-01",
+          "collection": "tickets",
+          "data": {
+            "title": "Login page times out",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-02",
+          "collection": "tickets",
+          "data": {
+            "title": "Export drops last row",
+            "priority": "low",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-03",
+          "collection": "tickets",
+          "data": {
+            "title": "Dark mode contrast",
+            "priority": "medium",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-04",
+          "collection": "tickets",
+          "data": {
+            "title": "Payment webhook retries",
+            "priority": "high",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-05",
+          "collection": "tickets",
+          "data": {
+            "title": "Search ignores accents",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-06",
+          "collection": "tickets",
+          "data": {
+            "title": "Invite email typo",
+            "priority": "low",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-07",
+          "collection": "tickets",
+          "data": {
+            "title": "Report totals off by one",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-08",
+          "collection": "tickets",
+          "data": {
+            "title": "Avatar upload fails",
+            "priority": "medium",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-09",
+          "collection": "tickets",
+          "data": {
+            "title": "Slow dashboard load",
+            "priority": "high",
+            "status": "closed"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-10",
+          "collection": "tickets",
+          "data": {
+            "title": "Broken help link",
+            "priority": "low",
+            "status": "open"
+          }
+        }
+      ]
+    },
+    "turns": 5
+  }
+}
