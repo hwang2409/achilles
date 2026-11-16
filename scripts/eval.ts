@@ -7,7 +7,7 @@ import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type Eva
 import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type ProviderError, type TaskSetup, type TaskStep } from "./eval-grade";
 import { createGateWait } from "./gate-diagnostics";
 import { formFields } from "../apps/web/src/page/formSchema";
-import { loadBaseReport, makeReport, reportJson, reportMarkdown, type BaseReport } from "./eval-report";
+import { loadBaseReport, makeReport, reportJson, reportMarkdown, reportSummary, type BaseReport, type FinalAnswers } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 import { createBrowserDriver, stepFinished, type BrowserDriver } from "./eval-browser";
 
@@ -601,7 +601,7 @@ export async function classifyTaskSupport(stack: EvalStack, task: EvalTask, hidd
   } catch (error) { return failureResult(task, error, hidden); }
 }
 
-type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; failed: boolean; stop_suite?: boolean };
+type RepeatResult = { result: ReturnType<typeof gradeTask>; snapshot?: EvalSnapshot; cleanup?: CleanupProof; catalog: string[]; achilles_sha?: string; zeta_sha?: string; provider?: string; model?: string; failed: boolean; stop_suite?: boolean };
 async function runRepeat(task: EvalTask, index: number, options: { scripted: boolean; achillesDir?: string; keep: boolean; runId: string; signal: AbortSignal; hidden: string[] }): Promise<RepeatResult> {
   const provider = options.scripted ? scriptedProvider() : undefined; let stack: EvalStack | undefined; let result: ReturnType<typeof gradeTask> | undefined; let snapshot: EvalSnapshot | undefined; let failed = false; let stopSuite = false; let catalog: string[] = [];
   const retainedRoot = options.keep ? resolve(new URL(`../.cache/evals/${options.runId}/repeat-${index + 1}`, import.meta.url).pathname) : undefined;
@@ -631,15 +631,16 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     if (retainedRoot) { await mkdir(join(retainedRoot, ".."), { recursive: true }); await cp(stack.root, retainedRoot, { recursive: true, force: true }); await scanArtifactTree(retainedRoot, options.hidden); }
   } catch (error) { failed = true; stopSuite ||= stopsSuite(error); result = failureResult(task, new Error(stopSuite ? "suite stopped after a secret-scan failure" : "artifact finalization failed"), options.hidden); if (retainedRoot) await rm(retainedRoot, { recursive: true, force: true }); }
   finally { await stack.close().catch(() => undefined); await rm(stack.root, { recursive: true, force: true }); }
-  return { result: result!, snapshot, cleanup, catalog, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, failed, stop_suite: stopSuite };
+  return { result: result!, snapshot, cleanup, catalog, achilles_sha: stack.achillesSha, zeta_sha: stack.zetaSha, provider: stack.provider, model: stack.model, failed, stop_suite: stopSuite };
 }
 
+function finalAnswers(report: ReturnType<typeof makeReport>, repeats: RepeatResult[]): FinalAnswers { return Object.fromEntries(report.tasks.map((task, index) => [task.transcript ?? "", repeats[index]?.snapshot?.answers])); }
 async function writeReportArtifacts(staging: string, report: ReturnType<typeof makeReport>, repeats: RepeatResult[], base?: BaseReport) {
-  await Bun.write(join(staging, "report.json"), reportJson(report)); await Bun.write(join(staging, "report.md"), reportMarkdown(report, base)); await Bun.write(join(staging, "cleanup.json"), JSON.stringify(repeats.map(repeat => repeat.cleanup ?? null), null, 2));
+  await Bun.write(join(staging, "report.json"), reportJson(report)); await Bun.write(join(staging, "report.md"), reportMarkdown(report, base, finalAnswers(report, repeats))); await Bun.write(join(staging, "cleanup.json"), JSON.stringify(repeats.map(repeat => repeat.cleanup ?? null), null, 2));
   await mkdir(join(staging, "snapshots")); const seen = new Map<string, number>(); for (const repeat of repeats) { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); await Bun.write(join(staging, "snapshots", `${repeat.result.task_id}-${number}.json`), JSON.stringify(repeat.snapshot ?? null, null, 2)); }
 }
 async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, hidden: string[], base?: BaseReport) {
-  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); const completedRepeats = Math.max(0, ...seen.values()); let publicationFailed = false; let report = makeReport({ run_id: runId, repeats: completedRepeats, agent: { provider: Bun.env.EVAL_BACKEND === "scripted" ? "scripted" : "configured", model: Bun.env.EVAL_BACKEND === "scripted" ? "offline" : Bun.env.MODEL ?? "configured", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
+  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); const completedRepeats = Math.max(0, ...seen.values()); let publicationFailed = false; const ran = repeats.find(repeat => repeat.model); let report = makeReport({ run_id: runId, repeats: completedRepeats, agent: { provider: ran?.provider ?? "unavailable", model: ran?.model ?? "unavailable", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
   const staging = await mkdtemp(join(Bun.env.TMPDIR ?? "/tmp", "achilles-eval-report-"));
   try {
     await writeReportArtifacts(staging, report, repeats, base);
@@ -650,7 +651,7 @@ async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output:
     }
     await mkdir(output, { recursive: true }); await cp(staging, output, { recursive: true, force: true });
   } finally { await rm(staging, { recursive: true, force: true }); }
-  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => (task.pass || task.status === "unsupported") && task.status !== "needs_review") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); return pass;
+  const pass = !publicationFailed && repeats.length === tasks.length * completedRepeats && report.tasks.every(task => (task.pass || task.status === "unsupported") && task.status !== "needs_review") && repeats.every(repeat => !repeat.failed); console.log(JSON.stringify({ tasks: tasks.map(task => task.id), pass, repeats: completedRepeats, report: output, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha })); console.log(`\n${reportSummary(report, finalAnswers(report, publicationFailed ? [] : repeats))}\nreport: ${join(output, "report.md")}`); return pass;
 }
 
 async function runStackOnly(task: EvalTask, controller: AbortController, hidden: string[]) {

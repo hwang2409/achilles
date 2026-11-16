@@ -1,12 +1,20 @@
 import { expect, test } from "bun:test";
-import { aggregateTaskResults, diffMarkdown, loadBaseReport, makeReport, parseBaseReport, reportJson, reportMarkdown } from "./eval-report";
+import { aggregateTaskResults, diffMarkdown, loadBaseReport, makeReport, parseBaseReport, reportJson, reportMarkdown, reportSummary } from "./eval-report";
 
 test("report aggregates pass rate per task and states tools", () => {
   const rows = [{ task_id: "a", pass: true, score: 100, turns: 2, tool_calls: 1, wall_ms: 10 }, { task_id: "a", pass: false, score: 50, turns: 3, tool_calls: 2, wall_ms: 20 }];
   expect(aggregateTaskResults(rows).a.pass_rate).toBe(0.5);
   const usage = { turns_with_usage: 1, input_tokens: 10, output_tokens: "unavailable at this zeta pin", reasoning_output_tokens: 4, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 } as const;
-  const report = makeReport({ run_id: "run", repeats: 2, agent: { provider: "claude", model: "claude-opus-5-5", tool_policy: "achilles__*,mcp_discover", observed_catalog: ["achilles__list_notes"] }, totals: { turns: 5, wall_ms: 30 }, tasks: rows.map((row) => ({ ...row, approvals: 0, usage, checks: [], host_tools_gap: false })) as never });
-  const markdown = reportMarkdown(report);
+  const failed = { id: "count", pass: false, expected: 3, actual: 2, reason: "wrong_value" };
+  const report = makeReport({ run_id: "run", repeats: 2, agent: { provider: "claude", model: "claude-opus-5-5", tool_policy: "achilles__*,mcp_discover", observed_catalog: ["achilles__list_notes"], achilles_sha: "aaaaaaa111", zeta_sha: "bbbbbbb222" }, totals: { turns: 5, wall_ms: 90_000 }, tasks: rows.map((row, index) => ({ ...row, approvals: 0, usage, checks: row.pass ? [] : [failed], host_tools_gap: false, transcript: `snapshots/a-${index + 1}.json` })) as never });
+  const markdown = reportMarkdown(report, undefined, { "snapshots/a-2.json": { ask: "first", answer: "x".repeat(400) } });
+  const top = markdown.split("\n");
+  expect(top[0]).toBe("FAIL 1/2 | achilles aaaaaaa | zeta bbbbbbb | model claude/claude-opus-5-5 | 1.5 min | tokens unavailable");
+  expect(top[2]).toBe("eval agent: tools `achilles__*,mcp_discover`, max turns per task from its agent_turns (default 20), no auto memory.");
+  expect(top[3]).toStartWith("live `make dev` page chats differ:");
+  expect(markdown).toContain("### a run 2: agent_fail, score 50\n\n- check `count`: expected 3, actual 2 (wrong_value)\n- final answer (step `answer`): \"" + "x".repeat(300) + "...\"\n- snapshot: snapshots/a-2.json");
+  expect(markdown).not.toContain("### a run 1");
+  expect(markdown.startsWith(reportSummary(report, { "snapshots/a-2.json": { ask: "first", answer: "x".repeat(400) } }))).toBe(true);
   expect(markdown).toContain("observed catalog");
   expect(markdown).toContain("| a | 2 | 1/2 | 50% | 75 | 2.5 | 0 | 0 |");
   expect(markdown).toContain("provider credentials are read from the configured account home");
@@ -102,9 +110,12 @@ test("malformed base gives a clear error", async () => {
   await expect(loadBaseReport("/nonexistent/achilles-base")).rejects.toThrow("BASE achilles-base: no readable report.json");
 });
 
-test("report without base is unchanged and with base starts with the diff", () => {
+test("report starts with the summary, then the base diff, then the results", () => {
   const report = makeReport({ run_id: "run", repeats: 1, agent: { provider: "p", model: "m", tool_policy: "t", observed_catalog: [] }, tasks: [{ ...row("a", true), score: 100, tool_calls: 0, wall_ms: 1, approvals: 0, checks: [] }] as never });
   const plain = reportMarkdown(report);
-  expect(plain.startsWith("# achilles eval run")).toBe(true);
-  expect(reportMarkdown(report, base([row("a", false)]))).toBe(diffMarkdown(base([row("a", false)]), report) + "\n" + plain);
+  const summary = reportSummary(report);
+  expect(summary.startsWith("PASS 1/1 |")).toBe(true);
+  expect(summary).toContain("## failures\n\nnone");
+  expect(plain.startsWith(summary + "\n# results of run run")).toBe(true);
+  expect(reportMarkdown(report, base([row("a", false)]))).toBe(summary + "\n" + diffMarkdown(base([row("a", false)]), report) + "\n" + plain.slice(summary.length + 1));
 });
