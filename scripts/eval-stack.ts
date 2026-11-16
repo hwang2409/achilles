@@ -6,12 +6,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { connectEvalProtocol } from "./eval-protocol";
 
 export const TOOL_POLICY = "achilles__*,mcp_discover";
+// the label shown in the report when a task opts into the live page-chat tool set (zeta settings default: full tool set)
+export const LIVE_TOOL_POLICY = "settings-default (full tool set incl. bash, edit, write, fetch)";
 export const DEFAULT_MAX_TURNS = 20;
 const RESERVED_PORTS = new Set([5190, 5191, 8765]);
 const HTTP_TIMEOUT_MS = 10_000;
 export type CleanupProof = { pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; ports: number[]; pids_dead: boolean; pgids_dead: boolean; ports_closed: boolean; discovery_pid_dead: boolean; discovery_cleaned: boolean };
-export type EvalStackConfig = { achillesDir?: string; zetaRev?: string; model?: string; accountHome?: string; ollamaBaseUrl?: string; maxTurns?: number; root?: string; signal?: AbortSignal; beforeDelete?: (root: string) => Promise<void> };
-export type EvalStack = { achillesOrigin: string; zetaOrigin: string; achillesDir: string; achillesSha: string; zetaSha: string; provider: string; model: string; root: string; accountHome: string; cleanup?: CleanupProof; run(command: string, args: string[], cwd?: string, timeoutMs?: number): Promise<{ exitCode: number; stdout: string; stderr: string }>; restartZeta(): Promise<{ killed_pid: number; started_pid: number }>; close(): Promise<CleanupProof> };
+export type EvalStackConfig = { achillesDir?: string; zetaRev?: string; model?: string; accountHome?: string; ollamaBaseUrl?: string; maxTurns?: number; root?: string; signal?: AbortSignal; liveTools?: boolean; beforeDelete?: (root: string) => Promise<void> };
+export type EvalStack = { achillesOrigin: string; zetaOrigin: string; achillesDir: string; achillesSha: string; zetaSha: string; provider: string; model: string; root: string; accountHome: string; toolPolicy: string; cleanup?: CleanupProof; run(command: string, args: string[], cwd?: string, timeoutMs?: number): Promise<{ exitCode: number; stdout: string; stderr: string }>; restartZeta(): Promise<{ killed_pid: number; started_pid: number }>; close(): Promise<CleanupProof> };
 
 export async function fetchDeadline(input: string | URL, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = HTTP_TIMEOUT_MS) {
   const deadline = AbortSignal.timeout(timeoutMs); const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -183,7 +185,10 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
     config.signal?.throwIfAborted();
     const achillesLog = openSync(join(root, "achilles-home/serve.log"), "a"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
     await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
-    const spawnZeta = () => { const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const child = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? DEFAULT_MAX_TURNS), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, "--tools", TOOL_POLICY, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog); return child; };
+    // a live-tools task drops the narrow eval tool policy so the session carries zeta's full default tool set, exactly
+    // like a `make dev` / achilles serve page chat; the achilles__* MCP tools stay available either way
+    const toolArgs = config.liveTools ? [] : ["--tools", TOOL_POLICY];
+    const spawnZeta = () => { const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const child = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? DEFAULT_MAX_TURNS), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, ...toolArgs, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog); return child; };
     let zetaProcess = spawnZeta();
     const discovery = await waitForDiscovery(root, zetaProcess, config.signal);
     // the same serve again on the same port and home; the stale discovery file goes first so the wait sees the new process
@@ -191,7 +196,7 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
       const killed_pid = zetaProcess.pid!; await owner.kill(zetaProcess); await rm(join(root, "zeta-home/run/serve.ws.json"), { force: true });
       zetaProcess = spawnZeta(); await waitForDiscovery(root, zetaProcess, config.signal); return { killed_pid, started_pid: zetaProcess.pid! };
     }; const preflight = await connectEvalProtocol(discovery); await preflight.close();
-    stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), restartZeta, close };
+    stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, toolPolicy: config.liveTools ? LIVE_TOOL_POLICY : TOOL_POLICY, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), restartZeta, close };
     return stack;
   } catch (error) { const detail = error as Error & { cleanup?: CleanupProof }; detail.cleanup = await close(); throw detail; }
 }
