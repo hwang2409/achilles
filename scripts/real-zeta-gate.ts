@@ -974,11 +974,11 @@ try {
 
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
-  await field.fill("put the page note before the books list");
+  await field.fill("layout updated without reload");
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "put the page note before the books list" }), "waitFor", { timeout: 20000 });
+  await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
     const metrics = page.locator(".metric-strip");
     return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
