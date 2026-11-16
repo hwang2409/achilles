@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -97,12 +98,26 @@ def _parse_chat_cursor(cursor: str | None) -> tuple[str, str] | None:
     return value[0], value[1]
 
 
+def _start_command(request, attached: str | None, origin: str) -> str | None:
+    """The command that starts the zeta serve this achilles reads, for the zeta-down screen."""
+    if attached is None:
+        return None  # zeta's default discovery: the page names `zeta serve` on the last port it saw
+    if Path(attached).resolve() == (_home() / "run/serve.json").resolve():
+        port = request.url.port
+        return "make dev" if port in (None, 5191) else f"make dev PORT={port}"
+    return (
+        f"zeta serve --ws 0 --ws-discovery {shlex.quote(attached)}"
+        f" --ws-origin {shlex.quote(origin)}"
+    )
+
+
 def _discovery(request):
+    attached = os.environ.get("ACHILLES_ZETA_DISCOVERY")
     path = Path(
-        os.environ.get(
-            "ACHILLES_ZETA_DISCOVERY",
-            Path(os.environ.get("ZETA_HOME", Path.home() / ".zeta")) / "run/serve.ws.json",
-        )
+        attached or Path(os.environ.get("ZETA_HOME", Path.home() / ".zeta")) / "run/serve.ws.json"
+    )
+    origin = (
+        request.headers.get("origin") or f"{request.url.scheme}://{request.headers.get('host', '')}"
     )
     try:
         document = json.loads(path.read_text())
@@ -112,10 +127,6 @@ def _discovery(request):
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError
         os.kill(int(document["pid"]), 0)
-        origin = (
-            request.headers.get("origin")
-            or f"{request.url.scheme}://{request.headers.get('host', '')}"
-        )
         if not _same_origin(request) or origin not in document.get("origins", []):
             raise HTTPException(403, "origin is not allowed")
         return JSONResponse(
@@ -128,7 +139,14 @@ def _discovery(request):
     except HTTPException:
         raise
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        raise HTTPException(503, "zeta serve is not available")
+        return JSONResponse(
+            {
+                "detail": "zeta serve is not available",
+                "start": _start_command(request, attached, origin),
+            },
+            status_code=503,
+            headers={"cache-control": "no-store"},
+        )
 
 
 class PageAuthMiddleware(BaseHTTPMiddleware):
