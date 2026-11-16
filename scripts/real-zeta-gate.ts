@@ -43,8 +43,6 @@ const writeArtifacts = async () => {
   await rm(artifactDir, { recursive: true, force: true });
   await mkdir(artifactDir, { recursive: true });
   const now = new Date().toISOString();
-  // the last restarted server's tokens, which no gate step read.
-  for (const path of [ownDiscovery, sharedDiscovery]) await readDiscovery(path).catch(() => {});
   const all = [...secrets, ...artifactSecrets];
   const safe = ([time, line]: [string, string]) => `${time} ${redactArtifact(line, all)}`;
   for (const log of artifactLogs)
@@ -230,6 +228,7 @@ try {
       return false;
     }
   }, "restarted zeta");
+  await readDiscovery(ownDiscovery);
   const field = page.getByRole("textbox", { name: "message" });
   await gateWait.playwright(field, "waitFor", { timeout: 20000 }).catch(async () => {
     throw new Error(
@@ -1636,6 +1635,7 @@ try {
     } finally {
       zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
       await waitFor(async () => JSON.parse(await Bun.file(control).text()).pid !== previousPid, "zeta restart after vim read-only gate");
+      await readDiscovery(ownDiscovery);
     }
   }, requests, gateWait);
 
@@ -1720,6 +1720,7 @@ try {
     try { return JSON.parse(await Bun.file(control).text()).pid !== droppedPid; }
     catch { return false; }
   }, "zeta reconnect after dropped connection");
+  await readDiscovery(ownDiscovery);
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
@@ -1753,6 +1754,8 @@ try {
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 
 } finally {
+  // the live servers' tokens, read while their discovery files still exist (a failed restart wait skips the read above).
+  for (const path of [ownDiscovery, sharedDiscovery]) await readDiscovery(path).catch(() => {});
   try {
     await browser?.close().catch(() => {});
     for (const child of children) child.kill("SIGTERM");

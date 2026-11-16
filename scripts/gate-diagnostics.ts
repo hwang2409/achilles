@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 
-const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential/i;
+const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
 
 type FrameSummary = { direction: "received" | "sent"; method?: string; event?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
 
@@ -104,7 +104,11 @@ export const controlSnapshot = (text: string, secrets: readonly string[] = []): 
 
 // covers `"token": "x"`, escaped `\"token\":\"x\"`, `'Authorization': 'Basic x'`, `x-api-key: x`, and `credential=x` in log lines that are not JSON.
 // a quoted value keeps its quotes, and an unquoted value stops at a quote, so a redacted JSON line stays valid.
-const SECRET_FIELD = /((?:\\*["'])?[\w-]*(?:token|authorization|credential|mcp_bindings|cookie|api[_-]?key)[\w-]*(?:\\*["'])?\s*[:=]\s*)(?:(\\*["'])(?:(?!\2).)*?\2|(?:basic|bearer|digest)\s+[^\s,}&"'\\]+|[^\s,}&"'\\]+)/gi;
+// a key starts only at the start of a `[\w-]` run, and its parts are bounded to 64 characters, so a long run cannot backtrack for minutes.
+const FIELD_KEY = String.raw`(?<![\w-])[\w-]{0,64}(?:token|authorization|credential|mcp_bindings|cookie|api[_-]?key|secret|password)[\w-]{0,64}`;
+const SECRET_FIELD = new RegExp(String.raw`((?:\\*["'])?${FIELD_KEY}(?:\\*["'])?\s*[:=]\s*)(?:(\\*["'])(?:(?!\2).)*?\2|(?:basic|bearer|digest)\s+[^\s,}&"'\\]+|[^\s,}&"'\\]+)`, "gi");
+// a python header tuple `(b'x-api-key', b'x')`.
+const HEADER_TUPLE = new RegExp(String.raw`(\(\s*b?(["'])${FIELD_KEY}\2\s*,\s*b?)(["'])(?:(?!\3).)*?\3`, "gi");
 // a `Cookie:` or `set-cookie:` header value runs to the end of the line, across `;`.
 const COOKIE_HEADER = /(\bcookie\s*:\s*)[^\r\n"'\\]+/gi;
 const BEARER_PROTOCOL = /zeta\.bearer\.[^\s"'\\,]+/gi;
@@ -121,6 +125,7 @@ export const redactArtifact = (line: string, secrets: readonly string[] = [], ho
   text = text
     .replace(COOKIE_HEADER, "$1[redacted]")
     .replace(BEARER_PROTOCOL, "zeta.bearer.[redacted]")
+    .replace(HEADER_TUPLE, "$1$3[redacted]$3")
     .replace(SECRET_FIELD, (match: string, key: string, quote?: string) =>
       match.slice(key.length).includes("[redacted]") ? match : quote ? `${key}${quote}[redacted]${quote}` : `${key}[redacted]`);
   return home.length > 1 ? text.split(home).join("~") : text;

@@ -29,6 +29,9 @@ test("artifact lines redact credential shapes without a known secret, and keep J
     `set-cookie: a=${fake}; Path=/`,
     `authorization: Basic ${fake}`,
     `x-api-key: ${fake}`,
+    `password=${fake} client_secret: ${fake}`,
+    JSON.stringify({ password: fake, client_secret: fake }),
+    `headers=[(b'x-api-key', b'${fake}')]`,
   ];
   const output = lines.map((line) => redactArtifact(line, [], "/home/tester"));
   for (const line of output) expect(line).not.toContain(fake);
