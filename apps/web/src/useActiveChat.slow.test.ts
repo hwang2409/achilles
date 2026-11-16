@@ -2,6 +2,7 @@ import { afterAll, afterEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
+import { chatQueues } from "./composer/chatQueues";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
 
@@ -477,45 +478,97 @@ test("a settle zeta keeps refusing after the turn end retries a bounded number o
   expect(zeta.state.sets).toBe(1);
 });
 
-// zeta serves one attached session: `new_session` and `resume` move it, and a request naming another session is refused
-// browser Back to an older unsent chat while one zeta call of the first send's create is still on its way
-for (const hold of ["new_session", "session_settings s1", "resume s1"]) test(`a first send whose create is held at ${hold} when an older unsent chat opens leaves that chat alone and is not sent`, async () => {
+// The first chat of a page, through the page hook and the composer queue that App renders. zeta serves one attached
+// session: `new_session` and `resume` move it, and a request naming another session is refused. "back" opens the older
+// unsent chat s0 (?chat=s0); "forth" opens the page again with no chat named. `nth` counts calls with the same name.
+type Stage = { call: string; nth?: number };
+type CreateRow = {
+  name: string;
+  home?: string; // the page's home chat at load (default: none, so the page opens empty)
+  hold?: Stage; // this call's reply waits until the moves are done
+  moves?: Array<"back" | "forth">;
+  fail?: Stage; // this call fails once, with the user still on the page
+  retry?: boolean; // then "retry creating chat"
+  // where the first message ends up once the page opens again with no chat named: sent to s1, or visible in the shown
+  // composer (box text or a row); `shown` is that composer's chat
+  message: "sent" | "visible" | "none";
+  shown: "s0" | "s1" | "new";
+};
+const BACK_FORTH_CYCLES = 4;
+const createRows: CreateRow[] = [
+  { name: "success", message: "sent", shown: "s1" },
+  { name: "stale before new_session", hold: { call: "GET /api/pages/home", nth: 2 }, moves: ["back"], message: "visible", shown: "new" },
+  { name: "stale after new_session", hold: { call: "new_session" }, moves: ["back"], message: "visible", shown: "new" },
+  { name: "stale after register", hold: { call: "POST /api/pages/home/chats" }, moves: ["back"], message: "visible", shown: "new" },
+  { name: "stale after settings", hold: { call: "session_settings s1" }, moves: ["back"], message: "visible", shown: "new" },
+  { name: "stale after mapping", hold: { call: "PUT /api/pages/home/session" }, moves: ["back"], message: "visible", shown: "s1" },
+  { name: "stale during attach resume", hold: { call: "resume s1" }, moves: ["back"], message: "visible", shown: "s1" },
+  { name: "stale during attach settings", hold: { call: "session_settings s1", nth: 2 }, moves: ["back"], message: "visible", shown: "s1" },
+  { name: "stale during attach history", hold: { call: "session_history_and_subscribe s1" }, moves: ["back"], message: "visible", shown: "s1" },
+  { name: "failure at new_session", fail: { call: "new_session" }, message: "visible", shown: "new" },
+  { name: "failure at register, then retry", fail: { call: "POST /api/pages/home/chats" }, retry: true, message: "visible", shown: "s1" },
+  { name: "failure at settings, then retry", fail: { call: "session_settings s1" }, retry: true, message: "visible", shown: "s1" },
+  { name: "failure at mapping, then retry", fail: { call: "PUT /api/pages/home/session" }, retry: true, message: "visible", shown: "s1" },
+  { name: "failure at attach, then retry", fail: { call: "resume s1" }, retry: true, message: "visible", shown: "s1" },
+  { name: "an attachment that went stale on a lost home chat creates nothing", home: "lost", hold: { call: "resume lost" }, moves: ["back"], message: "none", shown: "s0" },
+  { name: "the page opened again joins the running create", hold: { call: "resume s1" }, moves: ["back", "forth"], message: "visible", shown: "s1" },
+  { name: "back and forth quickly", hold: { call: "resume s1" }, moves: Array.from({ length: BACK_FORTH_CYCLES }, () => ["back", "forth"] as const).flat(), message: "visible", shown: "s1" },
+];
+
+test.each(createRows)("first chat of a page: $name", async (row) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new MemoryStorage();
   const popListeners: Array<() => void> = [];
   const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
-  const emptyPage = { ...page, zeta_session_id: null as string | null };
+  const emptyPage = { ...page, zeta_session_id: (row.home ?? null) as string | null };
   const unsent = { ...chat, session_id: "s0", message_sent: false };
+  const counts = new Map<string, number>();
+  const held = deferred<void>();
+  let holding = false;
+  const failed = new Set<string>();
+  const requests: string[] = [];
+  // counts the call; holds its reply or fails it once when the row names it
+  const gate = async (call: string) => {
+    requests.push(call);
+    const nth = (counts.get(call) ?? 0) + 1;
+    counts.set(call, nth);
+    const named = (stage?: Stage) => stage?.call === call && (stage.nth ?? 1) === nth;
+    if (named(row.hold)) { holding = true; await held.promise; }
+    if (named(row.fail) && !failed.has(call)) { failed.add(call); return true; }
+    return false;
+  };
   setGlobals({
     localStorage: storage,
     location,
     history: { pushState() {}, replaceState() {} },
     addEventListener: (type: string, listener: () => void) => { if (type === "popstate") popListeners.push(listener); },
     removeEventListener() {},
-    fetch: async (input: string | URL | Request) => {
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      const method = init?.method ?? "GET";
+      // the server writes the home mapping when the request arrives; a held reply comes later
+      if (method === "PUT" && url === "/api/pages/home/session" && !(row.fail?.call === `PUT ${url}` && !failed.has(`PUT ${url}`))) emptyPage.zeta_session_id = "s1";
+      if (await gate(`${method} ${url}`)) return new Response(null, { status: 503 });
       if (url === "/api/pages/home") return Response.json(emptyPage);
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
       if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
-      if (url === "/api/pages/home/session") { emptyPage.zeta_session_id = "s1"; return Response.json({ session_id: "s1" }); }
+      if (url === "/api/pages/home/session") return Response.json({ session_id: "s1" });
       // unsent chats are not listed; `include` finds one by id
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: url.includes("include=s0") ? [unsent] : [], next: null });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: url.includes("include=s0") ? [unsent] : url.includes("include=s1") ? [{ ...unsent, session_id: "s1" }] : [], next: null });
       if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
       throw new Error(`unexpected fetch ${url}`);
     },
   });
-  const held = deferred<void>();
-  let holding = false;
-  const requests: string[] = [];
   let attached: string | null = null;
   const zeta = {
     features: ["session_mcp_bindings", "session_replay_seq"],
     request: async (method: string, params: { session_id?: string } = {}) => {
-      const call = method === "new_session" ? method : `${method} ${params.session_id ?? ""}`;
-      requests.push(call);
-      // zeta switches its attached session when it gets the call; only the reply is held
-      if (method === "new_session" || method === "resume") attached = params.session_id ?? "s1";
-      if (call === hold && !holding) { holding = true; await held.promise; }
+      if (method === "resume" && params.session_id === "lost") {
+        await gate("resume lost");
+        throw Object.assign(new Error("gone"), { data: { code: "session_not_found" } });
+      }
+      if (method === "new_session" || method === "resume") attached = params.session_id ?? "s1"; // zeta moves when it gets the call
+      if (await gate(method === "new_session" ? method : `${method} ${params.session_id ?? ""}`)) throw new Error(`forced ${method} failure`);
       if (method === "new_session") return { session: { session_id: "s1" } };
       if (method === "resume") return { session: { name: null } };
       if (params.session_id && params.session_id !== attached) throw Object.assign(new Error("session is not active"), { code: -32005 });
@@ -532,29 +585,87 @@ for (const hold of ["new_session", "session_settings s1", "resume s1"]) test(`a 
   let active!: ReturnType<typeof useActiveChat>;
   const clock = new ManualClock();
   const Harness = () => { active = useActiveChat(zeta as never, true, clock as never); return null; };
-  await act(async () => { mounted = render(createElement(Harness)); });
-  await flushUntil(() => active.state.phase === "empty");
 
-  let sent!: Promise<void>;
-  await act(async () => { sent = active.send("x1", { steer: false }, () => {}); sent.catch(() => {}); });
-  await flushUntil(() => holding);
-  location.search = "?chat=s0";
-  await act(async () => { popListeners.forEach((listener) => listener()); });
-  // before zeta named the new session nothing is pending, so s0 opens at once; later the page joins the running create
-  if (hold === "new_session") {
-    await flushUntil(() => active.state.phase === "ready");
-    expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
+  // the composer App shows (none while loading or while a create error is shown), with its owner in `chatQueues`
+  let view: { key: string; owner: ReturnType<typeof chatQueues.open>; detach: () => void } | null = null;
+  const shownKey = () => active.creationError ? null : active.state.phase === "ready" ? active.state.sessionId : active.state.phase === "empty" ? "new:home" : null;
+  const commit = () => {
+    const key = shownKey();
+    if (key !== view?.key) {
+      const fromNewChat = active.state.phase === "ready" && !active.state.sent ? "new:home" : undefined;
+      const owner = key ? chatQueues.open(key, {
+        state: "idle",
+        defaultValue: draftStore.get(key),
+        onDraftChange: (text) => draftStore.set(key, text),
+        onDraftSubmit: (text) => draftStore.confirm(key, text),
+        onSubmit: (text, intent, track) => active.send(text, intent, track ?? (() => {})),
+      }, fromNewChat) : null;
+      view?.detach();
+      view = key && owner ? { key, owner, detach: owner.attach() } : null;
+      if (key) owner?.sync("idle", draftStore.get(key));
+    }
+    chatQueues.settle();
+  };
+  const settle = async (done: () => boolean = () => false) => {
+    for (let flush = 0; flush < 40 && !done(); flush += 1) { await act(async () => {}); commit(); }
+  };
+  const navigate = async (search: string) => {
+    location.search = search;
+    await act(async () => { popListeners.forEach((listener) => listener()); });
+    commit();
+  };
+
+  try {
+    await act(async () => { mounted = render(createElement(Harness)); });
+    if (row.home) await settle(() => holding);
+    else {
+      await settle(() => view?.key === "new:home");
+      expect(view?.key).toBe("new:home");
+      await act(async () => { view!.owner.edit("x1"); void view!.owner.submit(); });
+      await settle(() => holding || active.state.phase === "ready" || Boolean(active.creationError) || view?.owner.getModel().queue.some((item) => item.failed) === true);
+    }
+    for (const move of row.moves ?? []) {
+      await navigate(move === "back" ? "?chat=s0" : "");
+      await settle(() => move === "back" ? active.state.phase === "ready" : false);
+    }
+    const released = requests.length;
+    await act(async () => { held.resolve(); });
+    await settle();
+    if (row.moves?.at(-1) === "back") {
+      // the stopped create sent nothing more for s1, and zeta still serves the shown chat
+      expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
+      expect(attached).toBe("s0");
+      expect(requests.slice(released).filter((call) => call.endsWith(" s1") || call === "new_session")).toEqual([]);
+      if (row.message !== "none") await navigate("");
+    }
+    if (row.retry) {
+      expect(active.creationError).not.toBeNull();
+      await act(async () => { active.retrySaving(); });
+    }
+    await settle(() => shownKey() !== null && (row.message !== "sent" || requests.includes("send s1")));
+    expect(active.creationError).toBeNull();
+    expect(shownKey()).toBe(row.shown === "new" ? "new:home" : row.shown);
+    const sends = requests.filter((call) => call.startsWith("send "));
+    if (row.message === "sent") {
+      expect(sends).toEqual(["send s1"]);
+      expect(view!.owner.getModel().queue).toEqual([]);
+    } else {
+      expect(sends).toEqual([]);
+      expect(requests.filter((call) => call === "new_session").length).toBeLessThanOrEqual(row.message === "none" ? 0 : 1);
+      if (row.message === "visible") {
+        const key = shownKey()!;
+        const shown = draftStore.get(key).includes("x1") || view!.owner.getModel().queue.some((item) => item.text === "x1");
+        expect({ key, shown }).toEqual({ key, shown: true });
+      }
+    }
+    // bounded: one create, and each page open attaches s1 at most once
+    expect(requests.filter((call) => call === "resume s1").length).toBeLessThanOrEqual(3);
+    expect(storage.getItem("achilles-pending-chats")).toBeNull();
+  } finally {
+    held.resolve();
+    view?.detach();
+    view = null;
+    for (const key of ["new:home", "s0", "s1"]) draftStore.set(key, "");
+    chatQueues.settle();
   }
-
-  const settled = requests.length;
-  await act(async () => { held.resolve(); await sent.catch(() => {}); });
-  for (let flush = 0; flush < 10; flush += 1) await act(async () => {});
-  expect(active.creationError).toBeNull();
-  expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
-  expect(attached).toBe("s0");
-  // the stopped create sends nothing more for s1 and never sends the message
-  expect(requests.slice(settled).filter((call) => call.endsWith("s1") && call !== "session_settings s1")).toEqual([]);
-  expect(requests).not.toContain("send s1");
-  await expect(sent).rejects.toThrow("another chat opened before this chat was created");
-  expect(storage.getItem("achilles-pending-chats")).toBeNull();
 });

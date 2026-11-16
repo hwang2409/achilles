@@ -155,7 +155,7 @@ export async function attachPage(
     const serverApprovalMode = page.approval_mode ?? null;
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
-      const session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); requireCurrent(owner, token);
+      const session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token)); requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;

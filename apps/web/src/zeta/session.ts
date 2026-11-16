@@ -45,7 +45,7 @@ export function creationApprovalMode(serverMode: string | null | undefined, auto
 
 export class SessionNotFoundError extends Error {}
 
-export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null) {
+export async function openHomeSession(client: ZetaClient, id: string, credential: string, cwd: string, serverMode?: string | null, current: () => boolean = () => true) {
   let name: string | null = null;
   // With `resume_attach`, `resume` of this chat during its live turn (for example an approval wait after a reload)
   // attaches and re-binds the page tools at once. Without it zeta refuses that `resume`, so attach without it: the
@@ -66,6 +66,7 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       if (!rebind && (running !== null || retried)) throw new ChatBusyError(running);
     }
   }
+  if (!current()) throw aborted();
   if (serverMode === "ask") return { id, name, rebind, ...await applyApprovalMode(client, id, "ask") };
   const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
   return { id, name, rebind, approvalMode: settings.approval_mode, pending: false };
