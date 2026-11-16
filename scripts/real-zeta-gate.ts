@@ -274,11 +274,33 @@ try {
   const reloadAttach = reloadFrames.slice(reloadFrames.indexOf(reloadResume) + 1).find((frame) => frame.id === reloadResume.id && (frame.result || frame.error));
   if (reloadAttach?.result?.attached !== "live_turn") throw new Error(`reload resume did not attach to the live turn: ${redact(JSON.stringify(reloadAttach?.error ?? reloadAttach?.result ?? null))}`);
   if (await page.getByText("a turn is already running").count()) throw new Error("reload during approval showed the busy error");
-  // "new chat" while this turn waits keeps the chat and its approval, and says why no chat was created.
+  // "new chat" while this turn waits keeps the new chat's box and says why no chat was created; nothing typed there may
+  // reach the waiting chat. "open it" goes back to the waiting chat and its approval.
   await page.getByRole("button", { name: "new chat" }).first().click();
-  await gateWait.playwright(page.getByRole("alert").filter({ hasText: "this chat is still running" }), "waitFor", { timeout: 20_000 });
-  await waitFor(async () => (await approval.count()) > approvalBefore && await homeSessionId() === first, "pending approval after a busy new chat");
+  const busyNotice = page.getByRole("alert").filter({ hasText: "is still running, so zeta cannot start a new chat yet" });
+  await gateWait.playwright(busyNotice, "waitFor", { timeout: 20_000 });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "busy-new-chat-1440x900.png") });
+  // Enter there is refused and keeps a failed row. A reload opens the waiting chat (the newest), so a notice says the
+  // row waits for a new chat; "open" shows it in the new-chat box again without making a chat. It is never sent.
+  const unsentText = "unsent while the other chat waits";
+  await field.fill(unsentText);
+  await field.press("Enter");
+  const unsentRow = page.locator('[data-part="composer-queued"][data-failed]').filter({ hasText: unsentText });
+  await gateWait.playwright(unsentRow, "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page, "reload");
+  const unsentNotice = page.getByRole("status").filter({ hasText: "1 unsent message for a new chat" });
+  await gateWait.playwright(unsentNotice, "waitFor", { timeout: 20_000 }).catch(async (error) => { throw new Error(`${error}\nno unsent notice after reload body=${redact(await page.locator("body").innerText())}`); });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "unsent-new-chat-notice-1440x900.png") });
+  const framesBeforeOpen = requests().length;
+  await unsentNotice.getByRole("button", { name: "open", exact: true }).click();
+  await gateWait.playwright(unsentRow, "waitFor", { timeout: 20_000 });
+  if (requests().slice(framesBeforeOpen).some((frame) => frame.method === "new_session")) throw new Error("open of the unsent notice made a chat");
+  if (requests().some((frame) => (frame.method === "send" || frame.method === "steer") && frame.params?.text === unsentText)) throw new Error("text written for a new chat was sent");
+  await unsentRow.getByRole("button", { name: /^cancel message/ }).click();
+  await gateWait.playwright(unsentRow, "waitFor", { state: "detached", timeout: 20_000 });
+  // a reload opens the page's newest chat again: the waiting one, with its approval
+  await gateWait.playwright(page, "reload");
+  await waitFor(async () => (await approval.count()) > approvalBefore && await homeSessionId() === first, "pending approval after a busy new chat");
   const approvalComplete = page.getByText("approval complete", { exact: true });
   const approvalCompleteBefore = await approvalComplete.count();
   const paginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T{i // 60:02}:{i % 60:02}:00Z') for i in range(105)]); db.commit(); db.close()"], env);

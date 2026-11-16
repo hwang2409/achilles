@@ -192,7 +192,7 @@ async function refreshFailureHarness(failures: number) {
         await lastRefresh.promise;
         return { session_id: "fresh", servers: ["achilles"] };
       }
-      if (method === "send") return {};
+      if (method === "send") return { accepted: true };
       throw new Error(`unexpected ${method}`);
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
@@ -575,7 +575,7 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: attached }, state: "idle" };
-      if (method === "send") return {};
+      if (method === "send") return { accepted: true };
       throw new Error(`unexpected ${method}`);
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
@@ -668,5 +668,221 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
     view = null;
     for (const key of ["new:home", "s0", "s1"]) draftStore.set(key, "");
     chatQueues.settle();
+  }
+});
+
+// zeta refuses new_session (-32004) while another chat's turn runs. the text typed after "new chat" was written for a new
+// chat: it must never reach the running chat, whatever zeta allows.
+test("new chat while another chat's turn runs keeps the new chat and never sends its text to the running chat", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const delivered: { method: string; session: unknown }[] = [];
+  const requests: string[] = [];
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, last_state: "running" }], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      requests.push(method);
+      if (method === "new_session") throw TURN_RUNNING_ERROR();
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "running", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "chat" }, state: "running" };
+      if (method === "send" || method === "steer") { delivered.push({ method, session: params?.session_id }); return { accepted: true }; }
+      if (method === "delivery_status") return { status: "delivered" };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
+  const clock = new ManualClock();
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => harness.active.state.phase === "ready");
+  await act(async () => { await harness.active.newChat(); });
+  await flushUntil(() => harness.active.busy !== null && harness.active.state.phase !== "loading");
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  clock.advance(5_000);
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  // zeta refuses it during a turn and the client repeats a refused one, so achilles asks status first and sends none
+  expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+  // the composer steers when the shown chat runs (App: `turn === "running"`), so send the way it would
+  const steer = harness.active.state.phase === "ready";
+  let sent: Promise<void> | null = null;
+  await act(async () => { sent = harness.active.send("second story", { steer }, () => {}); await sent.catch(() => {}); });
+  expect(delivered, "text written for the new chat reached the running chat").toEqual([]);
+  expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+  await expect(sent!).rejects.toThrow("another chat is still running");
+  expect(harness.active.state.phase).toBe("empty");
+  expect(harness.active.busy).toMatchObject({ sessionId: "chat", retry: "new" });
+});
+
+// unsent rows across a page load, through the page: chatQueues keeps every chat's rows (the new-chat box's too) in browser
+// storage, so a reload shows them as failed rows (retry, edit, x). never in another chat, never sent before the user acts,
+// never twice, never merged into a box
+type UnsentRow = {
+  name: string;
+  // "refused": Enter in the new-chat box while another chat's turn runs; "failed": the first send to the created chat fails
+  start: "refused" | "failed";
+  // "failed": the user types this into the created chat's box before the reload
+  box?: string;
+};
+const unsentRows: UnsentRow[] = [
+  { name: "a refused create, then a reload: the row waits for a new chat, then goes there once", start: "refused" },
+  { name: "the first send fails, then a reload: the row is back in the created chat", start: "failed" },
+  // a5e0c5b dropped the first message when the box held a longer text containing it
+  { name: "the first send fails, the box holds a longer text containing it, then a reload: both stay", start: "failed", box: "this works" },
+];
+const UNSENT_TEXT = "hi";
+
+test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const storage = new MemoryStorage();
+  let running = row.start === "refused";
+  let failSend = row.start === "failed";
+  let created = 0;
+  const listed = [chat.session_id];
+  const delivered: { method: string; session?: string; text?: string }[] = [];
+  const requests: string[] = [];
+  setGlobals({
+    localStorage: storage,
+    location: { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
+      // newest first, the way the sidebar orders them
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [...listed].reverse().map((id) => ({ ...chat, session_id: id, last_state: running && id === "chat" ? "running" : "idle" })), next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
+    request: async (method: string, params?: { session_id?: string; text?: string }) => {
+      requests.push(method);
+      if (method === "new_session") {
+        if (running) throw TURN_RUNNING_ERROR();
+        created += 1; listed.push(`s${created}`);
+        return { session: { session_id: `s${created}` } };
+      }
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings" || method === "set_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: running ? "running" : "idle", pending_approvals: [] } };
+      if (method === "status") return running ? { session: { session_id: "chat" }, state: "running" } : { state: "idle" };
+      if (method === "send" || method === "steer") {
+        if (failSend) throw new Error("connection closed");
+        delivered.push({ method, session: params?.session_id, text: params?.text }); return { accepted: true };
+      }
+      if (method === "delivery_status") return { status: "delivered" };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
+  const clock = new ManualClock();
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
+  // the composer of `box`, wired the way App wires it; `close` detaches it, the way a page unload or chat switch does
+  let close = () => {};
+  const composer = (box: string, fromNewChat?: string) => {
+    close();
+    const owner = chatQueues.open(box, {
+      state: "idle", defaultValue: draftStore.get(box),
+      onDraftChange: (text) => draftStore.set(box, text), onDraftSubmit: (text) => draftStore.confirm(box, text),
+      onSubmit: (text, intent, track) => harness.active.send(text, intent, track),
+    }, fromNewChat);
+    const detach = owner.attach();
+    close = () => { detach(); chatQueues.settle(); close = () => {}; };
+    return owner;
+  };
+  // a page load: a fresh hook over the same browser storage. the old page's owners hold only failed rows, so they leave
+  // memory (chatQueues.settle) and the new page reads its rows back from storage
+  const load = async () => {
+    close();
+    if (mounted) await act(async () => { mounted?.unmount(); });
+    await act(async () => { mounted = render(createElement(Harness)); });
+    await flushUntil(() => harness.active.state.phase === "ready");
+  };
+  const rowsOf = (owner: ReturnType<typeof chatQueues.open>) => owner.getModel().queue.map((item) => `${item.text}: ${item.failed ?? "unsent"}`);
+  const sendsOfText = () => delivered.filter((item) => item.text === UNSENT_TEXT);
+  try {
+    await load();
+    if (row.start === "refused") {
+      await act(async () => { await harness.active.newChat(); });
+      await flushUntil(() => harness.active.state.phase === "empty" && harness.active.busy !== null);
+      const box = composer("new:home");
+      box.edit(UNSENT_TEXT);
+      await act(async () => { await box.submit(); });
+      expect(box.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat is still running") }]);
+      expect(draftStore.get("new:home")).toBe("");
+      await load();
+      // the page opens its newest chat (the running one): the row was written for a new chat, so it is not there
+      expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
+      expect(rowsOf(composer("chat"))).toEqual([]);
+      expect(sendsOfText(), "text written for the new chat reached the running chat").toEqual([]);
+      expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+      // the turn ends; the notice's "open" shows the new-chat box with the row, still unsent, and makes no chat
+      running = false;
+      await act(async () => { harness.active.openNewChat(); });
+      expect(requests.filter((method) => method === "new_session"), "open made a chat").toHaveLength(0);
+      await flushUntil(() => harness.active.state.phase === "empty");
+      const box2 = composer("new:home");
+      expect(box2.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat is still running") }]);
+      expect(sendsOfText()).toEqual([]);
+      // retry makes the chat the text was written for, and sends it there once
+      await act(async () => { await box2.retry(box2.getModel().queue[0]!.id); });
+      await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
+      expect(requests.filter((method) => method === "new_session")).toHaveLength(1);
+      expect(sendsOfText(), "sent other than once, to the new chat").toEqual([{ method: "send", session: "s1", text: UNSENT_TEXT }]);
+      // zeta took it: a later page load shows it nowhere and sends nothing
+      await load();
+      expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "s1" });
+      expect(rowsOf(composer("s1"))).toEqual([]);
+      expect(sendsOfText()).toHaveLength(1);
+      return;
+    }
+    // "new chat" makes s1; the first send there fails
+    await act(async () => { await harness.active.newChat(); });
+    await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
+    const first = composer("s1");
+    first.edit(UNSENT_TEXT);
+    await act(async () => { await first.submit(); });
+    expect(first.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: "connection closed" }]);
+    if (row.box) first.edit(row.box);
+    await load();
+    expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "s1" });
+    const s1 = composer("s1");
+    // shown once, as its own failed row; the box keeps what the user typed after it
+    expect(rowsOf(s1), "the unsent message was lost or changed").toEqual([`${UNSENT_TEXT}: connection closed`]);
+    expect(s1.getModel().draft).toBe(row.box ?? "");
+    expect(sendsOfText()).toEqual([]);
+    failSend = false;
+    await act(async () => { await s1.retry(s1.getModel().queue[0]!.id); });
+    expect(sendsOfText()).toEqual([{ method: "send", session: "s1", text: UNSENT_TEXT }]);
+    expect(s1.getModel().draft).toBe(row.box ?? "");
+  } finally {
+    close();
+    for (const key of ["new:home", "chat", "s1"]) draftStore.set(key, "");
   }
 });

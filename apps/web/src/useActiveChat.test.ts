@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
 import * as queues from "./composer/chatQueues";
-const { chatQueues } = queues;
-import { composerStatus } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
 
@@ -11,6 +9,8 @@ class MemoryStorage {
   readonly values = new Map<string, string>();
   writes = 0;
   failWrite = 0;
+  get length() { return this.values.size; }
+  key(index: number) { return [...this.values.keys()][index] ?? null; }
   getItem(key: string) { return this.values.get(key) ?? null; }
   setItem(key: string, value: string) {
     this.writes += 1;
@@ -200,25 +200,35 @@ describe("steer delivery confirmation", () => {
   });
 });
 
+const ok = { accepted: true };
+const droppedCopy = { accepted: false, duplicate: true, status: "dropped" };
+const evicted = (outcome: string) => Object.assign(new Error("delivery id already used"), { code: -32010, data: { outcome } });
 const refused = (code: number) => Object.assign(new Error(`refused ${code}`), { code });
 
 describe("message delivery tracking", () => {
   test.each([
-    { name: "send", steer: false, replies: [{}], log: ["track:d1", "send:d1"] },
-    { name: "steer", steer: true, replies: [{}, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
-    { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), {}, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
-    { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), {}], log: ["track:d1", "steer:d1", "send:d1"] },
+    { name: "send", steer: false, replies: [ok], log: ["track:d1", "send:d1"] },
+    { name: "steer", steer: true, replies: [ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), ok, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), ok], log: ["track:d1", "steer:d1", "send:d1"] },
     { name: "network error on the first request", steer: false, replies: [new Error("socket closed")], log: ["track:d1", "send:d1"], error: "socket closed" },
     { name: "second refusal", steer: false, replies: [refused(-32004), refused(-32005)], log: ["track:d1", "send:d1", "steer:d1"], error: "refused -32005" },
+    { name: "reused id zeta still holds", steer: false, replies: [{ accepted: true, duplicate: true }], log: ["track:d1", "send:d1"] },
+    { name: "reused id zeta dropped: one send with a fresh id", steer: false, replies: [droppedCopy, ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
+    { name: "reused steer id zeta dropped: one steer with a fresh id", steer: true, replies: [droppedCopy, ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "track:fresh", "steer:fresh", "delivery_status:fresh"] },
+    { name: "fresh id answered as dropped too: shown, not retried again", steer: false, replies: [droppedCopy, droppedCopy], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"], error: "zeta dropped this message" },
+    { name: "reused id zeta took, then forgot (-32010, delivered)", steer: false, replies: [evicted("delivered")], log: ["track:d1", "send:d1"] },
+    { name: "reused id zeta dropped, then forgot (-32010, dropped): one send with a fresh id", steer: false, replies: [evicted("dropped"), ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
+    { name: "a reply zeta never sends: shown, never a confirm", steer: false, replies: [{ accepted: false, status: "later" }], log: ["track:d1", "send:d1"], error: "zeta did not accept this message" },
   ])("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error }) => {
     const log: string[] = [];
     const client = { request: async (method: string, params: { delivery_id: string }) => {
-      log.push(`${method}:${params.delivery_id}`);
+      log.push(`${method}:${params.delivery_id === "d1" ? "d1" : "fresh"}`);
       const reply = replies.shift();
       if (reply instanceof Error) throw reply;
       return reply;
     }};
-    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id}`));
+    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`));
     if (error) await expect(delivery).rejects.toThrow(error);
     else await delivery;
     expect(log).toEqual(expected);
@@ -635,7 +645,7 @@ describe("chat creation lifecycle", () => {
         if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "owned-session" }, state: "idle" };
         if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
-        if (method === "send") { deliveries += 1; sent.push((params as { text?: string })?.text ?? ""); return {}; }
+        if (method === "send") { deliveries += 1; sent.push((params as { text?: string })?.text ?? ""); return { accepted: true }; }
         throw new Error(`unexpected ${method}`);
       },
       replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
@@ -671,11 +681,18 @@ describe("chat creation lifecycle", () => {
     const publish = async () => { await step("publish"); publishes += 1; };
     if (reloadAt) {
       const message = `${reloadAt}${pageSwitch ? " page" : ""} first message PINEAPPLE`;
-      draftStore.set("new:home", ""); draftStore.set("owned-session", "");
+      const previousStorage = globalThis.localStorage;
+      // the unsent rows live in the browser storage, the same one each page load sees
+      Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true, writable: true });
       let oldPageAlive = true;
-      // the old page: Enter on the empty page starts the create with the first message, then the page goes away mid-step
-      const oldPage = owner.ensure({ input: input(client, true), current: () => oldPageAlive, attach: async (sessionId) => { await step("attach"); return { sessionId }; }, applyCreateMode: applyMode, publishReady: publish, text: message })!;
-      // each page load has its own owner; the last one is the page the user presses Enter on
+      // the old page: Enter in the new-chat box starts the create with the first message, then the page goes away mid-step
+      const oldBox = queues.createChatQueues().open("new:home", {
+        state: "idle", defaultValue: message, onDraftChange() {}, onDraftSubmit() {},
+        onSubmit: async () => { await owner.ensure({ input: input(client, true), current: () => oldPageAlive, attach: async (sessionId) => { await step("attach"); return { sessionId }; }, applyCreateMode: applyMode, publishReady: publish }); },
+      });
+      oldBox.attach();
+      const oldPage = oldBox.submit();
+      // each page load has its own owners; the last one is the page the user acts on
       let pageOwner = owner;
       const load = async (key: string) => {
         const attachment = createAttachmentOwner();
@@ -684,37 +701,36 @@ describe("chat creation lifecycle", () => {
         finally { attachment.clear(); }
       };
       try {
-        await waitBounded(reached.promise, () => gate.resolve(), () => oldPage.catch(() => {}));
+        await waitBounded(reached.promise, () => gate.resolve(), () => oldPage);
         oldPageAlive = false;
-        if (pageSwitch) {
-          expect((await load("other")).phase).toBe("empty");
-          expect(draftStore.get("new:other")).not.toContain("PINEAPPLE");
-        }
+        if (pageSwitch) expect((await load("other")).phase).toBe("empty");
         const opened = await load("home");
-        // no record before new_session answers: the page opens empty, the message in its new-chat box; else the created chat
+        // no record before new_session answers: the page opens empty, the row in its new-chat box; else the created chat takes it
         const box = reloadAt === "new_session" ? "new:home" : "owned-session";
         expect(opened).toMatchObject(reloadAt === "new_session" ? { phase: "empty" } : { phase: "ready", sessionId: "owned-session" });
-        expect(draftStore.get(box)).toBe(message);
-        expect(deliveries).toBe(0);
-        const delivery = chatQueues.open(box, {
+        const delivery = queues.createChatQueues().open(box, {
           state: "idle", defaultValue: draftStore.get(box),
-          onDraftChange: (text) => draftStore.set(box, text), onDraftSubmit: (text) => draftStore.confirm(box, text),
+          onDraftChange() {}, onDraftSubmit() {},
           onSubmit: async (text, intent, track) => {
-            const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }), text })!;
+            const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!;
             await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track);
           },
         });
         const detach = delivery.attach();
         try {
-          expect(delivery.getModel().draft).toBe(message);
-          expect(composerStatus(delivery.getModel()).text).toBe(box === "new:home" ? queues.KEPT_NOTE : queues.MOVED_NOTE);
+          // shown as its own failed row, not in the box, and not sent until the user retries it
+          expect(delivery.getModel().queue).toMatchObject([{ text: message, failed: queues.NOT_SENT }]);
+          expect(delivery.getModel().draft).toBe("");
           await new Promise((resolve) => setTimeout(resolve, 20));
           expect(deliveries).toBe(0);
-          await delivery.submit();
+          await delivery.retry(delivery.getModel().queue[0]!.id);
           expect(sent).toEqual([message]);
-          expect(composerStatus(delivery.getModel()).text).toBe("");
-        } finally { detach(); chatQueues.settle(); }
-      } finally { gate.resolve(); await oldPage.catch(() => {}); }
+          expect(delivery.getModel().queue).toEqual([]);
+        } finally { detach(); }
+      } finally {
+        gate.resolve(); await oldPage.catch(() => {});
+        Object.defineProperty(globalThis, "localStorage", { value: previousStorage, configurable: true, writable: true });
+      }
       return;
     }
     const run = () => reopen
@@ -778,4 +794,49 @@ describe("chat creation lifecycle", () => {
     expect(deliveries).toBe(doubleEnter ? 1 : 0);
     expect(owner.status("home")).toMatchObject({ pending: null, error: null, createMode: undefined });
   }, CONTROLLED_TIMEOUT_MS + 5_000);
+});
+
+// another tab mapped its own home chat first (409): the page opens that chat, which nobody wrote these rows for
+test("a 409 home mapping keeps the new-chat rows in the new-chat box: none are written into the other tab's chat or sent there", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousStorage = globalThis.localStorage;
+  const storage = new MemoryStorage();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: storage });
+  globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+    const url = String(resource);
+    if (url === "/api/pages/home/chats") return new Response(null, { status: 201 });
+    if (url === "/api/pages/home/session" && init?.method === "PUT") return Response.json({ session_id: "other-tab" }, { status: 409 });
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+  const held = deferred<void>();
+  const sentToOther: string[] = [];
+  const options = (onSubmit: (text: string) => Promise<unknown>) => ({ state: "idle" as const, onDraftChange() {}, onDraftSubmit() {}, onSubmit });
+  const newChat = queues.chatQueues.open("new:home", options(() => held.promise));
+  const detachNew = newChat.attach();
+  let detachOther = () => {};
+  try {
+    newChat.edit("first"); void newChat.submit();
+    newChat.edit("second"); void newChat.submit();
+    const creation = createChatCreationOwner(new MemoryStorage());
+    const attached = await creation.ensure({ input: input(attachmentClient(), true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!;
+    expect(attached.sessionId).toBe("other-tab");
+    // App opens the mapped chat, already sent, so not as the new-chat composer's chat
+    detachNew();
+    const other = queues.chatQueues.open("other-tab", options(async (text) => { sentToOther.push(text); }));
+    detachOther = other.attach();
+    queues.chatQueues.settle();
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+    expect(other.getModel().queue.map((item) => item.text), "new-chat rows shown in another tab's chat").toEqual([]);
+    expect(storage.getItem("achilles:unsent:other-tab")).toBeNull();
+    expect(sentToOther).toEqual([]);
+    expect(newChat.getModel().queue.map((item) => item.text)).toEqual(["first", "second"]);
+  } finally {
+    held.resolve();
+    detachNew(); detachOther();
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+    newChat.cancel(); newChat.cancel();
+    queues.chatQueues.settle();
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: previousStorage });
+  }
 });

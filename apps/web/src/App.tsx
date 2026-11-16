@@ -239,10 +239,13 @@ export function App() {
   const composerProps = activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
   const hasComposer = !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
+  // rows typed in the new-chat box that no chat took (a refused create): the page opens another chat, so say they wait
+  const unsentNew = ready ? chatQueues.unsent(`new:${ready.page.id}`) : 0;
   const content = <>
     {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity)} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
+    {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}
     {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p><div className="full-state-actions"><button className="primary" onClick={active.retrySaving}>retry creating chat</button><button type="button" onClick={active.discardCreation}>start over</button></div></div>
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
@@ -270,10 +273,12 @@ export function App() {
   return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
-function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {
+function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {
   const here = busy.sessionId !== null && busy.sessionId === openSessionId;
   const open = !here && busy.chat;
-  const text = here ? "this chat is still running. approve or stop it, then try again."
+  const running = open ? `"${titleOf(busy.chat!)}"` : "another chat";
+  const text = busy.retry === "new" && busy.sessionId ? `${running} is still running, so zeta cannot start a new chat yet. a message sent here stays unsent; retry it when that chat ends.`
+    : here ? "this chat is still running. approve or stop it, then try again."
     : open ? `"${titleOf(busy.chat!)}" is still running. open it to approve or stop it, then try again.`
     : busy.sessionId ? "another chat is still running. approve or stop it, then try again."
     : "zeta was busy a moment ago and is ready now. try again.";

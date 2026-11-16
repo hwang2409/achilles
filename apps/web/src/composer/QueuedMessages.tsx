@@ -1,4 +1,5 @@
 import { inFlight, shownQueue, type ComposerModel } from "./composer-machine";
+import { MAYBE_SENT } from "./chatQueues";
 
 /** Submitted messages, in send order: the in-flight one first ("sending", or "next step" for a steer), then "queued"; a failed one has retry, edit, and cancel. */
 export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model: ComposerModel; onRetry: (id: number) => void; onRestore: (id: number) => void; onCancel: (id: number) => void }) {
@@ -10,7 +11,7 @@ export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model:
       {rows.map((item) => {
         const sending = item === current;
         const preview = item.text.length > 40 ? `${item.text.slice(0, 40)}…` : item.text;
-        const label = item.failed ? (item.tries ?? 1) > 1 ? `not sent · ${item.tries} tries` : "not sent" : sending ? model.send?.steer ? "next step" : "sending" : "queued";
+        const label = item.failed === MAYBE_SENT ? "maybe sent" : item.failed ? (item.tries ?? 1) > 1 ? `not sent · ${item.tries} tries` : "not sent" : sending ? model.send?.steer ? "next step" : "sending" : "queued";
         return (
           <li key={item.id} data-part="composer-queued" data-failed={item.failed ? "" : undefined} data-sending={sending || undefined}>
             <span data-part="composer-queued-label">{label}</span>
