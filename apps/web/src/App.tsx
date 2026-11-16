@@ -279,7 +279,7 @@ export function App() {
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
           const scroll = transcript.current;
-          scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
+          if (scroll) { scroll.scrollTop = scroll.scrollHeight; scroll.scrollTo({ top: scroll.scrollHeight, behavior: "auto" }); }
         }}>jump to latest</button></div>}</section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} props={composerProps} />
         </div>
