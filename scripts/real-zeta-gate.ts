@@ -36,18 +36,26 @@ const secrets: string[] = [];
 // failure-only CI artifacts: one stamped log per process instance and the full websocket frame log.
 const artifactDir = process.env.GATE_ARTIFACT_DIR ?? join(root, ".cache/gate-artifacts");
 const artifactSecrets: string[] = [];
-const artifactLogs: { name: string; lines: [string, string][]; partial: string }[] = [];
+const artifactLogs: { name: string; lines: [string, string][]; partial: { stdout: string; stderr: string } }[] = [];
 const frameLog: [string, number, string, string][] = [];
 let passed = false;
 const writeArtifacts = async () => {
   await rm(artifactDir, { recursive: true, force: true });
   await mkdir(artifactDir, { recursive: true });
+  const now = new Date().toISOString();
   const all = [...secrets, ...artifactSecrets];
   const safe = ([time, line]: [string, string]) => `${time} ${redactArtifact(line, all)}`;
   for (const log of artifactLogs)
-    await writeFile(join(artifactDir, `${log.name}.log`), [...log.lines, ...(log.partial ? [["", log.partial] as [string, string]] : [])].map(safe).join("\n") + "\n");
+    await writeFile(join(artifactDir, `${log.name}.log`), [...log.lines, ...Object.values(log.partial).filter(Boolean).map((line) => [now, line] as [string, string])].map(safe).join("\n") + "\n");
   await writeFile(join(artifactDir, "frames.log"), frameLog.map(([time, socket, direction, payload]) => `${time} socket=${socket} ${direction} ${redactArtifact(payload, all)}`).join("\n") + "\n");
   console.error(`gate artifacts written to ${artifactDir}`);
+};
+// every token field of a discovery file the gate reads goes into the artifact redaction list at once.
+// the gate reads the scripted server's file before each SIGTERM, so every restarted server's tokens are listed.
+const readDiscovery = async (path: string) => {
+  const document = JSON.parse(await Bun.file(path).text());
+  for (const [key, value] of Object.entries(document)) if (/token/i.test(key) && typeof value === "string") artifactSecrets.push(value);
+  return document;
 };
 const redact = (text: string) => diagnostic(text, secrets);
 const safeControl = (text: string) => controlSnapshot(text, secrets);
@@ -69,17 +77,19 @@ const start = (
   });
   children.push(child);
   logs.set(child, "");
-  const kind = args.includes("serve") ? (args.includes("achilles") ? "achilles" : "zeta-serve") : args.some((arg) => arg.endsWith("real-zeta-server.py")) ? "real-zeta-server" : "helper";
-  const log = { name: `${kind}-${artifactLogs.filter((entry) => entry.name.startsWith(`${kind}-`)).length + 1}`, lines: [] as [string, string][], partial: "" };
+  const kinds: [string, (arg: string) => boolean][] = [["achilles", (arg) => arg === "achilles"], ["zeta-serve", (arg) => arg === "serve"], ["real-zeta-server", (arg) => arg.endsWith("real-zeta-server.py")]];
+  const kind = kinds.find(([, match]) => args.some(match))?.[0] ?? "helper";
+  const log = { name: `${kind}-${artifactLogs.filter((entry) => entry.name.startsWith(`${kind}-`)).length + 1}`, lines: [] as [string, string][], partial: { stdout: "", stderr: "" } };
   artifactLogs.push(log);
-  const stamp = (data: Buffer) => {
-    const lines = (log.partial + data).split("\n");
-    log.partial = lines.pop()!;
+  // one partial line per stream, so interleaved output never joins two half-lines.
+  const stamp = (stream: keyof typeof log.partial) => (data: Buffer) => {
+    const lines = (log.partial[stream] + data).split("\n");
+    log.partial[stream] = lines.pop()!;
     const time = new Date().toISOString();
     for (const line of lines) log.lines.push([time, line]);
   };
-  child.stdout?.on("data", stamp);
-  child.stderr?.on("data", stamp);
+  child.stdout?.on("data", stamp("stdout"));
+  child.stderr?.on("data", stamp("stderr"));
   child.stdout?.on("data", (data) => logs.set(child, logs.get(child)! + data));
   child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + data));
   return child;
@@ -129,8 +139,7 @@ try {
     env,
   );
   await waitFor(async () => await Bun.file(sharedDiscovery).exists(), "shared zeta discovery");
-  const shared = JSON.parse(await Bun.file(sharedDiscovery).text());
-  for (const [key, value] of Object.entries(shared)) if (/token/i.test(key) && typeof value === "string") artifactSecrets.push(value);
+  const shared = await readDiscovery(sharedDiscovery);
   let zetaProcess = start(
     "uv",
     [
@@ -143,7 +152,7 @@ try {
     env,
   );
   await waitFor(async () => await Bun.file(ownDiscovery).exists(), "achilles zeta discovery");
-  const pending = JSON.parse(await Bun.file(ownDiscovery).text());
+  const pending = await readDiscovery(ownDiscovery);
   for (const key of ["controller_token", "observer_token"])
     if (typeof pending[key] === "string") secrets.push(pending[key]);
   const appEnv = env;
@@ -382,7 +391,7 @@ try {
   await paginationSearch.fill("");
   await trimmedPagination;
   await gateWait.playwright(page.locator(`.chat-list[data-list-state="ready"]:not([data-loaded-count="${beforeTrim}"])`), "waitFor", { timeout: 20_000 });
-  const own = JSON.parse(await Bun.file(ownDiscovery).text());
+  const own = await readDiscovery(ownDiscovery);
   const connected = await fetch(discoveryUrl).then((response) => response.json()) as { url: string };
   if (sharedProcess.exitCode !== null || zetaProcess.exitCode !== null) throw new Error("one of the unrelated zeta serves exited during chat");
   if (shared.pid === own.pid || shared.port === own.port) throw new Error("shared and achilles zeta serves did not remain distinct");
@@ -1619,6 +1628,7 @@ try {
     const previousPid = JSON.parse(await Bun.file(control).text()).pid;
     try {
       await expectBrowserErrors(page, [], async () => {
+        await readDiscovery(ownDiscovery);
         zetaProcess.kill("SIGTERM");
         if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta shutdown timeout during vim read-only gate");
         await check();
@@ -1691,6 +1701,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
     const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
+    await readDiscovery(ownDiscovery);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
     await gateWait.playwright(page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }), "waitFor", { timeout: 20_000 });
@@ -1717,6 +1728,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
+    await readDiscovery(ownDiscovery);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
     const heldRequests: Route[] = [];
@@ -1743,6 +1755,8 @@ try {
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 
 } finally {
+  // the last live server's tokens, read before shutdown and rm(temp) remove its discovery file.
+  for (const path of [ownDiscovery, sharedDiscovery]) await readDiscovery(path).catch(() => {});
   try {
     await browser?.close().catch(() => {});
     for (const child of children) child.kill("SIGTERM");
