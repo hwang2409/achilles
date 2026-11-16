@@ -66,11 +66,11 @@ jobs:
         timeout-minutes: 2
         run: |
           rm -rf apps/web/node_modules/@fulcrum
-          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 EVAL_SKIP_BROWSER_INSTALL=1 REPORT_DIR=.cache/eval-ci-make-setup make eval TASK=harness-smoke
+          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 EVAL_SKIP_BROWSER_INSTALL=1 BASE=none REPORT_DIR=.cache/eval-ci-make-setup make eval TASK=harness-smoke
       - run: bun test ./scripts/eval*.test.ts
       - run: |
           set +e
-          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
+          EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 BASE=none REPORT_DIR=.cache/eval-ci-setup bun scripts/eval.ts
           status=$?
           set -e
           STATUS=$status python - <<'PY'
@@ -90,12 +90,12 @@ jobs:
           git fetch --depth=1 origin 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
           git worktree add --detach .cache/achilles-baseline 1fe26f74991a8ea78dd0e2b551bdb5125e1f542e
           # earlier steps let the pinned zeta create ~/.zeta at its storage epoch; an older baseline zeta refuses a newer home
-          ZETA_HOME="$RUNNER_TEMP/baseline-zeta-home" EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
+          ZETA_HOME="$RUNNER_TEMP/baseline-zeta-home" EVAL_BACKEND=scripted EVAL_SETUP_ONLY=1 ACHILLES_DIR="$PWD/.cache/achilles-baseline" BASE=none REPORT_DIR=.cache/eval-ci-baseline-setup bun scripts/eval.ts
       - run: |
           python - <<'PY'
           import json, os, subprocess
           from pathlib import Path
-          env = {**os.environ, 'EVAL_BACKEND': 'scripted', 'EVAL_SKIP_EXPLICIT_EXIT': '1', 'REPORT_DIR': '.cache/eval-ci-success'}
+          env = {**os.environ, 'EVAL_BACKEND': 'scripted', 'EVAL_SKIP_EXPLICIT_EXIT': '1', 'REPORT_DIR': '.cache/eval-ci-success', 'BASE': 'none'}
           result = subprocess.run(['bun', 'scripts/eval.ts', '--suite', 'judge-page-and-annotate'], env=env, timeout=30)
           report = json.loads((Path('.cache/eval-ci-success') / 'report.json').read_text())
           if any(check['id'] == 'harness' for task in report['tasks'] for check in task['checks']):
@@ -144,7 +144,7 @@ jobs:
           PY
       - name: scripted eval forced error cleans up
         run: |
-          if EVAL_BACKEND=scripted EVAL_FORCE_ERROR=1 REPORT_DIR=.cache/eval-ci-error bun scripts/eval.ts --suite create-and-use-tool-same-chat; then
+          if EVAL_BACKEND=scripted EVAL_FORCE_ERROR=1 BASE=none REPORT_DIR=.cache/eval-ci-error bun scripts/eval.ts --suite create-and-use-tool-same-chat; then
             echo "forced provider error unexpectedly passed" >&2
             exit 1
           fi

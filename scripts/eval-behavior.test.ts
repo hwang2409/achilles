@@ -39,7 +39,7 @@ async function runEval(target: string, task: string, extraEnv: Record<string, st
   const report = extraEnv.REPORT_DIR ?? join(target, "report");
   const child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", task], {
     cwd: target,
-    env: { ...process.env, EVAL_BACKEND: "scripted", EVAL_SKIP_BROWSER_INSTALL: "1", REPORT_DIR: report, PATH: `${join(target, "test-bin")}:${process.env.PATH}`, ...extraEnv },
+    env: { ...process.env, EVAL_BACKEND: "scripted", EVAL_SKIP_BROWSER_INSTALL: "1", REPORT_DIR: report, BASE: "none", PATH: `${join(target, "test-bin")}:${process.env.PATH}`, ...extraEnv },
     stdout: "pipe",
     stderr: "pipe",
   });

@@ -320,6 +320,9 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
   }
 }
 
+// the most model turns one eval task may give its agent
+export const MAX_AGENT_TURNS = 20;
+
 export function validateTask(value: unknown): EvalTask {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("task must be an object");
   own(value, ["id", "prompt", "page_plan", "agent_turns", "steps", "checks", "setup", "approval_mode", "requires", "goal_capabilities", "suite", "backend"], "task"); const task = value as Record<string, unknown>;
@@ -327,7 +330,7 @@ export function validateTask(value: unknown): EvalTask {
   if (task.prompt !== undefined && typeof task.prompt !== "string") throw new Error("task.prompt must be a string");
   if (task.suite !== undefined && !["core", "focused", "hard"].includes(String(task.suite))) throw new Error("task.suite must be core, focused, or hard");
   if (task.backend !== undefined && task.backend !== "scripted") throw new Error('task.backend must be "scripted" (a task that only the scripted provider can run) or absent');
-  if (!Number.isInteger(task.agent_turns) || (task.agent_turns as number) < 1 || (task.agent_turns as number) > 20) throw new Error("agent_turns must be 1..20");
+  if (!Number.isInteger(task.agent_turns) || (task.agent_turns as number) < 1 || (task.agent_turns as number) > MAX_AGENT_TURNS) throw new Error(`agent_turns must be 1..${MAX_AGENT_TURNS}`);
   if (task.approval_mode !== undefined && !["allow", "ask"].includes(String(task.approval_mode))) throw new Error("approval_mode must be allow or ask");
   if (task.requires !== undefined && (!Array.isArray(task.requires) || !task.requires.length || !task.requires.every(identifier) || new Set(task.requires).size !== task.requires.length)) throw new Error("requires must name unique capabilities");
   if (task.goal_capabilities !== undefined && (!Array.isArray(task.goal_capabilities) || !task.goal_capabilities.length || !task.goal_capabilities.every(identifier) || new Set(task.goal_capabilities).size !== task.goal_capabilities.length)) throw new Error("goal_capabilities must name unique capabilities");

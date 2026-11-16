@@ -55,7 +55,8 @@ the one-command flow:
   over 25%, tasks in only one run). by default (`BASE=last`) the base is the
   newest earlier run of the same suite in the history dir; a run of the same
   `TASK` list counts as the same suite. with no such run there is no diff.
-  `BASE=/path/to/run` compares with one saved run folder instead.
+  `BASE=/path/to/run` compares with one saved run folder instead. `BASE=none`
+  skips the diff (tests and CI use it, so they never read your real runs).
 - a retained stack for a preview or ux test: `make eval-stack` starts the stack
   for `harness-smoke`, keeps it, and prints the local achilles url, model, tool
   policy (`achilles__*,mcp_discover`), and the retained state path. it never

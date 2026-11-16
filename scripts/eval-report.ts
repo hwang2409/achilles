@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { MAX_AGENT_TURNS } from "./eval-grade";
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
 export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported" | "needs_review"; cap_hit?: boolean; gap?: string };
@@ -88,8 +89,8 @@ export function reportSummary(report: EvalReport, answers: FinalAnswers = {}): s
   const lines = [
     [`${passed === graded ? "PASS" : "FAIL"} ${passed}/${graded}${unsupported ? ` (${unsupported} unsupported)` : ""}`, `achilles ${short(report.agent.achilles_sha)}`, `zeta ${short(report.agent.zeta_sha)}`, `model ${report.agent.provider}/${report.agent.model}`, `${(wallMs / 60_000).toFixed(1)} min`, tokens === undefined ? "tokens unavailable" : `${tokens} tokens`].join(" | "),
     "",
-    `eval agent: tools \`${report.agent.tool_policy}\`, max turns per task from its agent_turns (at most 20), no auto memory.`,
-    "live `make dev` page chats differ: zeta's default tool set plus all MCP servers, no turn limit, auto memory on, no `--yolo`.",
+    `eval agent: tools \`${report.agent.tool_policy}\`, max turns per task from its agent_turns (at most ${MAX_AGENT_TURNS}), no auto memory.`,
+    "live `make dev` page chats differ: zeta's default tool set plus all MCP servers, zeta's default limit of 150 turns, auto memory on, no `--yolo`.",
     "", "## failures", "",
   ];
   const failed = report.tasks.filter(task => task.status !== "unsupported" && !runPassed(task));
