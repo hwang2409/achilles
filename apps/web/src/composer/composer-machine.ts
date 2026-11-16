@@ -147,8 +147,9 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "retry":
       return { model: { ...model, queue: model.queue.map((item) => item.id === event.id ? { ...item, failed: undefined } : item) } };
     case "restore": {
-      // edit a failed message: its text goes back to the front of the box, its row goes away, and the rows behind it wait
-      const item = model.queue.find((queued) => queued.id === event.id && queued.failed);
+      // edit a failed message: its text goes back to the front of the box, its row goes away, and the rows behind it wait.
+      // a row that may have been sent has no edit: zeta may hold its text, and Enter would send it again with a new id
+      const item = model.queue.find((queued) => queued.id === event.id && queued.failed && queued.failed !== MAYBE_SENT);
       if (!item) return { model };
       const queue = model.queue.filter((queued) => queued !== item);
       return { model: { ...model, draft: [item.text, model.draft].filter(Boolean).join("\n"), queue, held: queue.length > 0 } };

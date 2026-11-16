@@ -337,6 +337,8 @@ export class DroppedSteerDeliveryError extends Error {}
 const TURN_RUNNING = -32004;
 const NO_TURN = -32005;
 const ID_EVICTED = -32010;
+// zeta sends it with no request id; fulcrum rejects every pending request with it
+const OUTPUT_OVERFLOW = -32011;
 const errorCode = (error: unknown) => (error as { code?: unknown } | null)?.code;
 
 export function pageDeliverySteer(phase: State["phase"], intent: { steer: boolean }) {
@@ -352,26 +354,38 @@ export async function deliverChatMessage(
   track: (id: string) => void,
 ): Promise<"send" | "steer"> {
   try {
-    try {
-      return await deliverOnce(client, sessionId, text, deliveryId, steer, track);
-    } catch (error) {
-      // only a reused id (a retry of a row that may have been sent) can come back as zeta's dropped duplicate. a dropped
-      // delivery holds nothing, so one send with a fresh id cannot make a second copy
-      const evicted = errorCode(error) === ID_EVICTED ? (error as { data?: { outcome?: unknown } }).data?.outcome : undefined;
-      // a reused id zeta took and then forgot (-32010): it holds the text unless the delivery was dropped
-      if (evicted === "queued" || evicted === "delivered") return steer ? "steer" : "send";
-      if (!(error instanceof DroppedDuplicateError) && evicted !== "dropped") throw error;
-      return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
-    }
+    return await deliverOnce(client, sessionId, text, deliveryId, steer, track);
   } catch (error) {
-    // zeta answered (a drop, a refusal, a reply it never sends): it holds nothing new. no answer (a timeout, a closed
-    // socket) or an id zeta forgot without a known outcome: it may hold the text, so the row says so and is never resent
-    if (error instanceof DroppedSteerDeliveryError || error instanceof RefusedError) throw error;
-    // a ZetaError's code is the websocket close code, not zeta's answer
-    const code = errorCode(error);
-    if (typeof code === "number" && code !== ID_EVICTED && !(error instanceof ZetaError)) throw error;
-    throw new Error(MAYBE_SENT);
+    const outcome = classify(error);
+    if (outcome === "sent") return steer ? "steer" : "send";
+    if (outcome !== "resend") throw outcome === "maybe" ? new Error(MAYBE_SENT) : error;
   }
+  try {
+    return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
+  } catch (error) {
+    // the one resend: zeta's answer is shown and nothing goes out again by itself
+    throw classify(error) === "rethrow" || error instanceof DroppedDuplicateError ? error : new Error(MAYBE_SENT);
+  }
+}
+
+/**
+ * What a failed delivery means:
+ * - "sent": a reused id zeta took and then forgot (-32010 queued/delivered): it holds the text.
+ * - "resend": zeta dropped the reused id (terminal, never delivered): it holds nothing, so one send with a fresh id.
+ * - "maybe": no answer from zeta (a timeout, a closed socket, an id-less error fulcrum rejects every pending request
+ *   with, an id forgotten without a known outcome): it may hold the text, so the row says so and is never resent.
+ * - "rethrow": zeta answered with a refusal (a drop, an error code, a reply it never sends): it holds nothing new.
+ */
+function classify(error: unknown): "sent" | "resend" | "maybe" | "rethrow" {
+  if (error instanceof DroppedDuplicateError) return "resend";
+  if (error instanceof DroppedSteerDeliveryError || error instanceof RefusedError) return "rethrow";
+  const code = errorCode(error);
+  if (code === ID_EVICTED) {
+    const outcome = (error as { data?: { outcome?: unknown } }).data?.outcome;
+    return outcome === "queued" || outcome === "delivered" ? "sent" : outcome === "dropped" ? "resend" : "maybe";
+  }
+  // a ZetaError's code is the websocket close code, not zeta's answer
+  return typeof code === "number" && code !== OUTPUT_OVERFLOW && !(error instanceof ZetaError) ? "rethrow" : "maybe";
 }
 
 async function deliverOnce(

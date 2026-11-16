@@ -227,6 +227,9 @@ describe("message delivery tracking", () => {
     { name: "reused id zeta holds, then forgot (-32010, queued)", steer: false, replies: [evicted("queued")], log: ["track:d1", "send:d1"] },
     { name: "reused id zeta forgot with an outcome it does not name (-32010, unknown): shown as maybe sent, never resent", steer: false, replies: [evicted("unknown")], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
     { name: "reused id zeta dropped, then forgot (-32010, dropped): one send with a fresh id", steer: false, replies: [evicted("dropped"), ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
+    // fulcrum rejects every pending request with zeta's id-less output-overflow error (-32011): not an answer to this send
+    { name: "output overflow broadcast before zeta's answer (-32011)", steer: false, replies: [refused(-32011)], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
+    { name: "output overflow broadcast while the steer status is read (-32011)", steer: true, replies: [ok, refused(-32011)], log: ["track:d1", "steer:d1", "delivery_status:d1"], error: MAYBE_SENT },
     { name: "a reply zeta never sends: shown, never a confirm", steer: false, replies: [{ accepted: false, status: "later" }], log: ["track:d1", "send:d1"], error: "zeta did not accept this message" },
   ])("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error }) => {
     const log: string[] = [];

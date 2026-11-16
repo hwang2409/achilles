@@ -321,7 +321,7 @@ const queueCases: QueueCase[] = [
   },
   {
     name: "edit, then a reload: the text is in the box once, with no row",
-    steps: [["enter", "first"], ["fail", "closed"], ["edit", "first"], ["reload"], ["box", "first"]],
+    steps: [["enter", "first"], ["refuse", "denied"], ["edit", "first"], ["reload"], ["box", "first"]],
     sent: ["a:first"],
   },
   {
