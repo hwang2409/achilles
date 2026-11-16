@@ -51,11 +51,12 @@ function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<
   useEffect(() => {
     if (!block.count || typeof block.collection !== "string") return;
     let live = true;
-    void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(block.collection)}?limit=1`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then((response) => {
+    const query = new URLSearchParams({ limit: "1", ...block.where && { field: String((block.where as Record<string, unknown>).field), equals: JSON.stringify((block.where as Record<string, unknown>).equals) } });
+    void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(block.collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then((response) => {
       if (live) setValue(response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—");
     }).catch(() => { if (live) setValue("—"); });
     return () => { live = false; };
-  }, [block.collection, block.count, credential, pageId, refreshKey]);
+  }, [block.collection, block.count, block.where, credential, pageId, refreshKey]);
   const status = String(block.status ?? block.label ?? "").toLowerCase();
   return <section className="metric-block"><span className={`record-mark record-mark-${status}`} aria-hidden="true" /><div><span className="metric-label">{String(block.label)}</span><strong className={block.warn ? "metric-warn" : undefined}>{value}</strong>{block.detail != null && <small>{String(block.detail)}</small>}</div>{block.delta != null && <span className="metric-delta">{String(block.delta)}</span>}</section>;
 }
