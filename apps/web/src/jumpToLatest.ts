@@ -15,6 +15,8 @@ type Store = Pick<ReturnType<typeof createRunStore>, "subscribe" | "getState" | 
  * workaround for fulcrum virtual.tsx onScroll sub-pixel snap (bug_report to fulcrum inbox, 2026-11-16; see the
  * achilles PR body); remove when fulcrum fixes it.
  */
+const inputExpiryMs = 500;
+
 export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (shown: boolean) => void, follow: () => void): () => void {
   // the reader moved up by their own input; a WebKit wheel scroll lands after its event, so mark it at the input
   let userScrolled = false;
@@ -58,11 +60,19 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
     // the scrollbar, not a click on text in a row
     ["pointerdown", (event) => event.target === scroll],
   ];
-  const listeners = input.map(([type, isUp]) => [type, (event: Event) => { if (isUp(event)) userScrolled = true; }] as const);
+  // an input whose scroll never lands (WebKit can drop a wheel at the bottom while the timeline follows) expires
+  let expiry: ReturnType<typeof setTimeout> | undefined;
+  const markInput = () => {
+    userScrolled = true;
+    clearTimeout(expiry);
+    expiry = setTimeout(() => { if (!movedUp) userScrolled = false; }, inputExpiryMs);
+  };
+  const listeners = input.map(([type, isUp]) => [type, (event: Event) => { if (isUp(event)) markInput(); }] as const);
   for (const [type, listener] of listeners) scroll.addEventListener(type, listener, { passive: true });
   scroll.addEventListener("scroll", onScroll, { passive: true });
   return () => {
     unsubscribe();
+    clearTimeout(expiry);
     scroll.removeEventListener("scroll", onScroll);
     for (const [type, listener] of listeners) scroll.removeEventListener(type, listener);
   };

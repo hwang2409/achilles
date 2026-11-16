@@ -943,7 +943,7 @@ class PageStore:
         self, limit: int = 200, before: tuple[str, str] | None = None
     ) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:
         with self._connect() as db:
-            # a stable order (home, then newest created first): a setting toggle never moves navigation
+            # stable order (home, then newest created): a setting toggle never moves navigation
             where = ""
             parameters: list[Any] = []
             if before is not None:

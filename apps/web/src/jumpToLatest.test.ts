@@ -61,3 +61,21 @@ describe("watchJumpToLatest", () => {
     });
   }
 });
+
+test("a wheel up whose scroll never lands expires, and the snap re-follows again", async () => {
+  const store = createRunStore((job) => job());
+  store.dispatch(delta("m1", "streaming reply"));
+  const { box, scrollTo, grow, wheel } = scrollBox(0);
+  let followed = 0;
+  const stop = watchJumpToLatest(store, box, () => {}, () => { followed += 1; });
+  try {
+    wheel(-3); // WebKit dropped its scroll: no scroll event moves up
+    await Bun.sleep(600);
+    scrollTo(1);
+    grow(68);
+    store.dispatch(delta("m1", " more"));
+    expect(followed).toBe(1);
+  } finally {
+    stop();
+  }
+});
