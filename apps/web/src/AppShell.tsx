@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { CommandPalette, Highlight, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
-import { firstFocusable, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
+import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
 
@@ -209,33 +209,44 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     return () => document.removeEventListener("keydown", key, true);
   }, [drawer, narrow]);
   useEffect(() => {
-    // capture on window runs before the composer (CodeMirror vim too) sees the key, so it only opens the palette
+    // capture on window runs before the composer (CodeMirror vim too) sees app shortcuts.
     const key = (event: KeyboardEvent) => {
-      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-      if (!mod || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (paletteOpen) closePalette(); else openPalette();
-    };
-    addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
-  }, [paletteOpen, drawer]);
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); if (!narrow) setCollapsed((value) => !value); }
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+      if (!hasAppModifier(event) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (!event.shiftKey && key === "k") {
         event.preventDefault();
+        event.stopPropagation();
+        if (paletteOpen) closePalette(); else openPalette();
+      } else if (key === "b") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!narrow) setCollapsed((value) => !value);
+      } else if (event.key === ",") {
+        event.preventDefault();
+        event.stopPropagation();
         const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
         if (paletteOpen) closePalette();
         openSettings(opener);
+      } else if (event.shiftKey && key === "o") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!loading) void onNewChat();
+      } else if (event.key === ".") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!loading) void onToggleCreateMode();
       }
-      if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
-      if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
+    };
+    addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
+  }, [loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
       if (isEditableTarget(event)) return;
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
       if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [loading, narrow, onNewChat, onToggleCreateMode, settingsOpen, shortcutsOpen, paletteOpen]);
+  }, [shortcutsOpen]);
 
   const pageRows = pageList.items ?? [];
   const waitingTotal = Math.max(waiting, chatList.meta);

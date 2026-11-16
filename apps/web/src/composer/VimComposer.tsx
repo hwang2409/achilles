@@ -1,4 +1,5 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { history } from "@codemirror/commands";
 import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView } from "@codemirror/view";
 import { getCM, Vim, vim } from "@replit/codemirror-vim";
@@ -45,6 +46,9 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const [mode, setMode] = useState<Mode>("insert");
   const [focused, setFocused] = useState(true);
   const [pending, setPending] = useState("");
+  // a short note shown when a key achilles intercepts has no action (e.g. the ex line ":")
+  const [note, setNote] = useState("");
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [selectionLength, setSelectionLength] = useState(0);
   useLayoutEffect(() => {
     const view = viewRef.current;
@@ -70,7 +74,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       state: EditorState.create({
         doc: initialDefaultValue,
         extensions: [
-          vim(), drawSelection(), EditorView.lineWrapping, editable.of(EditorView.editable.of(state !== "read-only")),
+          vim(), history(), drawSelection(), EditorView.lineWrapping, editable.of(EditorView.editable.of(state !== "read-only")),
           EditorView.contentAttributes.of({ "aria-label": label, "aria-describedby": `${id}-mode ${id}-hint ${id}-message`, "data-placeholder": placeholder ?? "" }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) edit(update.state.doc.toString());
@@ -107,9 +111,16 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape" && modeBefore === "normal") { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); view.contentDOM.blur(); return; }
       if (modeBefore === "insert") { if (event.key === "Escape") queueMicrotask(() => syncVimState(view)); return; }
-      const ctrlRedo = event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r";
-      const allowed = ctrlRedo || event.key === "Tab" || event.key === "Escape" || /^[0-9ghjklwbeiaIoOAxdcypuvVG$]$/.test(event.key);
-      if (!allowed) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); return; }
+      // codemirror-vim owns normal- and visual-mode keys; achilles intercepts only the ex line and cmd shortcuts, so a
+      // new vim motion or operator needs no change here. (the command palette's mod+k is consumed upstream in AppShell.)
+      if (event.key === ":") {
+        event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+        setNote("ex commands are off in achilles");
+        clearTimeout(noteTimer.current);
+        noteTimer.current = setTimeout(() => setNote(""), 3000);
+        return;
+      }
+      if (event.metaKey) return; // cmd shortcuts (palette, settings, sidebar) belong to the app and browser
       if (event.key === "y" || (cm?.state.vim?.status ?? "").includes("y")) yankPending = true;
       queueMicrotask(() => syncVimState(view));
     };
@@ -128,11 +139,12 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
         if (event.key === "i" && vimMode(view) === "normal") Vim.handleKey(cm!, "i", "user");
         syncVimState(view);
       } else if (event.key === "j" || event.key === "k") {
-        event.preventDefault(); document.querySelector(".transcript")?.scrollBy({ top: event.key === "j" ? 96 : -96, behavior: "smooth" });
+        event.preventDefault(); document.querySelector('[data-part="timeline-scroll"]')?.scrollBy({ top: event.key === "j" ? 96 : -96, behavior: "smooth" });
       }
     };
     document.addEventListener("keydown", onPageKeyDown);
     return () => {
+      clearTimeout(noteTimer.current);
       document.removeEventListener("keydown", onPageKeyDown);
       host.current?.removeEventListener("keydown", onKeyDown, true);
       cm?.off("vim-command-done", commandDone);
@@ -145,7 +157,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-
+  const hint = note || undefined;
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;

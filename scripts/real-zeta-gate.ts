@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -817,7 +817,7 @@ try {
   await gateWait.playwright(field, "waitFor", { timeout: 20_000 });
   const chatOne = await homeSessionId();
   if (!chatOne || chatOne !== first) throw new Error("create_page did not run in the first home chat");
-  await page.keyboard.press("Meta+Shift+O");
+  await page.keyboard.press(appShortcut("Shift+O"));
   await waitFor(async () => {
     const current = await homeSessionId();
     return Boolean(current && current !== chatOne);
@@ -1681,7 +1681,7 @@ try {
   const draft = "this draft must remain after zeta disconnects";
   const droppedField = page.getByRole("textbox", { name: "message" });
   await droppedField.fill(draft);
-  await page.keyboard.press("Meta+b");
+  await page.keyboard.press(appShortcut("b"));
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
     const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);

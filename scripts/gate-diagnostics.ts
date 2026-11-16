@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
+export const appShortcut = (key: string) => `ControlOrMeta+${key}`;
 
 // the python server polls control.json while it holds zeta's turn: a reader must never see a partial file
 export async function writeControl(path: string, document: unknown): Promise<void> {
