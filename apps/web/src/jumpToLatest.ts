@@ -51,15 +51,7 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
     if (userScrolled && scroll.scrollTop < lastTop) movedUp = true;
     else if (movedUp && scroll.scrollTop > lastTop && gap() <= 1) userScrolled = movedUp = false;
     lastTop = scroll.scrollTop;
-    // while the reader is away from the bottom, content growth can emit a transient scroll
-    // at the old bottom before anchoring settles. keep the control mounted and visible.
-    if (userScrolled && movedUp) {
-      setShown(true);
-      return;
-    }
     if (!atBottom()) return;
-    // keep keyboard focus stable while a reader is using the control; its click handler will follow and hide it.
-    if (document.activeElement === scroll.querySelector('[data-part="jump-to-latest"]')) return;
     bottomTop = scroll.scrollTop;
     setShown(false);
   };
