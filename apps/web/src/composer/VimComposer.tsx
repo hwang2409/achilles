@@ -144,7 +144,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint = mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send · esc leave" : "i focus · j/k scroll chat · ? shortcuts";
+  const hint = mode === "insert" ? [`enter ${queues ? "queue" : "send"}`, "shift+enter new line", "esc normal"] : mode === "visual" ? ["enter send", "d delete", "y yank", "c change", "esc normal"] : ["enter send", focused ? "i insert" : "i focus", "j/k scroll chat", "? shortcuts"];
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
@@ -158,7 +158,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       <div className="vim-guidance">
         <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
-          <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
+          <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint.map((segment, index) => <span key={segment} data-hint-segment={index}>{index > 0 && " · "}{segment}</span>)}</span>
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
         </p>
       </div>

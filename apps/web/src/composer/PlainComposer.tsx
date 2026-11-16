@@ -35,14 +35,13 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint =
-    state === "running"
-      ? "a turn is running · stop it or wait to send"
-      : queues
-        ? "enter to queue · esc in an empty box cancels the last"
-        : steer
-          ? "enter to steer · shift+enter new line"
-          : "enter to send · shift+enter for a new line";
+  const hint = state === "running"
+    ? ["stop or wait to send"]
+    : queues
+      ? ["enter queue", "esc cancels last"]
+      : steer
+        ? ["enter steer", "shift+enter new line"]
+        : ["enter send", "shift+enter new line"];
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -146,7 +145,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
             id={`${id}-hint`}
             hidden={Boolean(message)}
           >
-            {hint}
+            {hint.map((segment, index) => <span key={segment} data-hint-segment={index}>{index > 0 && " · "}{segment}</span>)}
           </span>
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}

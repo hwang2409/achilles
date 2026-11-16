@@ -1,0 +1,75 @@
+/* design-v4 shell: the transcript and composer own the center pane's scroll boundary. */
+.app-shell {
+  grid-template-columns: 288px minmax(0, 1fr);
+}
+.sidebar { border-right: 1px solid var(--fulcrum-border); }
+.brand-row { padding: 0 14px; }
+.new-chat, .chat-search { margin-left: 14px; margin-right: 14px; }
+.list-head { padding-inline: 14px; font-size: 11px; letter-spacing: .1em; }
+.page-list a,
+.chat-row { position: relative; border-left: 2px solid transparent; }
+.page-list a { gap: 10px; padding: 6px 14px 6px 10px; }
+.page-list a > span { position: absolute; left: 4px; color: var(--fulcrum-muted); }
+.page-list a b,
+.chat-row strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-row { padding: 8px 14px 8px 10px; }
+.chat-row strong { font-size: 13px; line-height: 20px; }
+.chat-row > span { margin-top: 2px; font-size: 12px; line-height: 16px; }
+.chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.chat-row.state-running { border-left-color: var(--fulcrum-accent); }
+.chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 10%, transparent); }
+.chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
+.chat-row.current strong { font-weight: 700; }
+
+.chat-header { height: 56px; flex-basis: 56px; padding: 0 24px; }
+.chat-heading { gap: 8px; }
+.chat-heading span { order: 0; flex: 0 1 auto; max-width: 24ch; }
+.chat-heading strong { order: 1; flex: 1 1 auto; font-weight: 600; }
+.chat-actions { gap: 12px; }
+.chat-actions button { min-height: 30px; padding: 6px 11px; font-size: 12px; }
+.approval-mode { color: var(--fulcrum-muted); font-size: 12px; }
+.run-state { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
+
+.page-chat { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+.transcript { flex: 1 1 0; min-height: 0; padding-top: 32px; padding-bottom: 16px; }
+.transcript > [data-part="timeline-frame"] { width: 100%; height: 100%; }
+.main-pane [data-part="composer"] {
+  width: min(880px, calc(100% - 32px));
+  margin: 0 auto 24px;
+  border: 1px solid var(--fulcrum-border);
+  background: var(--fulcrum-surface);
+  container-type: inline-size;
+}
+.main-pane [data-part="composer"]:focus-within { border-color: var(--fulcrum-accent); }
+.main-pane [data-part="composer-field"] { min-height: 64px; }
+.main-pane [data-part="composer-field"] textarea {
+  display: block; width: 100%; min-height: 64px; resize: none; padding: 12px 14px;
+  border: 0; outline: 0; background: transparent; line-height: 22px;
+}
+.main-pane [data-part="composer-bar"] { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 6px 8px 8px 14px; }
+.main-pane [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; }
+.main-pane [data-part="composer-hint"] { display: block; overflow: hidden; white-space: nowrap; }
+.main-pane [data-part="composer-submit"],
+.main-pane [data-part="composer-stop"] { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.main-pane [data-part="composer-submit"] { color: var(--fulcrum-bg); background: var(--fulcrum-accent); border-color: var(--fulcrum-accent); }
+.main-pane [data-part="composer-submit"][aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; border-color: var(--fulcrum-border); }
+.main-pane [data-part="composer-stop"] { color: var(--fulcrum-warn); border-color: var(--fulcrum-warn); }
+.main-pane [data-part="composer-reason"] { margin: 0; padding: 12px 14px; color: var(--fulcrum-muted); }
+.main-pane .vim-composer { --inset: 12px; }
+.main-pane .vim-composer [data-part="composer-bar"] { padding-top: 6px; }
+
+@container (max-width: 640px) {
+  [data-part="composer-hint"] [data-hint-segment="1"],
+  [data-part="composer-hint"] [data-hint-segment="2"],
+  [data-part="composer-hint"] [data-hint-segment="3"],
+  [data-part="composer-hint"] [data-hint-segment="4"] { display: none; }
+}
+@container (max-width: 480px) {
+  .vim-guidance { flex-wrap: nowrap; }
+  .vim-mode-chip { min-width: auto; padding-inline: 6px; }
+}
+@media (max-width: 760px), (max-height: 500px) {
+  .chat-header { padding-left: 64px; padding-right: 12px; }
+  .transcript { padding: 14px 12px 8px; }
+  .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: 12px; }
+}
