@@ -1,0 +1,364 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "119eaa4cc5de63c8fd4babed",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "1ff11f787f6496b2da8f67d3",
+        "name": "add_task",
+        "version": 1,
+        "operation": "insert",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "b69e5f5509309fa4a3e9a9f9",
+        "collection": "tasks",
+        "data": {
+          "title": "Alpha"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "2e60b5c12fc0b65c03c371a8",
+        "collection": "tasks",
+        "data": {
+          "title": "Beta"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "f5ce11abd9c9830406f8138f",
+        "collection": "tasks",
+        "data": {
+          "title": "Gamma"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "ollama-90d895a1-815a-4f36-ada6-356656153dcf",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "call_id": "ollama-90d895a1-815a-4f36-ada6-356656153dcf",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-565d8b8a-bd13-473c-a2c1-78bbedfdc239",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Beta"
+        },
+        "call_id": "ollama-565d8b8a-bd13-473c-a2c1-78bbedfdc239",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-b1649fbc-2744-46f9-aaa6-8bff38dba7fc",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Gamma"
+        },
+        "call_id": "ollama-b1649fbc-2744-46f9-aaa6-8bff38dba7fc",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "ollama-90d895a1-815a-4f36-ada6-356656153dcf",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "b69e5f5509309fa4a3e9a9f9",
+          "revision": 1,
+          "title": "Alpha"
+        }
+      },
+      {
+        "call_id": "ollama-565d8b8a-bd13-473c-a2c1-78bbedfdc239",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "2e60b5c12fc0b65c03c371a8",
+          "revision": 1,
+          "title": "Beta"
+        }
+      },
+      {
+        "call_id": "ollama-b1649fbc-2744-46f9-aaa6-8bff38dba7fc",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "f5ce11abd9c9830406f8138f",
+          "revision": 1,
+          "title": "Gamma"
+        }
+      }
+    ],
+    "errors": [],
+    "failed_turns": [
+      {
+        "code": "backend_error",
+        "message": "Ollama HTTP 529: {\"error\":\"overloaded_error: scripted provider fault\"}",
+        "provider_error": true,
+        "chat_id": "tasks-chat",
+        "page_id": "home"
+      }
+    ],
+    "approvals": [],
+    "interjections": [],
+    "turns": 5,
+    "answers": {
+      "retry": "added Alpha, Beta, Gamma"
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "119eaa4cc5de63c8fd4babed",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "1ff11f787f6496b2da8f67d3",
+          "name": "add_task",
+          "version": 1,
+          "operation": "insert",
+          "collection": "tasks"
+        }
+      ],
+      "records": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "119eaa4cc5de63c8fd4babed",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "1ff11f787f6496b2da8f67d3",
+        "name": "add_task",
+        "version": 1,
+        "operation": "insert",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "b69e5f5509309fa4a3e9a9f9",
+        "collection": "tasks",
+        "data": {
+          "title": "Alpha"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "2e60b5c12fc0b65c03c371a8",
+        "collection": "tasks",
+        "data": {
+          "title": "Beta"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "f5ce11abd9c9830406f8138f",
+        "collection": "tasks",
+        "data": {
+          "title": "Gamma"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "dup-alpha",
+        "collection": "tasks",
+        "data": {
+          "title": "Alpha"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "ollama-90d895a1-815a-4f36-ada6-356656153dcf",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "call_id": "ollama-90d895a1-815a-4f36-ada6-356656153dcf",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-565d8b8a-bd13-473c-a2c1-78bbedfdc239",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Beta"
+        },
+        "call_id": "ollama-565d8b8a-bd13-473c-a2c1-78bbedfdc239",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-b1649fbc-2744-46f9-aaa6-8bff38dba7fc",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Gamma"
+        },
+        "call_id": "ollama-b1649fbc-2744-46f9-aaa6-8bff38dba7fc",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "dup-call",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "call_id": "dup-call",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "ollama-90d895a1-815a-4f36-ada6-356656153dcf",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "b69e5f5509309fa4a3e9a9f9",
+          "revision": 1,
+          "title": "Alpha"
+        }
+      },
+      {
+        "call_id": "ollama-565d8b8a-bd13-473c-a2c1-78bbedfdc239",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "2e60b5c12fc0b65c03c371a8",
+          "revision": 1,
+          "title": "Beta"
+        }
+      },
+      {
+        "call_id": "ollama-b1649fbc-2744-46f9-aaa6-8bff38dba7fc",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "f5ce11abd9c9830406f8138f",
+          "revision": 1,
+          "title": "Gamma"
+        }
+      }
+    ],
+    "errors": [],
+    "failed_turns": [
+      {
+        "code": "backend_error",
+        "message": "Ollama HTTP 529: {\"error\":\"overloaded_error: scripted provider fault\"}",
+        "provider_error": true,
+        "chat_id": "tasks-chat",
+        "page_id": "home"
+      }
+    ],
+    "approvals": [],
+    "interjections": [],
+    "turns": 5,
+    "answers": {
+      "retry": "added Alpha, Beta, Gamma"
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "119eaa4cc5de63c8fd4babed",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "1ff11f787f6496b2da8f67d3",
+          "name": "add_task",
+          "version": 1,
+          "operation": "insert",
+          "collection": "tasks"
+        }
+      ],
+      "records": []
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "id": "restart-zeta-batch-scripted",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "tasks",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 8,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "add",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "add_task each of these in one batch with the field title: Alpha, Beta, Gamma",
+      "during": {
+        "tool": "achilles__add_task",
+        "nth": 2,
+        "restart_zeta": true
+      }
+    },
+    {
+      "id": "resume",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "continue"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_task",
+        "operation": "insert",
+        "collection": "tasks"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "Alpha"
+        },
+        {
+          "title": "Beta"
+        },
+        {
+          "title": "Gamma"
+        }
+      ]
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "tasks",
+      "tool": "achilles__add_task",
+      "collection": "tasks",
+      "fields": [
+        "title"
+      ]
+    },
+    {
+      "id": "recovery",
+      "type": "restart_recovery",
+      "page": "tasks",
+      "step": "resume",
+      "collection": "tasks",
+      "fields": [
+        "title"
+      ]
+    }
+  ]
+}

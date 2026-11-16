@@ -1,0 +1,746 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "0ab67322a906af538d4d0d50",
+        "name": "add_contact",
+        "version": 1,
+        "operation": "insert",
+        "collection": "contacts"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "991a9d7e3cd79d92973765f0",
+        "name": "list_contacts",
+        "version": 1,
+        "operation": "list",
+        "collection": "contacts"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "17b973e4fa1247705b665dc4",
+        "collection": "contacts",
+        "data": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "6112dbab79a757f4a16c4226",
+        "collection": "contacts",
+        "data": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "f3cbb5405859130831eeb19a",
+        "collection": "contacts",
+        "data": {
+          "email": "alan@example.test",
+          "name": "Alan Turing"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "9cfd9f6d7dadba3a5957b17d",
+        "collection": "contacts",
+        "data": {
+          "email": "katherine@example.test",
+          "name": "Katherine Johnson"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "df42bdb08450f3b758422386",
+        "collection": "contacts",
+        "data": {
+          "email": "edsger@example.test",
+          "name": "Edsger Dijkstra"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace"
+        },
+        "call_id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper"
+        },
+        "call_id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        "call_id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        "call_id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        },
+        "call_id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace",
+          "record_id": "17b973e4fa1247705b665dc4",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper",
+          "record_id": "6112dbab79a757f4a16c4226",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "alan@example.test",
+          "name": "Alan Turing",
+          "record_id": "f3cbb5405859130831eeb19a",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "katherine@example.test",
+          "name": "Katherine Johnson",
+          "record_id": "9cfd9f6d7dadba3a5957b17d",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "edsger@example.test",
+          "name": "Edsger Dijkstra",
+          "record_id": "df42bdb08450f3b758422386",
+          "revision": 1
+        }
+      }
+    ],
+    "errors": [],
+    "failed_turns": [],
+    "approvals": [
+      {
+        "request_id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01Sg1UjHN7M8GV1RZUWDkCsK",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01ALtTEawriJpnGH7cCNwnBe",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      }
+    ],
+    "interjections": [
+      {
+        "step": "write",
+        "page_id": "home",
+        "chat": "contacts-chat",
+        "action": "restart_zeta",
+        "request_id": "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+        "original_session_id": "5e939a5251824d0aac9d3e44a8ee0c3a",
+        "ok": true,
+        "records_before": [
+          {
+            "collection": "contacts",
+            "id": "17b973e4fa1247705b665dc4",
+            "data": {
+              "email": "ada@example.test",
+              "name": "Ada Lovelace"
+            }
+          },
+          {
+            "collection": "contacts",
+            "id": "6112dbab79a757f4a16c4226",
+            "data": {
+              "email": "grace@example.test",
+              "name": "Grace Hopper"
+            }
+          }
+        ],
+        "killed_pid": 39509,
+        "started_pid": 39555,
+        "resumed_session_id": "5e939a5251824d0aac9d3e44a8ee0c3a",
+        "after_restart": [],
+        "history_continuity": true,
+        "dangling_approvals": [
+          "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+          "toolu_014W5a1p8Lpcox7uNi6NucQi",
+          "toolu_01Vjd7gRp5qVW7ZDETpQt8ov"
+        ]
+      }
+    ],
+    "turns": 3,
+    "answers": {
+      "resume": "Ada Lovelace and Grace Hopper were added before the restart; I added Alan Turing, Katherine Johnson, and Edsger Dijkstra now."
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "contacts"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "0ab67322a906af538d4d0d50",
+          "name": "add_contact",
+          "version": 1,
+          "operation": "insert",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "991a9d7e3cd79d92973765f0",
+          "name": "list_contacts",
+          "version": 1,
+          "operation": "list",
+          "collection": "contacts"
+        }
+      ],
+      "records": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "0ab67322a906af538d4d0d50",
+        "name": "add_contact",
+        "version": 1,
+        "operation": "insert",
+        "collection": "contacts"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "991a9d7e3cd79d92973765f0",
+        "name": "list_contacts",
+        "version": 1,
+        "operation": "list",
+        "collection": "contacts"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "17b973e4fa1247705b665dc4",
+        "collection": "contacts",
+        "data": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "6112dbab79a757f4a16c4226",
+        "collection": "contacts",
+        "data": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "88d9c632398024399a4afe93",
+        "collection": "contacts",
+        "data": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "d2a2b293fb77d1471291d9b5",
+        "collection": "contacts",
+        "data": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "f3cbb5405859130831eeb19a",
+        "collection": "contacts",
+        "data": {
+          "email": "alan@example.test",
+          "name": "Alan Turing"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "9cfd9f6d7dadba3a5957b17d",
+        "collection": "contacts",
+        "data": {
+          "email": "katherine@example.test",
+          "name": "Katherine Johnson"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "df42bdb08450f3b758422386",
+        "collection": "contacts",
+        "data": {
+          "email": "edsger@example.test",
+          "name": "Edsger Dijkstra"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace"
+        },
+        "call_id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper"
+        },
+        "call_id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01Sg1UjHN7M8GV1RZUWDkCsK",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        },
+        "call_id": "toolu_01Sg1UjHN7M8GV1RZUWDkCsK",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01ALtTEawriJpnGH7cCNwnBe",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        "call_id": "toolu_01ALtTEawriJpnGH7cCNwnBe",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        "call_id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        "call_id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      },
+      {
+        "id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "name": "achilles__add_contact",
+        "arguments": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        },
+        "call_id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace",
+          "record_id": "17b973e4fa1247705b665dc4",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper",
+          "record_id": "6112dbab79a757f4a16c4226",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01Sg1UjHN7M8GV1RZUWDkCsK",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "ada@example.test",
+          "name": "Ada Lovelace",
+          "record_id": "88d9c632398024399a4afe93",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01ALtTEawriJpnGH7cCNwnBe",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "grace@example.test",
+          "name": "Grace Hopper",
+          "record_id": "d2a2b293fb77d1471291d9b5",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "alan@example.test",
+          "name": "Alan Turing",
+          "record_id": "f3cbb5405859130831eeb19a",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "katherine@example.test",
+          "name": "Katherine Johnson",
+          "record_id": "9cfd9f6d7dadba3a5957b17d",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "email": "edsger@example.test",
+          "name": "Edsger Dijkstra",
+          "record_id": "df42bdb08450f3b758422386",
+          "revision": 1
+        }
+      }
+    ],
+    "errors": [],
+    "failed_turns": [],
+    "approvals": [
+      {
+        "request_id": "toolu_019tLEqfNTJsfoTEKzS7DVSt",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_015pD8oxfU5fkqfc8xhrjEic",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01Sg1UjHN7M8GV1RZUWDkCsK",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01ALtTEawriJpnGH7cCNwnBe",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01XQGjyXpQczdWnmBptL8XvB",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01FnViWyCEXYeNMwm7pF5FSA",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01ExHg7MEEcUjCRLyWZ8PCSZ",
+        "chat_id": "contacts-chat",
+        "page_id": "home",
+        "tool": "achilles__add_contact",
+        "decision": "approve"
+      }
+    ],
+    "interjections": [
+      {
+        "step": "write",
+        "page_id": "home",
+        "chat": "contacts-chat",
+        "action": "restart_zeta",
+        "request_id": "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+        "original_session_id": "5e939a5251824d0aac9d3e44a8ee0c3a",
+        "ok": true,
+        "records_before": [
+          {
+            "collection": "contacts",
+            "id": "17b973e4fa1247705b665dc4",
+            "data": {
+              "email": "ada@example.test",
+              "name": "Ada Lovelace"
+            }
+          },
+          {
+            "collection": "contacts",
+            "id": "6112dbab79a757f4a16c4226",
+            "data": {
+              "email": "grace@example.test",
+              "name": "Grace Hopper"
+            }
+          }
+        ],
+        "killed_pid": 39509,
+        "started_pid": 39555,
+        "resumed_session_id": "5e939a5251824d0aac9d3e44a8ee0c3a",
+        "after_restart": [],
+        "history_continuity": true,
+        "dangling_approvals": [
+          "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+          "toolu_014W5a1p8Lpcox7uNi6NucQi",
+          "toolu_01Vjd7gRp5qVW7ZDETpQt8ov"
+        ]
+      }
+    ],
+    "turns": 3,
+    "answers": {
+      "resume": "I added all 5 contacts, using one call for each. Every call came back with a new record:\n\n- Ada Lovelace (ada@example.test)\n- Grace Hopper (grace@example.test)\n- Alan Turing (alan@example.test)\n- Katherine Johnson (katherine@example.test)\n- Edsger Dijkstra (edsger@example.test)"
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "contacts"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "0ab67322a906af538d4d0d50",
+          "name": "add_contact",
+          "version": 1,
+          "operation": "insert",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "991a9d7e3cd79d92973765f0",
+          "name": "list_contacts",
+          "version": 1,
+          "operation": "list",
+          "collection": "contacts"
+        }
+      ],
+      "records": []
+    }
+  }
+}

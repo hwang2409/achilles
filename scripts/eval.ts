@@ -561,7 +561,9 @@ function scriptedProvider() {
     let toolCalls: unknown[] = [];
     if (prompt.includes("add_task each")) {
       const next = SCRIPTED_TASK_NAMES.find(name => !toolResults.some(message => message.tool_name === "achilles__add_task" && String(message.content).includes(name)));
-      if (next) toolCalls = [{ function: { name: "achilles__add_task", arguments: { title: next } } }];
+      const missing = SCRIPTED_TASK_NAMES.filter(name => !toolResults.some(message => message.tool_name === "achilles__add_task" && String(message.content).includes(name)));
+      // "in one batch": every missing record in one parallel tool batch, so a restart can cut the batch in half
+      if (next) toolCalls = (prompt.includes("in one batch") ? missing : [next]).map(title => ({ function: { name: "achilles__add_task", arguments: { title } } }));
       else return new Response(`${JSON.stringify({ message: { content: `added ${SCRIPTED_TASK_NAMES.join(", ")}` }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
     }
     else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
