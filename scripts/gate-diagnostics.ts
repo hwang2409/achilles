@@ -102,8 +102,12 @@ export const controlSnapshot = (text: string, secrets: readonly string[] = []): 
   }
 };
 
-// covers `"token": "x"`, `'Authorization': 'Bearer x'`, and `credential=x` in log lines that are not JSON.
-const SECRET_FIELD = /(["']?[\w-]*(?:token|authorization|credential|mcp_bindings)[\w-]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,}&]+)/gi;
+// covers `"token": "x"`, escaped `\"token\":\"x\"`, `'Authorization': 'Basic x'`, `x-api-key: x`, and `credential=x` in log lines that are not JSON.
+// a quoted value keeps its quotes, and an unquoted value stops at a quote, so a redacted JSON line stays valid.
+const SECRET_FIELD = /((?:\\*["'])?[\w-]*(?:token|authorization|credential|mcp_bindings|cookie|api[_-]?key)[\w-]*(?:\\*["'])?\s*[:=]\s*)(?:(\\*["'])(?:(?!\2).)*?\2|(?:basic|bearer|digest)\s+[^\s,}&"'\\]+|[^\s,}&"'\\]+)/gi;
+// a `Cookie:` or `set-cookie:` header value runs to the end of the line, across `;`.
+const COOKIE_HEADER = /(\bcookie\s*:\s*)[^\r\n"'\\]+/gi;
+const BEARER_PROTOCOL = /zeta\.bearer\.[^\s"'\\,]+/gi;
 
 // one log line or websocket payload, made safe for a public CI artifact.
 export const redactArtifact = (line: string, secrets: readonly string[] = [], home = homedir()): string => {
@@ -114,6 +118,10 @@ export const redactArtifact = (line: string, secrets: readonly string[] = [], ho
   } catch {
     text = diagnostic(line, secrets);
   }
-  text = text.replace(SECRET_FIELD, (_, key: string, value: string) => value.includes("[redacted]") ? key + value : `${key}[redacted]`);
+  text = text
+    .replace(COOKIE_HEADER, "$1[redacted]")
+    .replace(BEARER_PROTOCOL, "zeta.bearer.[redacted]")
+    .replace(SECRET_FIELD, (match: string, key: string, quote?: string) =>
+      match.slice(key.length).includes("[redacted]") ? match : quote ? `${key}${quote}[redacted]${quote}` : `${key}[redacted]`);
   return home.length > 1 ? text.split(home).join("~") : text;
 };

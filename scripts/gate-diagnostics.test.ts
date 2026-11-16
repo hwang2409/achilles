@@ -17,17 +17,25 @@ test("diagnostics redact all secret-shaped values", () => {
   expect(output).not.toContain(fake);
 });
 
-test("artifact lines redact credentials, bearer values, and home paths", () => {
+test("artifact lines redact credential shapes without a known secret, and keep JSON valid", () => {
   const lines = [
     JSON.stringify({ method: "hello", params: { controller_token: fake, mcp_bindings: [{ headers: { Authorization: `Bearer ${fake}` } }] } }),
     `INFO bind {'Authorization': 'Bearer ${fake}'} at /home/tester/zeta`,
     `credential=${fake}&x=1 token: ${fake}`,
-    `unlisted ${fake}`,
+    JSON.stringify({ text: JSON.stringify({ controller_token: fake }) }),
+    JSON.stringify({ url: `http://127.0.0.1/?token=${fake}` }),
+    `Sec-WebSocket-Protocol: zeta.bearer.${fake}`,
+    `Cookie: session=${fake}; other=${fake}`,
+    `set-cookie: a=${fake}; Path=/`,
+    `authorization: Basic ${fake}`,
+    `x-api-key: ${fake}`,
   ];
-  const output = lines.map((line) => redactArtifact(line, [fake], "/home/tester")).join("\n");
-  expect(output).not.toContain(fake);
-  expect(output).not.toContain("/home/tester");
-  expect(output).toContain("INFO bind");
+  const output = lines.map((line) => redactArtifact(line, [], "/home/tester"));
+  for (const line of output) expect(line).not.toContain(fake);
+  expect(output.join("\n")).not.toContain("/home/tester");
+  expect(output[1]).toContain("INFO bind");
+  for (const index of [0, 3, 4]) expect(() => JSON.parse(output[index])).not.toThrow();
+  expect(redactArtifact(`unlisted ${fake}`, [fake], "/home/tester")).toBe("unlisted [redacted]");
 });
 
 test.each([
