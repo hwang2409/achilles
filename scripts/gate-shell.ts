@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { appShortcut, type GateWait } from "./gate-diagnostics";
 
 export async function gateShell(
   page: Page,
@@ -32,7 +32,7 @@ export async function gateShell(
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== secondSessionId)
     throw new Error("reload did not keep the selected chat query");
-  await page.keyboard.press("Meta+Shift+O");
+  await page.keyboard.press(appShortcut("Shift+O"));
   await waitFor(async () => {
     const field = page.getByRole("textbox", { name: "message", exact: true });
     return await field.count() === 1 && await field.evaluate((element) => element === document.activeElement);
