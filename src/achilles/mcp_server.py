@@ -203,7 +203,18 @@ def _validate_create(name: str, args: Any) -> None:
         "update_layout": UPDATE_LAYOUT_SCHEMA,
         "restore_version": RESTORE_VERSION_SCHEMA,
     }[name]
-    validate_schema(args, schema)
+    try:
+        validate_schema(args, schema)
+    except ValidationError as exc:
+        bundle = args.get("bundle") if isinstance(args, dict) else None
+        if (
+            name == "create_tool"
+            and isinstance(bundle, dict)
+            and "page" in bundle
+            and exc.path.startswith("/bundle")
+        ):
+            exc.hint = "`page` goes at the top level, not inside `bundle`"
+        raise
 
 
 def build_mcp(store: PageStore):
