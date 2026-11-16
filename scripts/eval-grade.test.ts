@@ -650,6 +650,8 @@ test("restart_recovery needs the same chat back, every earlier row, a finished t
   expect(gradeCheck(check, snapshot(restart, "Ada Lovelace was already added before the restart; I added the other four.")).pass).toBe(true);
   expect(gradeCheck(check, snapshot(restart, "all five contacts are added")).reason).toContain("does not say Ada Lovelace existed");
   expect(gradeCheck(check, snapshot(restart)).reason).toContain("no turn finished after the restart");
+  const twice = { ...snapshot(restart, "I added Ada Lovelace and the others"), records: [1, 2].map(n => ({ page_id: "page-1", collection: "contacts", id: `r${n}`, data: { name: "Ada Lovelace" } })) };
+  expect(gradeCheck(check, twice).reason).toContain("redid Ada Lovelace");
   expect(gradeCheck(check, snapshot({ ...restart, history_continuity: false }, "Ada Lovelace")).reason).toContain("rows from before the restart are missing");
   expect(gradeCheck(check, snapshot({ ...restart, resumed_session_id: "other" }, "Ada Lovelace")).reason).toContain("different session");
 });

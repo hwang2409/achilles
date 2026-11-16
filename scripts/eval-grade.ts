@@ -570,7 +570,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     return twins.length ? { reason: `${twins[0][1].length} ${check.collection} records share ${check.fields!.join(", ")} = ${twins[0][0]}`, evidence: { duplicates: twins.map(([values, ids]) => ({ values: JSON.parse(values), records: ids })) } } satisfies CheckFailure : true;
   },
   // the serve was killed and started again; the same chat came back with every earlier row, it finished a turn after the
-  // restart (no hang), and that answer names each record that existed when the serve died
+  // restart (no hang), it did not redo a record that existed when the serve died, and its answer names each such record
   restart_recovery: ({ check, snapshot, owned }) => {
     const row = owned("interjections").find(item => item.action === "restart_zeta");
     if (!row) return { reason: "the zeta serve was never restarted (the agent never made the matching request)" } satisfies CheckFailure;
@@ -581,6 +581,9 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const answer = snapshot.answers?.[check.step!];
     if (typeof answer !== "string") return { reason: `no turn finished after the restart (step ${check.step})`, evidence } satisfies CheckFailure;
     const field = check.fields![0]; const before = ((row.records_before ?? []) as Array<Record<string, unknown>>).filter(item => item.collection === check.collection).map(item => (item.data as Record<string, unknown> | undefined)?.[field]).filter((value): value is string => typeof value === "string");
+    // naming them is not enough: an agent that redid them claims work it repeated
+    const redone = before.filter(value => owned("records").filter(item => item.collection === check.collection && (item.data as Record<string, unknown> | undefined)?.[field] === value).length > 1);
+    if (redone.length) return { reason: `the agent redid ${redone.join(", ")}, which existed before the restart`, evidence } satisfies CheckFailure;
     const missing = before.filter(value => !mentions(answer, value));
     return missing.length ? { reason: `the answer after the restart does not say ${missing.join(", ")} existed before it: ${JSON.stringify(answer.slice(0, 500))}`, evidence } satisfies CheckFailure : true;
   },
