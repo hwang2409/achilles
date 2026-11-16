@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { appShortcut, type GateWait } from "./gate-diagnostics";
 
 export async function gateShell(
   page: Page,
