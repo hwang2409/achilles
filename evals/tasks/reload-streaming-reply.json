@@ -1,6 +1,6 @@
 {
   "id": "reload-streaming-reply",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "contacts",

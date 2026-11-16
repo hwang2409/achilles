@@ -1,6 +1,6 @@
 {
   "id": "deny-authoring-midway",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "home",

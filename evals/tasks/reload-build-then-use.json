@@ -1,6 +1,6 @@
 {
   "id": "reload-build-then-use",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "expenses",

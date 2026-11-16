@@ -1,6 +1,7 @@
 {
   "id": "resend-only-on-dropped",
   "suite": "hard",
+  "backend": "scripted",
   "page_plan": [
     {
       "alias": "notes",

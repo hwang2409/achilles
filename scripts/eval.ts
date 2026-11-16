@@ -61,6 +61,7 @@ export async function loadTask(id: string, dir = new URL("../evals/tasks/", impo
   const task = validateTask(JSON.parse(await readFile(join(dir, `${id}.json`), "utf8")));
   if (task.id !== id) throw new Error(`task id ${task.id} does not match ${id}`); return task;
 }
+export const MAX_SUITE_TASKS = 12;
 // TASK names tasks of any suite; without TASK a full run takes every task of one suite (default core).
 export async function selectTasks(selection?: string, dir = new URL("../evals/tasks/", import.meta.url).pathname, suite: EvalTask["suite"] = "core") {
   if (selection?.trim()) {
@@ -72,6 +73,8 @@ export async function selectTasks(selection?: string, dir = new URL("../evals/ta
   const tasks = await Promise.all(ids.map(id => loadTask(id, dir)));
   const chosen = tasks.filter(task => task.suite === suite);
   if (!chosen.length) throw new Error(`no ${suite} tasks found; set suite: "${suite}" on at least one task`);
+  // LOOP budget: a full eval run is at most 12 tasks x 20 model turns (agent_turns <= 20 is checked per task)
+  if (suite !== "focused" && chosen.length > MAX_SUITE_TASKS) throw new Error(`the ${suite} suite has ${chosen.length} tasks; a full run allows at most ${MAX_SUITE_TASKS} (budget rule: 12 tasks x 20 model turns). move tasks that pass 3/3 to suite "focused"`);
   return chosen;
 }
 
@@ -612,8 +615,8 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     else {
       const classification = await classifyTaskSupport(stack, task, options.hidden);
       if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }
-      // zeta has no seam to fault the real claude provider, so a provider_error task runs only against the scripted provider
-      else if (!provider && task.steps.some(step => step.provider_error)) { result = unsupportedResult(task, ["scripted_provider"]); snapshot = await databaseSnapshot(stack); }
+      // a scripted-only task (provider faults, the scripted model's fixed replies) spends no real turns
+      else if (!provider && task.backend === "scripted") { result = unsupportedResult(task, ["scripted_provider"]); snapshot = await databaseSnapshot(stack); }
       else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal, provider?.arm)); result = gradeReference(task, snapshot!); const capabilities = (await productCapabilities(stack)); const missingGoal = (task.goal_capabilities ?? []).find(capability => !capabilities.has(capability)); if (missingGoal && result.status === "agent_fail" && !task.requires?.length) result = { ...result, gap: `capability_missing:${missingGoal}` } as ReturnType<typeof gradeTask>; }
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;

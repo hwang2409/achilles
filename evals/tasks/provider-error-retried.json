@@ -1,6 +1,7 @@
 {
   "id": "provider-error-retried",
   "suite": "focused",
+  "backend": "scripted",
   "page_plan": [
     {
       "alias": "tasks",

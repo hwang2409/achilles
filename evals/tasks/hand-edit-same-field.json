@@ -1,6 +1,6 @@
 {
   "id": "hand-edit-same-field",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tasks",

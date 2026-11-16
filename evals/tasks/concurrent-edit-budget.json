@@ -1,6 +1,6 @@
 {
   "id": "concurrent-edit-budget",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "projects",
