@@ -1,0 +1,102 @@
+{
+  "id": "reload-build-then-use",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "expenses",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 12,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "browser_prompt",
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "prompt": "with create_tool, create two page-local tools for an expenses collection: add_expense, an insert tool with a string field item and a number field amount, and list_expenses, a list tool. then add a list block for the expenses collection to this page's layout.",
+      "reload": {
+        "on": "tool_start",
+        "tool": "achilles__create_tool",
+        "nth": 2
+      }
+    },
+    {
+      "id": "use",
+      "kind": "browser_prompt",
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "prompt": "use add_expense to add item coffee with amount 4 and item lunch with amount 12, then list the expenses",
+      "reload": {
+        "on": "tool_start",
+        "tool": "achilles__add_expense",
+        "nth": 1
+      }
+    }
+  ],
+  "checks": [
+    {
+      "id": "reload",
+      "type": "reload",
+      "page": "expenses",
+      "step": "build"
+    },
+    {
+      "id": "reload-use",
+      "type": "reload",
+      "page": "expenses",
+      "step": "use"
+    },
+    {
+      "id": "add-tool",
+      "type": "tool",
+      "page": "expenses",
+      "name": "add_expense"
+    },
+    {
+      "id": "list-tool",
+      "type": "tool",
+      "page": "expenses",
+      "name": "list_expenses"
+    },
+    {
+      "id": "one-tool-each",
+      "type": "no_duplicate_writes",
+      "page": "expenses",
+      "tool": "achilles__create_tool"
+    },
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "expenses",
+      "value": [
+        {
+          "item": "coffee",
+          "amount": 4
+        },
+        {
+          "item": "lunch",
+          "amount": 12
+        }
+      ]
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "expenses",
+      "tool": "achilles__add_expense",
+      "collection": "expenses",
+      "fields": [
+        "item"
+      ]
+    },
+    {
+      "id": "listed",
+      "type": "successful_result",
+      "page": "expenses",
+      "tool": "achilles__list_expenses"
+    }
+  ]
+}

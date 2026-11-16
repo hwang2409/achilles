@@ -1,0 +1,145 @@
+{
+  "id": "reload-streaming-reply",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "contacts",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 8,
+  "steps": [
+    {
+      "id": "reply",
+      "kind": "browser_prompt",
+      "page": "contacts",
+      "chat": "contacts-chat",
+      "prompt": "add the contact Barbara Liskov (barbara@example.test) with add_contact, using the fields name and email. then call list_contacts and write two or three sentences about each contact, naming each one. do not write anything before the tool calls.",
+      "reload": {
+        "on": "assistant_delta",
+        "nth": 3
+      }
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts"
+      },
+      {
+        "name": "list_contacts",
+        "operation": "list",
+        "collection": "contacts"
+      }
+    ],
+    "records": [
+      {
+        "id": "c-1",
+        "collection": "contacts",
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        }
+      },
+      {
+        "id": "c-2",
+        "collection": "contacts",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      },
+      {
+        "id": "c-3",
+        "collection": "contacts",
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        }
+      },
+      {
+        "id": "c-4",
+        "collection": "contacts",
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        }
+      },
+      {
+        "id": "c-5",
+        "collection": "contacts",
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "reload",
+      "type": "reload",
+      "page": "contacts",
+      "step": "reply"
+    },
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "contacts",
+      "value": [
+        {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        },
+        {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        },
+        {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      ]
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "contacts",
+      "tool": "achilles__add_contact",
+      "collection": "contacts",
+      "fields": [
+        "email"
+      ]
+    },
+    {
+      "id": "answer",
+      "type": "answer_mentions",
+      "step": "reply",
+      "value": [
+        "Edsger Dijkstra"
+      ],
+      "page": "contacts"
+    },
+    {
+      "id": "no-errors",
+      "type": "no_error",
+      "page": "contacts"
+    }
+  ]
+}

@@ -5,7 +5,8 @@ const CONNECTION_CAPACITY = -32001;
 const RECONNECT_DELAYS_MS = [50, 100, 200, 400, 800, 1_600, 1_850] as const;
 type EventHandler = (event: Record<string, any>) => void;
 type Rpc = { id?: number; result?: any; error?: { message?: string; code?: number }; method?: string; params?: any };
-type ConnectOptions = { retryCapacity?: boolean; wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>; signal?: AbortSignal };
+type Role = "controller" | "observer";
+type ConnectOptions = { role?: Role; retryCapacity?: boolean; wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>; signal?: AbortSignal };
 
 class Client implements EvalProtocol {
   private nextId = 1;
@@ -38,7 +39,9 @@ class Client implements EvalProtocol {
       this.socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
     });
   }
-  hello(features: string[]) { return this.request("hello", { protocol_version: "1.1", client_version: "1.1", features, role: "controller" }); }
+  hello(features: string[], role: Role = "controller") { return this.request("hello", { protocol_version: "1.1", client_version: "1.1", features, role }); }
+  status() { return this.request("status"); }
+  subscribe(sessionId: string) { return this.request("session_history_and_subscribe", { session_id: sessionId }); }
   newSession(params: Record<string, unknown>) { return this.request("new_session", params); }
   async send(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { const accepted = await this.request("send", { session_id: sessionId, text, delivery_id: deliveryId }); return { delivery_id: deliveryId, ...(accepted ?? {}) }; }
   deliveryStatus(deliveryId: string, timeoutMs = RPC_TIMEOUT_MS) { return this.request("delivery_status", { delivery_id: deliveryId }, timeoutMs); }
@@ -70,6 +73,9 @@ export type EvalProtocol = {
   abort(sessionId: string): Promise<void>;
   resume(sessionId: string, binding: Record<string, unknown>): Promise<{ session?: { session_id?: string }; session_id?: string }>;
   sessionHistory(sessionId: string): Promise<unknown[]>;
+  status(): Promise<{ state?: string; session?: { session_id?: string } }>;
+  // an observer sees a session's events only after it joins that session's replay stream
+  subscribe(sessionId: string): Promise<unknown>;
   close(signal?: AbortSignal, timeoutMs?: number): Promise<void>;
 };
 
@@ -85,7 +91,8 @@ async function withDeadline<T>(work: Promise<T>, label: string, timeoutMs = RPC_
   } finally { clearTimeout(timer); if (abort) signal?.removeEventListener("abort", abort); }
 }
 
-async function connectOnce(discovery: { url: string; controller_token: string }, onEvent?: EventHandler, signal?: AbortSignal): Promise<EvalProtocol> {
+// An observer reads events and history with the observer token while a browser holds the one controller slot.
+async function connectOnce(discovery: { url: string; controller_token: string }, onEvent?: EventHandler, signal?: AbortSignal, role: Role = "controller"): Promise<EvalProtocol> {
   signal?.throwIfAborted();
   const url = new URL(discovery.url); for (const key of [...url.searchParams.keys()]) url.searchParams.delete(key);
   const socket = new WebSocket(url, ["zeta.v1", `zeta.bearer.${discovery.controller_token}`]);
@@ -101,7 +108,7 @@ async function connectOnce(discovery: { url: string; controller_token: string },
   const client = new Client(socket, onEvent);
   try {
     const hello = await Promise.race([
-      client.hello([...REQUIRED_FEATURES]),
+      client.hello(role === "observer" ? [...REQUIRED_FEATURES, "serve_observers", "session_replay_seq"] : [...REQUIRED_FEATURES], role),
       ...(signal ? [new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))] : []),
     ]) as { capabilities?: { features?: unknown } };
     const accepted = hello.capabilities?.features;
@@ -129,7 +136,7 @@ export async function connectEvalProtocol(discovery: { url: string; controller_t
   for (const delayMs of [0, ...(options.retryCapacity ? RECONNECT_DELAYS_MS : [])]) {
     if (delayMs) await waitForDelay(wait, delayMs, options.signal);
     else options.signal?.throwIfAborted();
-    try { return await connectOnce(discovery, onEvent, options.signal); }
+    try { return await connectOnce(discovery, onEvent, options.signal, options.role); }
     catch (error) {
       if ((error as { code?: unknown }).code !== CONNECTION_CAPACITY) throw error;
       firstCapacityError ??= error;

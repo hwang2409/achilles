@@ -599,3 +599,24 @@ test("list_shows fields need the exact column order and a prompt or schema sourc
   expect(withCheck({ collection: undefined, value: "Login page times out" })).toThrow("fields must be a list_shows check");
   expect(withCheck({ type: "record", value: {} })).toThrow("fields must be a list_shows check");
 });
+
+test("no_duplicate_writes names two records that share the checked fields even when the calls differ", () => {
+  const check = { id: "dup", type: "no_duplicate_writes" as const, page: "p", tool: "achilles__add_contact", collection: "contacts", fields: ["email"] };
+  const snapshot: EvalSnapshot = { pages: [{ id: "home", alias: "p" }], calls: [
+    { page_id: "home", tool: "achilles__add_contact", success: true, arguments: { name: "Ada", email: "ada@example.test" } },
+    { page_id: "home", tool: "achilles__add_contact", success: true, arguments: { name: "Ada L", email: "ada@example.test" } },
+  ], records: [
+    { page_id: "home", collection: "contacts", id: "r1", data: { name: "Ada", email: "ada@example.test" } },
+    { page_id: "home", collection: "contacts", id: "r2", data: { name: "Ada L", email: "ada@example.test" } },
+  ] };
+  expect(gradeCheck(check, snapshot).reason).toBe('2 contacts records share email = ["ada@example.test"]');
+  expect(gradeCheck(check, { ...snapshot, records: snapshot.records!.slice(0, 1) }).pass).toBe(true);
+});
+
+test("a browser task cannot mix protocol prompts, and a reload names its trigger tool", () => {
+  const base = { id: "b", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 4, checks: [{ id: "e", type: "no_error", page: "p" }] };
+  const browser = { id: "s1", kind: "browser_prompt", page: "p", chat: "c", prompt: "hi", reload: { on: "tool_start", tool: "achilles__x" } };
+  expect(() => validateTask({ ...base, steps: [browser] })).not.toThrow();
+  expect(() => validateTask({ ...base, steps: [browser, { id: "s2", kind: "prompt", page: "p", chat: "c", prompt: "again" }] })).toThrow("cannot also have prompt");
+  expect(() => validateTask({ ...base, steps: [{ ...browser, reload: { on: "tool_start" } }] })).toThrow("tool_start requires one");
+});
