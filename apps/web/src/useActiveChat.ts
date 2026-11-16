@@ -140,6 +140,7 @@ export async function attachPage(
   applyCreateMode?: (ready: ReadyState, enabled: boolean) => Promise<ReadyState>,
   publishReady: (ready: ReadyState) => Promise<void> | void = () => {},
   forceNew = false,
+  firstMessage?: string,
 ): Promise<EmptyState | ReadyState | BusyState> {
   let ownsLease = false;
   try {
@@ -182,7 +183,11 @@ export async function attachPage(
     const newest = forceNew || create || selectedId || pending ? null : await findNewestChat((chat) => chat.page_id === page.id); requireCurrent(owner, token);
     const candidates = forceNew || pending ? [] : selectedId ? [selectedId] : [...new Set([newest?.session_id, page.zeta_session_id])].filter((id): id is string => Boolean(id));
     for (const sessionId of candidates) {
-      try { return await attachSession(sessionId); }
+      try {
+        const ready = await attachSession(sessionId);
+        creation.restoreUnsent(page.id, ready.sessionId, Boolean(firstUserText(ready.lease.store)));
+        return ready;
+      }
       catch (caught) {
         if (caught instanceof ChatBusyError) return busy(caught.sessionId);
         if (!(caught instanceof SessionNotFoundError)) throw caught;
@@ -191,12 +196,12 @@ export async function attachPage(
         if (sessionId === page.zeta_session_id) create = true;
       }
     }
-    if (!pending && !create) return { phase: "empty", page, serverApprovalMode, credential };
+    if (!pending && !create) { creation.restoreUnsent(page.id); return { phase: "empty", page, serverApprovalMode, credential }; }
 
     const mappingInput = forceNew ? creationInput : { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
     try {
-      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create });
-      if (!ready) return { phase: "empty", page, serverApprovalMode, credential };
+      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create, text: firstMessage });
+      if (!ready) { creation.restoreUnsent(page.id); return { phase: "empty", page, serverApprovalMode, credential }; }
       return ready as ReadyState;
     } catch (caught) {
       // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
@@ -584,6 +589,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         applyPendingCreateMode,
         async (ready) => { handedOff = ready; },
         empty.newChat,
+        text,
       );
       if (attached.phase === "busy") { void showBusy(attached.busySessionId, empty.newChat ? "new" : "attach"); throw new ChatBusyError(attached.busySessionId); }
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
@@ -627,6 +633,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
     try {
       await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
+      creation.current.sent(current.page.id);
     } catch (error) {
       if (pendingSelection.current?.sessionId === current.sessionId) pendingSelection.current = null;
       throw error;

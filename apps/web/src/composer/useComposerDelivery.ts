@@ -44,6 +44,8 @@ export type ComposerDelivery = {
   update(options: DeliveryOptions): void;
   sync(state: ComposerProps["state"], defaultValue?: string): void;
   edit(draft: string): void;
+  /** Show a note on the box: why it holds text (an unsent message moved in). */
+  note(text: string): void;
   submit(): Promise<void>;
   retry(id: number): Promise<void>;
   /** zeta's transcript shows the prompt sent with this delivery id. */
@@ -115,6 +117,9 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     },
     edit(draft) {
       apply({ type: "edit", draft });
+    },
+    note(text) {
+      apply({ type: "note", text });
     },
     async submit() {
       apply({ type: "state", state: current.state });
