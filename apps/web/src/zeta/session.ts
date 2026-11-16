@@ -21,31 +21,6 @@ export class ChatBusyError extends Error {
   constructor(readonly sessionId: string | null) { super(sessionId ? "another chat is still running" : "zeta was busy a moment ago and is ready now"); }
 }
 
-/**
- * Calls `ended` once when zeta stops running `sessionId`'s turn: on that session's `agent_end`, never by polling.
- * A store that joined mid-turn missed `agent_start`, so it is marked running first; one status check after the mark
- * covers an end that arrived before it. Returns a cancel function.
- */
-export function watchTurnEnd(client: ZetaClient, sessionId: string, ended: () => void): () => void {
-  const lease = client.forSession(sessionId);
-  const { store } = lease;
-  let done = false;
-  let unsubscribe = () => {};
-  const stop = () => { if (done) return false; done = true; unsubscribe(); lease.release(); return true; };
-  const finish = () => { if (stop()) ended(); };
-  const { agent, endOutcome } = store.getState();
-  const marked = agent !== "running";
-  try { if (marked) store.dispatch({ type: "run_start" }); }
-  catch { stop(); return () => {}; } // a store under replay refuses events: the notice keeps its "try again"
-  unsubscribe = store.subscribe(() => { if (store.getState().agent !== "running") finish(); });
-  void runningSession(client).then((running) => {
-    if (done || running === sessionId) return;
-    try { if (marked) store.dispatch({ type: "run_end", ...(endOutcome ? { outcome: endOutcome } : {}) }); } catch { /* evicted store: nothing to undo */ }
-    finish();
-  }, () => {});
-  return () => { stop(); };
-}
-
 type SessionSettings = { model: string; approval_mode?: string | null };
 type ApprovalModeResult = { approvalMode?: string | null; pending: boolean };
 

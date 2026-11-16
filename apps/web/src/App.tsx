@@ -128,7 +128,6 @@ export function App() {
   const refreshKey = `${completedTurns}:${completedTools}`;
   const previousRefreshKey = useRef(refreshKey);
   const waiting = Number(approvalCount);
-  const previousTurn = useRef(turn);
   const [followRequest, setFollowRequest] = useState(0);
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
@@ -182,11 +181,6 @@ export function App() {
     if (!store || !scroll) return;
     return watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
   }, [store, transcript]);
-  useEffect(() => {
-    const previous = previousTurn.current; previousTurn.current = turn;
-    // A chat attached during a live turn re-sends its page binding as soon as it is idle, even if the edge was missed.
-    if (turn === "idle" && (previous === "running" || ready?.rebind)) void active.settleAfterTurn();
-  }, [active.settleAfterTurn, turn, ready?.rebind]);
   const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
