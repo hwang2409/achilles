@@ -222,7 +222,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     const current = JSON.parse(await Bun.file(control).text());
     return current.request_count === (beforeStockSend.request_count ?? 0) + 1 && current.last_message.includes("stock confirmed once");
   }, "stock message on this backend turn");
-  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed stock send to clear its draft");
+  await waitFor(async () => await confirmedStock.inputValue() === "" && await page.locator('[data-part="composer-queued"]').count() === 0, "confirmed stock send to leave the list");
   await switchTo(originalSession);
   await switchTo(stockSession);
   confirmedStock = page.getByRole("textbox", { name: "message", exact: true });
@@ -266,7 +266,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   } else {
     throw new Error(`delayed steer had no response: ${JSON.stringify(delayedSteerResponse)}`);
   }
-  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed message to clear its draft");
+  // enter already emptied the box; wait until the message itself settles (its row leaves the list)
+  await waitFor(async () => await page.locator('[data-part="composer-queued"]').count() === 0 && await page.locator('[data-part="composer"]').last().getAttribute("data-pending") === null, "confirmed delayed message to leave the list");
   if (delayedSteerResponse.result && requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running")) throw new Error("successful delayed steer sent a fallback before clearing its draft");
   await confirmedStock.fill("kept draft");
   if (await stopButton.isVisible().catch(() => false)) await stopButton.focus();
