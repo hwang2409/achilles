@@ -51,7 +51,12 @@ function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<
   useEffect(() => {
     if (!block.count || typeof block.collection !== "string") return;
     let live = true;
-    const query = new URLSearchParams({ limit: "1", ...block.where && { field: String((block.where as Record<string, unknown>).field), equals: JSON.stringify((block.where as Record<string, unknown>).equals) } });
+    const query = new URLSearchParams({ limit: "1" });
+    if (block.where && typeof block.where === "object") {
+      const where = block.where as Record<string, unknown>;
+      query.set("field", String(where.field));
+      query.set("equals", JSON.stringify(where.equals));
+    }
     void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(block.collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then((response) => {
       if (live) setValue(response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—");
     }).catch(() => { if (live) setValue("—"); });
