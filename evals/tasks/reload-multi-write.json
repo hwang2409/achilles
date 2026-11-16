@@ -1,6 +1,6 @@
 {
   "id": "reload-multi-write",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "contacts",

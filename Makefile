@@ -1,4 +1,4 @@
-.PHONY: dev stop eval eval-history eval-stack eval-selfcheck-real
+.PHONY: dev stop eval eval-history eval-list eval-stack eval-selfcheck-real
 
 FULCRUM_CACHE := .cache/fulcrum
 FULCRUM_SETUP := FULCRUM_DIR=$(FULCRUM_CACHE) bun scripts/fulcrum.ts --prepare-web
@@ -27,6 +27,9 @@ eval:
 
 eval-history:
 	@bun -e 'const { historyDir, historyLine, readHistory } = await import("./scripts/eval-report.ts"); const runs = await readHistory(); console.log(runs.length ? runs.map(historyLine).join("\n") : `no eval runs in $${historyDir()}`)'
+
+eval-list:
+	@bun scripts/eval-list.ts
 
 eval-selfcheck-real:
 	@test -n "$${DIR}" || { echo "usage: make eval-selfcheck-real DIR=/path/to/eval-run"; exit 1; }

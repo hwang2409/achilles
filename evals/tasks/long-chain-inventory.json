@@ -1,6 +1,6 @@
 {
   "id": "long-chain-inventory",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "home",

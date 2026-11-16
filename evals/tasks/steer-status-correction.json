@@ -1,6 +1,6 @@
 {
   "id": "steer-status-correction",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tasks",

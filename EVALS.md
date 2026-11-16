@@ -39,8 +39,11 @@ the one-command flow:
 
 - one task: `make eval TASK=harness-smoke`
 - several tasks: `make eval TASK=harness-smoke,record-crud`
-- the whole suite: `make eval` (no `TASK`) — runs only the core 12 (see
-  "core vs focused-only" below); `TASK=` still accepts any task, core or not
+- the core suite: `make eval` (no `TASK`) runs every task with `suite: "core"`
+- another suite: `make eval SUITE=hard` (`SUITE` is `core` or `hard`; see
+  "suites" below). `TASK=` still accepts any task, of any suite
+- list the suites: `make eval-list` prints every task per suite with its turn
+  cap, read from the task files
 - repeats: `make eval TASK=record-crud N=3` runs each task `N` times
 - override the model: `make eval TASK=record-crud MODEL=provider/model`
   (default resolves from the account home settings)
@@ -58,35 +61,34 @@ the one-command flow:
   policy (`achilles__*,mcp_discover`), and the retained state path. it never
   forwards api-key env.
 
-budget. each task has an `agent_turns` cap; a run that exceeds it is stopped and
-graded as `agent_fail` with `cap hit = yes`. the whole command has a 240-turn cap:
-`N * sum(agent_turns)` must be `<= 240` or the run refuses to start. the core
-suite sums to 82 turns, so a full run (`make eval`, no `TASK`) accepts `N` up to 2.
+budget. each task has an `agent_turns` cap (at most 20); a run that exceeds it
+is stopped and graded as `agent_fail` with `cap hit = yes`. the whole command has
+a 240-turn cap: `N * sum(agent_turns)` must be `<= 240` or the run refuses to
+start. a suite run (`SUITE=core` or `SUITE=hard`, no `TASK`) takes at most 12
+tasks: the task loader refuses a 13th, so one full run stays within 12 tasks x 20
+model turns. `make eval-list` prints each suite's turn sum, so you can check which
+`N` fits.
 
-## core vs focused-only
+## suites
 
-each task file carries its own `suite` field (`"core"` or `"focused"`); this is
-the one place that decides membership — nothing else duplicates the list. a
-full run (`make eval` with no `TASK`) runs only tasks with `suite: "core"`.
-`make eval TASK=<name>` runs any task by name regardless of `suite`.
+each task file carries its own `suite` field; it is the one place that decides
+membership. nothing else keeps a copy of the lists (run `make eval-list`).
 
-the 12 core tasks (full runs):
+- `core`: the regression suite, run by `make eval` with no `TASK`. at most 12 tasks.
+- `hard`: tasks the agent does not yet pass reliably, run by `make eval SUITE=hard`.
+  at most 12 tasks.
+- `focused` (the default): run only by name, `make eval TASK=<name>`.
 
-- `agent-data-access`, `approval-once`, `create-and-use-tool-same-chat`,
-  `harness-smoke`, `invalid-authoring-recovery`, `judge-page-and-annotate`,
-  `reading-list-one-prompt`, `reading-metric-count`, `reconnect-recovery`,
-  `record-crud`, `tool-version-fresh-chat`, `update-layout-from-page-chat`
+rules:
 
-focused-only tasks (run with `TASK=<name>`, never in a full run):
-
-- `browser-controller-slot`, `count-question`, `create-mode-off-request`,
-  `denied-write-stops`, `other-page-request`, `page-awareness`,
-  `page-tool-without-create-mode`, `second-chat-tools`,
-  `stale-revision-after-form-edit`, `undo-layout-change`
-
-rule: a new task starts as focused-only. set `suite: "core"` explicitly to add
-a task to full runs; a task with no `suite` field, or `suite: "focused"`, is
-focused-only.
+- a new task starts as `focused`. set `suite` explicitly to add it to a suite run.
+- hard-tier rule: when a hard task passes 3/3 after one hardening, harden it again
+  or move it to `focused`, so `hard` keeps only open problems.
+- a task that only the scripted provider can run or needs (a `provider_error`
+  fault, a repro built on the scripted model's fixed replies, or a task that
+  grades only the page's delivery path, not the model) carries
+  `backend: "scripted"`. a real-model run reports it `unsupported`
+  (`scripted_provider`) and spends no turns on it; `EVAL_BACKEND=scripted` runs it.
 
 ## read the report
 
@@ -157,8 +159,10 @@ classify a failure before you act on it:
 a task is one json file in `evals/tasks/<id>.json`. fields:
 
 - `id`: matches the filename.
-- `suite` (optional, `"core"` or `"focused"`): defaults to `"focused"`. a new
-  task starts as focused-only; see "core vs focused-only" above.
+- `suite` (optional, `"core"`, `"hard"`, or `"focused"`): defaults to
+  `"focused"`. see "suites" above.
+- `backend` (optional, only `"scripted"`): the task runs only on the scripted
+  provider. the lint requires it on a task with a `provider_error` step.
 - `page_plan`: the pages. each has an `alias`, a `source` (`fixture`, `setup`, or
   `created`), `bind_chat`, `create_mode`, and an optional `route`. every
   `fixture` or `setup` page is the home page, except a `fixture` page with a
@@ -168,7 +172,20 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   `input_schema`), `records` (id, collection, data), and an `initial_layout`.
 - `steps`: the prompts and events, in order. each has an `id`, a `kind`, the
   `page`, and the `chat`. the kinds:
-  - `prompt` and `annotate`: send the `prompt` text to the chat.
+  - `prompt` and `annotate`: send the `prompt` text to the chat over zeta's
+    protocol.
+  - `browser_prompt`: type the `prompt` into the real page in a browser and send
+    it from the page's composer. it can take:
+    - `reload` (`{ on, tool?, nth? }`, `on` is `tool_start`, `assistant_delta`,
+      or `approval_request`): reload the page once, at the `nth` matching zeta
+      event of the turn.
+    - `follow_up` (needs `reload`): text typed into the reloaded page while the
+      turn may still run.
+    - `new_chat` (needs `reload`, no `follow_up`): click "new chat" on the
+      reloaded page and send this text there.
+    - `delivery_fault` (no `reload`): one fault on the page's socket to zeta for
+      this send: `dropped`, `evicted_delivered`, `evicted_queued`,
+      `evicted_unknown`, `closed_before_send`, or `closed_after_send`.
   - `reconnect`: drop the zeta connection and resume the chat's session.
   - `user_write`: a user edits a record through the page form. the step names
     a `tool` (an `update` tool) and its `arguments` (a `record_id` and the
@@ -177,14 +194,55 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     result in the snapshot's `user_writes` (never the credential). if the write
     fails or does not bump the revision, the run is `harness_error`. it uses no
     model turn; `chat` only labels the actor.
-  - `approval` (optional, `"approve"` or `"deny"`, default `"approve"`): how
-    the harness answers every approval request during a `prompt` or
-    `annotate` step. `"deny"` sends zeta's real `deny`. it is valid only in a
-    task with `approval_mode: "ask"`; the lint rejects it anywhere else. the
-    snapshot's `approvals` rows record the `decision`.
+  - `approval` (optional, `"approve"`, `"deny"`, or `{ tool, decisions }`,
+    default `"approve"`): how the harness answers every approval request during
+    a model step. `"deny"` sends zeta's real `deny`. `{ tool, decisions }`
+    answers that tool's requests in order from the `decisions` list (approve past
+    the end; other tools are approved). it is valid only in a task with
+    `approval_mode: "ask"`; the lint rejects it anywhere else. the snapshot's `approvals` rows record the `decision`.
+  - `during` (optional, a `prompt` step of an `approval_mode: "ask"` task):
+    `{ tool, nth?, ... }` acts before the harness answers the `nth` approval
+    request of `tool`, with exactly one of: `user_write` (`{ tool, arguments }`,
+    a form write like a second chat), `steer` (text steered into the running
+    turn), or `restart_zeta: true` (kill the private `zeta serve` and start it
+    again; the pending request is never answered, the chat is resumed like a
+    page would). rows go to the snapshot's `interjections`.
+  - `provider_error` (optional, a `prompt` step, scripted only): `{ status,
+    times }`. after the step's first tool result, the next `times` model
+    requests fail with HTTP `status`. the task needs `backend: "scripted"`.
 - `agent_turns`: the per-task turn cap.
-- `checks`: the acceptance table (see below). each has an `id`, a `type`, a
-  `page`, and type-specific fields.
+- `checks`: the acceptance table. each has an `id`, a `type`, a `page`, and
+  type-specific fields; `required: false` makes a check score-only. the types:
+  - pages and tools: `page_exists` (optional `route`), `same_page`,
+    `no_new_page`, `count` (rows of a snapshot collection), `tool`,
+    `tool_absent`, `refused_tool_name` (a reserved name was refused with
+    `invalid_input` at `/bundle/name`), `operations` (one collection has tools
+    for every listed operation), `assigned_tools_only` (the chat called only
+    the page's assigned tools), `tool_evolution` (a tool gained a field and old
+    records stay readable), `schema_roundtrip`.
+  - records and results: `record` (some record contains `value`),
+    `records_exact` (exactly these records), `updated_record` (a `transition`
+    from `before` to `after` values), `successful_result` (a successful call
+    of `tool`, optionally containing `value`), `no_duplicate_writes` (no two
+    successful calls with the same arguments; with `collection` and `fields`,
+    no two records share those values).
+  - layouts: `layout_contains`, `layout_update` (one block added to v1 on this
+    page only), `layout_restore` (a `restore_version` made the active layout),
+    `list_shows`, `detail_selects`, `metric_count` (the first block counts
+    `where` records and `inspect_page` reports the count).
+  - errors: `no_error`, `no_unrecovered_error` (every failed call of `tool` was
+    followed by a success), `error_shown` (the chat shows a failed turn with
+    HTTP status `value`).
+  - approvals and interruptions: `approval`, `approval_outcomes` (approved
+    records end with `set`, denied ones are never asked again and keep their
+    seed), `denied_step` (a denied `create_tool` is never retried and the
+    answer names it), `reconnect`, `reload` (the reloaded page came back on the
+    same chat, attached to the turn, and shows its answer), `new_chat_kept`,
+    `delivered_once` (a faulted send reached the model at most once),
+    `restart_recovery`, `overwrite_disclosed` (keeping the user's value passes;
+    the agent's value passes only if the answer names the user's value).
+  - text and browser: `answer_mentions`, `prompt` (a chat's first prompt is
+    `text`), `browser_text`, `form_submit`.
 - an `approval` check counts approval requests for a `tool`. give `count` for
   an exact number, or `max` to pass when there is at least one request and at
   most `max` (the agent tried, then stopped instead of looping).
@@ -253,46 +311,5 @@ grader rules, as rules:
 
 ## the tasks
 
-the 22 tasks in `evals/tasks/` (12 core, 10 focused-only — see "core vs
-focused-only" above):
-
-- `agent-data-access`: a bound chat reads all seeded records with `list_records`.
-- `approval-once`: with approval on, add exactly one note after one approval.
-- `browser-controller-slot`: create `/eval-smoke` and confirm the text is visible
-  in the browser.
-- `count-question`: with create mode off, ask how many of 5 seeded books are
-  done; the final answer must say 3 and the records stay unchanged.
-- `create-mode-off-request`: with create mode off, ask for a new page; no page
-  is created and only the page's own tools are called.
-- `create-and-use-tool-same-chat`: author a page-local insert tool and use it in
-  the same chat.
-- `denied-write-stops`: with approval on, the user denies the `add_note` write;
-  no record is written and the agent asks for approval at most twice.
-- `harness-smoke`: the smoke task; create a page with one text block.
-- `invalid-authoring-recovery`: a reserved tool name is refused, then a valid tool
-  is authored and used.
-- `judge-page-and-annotate`: build a review page with list and detail blocks, then
-  author and use annotation tools.
-- `other-page-request`: on `/books` with create mode on, ask to change the home
-  page; neither page's layout changes and no page is created.
-- `page-awareness`: with create mode off, ask what the page does; the agent reads
-  the page with `inspect_page` and changes no records.
-- `page-tool-without-create-mode`: with create mode off, add a contact using only
-  the page's assigned insert tool.
-- `reading-list-one-prompt`: from one prompt, build a reading-list page, then add,
-  update, and list a book. a score-only (`required: false`) `form_submit`
-  check adds a book through the page's own add form.
-- `reading-metric-count`: add a metric that counts "done" books and verify it.
-- `reconnect-recovery`: write a note, reconnect, then read it back.
-- `record-crud`: insert two records, update one, then list all.
-- `second-chat-tools`: two chats on one page both read the seeded note.
-- `stale-revision-after-form-edit`: the agent reads Dune, a user marks it done
-  through the page form (a `user_write` step), then the agent sets its pages;
-  the user's edit must survive (a revision conflict the agent recovers from is
-  fine).
-- `tool-version-fresh-chat`: add an optional field to a tool while old records keep
-  working.
-- `undo-layout-change`: change a page layout, then undo it with `restore_version`
-  so the active layout is a copy of v1.
-- `update-layout-from-page-chat`: use `update_layout` to add a list block for the
-  page's records.
+`make eval-list` prints every task per suite with its turn cap. each task's file
+in `evals/tasks/` holds its prompts and checks; read the file for what it tests.
