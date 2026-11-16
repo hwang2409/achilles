@@ -46,6 +46,8 @@ export type ComposerDelivery = {
   edit(draft: string): void;
   submit(): Promise<void>;
   retry(id: number): Promise<void>;
+  /** zeta's transcript shows the prompt sent with this delivery id. */
+  echo(deliveryId: string): void;
   /** Edit a failed message: its text goes back into the box. */
   restore(id: number): void;
   cancel(id?: number): void;
@@ -77,7 +79,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
 
   const deliver = async ({ attempt: sendAttempt, text, steer }: Extract<ComposerEffect, { type: "submit" }>) => {
     try {
-      await attempt(() => current.onSubmit(text, { steer }, () => {}));
+      await attempt(() => current.onSubmit(text, { steer }, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
       apply({ type: "confirm", attempt: sendAttempt });
     } catch (failure) {
       apply({ type: "reject", attempt: sendAttempt, message: errorText(failure) });
@@ -121,6 +123,9 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       const effect = apply({ type: "submit", turnRunning: turnRunning() });
       if (effect?.type === "submit") await deliver(effect);
       await drain();
+    },
+    echo(deliveryId) {
+      apply({ type: "echo", deliveryId });
     },
     async retry(id) {
       apply({ type: "retry", id });
@@ -176,6 +181,24 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
   useLayoutEffect(() => {
     owner.sync(options.state, options.defaultValue);
   }, [owner, options.defaultValue, options.state]);
+  // zeta echoes an accepted prompt before it answers the send: the transcript shows it, so its row goes (a queued steer
+  // stays: the transcript hides it until delivery settles)
+  const echoWanted = model.send?.echoed === false && !model.send.steer ? model.send.deliveryId : undefined;
+  useEffect(() => {
+    if (!echoWanted) return;
+    const check = () => {
+      const { outline } = store.getState();
+      for (let index = outline.length - 1; index >= 0; index -= 1) {
+        const item = store.getItem(outline[index]!.id);
+        if (item?.type !== "user") continue;
+        // the newest prompt is the only candidate
+        if (item.event.type === "user_message" && item.event.delivery_id === echoWanted && item.event.mode === "send") owner.echo(echoWanted);
+        return;
+      }
+    };
+    check();
+    return store.subscribe(check);
+  }, [owner, store, echoWanted]);
   const { sending, queued, failed } = composerActivity(model);
   useEffect(() => options.onActivity?.({ sending, queued, failed }), [options.onActivity, sending, queued, failed]);
   useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false }), [options.onActivity]);

@@ -1,12 +1,13 @@
-import { inFlight, type ComposerModel } from "./composer-machine";
+import { inFlight, shownQueue, type ComposerModel } from "./composer-machine";
 
 /** Submitted messages, in send order: the in-flight one first ("sending", or "next step" for a steer), then "queued"; a failed one has retry, edit, and cancel. */
 export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model: ComposerModel; onRetry: (id: number) => void; onRestore: (id: number) => void; onCancel: (id: number) => void }) {
-  if (!model.queue.length) return null;
+  const rows = shownQueue(model);
+  if (!rows.length) return null;
   const current = inFlight(model);
   return (
     <ol data-part="composer-queue" aria-label="submitted messages">
-      {model.queue.map((item) => {
+      {rows.map((item) => {
         const sending = item === current;
         const preview = item.text.length > 40 ? `${item.text.slice(0, 40)}…` : item.text;
         const label = item.failed ? (item.tries ?? 1) > 1 ? `not sent · ${item.tries} tries` : "not sent" : sending ? model.send?.steer ? "next step" : "sending" : "queued";

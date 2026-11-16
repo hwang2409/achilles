@@ -3,7 +3,8 @@ import type { ComposerState } from "@fulcrum/react";
 export type ComposerError = { kind: "submit" | "stop"; text: string };
 /** A submitted message. It left the box on Enter and goes out in order; `tries` counts failed sends. */
 export type QueuedMessage = { id: number; text: string; failed?: string; tries?: number };
-type Send = { attempt: number; id: number; steer: boolean };
+/** `deliveryId` is tracked once the request goes out; `echoed` once zeta's transcript shows that prompt */
+type Send = { attempt: number; id: number; steer: boolean; deliveryId?: string; echoed?: boolean };
 
 /** shortcut: a fixed cap keeps a stuck chat from collecting messages without end; make it a setting if anyone hits it */
 export const QUEUE_LIMIT = 20;
@@ -33,6 +34,8 @@ export type ComposerEvent =
   | { type: "edit"; draft: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "next"; turnRunning: boolean }
+  | { type: "track"; attempt: number; deliveryId: string }
+  | { type: "echo"; deliveryId: string }
   | { type: "confirm"; attempt: number }
   | { type: "reject"; attempt: number; message: string }
   | { type: "settle"; attempt: number }
@@ -61,6 +64,9 @@ export function submitAction(model: ComposerModel): "send" | "queue" | null {
 
 /** The in-flight message, if any. */
 export const inFlight = (model: ComposerModel) => model.sending ? model.queue.find((item) => item.id === model.send?.id) : undefined;
+
+/** The rows to show: the in-flight message leaves the list once the transcript shows it, so it never shows twice. */
+export const shownQueue = (model: ComposerModel) => model.send?.echoed ? model.queue.filter((item) => item !== inFlight(model)) : model.queue;
 
 /** The one status line both composers show, and its tone. */
 export function composerStatus(model: ComposerModel): { text: string; tone?: "danger" | "busy" } {
@@ -108,6 +114,12 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     }
     case "next":
       return next(model, event.turnRunning);
+    case "track":
+      if (model.send?.attempt !== event.attempt) return { model };
+      return { model: { ...model, send: { ...model.send, deliveryId: event.deliveryId, echoed: false } } };
+    case "echo":
+      if (!model.send || model.send.deliveryId !== event.deliveryId) return { model };
+      return { model: { ...model, send: { ...model.send, echoed: true } } };
     case "confirm":
       if (model.send?.attempt !== event.attempt) return { model };
       return { model: { ...model, queue: model.queue.filter((item) => item.id !== model.send!.id), send: undefined } };
