@@ -22,10 +22,12 @@ import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
+import { CodeFence } from "./chat/CodeFence";
+import "./chat/markdown.css";
 
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
-const fences: Fences = {};
+const fences: Fences = new Proxy({}, { get: () => CodeFence });
 const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
 const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
