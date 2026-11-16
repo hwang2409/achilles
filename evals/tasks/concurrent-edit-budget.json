@@ -17,7 +17,7 @@
       "kind": "prompt",
       "page": "projects",
       "chat": "projects-chat",
-      "prompt": "add 50 to the budget of every active project. I approve each write one by one",
+      "prompt": "add 50 to the budget of every active project",
       "during": {
         "tool": "achilles__update_project",
         "nth": 1,
