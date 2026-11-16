@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { wrapTab } from "../keyboard";
+import { layoutSummary } from "./layoutSummary";
 import "../settings-dialog.css";
 
-type LayoutVersion = { version: number; created_at: string; block_types: string[]; active: boolean; action: string | null; restored_from: number | null };
+type LayoutVersion = { version: number; created_at: string; block_types: string[]; summary: string | null; active: boolean; action: string | null; restored_from: number | null };
 type ToolVersion = { name: string; version: number; created_at: string; active: boolean; restored_from: number | null };
 type Versions = { layout: LayoutVersion[]; tools: ToolVersion[] };
 
@@ -22,6 +23,8 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   const [pending, setPending] = useState<string | null>(null);
   const refocus = useRef<string | null>(null);
   const auth = { Authorization: `Bearer ${credential}` };
+  // a touch device has no Esc key, so the close control reads "close" there and keeps the "esc" hint on a keyboard
+  const touchOnly = window.matchMedia("(any-pointer: coarse)").matches;
   useLayoutEffect(() => {
     const node = dialog.current;
     node?.showModal();
@@ -89,7 +92,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
     onKeyDown={(event) => wrapTab(event, event.currentTarget)}
   >
     <div className="settings-panel">
-      <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="history-title">history</h2></div><div><span>restore adds a new version</span><button type="button" onClick={onClose}>esc</button></div></div>
+      <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="history-title">history</h2></div><div><span>restore adds a new version</span><button type="button" onClick={onClose}>{touchOnly ? "close" : "esc"}</button></div></div>
       <div className="settings-content">
         <p ref={noteRef} tabIndex={-1} className={note?.error ? "history-note history-error" : "history-note"} role={note?.error ? "alert" : "status"}>{note?.text ?? (versions ? "" : "loading history…")}</p>
         {versions && <>
@@ -102,7 +105,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
                 if (pending === key) return confirmRow(key, row.version, "layout", () => void restore("layout", `/api/pages/${pageId}/layout/restore`, row.version, activeLayout!));
                 return <li key={row.version} data-row={key}>
                   <span className="history-version">v{row.version}</span>
-                  <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}{row.block_types.join(", ") || "no blocks"}</span>
+                  <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}{layoutSummary(row.block_types.length, row.summary)}</span>
                   <time dateTime={row.created_at}>{when(row.created_at)}</time>
                   {button(key, row, !createMode)}
                 </li>;
