@@ -251,10 +251,14 @@ def build_mcp(store: PageStore):
             if page["create_mode"]
             else "use it to answer questions about the page; this chat cannot change the page"
         )
+        create_status = "ON" if page["create_mode"] else "OFF"
         tools: list[Tool] = [
             Tool(
                 name="inspect_page",
                 description=(
+                    f"this chat is on the page at route {page['route']!r} "
+                    f"(title {page['title']!r}); create mode is currently {create_status} "
+                    "for this chat. "
                     "read-only: this page's route, title, layout blocks, record counts, "
                     "tools, metric_values and detail_filter_matches (by block index), and "
                     "pages it created. "
