@@ -449,10 +449,7 @@ describe("active chat attachment", () => {
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(storage);
     const attempt = async () => {
-      const api = creation as unknown as { ensure?: typeof creation.ensure; create?: (value: ChatCreationInput) => Promise<{ sessionId: string }> };
-      if (api.ensure) return attachPage(client as never, "home", null, owner, creation, owner.begin("attempt", true), true);
-      const created = await api.create!(input(client, true));
-      return attachPage(client as never, "home", created.sessionId, owner, creation, owner.begin("attempt", true));
+      return attachPage(client as never, "home", null, owner, creation, owner.begin("attempt", true), true);
     };
     try {
       await attempt().catch(() => {});
@@ -478,7 +475,7 @@ describe("active chat attachment", () => {
     const creation = createChatCreationOwner(storage);
     const client = attachmentClient((method) => { if (method === "resume") throw new Error("forced later attachment failure"); });
     try {
-      await creation.ensure(input(client, true), async (sessionId) => ({ sessionId })).catch(() => {});
+      await creation.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!.catch(() => {});
       expect(creation.status("home").error).toContain("could not save session mapping");
 
       await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true)).catch(() => {});
@@ -667,12 +664,13 @@ describe("chat creation lifecycle", () => {
         try { return await attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish); }
         finally { attachmentOwner.clear(); }
       })
-      : owner.ensure(
-        input(client, true),
-        async (sessionId) => { await step("attach"); attaches += 1; return { sessionId }; },
-        applyMode,
-        publish,
-      )!;
+      : owner.ensure({
+        input: input(client, true),
+        current: () => true,
+        attach: async (sessionId) => { await step("attach"); attaches += 1; return { sessionId }; },
+        applyCreateMode: applyMode,
+        publishReady: publish,
+      })!;
     if (reopen) {
       const reopened = await withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true)));
       attachmentOwner.clear();

@@ -4,7 +4,6 @@ import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
-import { chatQueues } from "./composer/chatQueues";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
@@ -195,19 +194,12 @@ export async function attachPage(
 
     const mappingInput = forceNew ? creationInput : { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
     try {
-      const ready = await creation.ensure(
-        mappingInput,
-        attachSession,
-        applyCreateMode,
-        publishReady,
-        create,
-        () => owner.current(token),
-      );
+      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create });
       if (!ready) return { phase: "empty", page, serverApprovalMode, credential };
       return ready as ReadyState;
     } catch (caught) {
       // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
-      // this runs at most once: the record is gone, and a newer create for this page would make this token stale
+      // bounded: each re-run follows one stopped create, and a stale attachment can no longer start one
       if (caught instanceof StaleCreation) { if (!owner.current(token)) throw caught; return attachPage(client, key, selectedId, owner, creation, token, create, applyCreateMode, publishReady, forceNew); }
       if (caught instanceof ChatBusyError) return busy(caught.sessionId);
       if (errorCode(caught) === TURN_RUNNING && !creation.status(page.id).pending) return busy(await runningSession(client));
@@ -590,7 +582,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
       if (modeToggle.current.stale()?.sessionId === attached.sessionId) { // clear the composer draft only when it was the sent text; a starter button must not erase typed text
         draftStore.set(attached.sessionId, text); if (draftStore.get(`new:${empty.page.id}`) === text) draftStore.set(`new:${empty.page.id}`, ""); }
-      chatQueues.created(`new:${empty.page.id}`, attached.sessionId); // before the chat renders, so its composer takes the new-chat queue
       publishReady(attached, token, true, focusClaim.owns(), false);
       return attached;
     } finally {

@@ -13,9 +13,9 @@ const owners = new Map<string, ComposerDelivery>();
 const createdChats = new Map<string, string>();
 
 export const chatQueues = {
-  /** The first send of the page's new-chat composer `newChat` created `chat`. */
+  /** The page now opens `chat` in place of its new-chat composer `newChat`: the queue of `newChat` (if any) goes with it. */
   created(newChat: string, chat: string) {
-    createdChats.set(newChat, chat);
+    if (owners.has(newChat)) createdChats.set(newChat, chat);
   },
   /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
    * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
@@ -39,15 +39,16 @@ export const chatQueues = {
   },
   /** Runs after each commit, and when a send of a chat with no composer ends. Drops owners with no composer and nothing to send. A page's new-chat owner whose
    * chat did not take it (it was not on screen when the chat was created) puts its unsent texts back into
-   * that page's new-chat box, unsent, once its send in flight has ended. */
+   * the box of the chat the page opens now (the created chat, else the new-chat box), unsent, once its send in flight has ended. */
   settle() {
     for (const [chat, owner] of owners) {
       const { queue, sending } = owner.getModel();
       if (owner.attached() || sending) continue;
       if (queue.length && !chat.startsWith("new:")) continue;
+      const box = createdChats.get(chat) ?? chat;
       owners.delete(chat);
       createdChats.delete(chat);
-      if (queue.length) draftStore.set(chat, [draftStore.get(chat), ...queue.map((item) => item.text)].filter((text) => text.trim()).join("\n\n"));
+      if (queue.length) draftStore.set(box, [draftStore.get(box), ...queue.map((item) => item.text)].filter((text) => text.trim()).join("\n\n"));
     }
   },
 };
