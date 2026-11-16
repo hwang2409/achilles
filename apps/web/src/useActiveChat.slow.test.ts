@@ -182,7 +182,8 @@ async function refreshFailureHarness(failures: number) {
     features: ["session_mcp_bindings", "session_replay_seq", "mcp_refresh_tools"],
     request: async (method: string) => {
       requests.push(method);
-      if (method === "new_session") { state.created = true; return { session: { session_id: "fresh" } }; }
+      // the first chat is "fresh"; a later "new chat" makes "second"
+      if (method === "new_session") { const id = state.created ? "second" : "fresh"; state.created = true; return { session: { session_id: id } }; }
       if (method === "resume") return { session: { name: null } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
@@ -271,6 +272,21 @@ test("a failed tool refresh on the new chat button keeps its notice across the c
   expect([active.toggleError, active.toggleBlocked]).toEqual([null, false]);
   expect(active.state).toMatchObject({ phase: "ready", page: { create_mode: true } });
   expect(requests.filter((method) => method === "mcp_refresh_tools")).toHaveLength(2);
+});
+
+test("new chat during the first turn of a just-made chat stays on the new chat when that turn ends", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const harness = await refreshFailureHarness(0);
+  harness.lastRefresh.resolve();
+  await act(async () => { await harness.active.send("make a reading list", { steer: false }, () => {}); });
+  expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+  await act(async () => { harness.active.recordLastState("running"); });
+  await act(async () => { await harness.active.newChat(); });
+  await flushUntil(() => harness.active.selectedId === "second");
+  // the first chat's turn ends after the user left it: it must not take the view back
+  await act(async () => { harness.active.recordLastState("idle"); });
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  expect(harness.active.selectedId).toBe("second");
 });
 
 test("a page refresh keeps the header create mode while the tool refresh still fails", async () => {
