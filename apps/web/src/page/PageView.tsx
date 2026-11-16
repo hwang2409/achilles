@@ -57,8 +57,9 @@ function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<
     }).catch(() => { if (live) setValue("—"); });
     return () => { live = false; };
   }, [block.collection, block.count, block.where, credential, pageId, refreshKey]);
-  const status = String(block.status ?? block.label ?? "").toLowerCase();
-  return <section className="metric-block"><span className={`record-mark record-mark-${status}`} aria-hidden="true" /><div><span className="metric-label">{String(block.label)}</span><strong className={block.warn ? "metric-warn" : undefined}>{value}</strong>{block.detail != null && <small>{String(block.detail)}</small>}</div>{block.delta != null && <span className="metric-delta">{String(block.delta)}</span>}</section>;
+  const label = String(block.label);
+  const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
+  return <section className="metric-block">{status && <span className={`record-mark record-mark-${status}`} aria-hidden="true" />}<div><span className="metric-label">{label}</span><strong className={block.warn ? "metric-warn" : undefined}>{value}</strong>{block.detail != null && <small>{String(block.detail)}</small>}</div>{block.delta != null && <span className="metric-delta">{String(block.delta)}</span>}</section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {

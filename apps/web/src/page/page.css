@@ -11,7 +11,7 @@
 .metric-block + .metric-block { border-left: 1px solid var(--fulcrum-border); }
 .metric-block > div { min-width: 0; display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
-.metric-block strong { min-width: 0; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.metric-block strong { min-width: 0; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .metric-block small, .metric-delta { color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-delta { margin-left: auto; align-self: center; white-space: nowrap; }
 .metric-warn { color: var(--fulcrum-warn); }
@@ -26,10 +26,10 @@
 .record-list table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; line-height: 20px; }
 .record-list th { height: 32px; padding: 0 8px; color: var(--fulcrum-muted); text-align: left; font-size: 12px; font-weight: 400; white-space: nowrap; }
 .record-list th:last-child { text-align: right; }
-.record-list th:first-child, .record-list td:first-child { width: 45%; }
-.record-list th:nth-child(2), .record-list td:nth-child(2) { width: 28%; }
-.record-list th:nth-child(3), .record-list td:nth-child(3) { width: 17%; }
-.record-list th:nth-child(4), .record-list td:nth-child(4) { width: 10%; }
+.record-list th:first-child, .record-list td:first-child { width: 43%; }
+.record-list th:nth-child(2), .record-list td:nth-child(2) { width: 27%; }
+.record-list th:nth-child(3), .record-list td:nth-child(3) { width: 18%; }
+.record-list th:nth-child(4), .record-list td:nth-child(4) { width: 12%; }
 .record-list td { height: 40px; min-width: 0; overflow: hidden; padding: 0 8px; border-top: 1px solid var(--fulcrum-border); white-space: nowrap; text-overflow: ellipsis; }
 .record-list td:first-child, .record-list th:first-child { padding-left: 12px; }
 .record-list td:not(:first-child) { color: var(--fulcrum-muted); }
