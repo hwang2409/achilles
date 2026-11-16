@@ -97,7 +97,7 @@
 }
 @media (max-width: 760px), (max-height: 500px) {
   .chat-header { padding-left: 64px; padding-right: 12px; }
-  .transcript [data-part="timeline"] { padding: 14px 0 8px; }
-  .transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: calc(100% - 24px); }
+  .transcript [data-part="timeline"] { padding: 14px 12px 8px; }
+  .transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: 100%; }
   .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: 12px; }
 }
