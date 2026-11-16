@@ -199,6 +199,8 @@ export function App() {
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
     if (!store || !scroll) return;
+    // fulcrum's scroll box takes no focus, and webkit never focuses a scroller by itself: ArrowUp/PageUp could not scroll it
+    scroll.tabIndex = 0; scroll.setAttribute("role", "region"); scroll.setAttribute("aria-label", "transcript");
     return watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
   }, [store, transcript]);
   const lastState = activeLastState(waiting, outcome, turn);

@@ -54,6 +54,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
 .chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
+.transcript [data-part="timeline-scroll"]:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .chat-row.current strong { font-weight: 700; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }

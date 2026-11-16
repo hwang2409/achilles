@@ -4,6 +4,8 @@ import { applyApprovalMode, pageBinding } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
 const MODE_STORAGE_KEY = "achilles-pending-create-modes";
+/** page -> the first message whose create is running: a page load that ends the old page's send puts it in a box again */
+const TEXT_STORAGE_KEY = "achilles-pending-create-texts";
 const stages = ["created", "registered", "approvalApplied", "mapped", "attached", "modeApplied"] as const;
 type Stage = typeof stages[number];
 
@@ -16,6 +18,8 @@ type AttachedChat = { sessionId: string };
  * every step (new_session, register, settings, mapping, attach, create mode) and stops a stale create for good.
  * `create: false` only finishes the page's pending create. The page's new-chat queue (`new:<page>`) moves to the chat
  * that the page opens afterwards: the created chat, or the chat a stale create already mapped as home.
+ * `text`: the first message. It stays in storage until the create ends; a later page load that finishes or drops the
+ * create (the old page's send died) puts it, unsent, into the box of the chat the page opens.
  */
 export type CreateRequest<T extends AttachedChat> = {
   input: ChatCreationInput;
@@ -24,6 +28,7 @@ export type CreateRequest<T extends AttachedChat> = {
   applyCreateMode?: (attached: T, enabled: boolean) => Promise<T>;
   publishReady?: (attached: T) => Promise<void> | void;
   create?: boolean;
+  text?: string;
 };
 /** The page no longer shows what started this create (another chat opened): it stopped before touching zeta again and forgot its record. */
 export class StaleCreation extends Error { constructor() { super("another chat opened before this chat was created, so the message was not sent"); } }
@@ -55,18 +60,21 @@ function writeRecords(storage: Storage, records: PendingChat[]) {
   else storage.removeItem?.(STORAGE_KEY);
 }
 
-function readModes(storage: Storage): Record<string, boolean> {
+function readMap<T extends "boolean" | "string">(storage: Storage, key: string, type: T): Record<string, T extends "boolean" ? boolean : string> {
   try {
-    const parsed = JSON.parse(storage.getItem(MODE_STORAGE_KEY) ?? "{}") as unknown;
+    const parsed = JSON.parse(storage.getItem(key) ?? "{}") as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"));
+    return Object.fromEntries(Object.entries(parsed).filter((entry) => typeof entry[1] === type));
   } catch { return {}; }
 }
 
-function writeModes(storage: Storage, modes: Record<string, boolean>) {
-  if (Object.keys(modes).length) storage.setItem(MODE_STORAGE_KEY, JSON.stringify(modes));
-  else storage.removeItem?.(MODE_STORAGE_KEY);
+function writeMap(storage: Storage, key: string, map: Record<string, unknown>) {
+  if (Object.keys(map).length) storage.setItem(key, JSON.stringify(map));
+  else storage.removeItem?.(key);
 }
+
+const readModes = (storage: Storage) => readMap(storage, MODE_STORAGE_KEY, "boolean");
+const writeModes = (storage: Storage, modes: Record<string, boolean>) => writeMap(storage, MODE_STORAGE_KEY, modes);
 
 export function createChatCreationOwner(storage: Storage = localStorage, request: Fetch = fetch) {
   const running = new Map<string, Promise<AttachedChat>>();
@@ -98,8 +106,24 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
   };
 
   const forget = (pageId: string) => { clearDurable(pageId); complete(pageId); };
+  const dropText = (pageId: string) => {
+    const texts = readMap(storage, TEXT_STORAGE_KEY, "string");
+    if (!Object.hasOwn(texts, pageId)) return;
+    delete texts[pageId]; writeMap(storage, TEXT_STORAGE_KEY, texts);
+  };
+  /** pages whose kept first message this page load sent into its create: it still holds that message (a queue row or a starter send) */
+  const started = new Set<string>();
+  /** The page opens `chat` (or its new-chat box): the kept first message of an earlier page load goes there. One that this
+   * page load holds stays kept until `sent` when `keep`, else this create will not send it and its holder puts it back. */
+  const handOff = (pageId: string, chat: string, keep: boolean) => {
+    const text = readMap(storage, TEXT_STORAGE_KEY, "string")[pageId];
+    if (text === undefined) return;
+    if (!started.has(pageId)) chatQueues.restore(`new:${pageId}`, chat, text);
+    else if (keep) return;
+    started.delete(pageId); dropText(pageId);
+  };
 
-  const ensure = <T extends AttachedChat>({ input, current, attach, applyCreateMode, publishReady = () => {}, create = true }: CreateRequest<T>): Promise<T> | null => {
+  const ensure = <T extends AttachedChat>({ input, current, attach, applyCreateMode, publishReady = () => {}, create = true, text }: CreateRequest<T>): Promise<T> | null => {
     const active = running.get(input.pageId);
     if (active) return active as Promise<T>;
     const existing = pending(input.pageId);
@@ -112,6 +136,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       // the home mapping already names this chat, so the page opens it now: its unsent first message goes there
       const opens = pending(input.pageId)?.mappedSessionId;
       if (opens) chatQueues.created(`new:${input.pageId}`, opens);
+      handOff(input.pageId, opens ?? `new:${input.pageId}`, false);
       forget(input.pageId);
       throw new StaleCreation();
     };
@@ -119,6 +144,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     const operation = (async () => {
       let record = existing;
       if (!record) {
+        if (text) { writeMap(storage, TEXT_STORAGE_KEY, { ...readMap(storage, TEXT_STORAGE_KEY, "string"), [input.pageId]: text }); started.add(input.pageId); }
         const result = await step(() => input.client.request("new_session", pageBinding(input.credential, input.cwd))) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
@@ -162,6 +188,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       }
       clearDurable(input.pageId);
       chatQueues.created(`new:${input.pageId}`, attached.sessionId); // before the chat renders, so its composer takes the new-chat queue
+      handOff(input.pageId, attached.sessionId, true);
       await publishReady(attached);
       complete(input.pageId);
       return attached;
@@ -190,7 +217,16 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     },
     ensure,
     /** Drop the page's failed create, so the page opens on its empty state with the new-chat draft. */
-    discard(pageId: string) { if (!running.has(pageId)) forget(pageId); },
+    discard(pageId: string) { if (!running.has(pageId)) { handOff(pageId, `new:${pageId}`, false); forget(pageId); } },
+    /** The page opens `chat` (default: its new-chat box) with no create pending. A first message kept by an earlier page
+     * load (it loaded again during new_session, or after the create but before zeta took the send) goes into that box,
+     * unsent; `delivered`: the chat's transcript already has a user message, so zeta took it and it is dropped. */
+    restoreUnsent(pageId: string, chat = `new:${pageId}`, delivered = false) {
+      if (running.has(pageId) || pending(pageId)) return;
+      if (delivered) dropText(pageId); else handOff(pageId, chat, true);
+    },
+    /** zeta took a message of this page's chat: a kept first message is sent */
+    sent(pageId: string) { started.delete(pageId); dropText(pageId); },
   };
 }
 
