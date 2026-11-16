@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { approvalDecision, classifyTaskSupport, createDecisionQueue, finalAnswer, insertForms, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { approvalDecision, classifyTaskSupport, createDecisionQueue, finalAnswer, insertForms, parseHistory, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
 import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
@@ -263,6 +263,13 @@ test("each step's answer is the last assistant text of its own turn", () => {
   expect(finalAnswer(history, 0)).toBe("first answer");
   expect(finalAnswer(history, 1)).toBe("3 are done");
   expect(finalAnswer([{ role: "user", content: [] }, { role: "assistant", content: [{ type: "tool_use" }] }, end], 0)).toBeUndefined();
+});
+
+test("parseHistory tags each result with the step whose turn made it", () => {
+  const call = (id: string) => [{ role: "assistant", content: [{ type: "tool_use", tool_call: { id, name: "achilles__create_tool" } }] }, { role: "tool_result", tool_result: { tool_call_id: id, content: "{}" } }];
+  const rows = [{ role: "user", content: [] }, ...call("t1"), { event: "served_turn_end" }, { role: "user", content: [] }, ...call("t2")];
+  const { results } = parseHistory([{ chat: "c", page_id: "p", rows, starts: [{ step: "build", from: 0 }, { step: "add-action", from: 4 }] }]);
+  expect(results.map(row => [row.call_id, row.step])).toEqual([["t1", "build"], ["t2", "add-action"]]);
 });
 
 test("insertForms finds the active insert tool behind each form block, in render order", () => {

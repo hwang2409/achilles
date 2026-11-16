@@ -222,7 +222,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
     own(value, ["field", "agent_value"], `checks[${i}].value`);
   }
   if (check.type === "error_shown" && (!Number.isInteger(check.value) || (check.value as number) < 400 || (check.value as number) > 599)) throw new Error(`checks[${i}] needs the HTTP status the chat must show`);
-  if (check.step !== undefined && !["answer_mentions", "answer_excludes", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept", "delivered_once"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
+  if (check.step !== undefined && !["successful_result", "answer_mentions", "answer_excludes", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept", "delivered_once"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
   if ((check.type === "reload" || check.type === "new_chat_kept" || check.type === "delivered_once") && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
   if (check.type === "no_duplicate_writes" && (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || (check.collection === undefined) !== (check.fields === undefined))) throw new Error(`checks[${i}] needs an achilles tool, and a collection with fields or neither`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
@@ -378,7 +378,7 @@ export function validateTask(value: unknown): EvalTask {
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt, task.approval_mode as EvalTask["approval_mode"]); const checks = validateChecks(task.checks, aliases);
   validateBrowserSteps(steps, page_plan);
   if (task.backend !== "scripted" && steps.some(step => step.provider_error)) throw new Error('a provider_error step runs only on the scripted provider; set backend: "scripted"');
-  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (check.type !== "reload" || step.reload) && (check.type !== "new_chat_kept" || step.new_chat) && (check.type !== "delivered_once" || step.delivery_fault))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : check.type === "new_chat_kept" ? "new_chat" : "prompt"} step on page ${check.page}`);
+  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (!check.chat || step.chat === check.chat) && (check.type !== "reload" || step.reload) && (check.type !== "new_chat_kept" || step.new_chat) && (check.type !== "delivered_once" || step.delivery_fault))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : check.type === "new_chat_kept" ? "new_chat" : "prompt"} step on page ${check.page}`);
   for (const check of checks.filter(check => check.type === "overwrite_disclosed")) {
     const { field, agent_value } = check.value as { field: string; agent_value: string | number }; const step = steps.find(item => item.id === check.step);
     if (!step?.during?.user_write || !(field in step.during.user_write.arguments)) throw new Error(`check ${check.id} needs step ${check.step} to have a during user_write that sets ${field}`);
@@ -732,7 +732,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   },
   successful_result: ({ check, snapshot, page }) => rows(snapshot, "results").some(row => {
     const actual = row.data ?? row.result; const expected = check.value;
-    return row.page_id === page && successful(row) && row.tool === check.tool && (!check.chat || row.chat_id === check.chat) && (expected === undefined || (valueRows(expected) ? matchValueRows(actual, expected) : structurallyContains(actual, expected)));
+    return row.page_id === page && successful(row) && row.tool === check.tool && (!check.chat || row.chat_id === check.chat) && (!check.step || row.step === check.step) && (expected === undefined || (valueRows(expected) ? matchValueRows(actual, expected) : structurallyContains(actual, expected)));
   }),
   no_error: ({ check, snapshot, page }) => rows(snapshot, "errors").filter(row => row.page_id === page && (!check.chat || row.chat_id === check.chat)).length === 0,
   no_unrecovered_error: ({ check, snapshot, page }) => {

@@ -214,16 +214,17 @@ function toolEnd(event: Record<string, any>) {
   let data: unknown = text; try { data = JSON.parse(text); } catch {}
   return { call, result, data, name: call.name ?? event.data?.name, success: !result.is_error };
 }
-function parseHistory(histories: Array<{ chat: string; page_id: string; rows: any[] }>) {
+// `starts` holds each model step's first history row in this chat, so a result row carries the step that made it
+export function parseHistory(histories: Array<{ chat: string; page_id: string; rows: any[]; starts?: Array<{ step: string; from: number }> }>) {
   const calls: Record<string, unknown>[] = []; const results: Record<string, unknown>[] = []; const errors: Record<string, unknown>[] = []; const failed_turns: Record<string, unknown>[] = [];
   for (const history of histories) {
     const pending = new Map<string, Record<string, unknown>>();
-    for (const row of history.rows) {
+    for (const [index, row] of history.rows.entries()) {
       for (const block of Array.isArray(row.content) ? row.content : []) if (block.type === "tool_use" && block.tool_call?.id) pending.set(block.tool_call.id, block.tool_call);
       if (row.role === "tool_result" && row.tool_result?.tool_call_id) {
         const call = pending.get(row.tool_result.tool_call_id) ?? {}; const text = String(row.tool_result.content ?? ""); let data: unknown = text; try { data = JSON.parse(text); } catch {}
         const common = { call_id: call.id, chat_id: history.chat, page_id: history.page_id, tool: call.name, success: row.tool_result.is_error !== true };
-        calls.push({ ...call, ...common }); results.push({ ...common, data });
+        calls.push({ ...call, ...common }); results.push({ ...common, step: history.starts?.findLast(start => start.from <= index)?.step, data });
         if (row.tool_result.is_error === true) errors.push({ ...(data && typeof data === "object" ? data : {}), ...common, message: text });
       } else if (row.event === "error") errors.push({ ...(row.data ?? {}), chat_id: history.chat, page_id: history.page_id });
       // the row a chat renders as the turn's error, live and after a reload
@@ -454,7 +455,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
   let discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
-  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
+  const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>(); const starts = new Map<string, Array<{ step: string; from: number }>>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
   let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; let restarting: Promise<Error | undefined> | undefined; const interjections: Array<Record<string, unknown>> = [];
@@ -519,6 +520,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       signal.throwIfAborted(); if (fatal) throw fatal; if (turns >= task.agent_turns && step.kind !== "reconnect" && step.kind !== "user_write") throw new TurnCapFailure("task model turn limit has no remaining turn");
       if (step.kind === "reconnect") { const session = sessions.get(step.chat); if (!session) throw new Error(`cannot reconnect missing chat ${step.chat}`); const before = await protocol.sessionHistory(session.id); await protocol.close(); protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal }); const resumed = await protocol.resume(session.id, session.binding!); reconnects.push({ page_id: session.page_id, chat: step.chat, original_session_id: session.id, resumed_session_id: String(resumed.session?.session_id ?? resumed.session_id ?? ""), pre_history_ids: before.map((row: any) => row.id).filter(Boolean) }); continue; }
       if (step.kind === "user_write") { const write = await userWrite(stack, step, pages.get(step.page), hidden, signal); userWrites.push(write); if (!write.ok || write.revision_after !== Number(write.revision_before) + 1) throw new Error(`user write ${step.id} failed (${write.status})`); continue; }
+      starts.set(step.chat, [...starts.get(step.chat) ?? [], { step: step.id, from: histories.get(step.chat)?.length ?? 0 }]);
       if (browser && step.kind === "browser_prompt") {
         const pageId = pages.get(step.page)!; const route = String(initial.pages?.find(page => page.id === pageId)?.route ?? "/"); approvalRule = step.approval; ruleRequests = 0;
         const turn = await browser.prompt(step, pageId, route, id => sessions.set(step.chat, { id, alias: step.page, page_id: pageId }), onEvent);
@@ -527,7 +529,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
       const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; currentStep = step; duringRequests = 0; steered = undefined; restarting = undefined; armProviderError(step.provider_error); try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(() => protocol, session.id, prior, () => fatal, signal, () => steered, () => restarting); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, steered ? terminal.count - 1 : prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
-    const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
+    const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows, starts: starts.get(chat) })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
     for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) { const pageId = pageIdFromResults(tools.results, plan); if (pageId) pages.set(plan.alias, pageId); }
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
@@ -542,7 +544,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
-    const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
+    const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows, starts: starts.get(chat) })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack).catch(() => ({} as EvalSnapshot));
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }

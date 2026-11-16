@@ -49,6 +49,7 @@
       "type": "successful_result",
       "page": "home",
       "chat": "home-chat",
+      "step": "add-action",
       "tool": "achilles__create_tool"
     },
     {

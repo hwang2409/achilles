@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import createToolTaskJson from "../evals/tasks/create-tool-on-new-page.json";
 import { type EvalSnapshot, expectationTokens, gradeCheck, gradeReference, gradeTask, mentions, structurallyContains, validateTask } from "./eval-grade";
 import countTaskJson from "../evals/tasks/count-question.json";
 import judgeTaskJson from "../evals/tasks/judge-page-and-annotate.json";
@@ -185,6 +186,18 @@ test("structured outcomes cannot pass on unrelated text", () => {
   expect(gradeCheck(check, { pages, results: [{ page_id: "p1", tool: "achilles__add_annotation", success: true, data: { note: "run-002 was bad" } }] }).pass).toBe(false);
   expect(gradeCheck(check, { pages, results: [{ page_id: "p1", tool: "achilles__add_annotation", success: true, data: { run_id: "run-002", verdict: "bad" } }] }).pass).toBe(true);
   expect(structurallyContains({ records: [{ run_id: "run-002", verdict: "bad", extra: 1 }] }, { run_id: "run-002", verdict: "bad" })).toBe(true);
+});
+
+test("successful_result with step counts only a call made in that step", () => {
+  const task = validateTask(createToolTaskJson); const check = task.checks.find(check => check.id === "home-created-tool")!;
+  expect(check.step).toBe("add-action");
+  const pages = [{ id: "p1", alias: "home" }];
+  const result = (step: string) => ({ page_id: "p1", chat_id: "home-chat", step, tool: "achilles__create_tool", success: true, data: { name: "update_expense" } });
+  expect(gradeCheck(check, { pages, results: [result("add-action")] }).pass).toBe(true);
+  expect(gradeCheck(check, { pages, results: [result("build")] }).pass).toBe(false);
+  const steps = (checks: unknown[]) => validateTask({ ...createToolTaskJson, checks });
+  expect(() => steps([{ ...check, step: "missing" }])).toThrow("names step missing");
+  expect(() => steps([{ ...check, step: "use-action" }])).toThrow("names step use-action");
 });
 
 const judgeDetailCheck = validateTask(judgeTaskJson).checks.find(check => check.id === "detail-layout")!;
