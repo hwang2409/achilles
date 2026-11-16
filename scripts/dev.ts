@@ -128,10 +128,14 @@ async function backupOnce(file: string) {
   try { output = await open(backup, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600); } catch (error: any) { if (error.code === "EEXIST") return; throw error; }
   try { await output.writeFile(await readFile(file)); await output.sync(); } finally { await output.close(); }
 }
+export function zetaExecutable(): string {
+  return process.env.ACHILLES_USE_PATH_ZETA === "1" ? "zeta" : resolve(root, ".cache/zeta/.venv/bin/zeta");
+}
+
 async function ensureMcp(url: string) {
   const file = resolve(home, "mcp.json");
   let current: McpConfig | null = null;
-  const shown = Bun.spawnSync(["zeta", "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: { ...process.env, PWD: home } });
+  const shown = Bun.spawnSync([zetaExecutable(), "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: { ...process.env, PWD: home } });
   if (shown.exitCode === 0) {
     try { current = JSON.parse(shown.stdout.toString()).config; } catch { throw new Error("zeta mcp show returned invalid JSON"); }
   } else if (!`${shown.stdout.toString()}${shown.stderr.toString()}`.includes("unknown MCP server: achilles")) {
@@ -141,7 +145,7 @@ async function ensureMcp(url: string) {
   if (decision.kind === "unchanged") { console.log("mcp.json: unchanged"); return; }
   if (decision.kind === "different") throw new Error(`mcp.json: achilles differs; fix it with: ${decision.command}`);
   await mkdir(dirname(file), { recursive: true }); await backupOnce(file);
-  run(["zeta", "mcp", "add", "--scope", "user", "--url", url, "achilles"], home);
+  run([zetaExecutable(), "mcp", "add", "--scope", "user", "--url", url, "achilles"], home);
   console.log("mcp.json: changed");
 }
 async function tail(path: string) {
@@ -181,7 +185,7 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string): Pro
   const runDir = dirname(discovery); await mkdir(runDir, { recursive: true, mode: 0o700 }); await chmod(runDir, 0o700);
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
   const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
-  const args = ["zeta", "serve", "--port", String(control), "--ws", String(ws), "--ws-discovery", discovery, "--ws-origin", requestedOrigin, "--ws-origin", alternate];
+  const args = [zetaExecutable(), "serve", "--port", String(control), "--ws", String(ws), "--ws-discovery", discovery, "--ws-origin", requestedOrigin, "--ws-origin", alternate];
   const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: { ...process.env, PWD: home }, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
@@ -232,9 +236,15 @@ async function startAchilles(appOrigin: string, stamp: string) {
   await writeFile(resolve(cache, "achilles.json"), JSON.stringify({ ...identity, stamp })); child.unref();
   console.log(`achilles is ready at ${appOrigin}`);
 }
-async function zetaInstallCommand() {
+async function ensurePinnedZeta() {
+  const checkout = resolve(root, ".cache/zeta");
   const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
-  return `git clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${shellQuote(pin)} && uv tool install --editable .cache/zeta`;
+  if (!existsSync(resolve(checkout, ".git"))) {
+    await mkdir(dirname(checkout), { recursive: true });
+    run(["git", "clone", "https://github.com/hwang2409/zeta", checkout]);
+  }
+  run(["git", "-C", checkout, "checkout", "--detach", pin]);
+  run(["uv", "sync", "--project", checkout, "--frozen"]);
 }
 async function zetaCheckout(): Promise<string | null> {
   const listed = Bun.spawnSync(["uv", "tool", "list", "--show-paths"]);
@@ -245,20 +255,15 @@ async function zetaCheckout(): Promise<string | null> {
     return receipt.match(/(?:editable|(?<!install-)path) = "([^"]+)"/)?.[1] ?? null;
   } catch { return null; }
 }
-async function zetaUpgradeCommand() {
-  const checkout = await zetaCheckout();
-  if (checkout) return `git -C ${shellQuote(checkout)} pull --ff-only`;
-  return "uv tool upgrade zeta";
+export function zetaRemediationMessage(pin: string): string {
+  return `your zeta is older than zeta.rev ${pin}; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one`;
 }
-export type ZetaRevision = { kind: "ok" } | { kind: "behind"; command: string } | { kind: "unknown"; reason: string };
+export type ZetaRevision = { kind: "ok" } | { kind: "behind"; message: string } | { kind: "unknown"; reason: string };
 export function zetaRevisionDecision(pin: string, checkout: string | null, headKnown: boolean, pinIsAncestor: boolean): ZetaRevision {
   if (!checkout) return { kind: "unknown", reason: "zeta is not installed from a git checkout" };
   if (!headKnown) return { kind: "unknown", reason: `the installed zeta at ${checkout} is not a git checkout` };
   if (pinIsAncestor) return { kind: "ok" };
-  return {
-    kind: "behind",
-    command: `create a separate pinned checkout at .cache/zeta (leave ${shellQuote(checkout)} unchanged):\ngit clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${pin} && uv tool install --editable .cache/zeta\nPATH="$(uv tool dir --bin):$PATH" make dev`,
-  };
+  return { kind: "behind", message: zetaRemediationMessage(pin) };
 }
 async function checkZetaRevision() {
   const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
@@ -266,7 +271,7 @@ async function checkZetaRevision() {
   const headKnown = checkout !== null && Bun.spawnSync(["git", "-C", checkout, "rev-parse", "HEAD"]).exitCode === 0;
   const pinIsAncestor = headKnown && Bun.spawnSync(["git", "-C", checkout!, "merge-base", "--is-ancestor", pin, "HEAD"]).exitCode === 0;
   const decision = zetaRevisionDecision(pin, checkout, headKnown, pinIsAncestor);
-  if (decision.kind === "behind") throw new Error(`installed zeta is older than the pin ${pin}; update it or set ACHILLES_ZETA_DISCOVERY to attach:\n${decision.command}`);
+  if (decision.kind === "behind") throw new Error(decision.message);
   if (decision.kind === "unknown") console.error(`warning: cannot verify the installed zeta is at least the pin ${pin}: ${decision.reason}; continuing`);
 }
 async function prerequisites() {
@@ -274,27 +279,31 @@ async function prerequisites() {
     bun: "curl -fsSL https://bun.sh/install | bash",
     uv: "curl -LsSf https://astral.sh/uv/install.sh | sh",
     git: process.platform === "darwin" ? "xcode-select --install" : "sudo apt-get install -y git",
-    zeta: await zetaInstallCommand(),
   };
-  for (const command of ["bun", "uv", "git", "zeta"]) {
+  for (const command of ["bun", "uv", "git"]) {
     if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) throw new Error(`missing ${command}: ${fixes[command]}`);
   }
+  if (process.env.ACHILLES_USE_PATH_ZETA !== "1") await ensurePinnedZeta();
+  else if (Bun.spawnSync(["sh", "-c", "command -v zeta"]).exitCode) throw new Error("missing zeta: install zeta or unset ACHILLES_USE_PATH_ZETA");
+  const zeta = zetaExecutable();
   const checks: [string[], string[], "serve" | "mcp"][] = [
-    [["zeta", "mcp", "--help"], ["add", "show", "remove"], "mcp"],
-    [["zeta", "mcp", "show", "--help"], ["--scope", "--json"], "mcp"],
-    [["zeta", "mcp", "add", "--help"], ["--scope", "--url"], "mcp"],
-    [["zeta", "mcp", "remove", "--help"], ["--scope"], "mcp"],
+    [[zeta, "mcp", "--help"], ["add", "show", "remove"], "mcp"],
+    [[zeta, "mcp", "show", "--help"], ["--scope", "--json"], "mcp"],
+    [[zeta, "mcp", "add", "--help"], ["--scope", "--url"], "mcp"],
+    [[zeta, "mcp", "remove", "--help"], ["--scope"], "mcp"],
   ];
-  if (!process.env.ACHILLES_ZETA_DISCOVERY) checks.unshift([["zeta", "serve", "--help"], ["--ws", "--ws-origin", "--ws-discovery"], "serve"]);
+  if (!process.env.ACHILLES_ZETA_DISCOVERY) checks.unshift([[zeta, "serve", "--help"], ["--ws", "--ws-origin", "--ws-discovery"], "serve"]);
   for (const [args, required, kind] of checks) {
     const result = Bun.spawnSync(args, { cwd: root, env: { ...process.env, PWD: root } });
     const help = `${result.stdout.toString()}${result.stderr.toString()}`;
     if (result.exitCode === 0 && required.every((value) => help.includes(value))) continue;
-    const upgrade = await zetaUpgradeCommand();
-    if (kind === "serve") throw new Error(`zeta too old: update zeta or set ACHILLES_ZETA_DISCOVERY to attach\nminimum zeta: 8f4b469\n${upgrade}, then restart zeta sessions`);
-    throw new Error(`missing zeta mcp: ${upgrade}`);
+    const message = process.env.ACHILLES_USE_PATH_ZETA === "1"
+      ? zetaRemediationMessage((await readFile(resolve(root, "zeta.rev"), "utf8")).trim())
+      : "the pinned zeta does not provide the required command";
+    if (kind === "serve") throw new Error(`zeta too old: ${message}`);
+    throw new Error(`missing zeta mcp: ${message}`);
   }
-  if (!process.env.ACHILLES_ZETA_DISCOVERY) await checkZetaRevision();
+  if (!process.env.ACHILLES_ZETA_DISCOVERY && process.env.ACHILLES_USE_PATH_ZETA === "1") await checkZetaRevision();
   await mkdir(home, { recursive: true });
 }
 async function dev() {

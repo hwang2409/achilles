@@ -10,9 +10,9 @@ cd achilles
 make dev
 ```
 
-prerequisites: `make`, `uv`, `bun`, `git`, and `zeta` on `PATH`, plus a provider and model in the zeta home. providers that use an account must be logged in; local ollama does not need credentials.
+prerequisites: `make`, `uv`, `bun`, and `git`, plus a provider and model in the zeta home. `make dev` prepares its pinned zeta checkout; set `ACHILLES_USE_PATH_ZETA=1` only when you want to use `zeta` on `PATH`. providers that use an account must be logged in; local ollama does not need credentials.
 
-`make dev` installs dependencies, builds pinned fulcrum packages and the web app when needed, configures achilles in `$ZETA_HOME/mcp.json`, starts or reuses its own zeta serve under the achilles data directory, starts achilles in yolo mode, and opens the app.
+`make dev` installs dependencies, prepares pinned zeta in `.cache/zeta` with its own virtual environment, builds pinned fulcrum packages and the web app when needed, configures achilles in `$ZETA_HOME/mcp.json`, starts or reuses its own zeta serve under the achilles data directory, starts achilles in yolo mode, and opens the app. to use zeta from `PATH` instead, set `ACHILLES_USE_PATH_ZETA=1`; an older path zeta is rejected without changing it.
 
 set `ACHILLES_APPROVAL=ask` to require approval for tool calls.
 
@@ -30,6 +30,6 @@ run the scripted harness with `make eval TASK=harness-smoke`. the current suite 
 
 use `make stop` to stop only processes started by `make dev`.
 
-use `make dev PORT=5297` for another port. use `ACHILLES_ZETA_DISCOVERY=/path/to/serve.json make dev` to attach to an existing zeta serve instead.
+use `make dev PORT=5297` for another port. use `ACHILLES_ZETA_DISCOVERY=/path/to/serve.json make dev` to attach to an existing zeta serve instead. the attached serve and its mcp commands must be provided by the same zeta selection; default runs use `.cache/zeta/.venv/bin/zeta`.
 
 `ZETA_HOME` defaults to `~/.zeta`. the private serve uses this zeta home and its settings; for oauth compatibility, set `oauth_compat = true` under `[anthropic]` in `settings.toml` or set `ZETA_ANTHROPIC_OAUTH_COMPAT=1`. `make dev` backs up an existing mcp file once as `mcp.json.achilles-backup` and preserves other servers. its private discovery file defaults to `~/.local/share/achilles/run/serve.json`.

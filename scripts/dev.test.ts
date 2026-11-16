@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaRevisionDecision, type ProcessIdentity } from "./dev";
+import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
@@ -116,16 +116,34 @@ test("web dependencies install only when the web-deps stamp changed", () => {
   expect(webInstallDecision(null, "web-stamp-a")).toBe("install");
 });
 
-test("make dev refuses an installed zeta older than the pin", () => {
+test("default zeta selection is isolated and path selection is explicit", () => {
+  const old = process.env.ACHILLES_USE_PATH_ZETA;
+  try {
+    delete process.env.ACHILLES_USE_PATH_ZETA;
+    expect(zetaExecutable()).toBe(resolve(root, ".cache/zeta/.venv/bin/zeta"));
+    process.env.ACHILLES_USE_PATH_ZETA = "1";
+    expect(zetaExecutable()).toBe("zeta");
+  } finally {
+    if (old === undefined) delete process.env.ACHILLES_USE_PATH_ZETA;
+    else process.env.ACHILLES_USE_PATH_ZETA = old;
+  }
+});
+
+test("zeta remediation never mutates an installed checkout", () => {
   const pin = "d6776edb3a60e7207eabcd1055e01a3aab092a83";
-  const checkout = "/home/u/zeta";
-  expect(zetaRevisionDecision(pin, checkout, true, true)).toEqual({ kind: "ok" });
-  expect(zetaRevisionDecision(pin, checkout, true, false)).toEqual({
-    kind: "behind",
-    command: `create a separate pinned checkout at .cache/zeta (leave '${checkout}' unchanged):\ngit clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${pin} && uv tool install --editable .cache/zeta\nPATH="$(uv tool dir --bin):$PATH" make dev`,
-  });
-  expect(zetaRevisionDecision(pin, null, false, false).kind).toBe("unknown");
-  expect(zetaRevisionDecision(pin, checkout, false, false).kind).toBe("unknown");
+  const cases = [
+    ["serve too old", zetaRemediationMessage(pin)],
+    ["mcp missing", `missing zeta mcp: ${zetaRemediationMessage(pin)}`],
+    ["behind pin", zetaRevisionDecision(pin, "/home/u/zeta", true, false).kind === "behind" ? zetaRevisionDecision(pin, "/home/u/zeta", true, false).message : ""],
+    ["not a checkout", `warning: cannot verify the installed zeta is at least the pin ${pin}: zeta is not installed from a git checkout`],
+  ];
+  for (const [name, text] of cases) {
+    expect(text, name).not.toContain("uv tool install");
+    expect(text, name).not.toContain("pull");
+    expect(text, name).not.toContain("git -C '/home/u/zeta'");
+  }
+  expect(cases[2][1]).toBe(zetaRemediationMessage(pin));
+  expect(cases[3][1]).toContain("not installed from a git checkout");
 });
 
 test("stop ownership requires pid, start time, and exact command", () => {
@@ -177,6 +195,7 @@ exit 0
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
     HOME: temp,
     ZETA_HOME: home,
     ACHILLES_HOME: achillesHome,
@@ -193,8 +212,8 @@ exit 0
   try {
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    expect(owned.stderr).toContain("zeta too old: update zeta or set ACHILLES_ZETA_DISCOVERY to attach\nminimum zeta: 8f4b469\n");
-    expect(owned.stderr).toContain("uv tool upgrade zeta, then restart zeta sessions");
+    expect(owned.stderr).toContain("zeta too old: your zeta is older than zeta.rev ");
+    expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
     expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);
     expect(await Bun.file(home).exists()).toBe(false);
@@ -291,6 +310,7 @@ process.exit(0);
   const baseEnv = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
     PORT: String(port),
     ZETA_HOME: home,
     ACHILLES_HOME: achillesHome,
@@ -505,6 +525,7 @@ esac
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
     HOME: temp,
     ZETA_HOME: home,
     ACHILLES_HOME: achillesHome,
@@ -515,10 +536,9 @@ esac
     const exitCode = await child.exited;
     const stderr = await new Response(child.stderr).text();
     expect(exitCode).not.toBe(0);
-    expect(stderr).toContain(`installed zeta is older than the pin ${pin}`);
-    expect(stderr).toContain("create a separate pinned checkout at .cache/zeta");
-    expect(stderr).toContain("git -C .cache/zeta checkout --detach");
-    expect(stderr).toContain("PATH=\"$(uv tool dir --bin):$PATH\" make dev");
+    expect(stderr).toContain(`your zeta is older than zeta.rev ${pin}; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one`);
+    expect(stderr).not.toContain("uv tool install");
+    expect(stderr).not.toContain("pull");
     expect(stderr).not.toContain(`git -C '${checkout}' fetch`);
     expect(stderr).not.toContain(`git -C '${checkout}' checkout`);
     expect(stderr).not.toContain(`git -C '${checkout}' reset`);
@@ -561,6 +581,7 @@ esac
   const baseEnv = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
     HOME: temp,
     ZETA_HOME: home,
     ACHILLES_HOME: achillesHome,
