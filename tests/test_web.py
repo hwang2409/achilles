@@ -220,7 +220,10 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "tools/call",
-                "params": {"name": "update_note", "arguments": {**arguments, "revision": 2}},
+                "params": {
+                    "name": "update_note",
+                    "arguments": {"record_id": "note-1", "revision": 2, "text": "third"},
+                },
             },
         ).json()["result"]
         stale_mcp = client.post(
@@ -233,7 +236,33 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
                 "params": {"name": "update_note", "arguments": arguments},
             },
         ).json()["result"]
-    expected = {"code": "conflict", "path": "/revision", "expected": "current record revision"}
+        stale_mcp_error = json.loads(stale_mcp["content"][0]["text"])
+        current = stale_mcp_error["current"]
+        retry = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "update_note",
+                    # the retry rebuilds its change from the live record, not the stale arguments
+                    "arguments": {
+                        "record_id": current["record_id"],
+                        "revision": current["revision"],
+                        "text": current["text"] + " and second",
+                    },
+                },
+            },
+        ).json()["result"]
+    expected_base = {
+        "code": "conflict",
+        "path": "/revision",
+        "expected": "current record revision",
+        "hint": "the record changed; compare current with your change and retry with "
+        "current.revision only if your change still applies",
+    }
     assert catalog["tools"][0]["input_schema"]["required"] == [
         "record_id",
         "revision",
@@ -241,16 +270,31 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
     ]
     assert browser.status_code == 200 and browser.json()["revision"] == 2
     assert stale_browser.status_code == 409
-    assert stale_browser.json()["error"] == expected
+    # the conflict carries the live record, so a caller can retry without a separate read
+    assert stale_browser.json()["error"] == {
+        **expected_base,
+        "current": {"text": "second", "record_id": "note-1", "revision": 2},
+    }
     assert stale_mcp["isError"] is True
-    assert json.loads(stale_mcp["content"][0]["text"]) == expected
+    # the conflict shows the other writer's value, so the agent sees what changed
+    assert stale_mcp_error == {
+        **expected_base,
+        "current": {"text": "third", "record_id": "note-1", "revision": 3},
+    }
     assert not agent.get("isError")
+    assert not retry.get("isError")
+    retried = json.loads(retry["content"][0]["text"])
+    assert (retried["text"], retried["revision"]) == ("third and second", 4)
     # each write is audited with who made it and which record; conflicts write no audit row.
     with store.transaction() as db:
         rows = db.execute(
             "SELECT actor, record_id FROM audit WHERE action='invoke:update_note' ORDER BY id"
         ).fetchall()
-    assert [tuple(row) for row in rows] == [("form", "note-1"), ("agent", "note-1")]
+    assert [tuple(row) for row in rows] == [
+        ("form", "note-1"),
+        ("agent", "note-1"),
+        ("agent", "note-1"),
+    ]
 
 
 def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_path: Path) -> None:
@@ -346,6 +390,98 @@ def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_pa
         "path": "",
         "expected": "valid JSON object",
     }
+
+
+def test_list_tool_filters_by_record_id_through_mcp(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    store = PageStore(root)
+    store.set_create_mode("home", True)
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "list_tasks",
+        "description": "list tasks",
+        "input_schema": {"type": "object", "additionalProperties": False},
+        "implementation": {
+            "operation": "list",
+            "collection": "tasks",
+            "data_schema": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "additionalProperties": True,
+            },
+        },
+    }
+    store.create_tool("home", bundle)
+    with store.transaction() as db:
+        db.executemany(
+            "INSERT INTO page_record(page_id,collection,record_id,version,revision,document,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            [
+                ("home", "tasks", "task-1", 1, 1, '{"title":"first"}', "now", "now"),
+                ("home", "tasks", "task-2", 1, 1, '{"title":"second"}', "now", "now"),
+            ],
+        )
+    token = store.ensure_credential("home")
+    mcp_headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+
+    def call(client, request_id, name, arguments):
+        return client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            },
+        ).json()["result"]
+
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        initialized = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        by_id = call(client, 3, "list_tasks", {"where": {"field": "record_id", "equals": "task-2"}})
+        unknown_id = call(
+            client, 4, "list_tasks", {"where": {"field": "record_id", "equals": "task-9"}}
+        )
+        unknown_field = call(
+            client, 5, "list_tasks", {"where": {"field": "name", "equals": "task-2"}}
+        )
+    assert not by_id.get("isError")
+    found = json.loads(by_id["content"][0]["text"])
+    assert [record["record_id"] for record in found] == ["task-2"]
+    assert found[0]["title"] == "second"
+    assert not unknown_id.get("isError")
+    assert json.loads(unknown_id["content"][0]["text"]) == []
+    assert unknown_field["isError"] is True
+    error = json.loads(unknown_field["content"][0]["text"])
+    assert error["path"] == "/where/field"
+    assert "record_id" in error["hint"]
+    assert "title" in error["hint"]
 
 
 def test_approval_mode_validation(monkeypatch) -> None:
@@ -901,6 +1037,37 @@ def test_discovery_rejects_invalid_port(monkeypatch, tmp_path: Path, port: objec
         headers={"origin": "http://127.0.0.1:5190", "host": "127.0.0.1:5190"},
     )
     assert response.status_code == 503
+
+
+@pytest.mark.parametrize(
+    ("discovery", "port", "start"),
+    [
+        (None, 5191, None),
+        ("home", 5191, "make dev"),
+        ("home", 5297, "make dev PORT=5297"),
+        (
+            "attached",
+            5190,
+            "zeta serve --ws 0 --ws-discovery {path} --ws-origin http://127.0.0.1:5190",
+        ),
+    ],
+)
+def test_stopped_zeta_names_the_command_for_this_achilles(
+    monkeypatch, tmp_path: Path, discovery: str | None, port: int, start: str | None
+) -> None:
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    path = tmp_path / "achilles/run/serve.json" if discovery == "home" else tmp_path / "serve.json"
+    if discovery:
+        monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(path))
+    else:
+        monkeypatch.delenv("ACHILLES_ZETA_DISCOVERY", raising=False)
+    origin = f"http://127.0.0.1:{port}"
+    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
+        "/api/zeta/discovery", headers={"origin": origin, "host": f"127.0.0.1:{port}"}
+    )
+    assert response.status_code == 503
+    assert response.json()["start"] == (start and start.format(path=path))
 
 
 def test_chat_list_shows_a_chat_only_after_its_first_message(tmp_path: Path) -> None:

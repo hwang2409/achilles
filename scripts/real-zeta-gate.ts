@@ -217,6 +217,8 @@ try {
       })
       .filter(Boolean);
   const zetaSessionCount = () => requests().filter((frame) => frame.method === "new_session").length;
+  // `/` or a page route with no chat named opens that page's most recent chat in the sidebar's order
+  const newestChatId = async (pageId: string) => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: { session_id: string; page_id: string }[] }).chats.find((chat) => chat.page_id === pageId)?.session_id;
   const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: unknown[] }).chats.length;
   const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
     const messages = requests();
@@ -1054,6 +1056,9 @@ try {
 
   await page.goto(origin);
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
+  // `/` opens the newest home chat, not the home chat: the sends below run in it and must not move page.zeta_session_id
+  const newestHome = await newestChatId("home");
+  if (!newestHome || newestHome === first || await homeSessionId() !== newestHome) throw new Error(`/ did not open the most recent home chat: ${newestHome} shown ${await homeSessionId()}`);
   const catalog = await homeMcp(2, "tools/list", {});
   const names =
     catalog.result?.tools?.map(
@@ -1288,8 +1293,10 @@ try {
     return reconnectPage.layout?.blocks?.some((block: { type?: string }) => block.type === "list")
       && (await page.locator("body").innerText()).includes("Synthetic Book");
   }, "reading page inserted book render");
+  const homeOpened = await newestChatId("home");
+  if (!homeOpened) throw new Error("no listed home chat before achilles restart");
   const homeIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
-    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterCreate)}`) return false;
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeOpened)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
   }).catch(() => { throw new Error("missing home idle state write before achilles restart"); });
   await page.goto(origin);
@@ -1324,8 +1331,8 @@ try {
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
-  if (await homeSessionId() !== homeAfterRestart) throw new Error("achilles restart changed home session id");
-  if (approvalModeResponse("session_settings", homeAfterRestart) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
+  if (await homeSessionId() !== homeOpened) throw new Error("achilles restart changed the open home chat");
+  if (approvalModeResponse("session_settings", homeOpened) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
   const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
   const restartedToggleResponse = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
@@ -1343,7 +1350,7 @@ try {
   const restartAnnotationApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "annotate_trace" });
   const restartApprovalBefore = await restartAnnotationApproval.count();
   const reconnectIdleWrite = gateWait.playwright(page, "waitForResponse", (response) => {
-    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeAfterRestart)}`) return false;
+    if (response.request().method() !== "PATCH" || requestPath(response.url()) !== `/api/chats/${encodeURIComponent(homeOpened)}`) return false;
     try { return JSON.parse(response.request().postData() ?? "null")?.last_state === "idle"; } catch { return false; }
   }).catch(() => { throw new Error("missing reconnect idle state write before achilles restart"); });
   await field.fill("post-reconnect catalog"); await field.press("Enter");
@@ -1448,19 +1455,28 @@ try {
   await page.reload({ waitUntil: "commit" });
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).bound_suspends ?? 0) > suspendsBeforeReload, "old page binding detached by the reload");
   const heldToolControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldToolControl, release_reload_tool_barrier: true }));
+  await Bun.write(control, JSON.stringify({ ...heldToolControl, release_reload_tool_barrier: true, hold_reload_history: reloadChat }));
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).detached_add_book_calls === 1, "add_book called with no page binding");
   await page.unroute(discoveryUrl, holdDiscovery);
   await Promise.all(heldDiscovery.map((route) => route.fallback()));
-  // the reply after the tool is held until the reloaded page shows the kept turn, so its text cannot race the attach
-  await waitFor(async () => JSON.parse(await Bun.file(control).text()).reload_reply_barrier === "held", "reply after add_book held");
+  // The reply commits while the reloaded page loads its history: zeta publishes assistant_message before it writes
+  // the reply's history row, so the test server holds the page's first history read until the reply was published
+  // with its row held, then holds the row until the page has loaded. The reply must still show.
+  await waitFor(async () => {
+    const document = JSON.parse(await Bun.file(control).text());
+    return document.reload_history_barrier === "held" && document.reload_row_barrier === "held"
+      && requests().slice(framesBeforeToolReload).some((frame) => frame.method === "event" && frame.params?.event === "assistant_message");
+  }, "reply published to the reloaded page while its history read and the reply's row are held");
+  const heldHistoryControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...heldHistoryControl, release_reload_history_barrier: true }));
   await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the kept turn running");
-  const heldReplyControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldReplyControl, release_reload_reply_barrier: true }));
+  const heldRowControl = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...heldRowControl, release_reload_row_barrier: true }));
   await gateWait.playwright(page.getByText("reload book added", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\npage after the reload during add_book: ${redact(await page.locator("body").innerText())}`);
   });
   await waitForIdleTurn(page, waitFor);
+  if (await page.getByText("reload book added", { exact: true }).count() !== 1) throw new Error("the reply committed during the reloaded page's load showed more than once");
   const afterToolReload = JSON.parse(await Bun.file(control).text());
   const reloadToolResult = afterToolReload.tool_results?.find((result: { call_id: string }) => result.call_id === "reload-add-book");
   if (!reloadToolResult || reloadToolResult.is_error)
@@ -1473,6 +1489,78 @@ try {
   if (requests().slice(framesBeforeToolReload).some((frame) => JSON.stringify(frame).includes('"reason":"disconnect"')))
     throw new Error("zeta cancelled the turn on reload (reason disconnect)");
   console.log("reload during a page tool call asserted: the call made with no binding waited, ran once on the reloaded page's binding, and the turn finished");
+
+  // A foreground tool still running across a reload: the output it printed before the reload shows on the reloaded
+  // page while it runs (`in_flight_replay`), and every line shows once after it ends. The tool waits for a file.
+  const transcript = page.locator(".transcript");
+  const toolLines = async () => { const text = await transcript.innerText(); return ["tool-line before-reload", "tool-line after-reload"].map((line) => text.split(line).length - 1); };
+  await allowField.fill("run a tool across a reload");
+  await allowField.press("Enter");
+  await waitFor(async () => (await toolLines())[0] === 1, "running tool output shown before the reload");
+  await page.reload();
+  await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the running tool's turn");
+  const runningTool = page.locator('[data-part="tool"][data-state="streaming"]').filter({ hasText: "tool-line before-reload" });
+  await waitFor(async () => (await runningTool.count()) === 1, "running tool output from before the reload shown on the reloaded page while the tool runs").catch(async (error) => {
+    throw new Error(`${error}\ntranscript after the reload during a running tool: ${redact((await transcript.innerText()).slice(-1500))}`);
+  });
+  if ((await toolLines())[0] !== 1) throw new Error(`running tool output showed ${(await toolLines())[0]} times after the reload, not once`);
+  await Bun.write(join(cwd, "release-reload-tool"), "");
+  await gateWait.playwright(page.getByText("reload tool complete", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
+  if ((await toolLines()).some((count) => count !== 1) || await page.getByText("reload tool complete", { exact: true }).count() !== 1)
+    throw new Error(`after the tool ended, its lines showed ${JSON.stringify(await toolLines())} times and the reply ${await page.getByText("reload tool complete", { exact: true }).count()} times, not once each`);
+  console.log("reload during a running tool asserted: output from before the reload showed once while the tool ran, and once after it ended");
+
+  // A reload during a woken turn's setup (a background task ended; zeta has not sent turn_start yet) attaches to
+  // that turn: the page shows the chat, not a busy error, the turn calls a page tool on the re-sent binding, and
+  // the forced ask mode the reloaded page asks for is applied only after the turn ends (zeta refuses it, -32004,
+  // during the setup). The test server holds the woken turn in its setup while achilles restarts in ask mode.
+  await allowField.fill("start a background task");
+  await allowField.press("Enter");
+  await gateWait.playwright(page.getByText("background task started", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
+  const wakeChat = await homeSessionId();
+  if (!wakeChat) throw new Error("woken-turn chat id missing");
+  const wakeArm = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...wakeArm, hold_wake_setup: true }));
+  await Bun.write(join(cwd, "release-wake-task"), "");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).wake_setup_barrier === "held", "woken turn held in its setup");
+  const restartAchilles = async (approval: "allow" | "ask") => {
+    app.kill("SIGTERM");
+    if (!(await waitForExit(app, 15_000))) throw new Error("achilles did not stop after SIGTERM");
+    app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: approval });
+    await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), `achilles restart in ${approval} mode`);
+  };
+  await restartAchilles("ask");
+  const framesBeforeWakeReload = requests().length;
+  await page.reload();
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
+  const wakeFrames = () => requests().slice(framesBeforeWakeReload);
+  const replyTo = (method: string) => {
+    const frames = wakeFrames();
+    const sent = frames.findLast((frame) => frame.method === method && frame.params?.session_id === wakeChat);
+    return sent && frames.slice(frames.indexOf(sent) + 1).find((frame) => frame.id === sent.id && (frame.result || frame.error));
+  };
+  await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
+  const wakeAttach = replyTo("resume");
+  if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
+  await waitFor(async () => Boolean(replyTo("set_settings")), "reloaded page asked for ask mode in the woken turn's setup");
+  if (replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
+  await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
+  if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
+  const wakeHeld = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...wakeHeld, release_wake_setup_barrier: true }));
+  await gateWait.playwright(page.getByText("woken turn complete", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
+    throw new Error(`${error}\npage after the reload in a woken turn's setup: ${redact(await page.locator("body").innerText())}`);
+  });
+  await waitForIdleTurn(page, waitFor);
+  const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
+  if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
+  await gateWait.playwright(page.getByLabel("ask before tools", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
+  if (approvalModeResponse("set_settings", wakeChat) !== "ask") throw new Error("ask mode was not applied after the woken turn ended");
+  if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
+  await restartAchilles("allow");
+  console.log("reload in a woken turn's setup asserted: the page attached, the turn ran a page tool, and ask mode applied after the turn ended");
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
   await gateSettings(page, origin, gateWait);

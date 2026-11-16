@@ -54,7 +54,8 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
 export type ConnectionDeps = {
   /** The page origin the server's `--ws-origin` allowlist must contain. */
   origin: string;
-  discover?: () => Promise<ZetaDiscovery | null>;
+  /** `{ start }` when zeta is not running and the server names the command that starts it. */
+  discover?: () => Promise<ZetaDiscovery | { start: string } | null>;
   connect?: (discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) => Promise<ZetaClient>;
   now?: () => number;
   setTimer?: (callback: () => void, ms: number) => unknown;
@@ -67,15 +68,16 @@ export type Connection = {
   readonly state: ConnectionState;
   /** The live client while `state.phase` is `connected`, else `null`. */
   readonly client: ZetaClient | null;
-  /** The websocket port of the last server found, so a restart hint names it; 8765 (zeta's documented port) before any. */
-  readonly port: number;
+  /** The shell command that starts zeta for this achilles: the server's own hint (`make dev`, or the attached discovery
+   * file), else `zeta serve` on the last port found (8765, zeta's documented port, before any). */
+  readonly startCommand: string;
   subscribe(listener: () => void): () => void;
   /** Skips the wait before the next automatic try. */
   retryNow(): void;
   stop(): void;
 };
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
@@ -108,7 +110,9 @@ export function createConnection({
   origin,
   discover = async () => {
     const response = await fetch("/api/zeta/discovery", { cache: "no-store" });
-    return response.ok ? await response.json() : null;
+    if (response.ok) return await response.json();
+    const start = (await response.json().catch(() => null))?.start;
+    return typeof start === "string" ? { start } : null;
   },
   connect = connectRole,
   now = Date.now,
@@ -120,6 +124,7 @@ export function createConnection({
   let state = initialConnection;
   let client: ZetaClient | null = null;
   let port = initialPort;
+  let start: string | null = null;
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
@@ -140,14 +145,15 @@ export function createConnection({
     const mine = ++generation;
     send({ type: "attempt" });
     const current = () => mine === generation && !stopped;
-    let discovery: ZetaDiscovery | null;
+    let discovery: ZetaDiscovery | { start: string } | null;
     try {
       discovery = await discover();
     } catch {
       discovery = null; // the dev server itself is unreachable: same remedy as a stopped zeta
     }
     if (!current()) return;
-    if (!discovery) return send({ type: "not_running", now: now() });
+    if (discovery && !("url" in discovery)) start = discovery.start;
+    if (!discovery || !("url" in discovery)) return send({ type: "not_running", now: now() });
     port = Number(new URL(discovery.url).port) || port;
     // An origin the allowlist lacks fails at the upgrade with no detail, so name it before trying.
     if (discovery.origins.length && !discovery.origins.includes(origin))
@@ -193,7 +199,7 @@ export function createConnection({
   return {
     get state() { return state; },
     get client() { return client; },
-    get port() { return port; },
+    get startCommand() { return start ?? `zeta serve --ws ${port} --ws-origin ${origin}`; },
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     retryNow() {
       if (state.phase === "connected" || state.phase === "connecting" || stopped) return;

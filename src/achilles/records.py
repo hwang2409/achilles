@@ -59,13 +59,27 @@ def _get(db, page_id, collection, arguments):
     return {**json.loads(found[1]), "record_id": found[0], "revision": found[2]}
 
 
+# a list filter may also match record_id (layout block filters cannot); say so, so the agent
+# does not guess `id`
+_LIST_WHERE_SCHEMA = {
+    **_EQUALITY_FILTER_SCHEMA,
+    "properties": {
+        **_EQUALITY_FILTER_SCHEMA["properties"],
+        "field": {
+            **_EQUALITY_FILTER_SCHEMA["properties"]["field"],
+            "description": "A field of the collection, or record_id.",
+        },
+    },
+}
+
+
 def list_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
     """Every list tool accepts where and limit on top of its own input schema."""
     return {
         **input_schema,
         "properties": {
             **input_schema.get("properties", {}),
-            "where": _EQUALITY_FILTER_SCHEMA,
+            "where": _LIST_WHERE_SCHEMA,
             "limit": {
                 "type": "integer",
                 "minimum": 1,
@@ -78,6 +92,8 @@ def list_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
 
 def _check_list_field(db, page_id, collection, where):
     field = where["field"]
+    if field == "record_id":
+        return
     fields = _collection_fields(PageStore._page_tools(db, page_id)).get(collection, set())
     if field in fields:
         return
@@ -93,7 +109,9 @@ def _check_list_field(db, page_id, collection, where):
     raise ValidationError(
         "/where/field",
         "field in collection schema",
-        hint=unknown_field_hint(f"the {collection} collection schema", field, fields, suggestion),
+        hint=unknown_field_hint(
+            f"the {collection} collection schema", field, fields | {"record_id"}, suggestion
+        ),
     )
 
 
@@ -103,10 +121,14 @@ def _list(db, page_id, collection, arguments):
     where = arguments.get("where")
     if where is not None:
         _check_list_field(db, page_id, collection, where)
-        # the field reaches SQL only as a bound json path parameter, never as SQL text
-        predicate, filter_parameters = _json_scalar_match(where["field"], where["equals"])
-        query += " AND " + predicate
-        parameters += filter_parameters
+        if where["field"] == "record_id":
+            query += " AND record_id = ?"
+            parameters += (where["equals"],)
+        else:
+            # the field reaches SQL only as a bound json path parameter, never as SQL text
+            predicate, filter_parameters = _json_scalar_match(where["field"], where["equals"])
+            query += " AND " + predicate
+            parameters += filter_parameters
     found = db.execute(
         query + " ORDER BY created_at DESC, rowid DESC LIMIT ?",
         (*parameters, arguments.get("limit", LIST_LIMIT)),
@@ -117,36 +139,44 @@ def _list(db, page_id, collection, arguments):
 def _update(db, page_id, collection, version, schema, arguments):
     record_id = arguments.get("record_id")
     found = db.execute(
-        "SELECT document FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+        "SELECT document, revision FROM page_record "
+        "WHERE page_id=? AND collection=? AND record_id=?",
         (page_id, collection, record_id),
     ).fetchone()
     if found is None:
         raise ValueError("record not found")
     revision = arguments.get("revision")
     document = json.loads(found[0])
+    if found[1] != revision:
+        # call_record holds the write lock, so this row is the live record; it has the
+        # list/get row shape so the caller can rebuild its change without a separate read
+        current = {**document, "record_id": record_id, "revision": found[1]}
+        raise VersionConflict(
+            "/revision",
+            "current record revision",
+            "the record changed; compare current with your change and retry with "
+            "current.revision only if your change still applies",
+            current,
+        )
     document.update({k: v for k, v in arguments.items() if k not in {"record_id", "revision"}})
     _check(schema, document)
-    updated = db.execute(
+    db.execute(
         "UPDATE page_record SET version=?, revision=revision+1, document=?, updated_at=? "
-        "WHERE page_id=? AND collection=? AND record_id=? AND revision=?",
-        (
-            version,
-            json.dumps(document, sort_keys=True),
-            now(),
-            page_id,
-            collection,
-            record_id,
-            revision,
-        ),
+        "WHERE page_id=? AND collection=? AND record_id=?",
+        (version, json.dumps(document, sort_keys=True), now(), page_id, collection, record_id),
     )
-    if updated.rowcount != 1:
-        raise VersionConflict("/revision", "current record revision")
     return {**document, "record_id": record_id, "revision": revision + 1}
 
 
 class VersionConflict(ValidationError):
-    def __init__(self, path: str, expected: str):
-        super().__init__(path, expected, "conflict")
+    def __init__(
+        self,
+        path: str,
+        expected: str,
+        hint: str | None = None,
+        current: dict[str, Any] | None = None,
+    ):
+        super().__init__(path, expected, "conflict", hint, current)
 
 
 def call_record(

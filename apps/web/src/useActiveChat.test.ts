@@ -141,13 +141,13 @@ async function waitBounded<T>(wait: Promise<T>, cancel: () => void, drain: () =>
 
 function attachmentClient(onRequest?: (method: string, params?: unknown) => void | Promise<void>) {
   return {
-    features: ["session_mcp_bindings"],
+    features: ["session_mcp_bindings", "session_replay_seq"],
     request: async (method: string, params?: unknown) => {
       await onRequest?.(method, params);
       if (method === "new_session") return { session: { session_id: "created-on-zeta" } };
       if (method === "resume") return { session: { name: "" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      if (method === "session_history") return { messages: [], next_offset: null };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: "created-on-zeta" }, state: "idle" };
       throw new Error(`unexpected ${method}`);
     },
@@ -287,6 +287,54 @@ describe("chat title cut", () => {
 });
 
 describe("active chat attachment", () => {
+  test("opening a page without a chat in the URL lands on its most recent chat, not the first chat it was mapped to", async () => {
+    const chats = [
+      { session_id: "books-latest", page_id: "books", title: "books chat", message_sent: true },
+      { session_id: "home-latest", page_id: "home", title: "newest home chat", message_sent: true },
+      { session_id: "home-first", page_id: "home", title: "first home chat", message_sent: true },
+    ];
+    const fetcher = (async (resource: string | URL | Request) => {
+      const url = String(resource);
+      if (url === "/api/pages/home") return Response.json(page("home-first"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats, next: null });
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    const owner = createAttachmentOwner();
+    try {
+      const ready = await withFetch(fetcher, () => attachPage(attachmentClient() as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true)));
+      expect(ready).toMatchObject({ phase: "ready", sessionId: "home-latest" });
+    } finally { owner.clear(); }
+  });
+
+  test("opening a page whose newest chat is gone in zeta falls back to its home chat and keeps the page mapping", async () => {
+    const chats = [
+      { session_id: "home-lost", page_id: "home", title: "newest home chat", message_sent: true },
+      { session_id: "home-first", page_id: "home", title: "first home chat", message_sent: true },
+    ];
+    const writes: string[] = [];
+    const fetcher = (async (resource: string | URL | Request, init?: RequestInit) => {
+      const url = String(resource);
+      if (init?.method && init.method !== "GET") writes.push(`${init.method} ${url}`);
+      if (url === "/api/pages/home") return Response.json(page("home-first"));
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats, next: null });
+      return Response.json({});
+    }) as typeof fetch;
+    const methods: string[] = [];
+    const client = attachmentClient((method, params) => {
+      methods.push(method);
+      if (method === "resume" && (params as { session_id: string }).session_id === "home-lost") throw Object.assign(new Error("gone"), { data: { code: "session_not_found" } });
+    });
+    const owner = createAttachmentOwner();
+    try {
+      const ready = await withFetch(fetcher, () => attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true)));
+      expect(writes.filter((write) => write.includes("/api/pages/home/session"))).toEqual([]);
+      expect(methods).not.toContain("new_session");
+      expect(ready).toMatchObject({ phase: "ready", sessionId: "home-first" });
+    } finally { owner.clear(); }
+  });
+
   test("a user-set title is not overwritten by a later zeta auto-name", async () => {
     const originalFetch = globalThis.fetch;
     let patched = false;
@@ -299,11 +347,11 @@ describe("active chat attachment", () => {
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         if (method === "resume") return { session: { name: "zeta auto name" } };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
         throw new Error(`unexpected ${method}`);
       },
@@ -329,11 +377,11 @@ describe("active chat attachment", () => {
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         if (method === "resume") return { session: {} };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
         throw new Error(`unexpected ${method}`);
       },
@@ -366,7 +414,7 @@ describe("active chat attachment", () => {
       request: async (method: string) => {
         if (method === "resume") return { session: { name: "" } };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") { statusRequests += 1; if (statusRequests === 2) { reached(); await statusGate; } return { session: { session_id: "s" }, state: "idle" }; }
         throw new Error(`unexpected ${method}`);
       },
@@ -480,7 +528,7 @@ describe("attachment while a turn runs", () => {
         if (method === "resume") throw busyError();
         if (method === "status") return running;
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: running.state, pending_approvals: running.pending_approvals } };
         throw new Error(`unexpected ${method}`);
       },
       replay: async (_id: string, refresh: () => Promise<typeof events>) => { events = await refresh(); return { store: { getState: () => ({ outline: [] }), resync(next: typeof events) { events = next; } }, release() {} }; },
@@ -572,13 +620,13 @@ describe("chat creation lifecycle", () => {
       if (fail === name && !failed) { failed = true; throw new Error(`forced ${name} failure`); }
     };
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         await step(method);
         if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }
         if (method === "resume") { await step("attach"); attaches += 1; return { session: { name: "" } }; }
         if (method === "session_settings") return { model: "offline", approval_mode: approval };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "owned-session" }, state: "idle" };
         if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
         if (method === "send") { deliveries += 1; return {}; }

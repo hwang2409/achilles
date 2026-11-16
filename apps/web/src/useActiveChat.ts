@@ -107,7 +107,8 @@ async function findChat(sessionId: string) {
   return null;
 }
 
-async function findWaitingChat() {
+// the newest listed chat (the sidebar's order) that matches
+async function findNewestChat(matches: (chat: Chat) => boolean) {
   let before: string | null = null;
   do {
     const params = new URLSearchParams({ limit: "200" });
@@ -115,7 +116,7 @@ async function findWaitingChat() {
     const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
     if (!response.ok) return null;
     const result = await response.json() as { chats: Chat[]; next: string | null };
-    const found = result.chats.find((chat) => chat.last_state === "approval");
+    const found = result.chats.find(matches);
     if (found) return found;
     before = result.next;
   } while (before);
@@ -154,7 +155,7 @@ export async function attachPage(
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
       const session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode); requireCurrent(owner, token);
-      const lease = await loadSession(client, session.id);
+      const lease = await loadSession(client, session.id, () => owner.current(token));
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
       page.approval_mode = session.approvalMode;
@@ -174,18 +175,21 @@ export async function attachPage(
     const creationStatus = creation.status(page.id);
     const pending = creationStatus.pending;
     if (creationStatus.createMode !== undefined) page.create_mode = creationStatus.createMode;
-    let sessionId = forceNew ? null : selectedId ?? page.zeta_session_id;
-    if (sessionId && !pending) {
+    // with no chat named, a page opens on its most recent chat (the sidebar's order), then on its home chat (page.zeta_session_id)
+    // shortcut: scans the whole chat list for a page with no listed chat; add a page filter to /api/chats if that gets slow
+    const newest = forceNew || create || selectedId || pending ? null : await findNewestChat((chat) => chat.page_id === page.id); requireCurrent(owner, token);
+    const candidates = forceNew || pending ? [] : selectedId ? [selectedId] : [...new Set([newest?.session_id, page.zeta_session_id])].filter((id): id is string => Boolean(id));
+    for (const sessionId of candidates) {
       try { return await attachSession(sessionId); }
       catch (caught) {
         if (caught instanceof ChatBusyError) return busy(caught.sessionId);
         if (!(caught instanceof SessionNotFoundError)) throw caught;
         if (selectedId) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
-        sessionId = null;
-        create = true;
+        // only a lost home chat is replaced: the replacement moves page.zeta_session_id. a lost newer chat falls back to home
+        if (sessionId === page.zeta_session_id) create = true;
       }
     }
-    if (!sessionId && !pending && !create) return { phase: "empty", page, serverApprovalMode, credential };
+    if (!pending && !create) return { phase: "empty", page, serverApprovalMode, credential };
 
     const mappingInput = forceNew ? creationInput : { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
     try {
@@ -496,7 +500,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [selectedId]);
 
   const continueWaitingChat = useCallback(async () => {
-    const waiting = await findWaitingChat();
+    const waiting = await findNewestChat((chat) => chat.last_state === "approval");
     if (waiting) selectChat(waiting);
   }, [selectChat]);
 

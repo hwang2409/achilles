@@ -249,9 +249,14 @@ export async function gateReloadMidTurn(
     await waitFor(async () => !(await turnEnded()) && await runningWithStop(), "kept turn shown running with a stop control after reload").catch(async (error) => {
       throw new Error(`${error}\nafter reload: ${JSON.stringify({ runState: await runState.innerText(), composer: await composer.getAttribute("data-state"), stop: await composer.locator('[data-part="composer-stop"]').count(), ended: await turnEnded() })}`);
     });
-    // the reply streams on the reloaded page: a later line shows before the turn ends, not only at its final commit
-    await waitFor(async () => (await messages.filter({ hasText: "reload line 050" }).count()) === 1, "reply streaming after reload");
-    if (await turnEnded() || !(await runningWithStop())) throw new Error("reload line 050 showed only after the turn ended, not while it streamed");
+    // the reply streams on the reloaded page: a later line shows before the turn ends, not only at its final commit.
+    // the text streamed before the reload shows with it, once (`in_flight_replay`); one read of the reply messages
+    let streaming: string[] = [];
+    await waitFor(async () => { streaming = await messages.filter({ hasText: "reload line 0" }).allInnerTexts(); return streaming.some((text) => text.includes("reload line 050")); }, "reply streaming after reload");
+    if (streaming.some((text) => text.includes("reload line 079")) || !(await runningWithStop())) throw new Error("reload line 050 showed only after the turn ended, not while it streamed");
+    const shown = Array.from({ length: 51 }, (_, index) => streaming.join("\n").split(`reload line ${String(index).padStart(3, "0")}`).length - 1);
+    if (streaming.length !== 1 || shown.some((count) => count !== 1))
+      throw new Error(`while the reply streamed after the reload, lines 000-050 showed ${JSON.stringify(shown)} times in ${streaming.length} messages, not once each in one`);
     await gateWait(() => page.getByText("reload line 079", { exact: false }).waitFor({ timeout: 30_000 }));
     await waitForIdleTurn(page, waitFor);
     if (await reply.count() !== 1) throw new Error(`reload split or duplicated the reply into ${await reply.count()} messages`);

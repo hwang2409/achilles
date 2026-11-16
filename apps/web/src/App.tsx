@@ -7,14 +7,14 @@ import { AppShell, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { draftStore } from "./draftStore";
 import { DetailRecord, type DetailFilter } from "./DetailRecord";
-import { FormBlock, selectRow, useRecordWrites, useSelectedRow } from "./page/RecordForm";
+import { FormBlock, refreshSelection, selectRow, useRecordWrites, useSelectedRow } from "./page/RecordForm";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import { usePageTools, type PageTool } from "./page/usePageTools";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -180,7 +180,7 @@ export function App() {
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
     if (!store || !scroll) return;
-    return watchJumpToLatest(store, scroll, setShowJumpToLatest);
+    return watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
   }, [store, transcript]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
@@ -266,13 +266,22 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   const actions = useRef<HTMLDivElement>(null);
   const closeOverflow = () => { setOverflow(false); overflowButton.current?.focus(); };
   useEffect(() => {
-    // the open menu covers the notice below the header, so Escape (from anywhere) and a tap outside close it
+    // the open menu covers the notice below the header, so Escape (from anywhere, even a table row that handles it:
+    // capture runs first), a tap outside, and focus moving outside (Tab) close it
     if (!overflow) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { setOverflow(false); overflowButton.current?.focus(); } };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOverflow(false);
+      if (actions.current?.contains(document.activeElement)) overflowButton.current?.focus();
+    };
     const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    addEventListener("keydown", onKey);
+    // a null relatedTarget is a click (WebKit does not focus clicked buttons), which onDown already judges
+    const onFocusOut = (event: FocusEvent) => { if (event.relatedTarget && !actions.current?.contains(event.relatedTarget as Node)) setOverflow(false); };
+    const box = actions.current;
+    addEventListener("keydown", onKey, true);
     addEventListener("pointerdown", onDown);
-    return () => { removeEventListener("keydown", onKey); removeEventListener("pointerdown", onDown); };
+    box?.addEventListener("focusout", onFocusOut);
+    return () => { removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", onDown); box?.removeEventListener("focusout", onFocusOut); };
   }, [overflow]);
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
@@ -304,14 +313,34 @@ function ChatHeader({ page, sessionId, title, state, toggling, disabled, toggle,
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
-  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`}>{state === "approval" ? "waiting on you" : state}</span><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  // the fold hides the full controls into the ••• menu below 64em, but an enabled mode must stay visible
+  // without opening it (spec.md:36, :109): a short word mark per mode that is on sits beside •••.
+  // when the header is tight the CSS-hidden .fold-long parts drop: "auto-approve" becomes "auto" and
+  // "create mode" becomes its hollow square alone; role="img" plus aria-label keeps the full name for screen readers.
+  const autoApprove = page.approval_mode === "allow";
+  const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state}</span>{foldMarkers}<button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
+
+const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
+  not_running: "start zeta, and this page connects by itself.",
+  controller_taken: "zeta is busy elsewhere",
+  auth_failed: "zeta refused this page",
+  incompatible: "zeta version mismatch",
+};
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";
   if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><button onClick={() => connection.retryNow()}>retry now</button></div>; }
-  const command = `zeta serve --ws ${connection.port} --ws-origin ${location.origin}`;
-  return <section className="full-state connection-state" role="alert"><p><span className="danger-mark" />{text}{"attempt" in state && <span className="attempt-count"> · tried {state.attempt} times</span>}</p><h1>{state.phase === "not_running" ? "start zeta, and this page connects by itself." : text}</h1>{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
+  const command = connection.startCommand;
+  // a short heading, the full sentence as body text; the time of the last try (not a rising attempt
+  // count alone, which read as a failure) plus the count itself, so a click has something to confirm it worked.
+  const heading = connectionHeadings[state.phase];
+  const attempt = "attempt" in state ? state.attempt : 0;
+  const status = "retryAt" in state
+    ? <>retrying by itself · last try <span className="local-time">{new Date(state.retryAt - backoff(attempt)).toLocaleTimeString().toLowerCase()}</span> · tried {attempt} time{attempt === 1 ? "" : "s"}</>
+    : "retrying…";
+  return <section className="full-state connection-state" role="alert"><p><span className="retry-mark" />{status}</p><h1>{heading ?? text}</h1>{heading && <p className="connection-detail">{text}</p>}{state.phase === "not_running" && <div className="command"><span>shell</span><button onClick={() => navigator.clipboard.writeText(command)}>copy</button><code>$ {command}</code></div>}<button className="primary" onClick={() => connection.retryNow()}>retry now</button></section>;
 }
 
 export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
@@ -349,25 +378,29 @@ function SchemaRecordList({ toolsKey, ...list }: { title: string; collection: st
 // name are appended, sorted, so the table never hides data the record actually has.
 export function RecordList({ title, collection, pageId, credential, refreshKey, columns = [], extendColumns = false }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; columns?: string[] | null; extendColumns?: boolean }) {
   const [records, setRecords] = useState<Record<string, unknown>[] | null>(null); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const requestSequence = useRef(0);
-  useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, refreshKey]);
+  useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?limit=100`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); refreshSelection(pageId, collection, value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, refreshKey]);
   const selected = useSelectedRow(pageId);
   const selectedId = selected?.collection === collection ? selected.record.record_id : undefined;
-  return <RecordListView title={title} collection={collection} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onSelect={(record) => selectRow(pageId, record && { collection, record })} />;
+  return <RecordListView title={title} collection={collection} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onSelect={(record, row) => selectRow(pageId, record && { collection, record, opener: row })} />;
 }
 
-export function RecordListView({ title, collection, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onSelect }: { title: string; collection?: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null) => void }) {
+export function RecordListView({ title, collection, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onSelect }: { title: string; collection?: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void }) {
   const loadedRecords = records ?? [];
+  // roving tabindex: one row is the table's tab stop (the last focused row, else the selected one, else the first); arrows move between rows
+  const [focusedId, setFocusedId] = useState<unknown>(undefined);
+  const has = (id: unknown) => id !== undefined && loadedRecords.some((record) => record.record_id === id);
+  const tabStop = has(focusedId) ? focusedId : has(selectedId) ? selectedId : loadedRecords[0]?.record_id;
   const columns = !chosen?.length ? recordColumns(loadedRecords) : extendColumns ? extendWithRecordKeys(chosen, loadedRecords) : chosen;
   const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => {
     const row = event.currentTarget;
-    if (event.key === "Enter" || event.key === " ") onSelect?.(record);
-    else if (event.key === "Escape") onSelect?.(null);
+    if (event.key === "Enter" || event.key === " ") onSelect?.(record, row);
+    else if (event.key === "Escape") onSelect?.(null, row);
     else if (event.key === "ArrowDown") (row.nextElementSibling as HTMLElement | null)?.focus();
     else if (event.key === "ArrowUp") (row.previousElementSibling as HTMLElement | null)?.focus();
     else return;
     event.preventDefault();
   };
-  return <section className="record-list" aria-busy={loading}><h2>{title}</h2>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><table role={onSelect ? "grid" : undefined} aria-label={title} data-collection={collection}><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{loadedRecords.map((record, index) => <tr key={String(record.record_id ?? index)} data-record-id={record.record_id == null ? undefined : String(record.record_id)} {...onSelect && { tabIndex: 0, "aria-selected": record.record_id === selectedId, onClick: () => onSelect(record), onKeyDown: (event: React.KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column}>{formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 100 && <p>showing newest 100 of {total}</p>}</>}</section>;
+  return <section className="record-list" aria-busy={loading}><h2>{title}</h2>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><table role={onSelect ? "grid" : undefined} aria-label={title} data-collection={collection}><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{loadedRecords.map((record, index) => <tr key={String(record.record_id ?? index)} data-record-id={record.record_id == null ? undefined : String(record.record_id)} {...onSelect && { tabIndex: record.record_id === tabStop ? 0 : -1, "aria-selected": record.record_id === selectedId, onFocus: () => setFocusedId(record.record_id), onClick: (event: React.MouseEvent<HTMLTableRowElement>) => onSelect(record, event.currentTarget), onKeyDown: (event: React.KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column}>{formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 100 && <p>showing newest 100 of {total}</p>}</>}</section>;
 }
 function formatRecordValue(value: unknown): string { return value !== null && typeof value === "object" ? JSON.stringify(value) : String(value ?? ""); }

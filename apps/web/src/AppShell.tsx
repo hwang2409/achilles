@@ -101,6 +101,9 @@ const initialPageListState = initialListState<PageLink, null>(null);
 const initialChatListState = initialListState<Chat, number>(0);
 const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : state.loading || state.items === null ? "loading" : "ready";
 
+// short heights use the drawer too: a phone on its side cannot spare 288px for the sidebar. matches style.css.
+const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
+
 export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
@@ -114,7 +117,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const settings = useSettings();
-  const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
+  const [narrow, setNarrow] = useState(() => matchMedia(DRAWER_MEDIA).matches);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const chatListElement = useRef<HTMLElement>(null);
@@ -171,7 +174,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
 
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
-  useEffect(() => { const media = matchMedia("(max-width: 760px)"); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
+  useEffect(() => { const media = matchMedia(DRAWER_MEDIA); const changed = () => setNarrow(media.matches); media.addEventListener("change", changed); return () => media.removeEventListener("change", changed); }, []);
   useEffect(() => { if (!narrow) setDrawer(false); }, [narrow]);
   useEffect(() => { void pageListOwner.current!.reload(null); }, [pageRefreshKey]);
   useEffect(() => { void chatListOwner.current!.reload(search); }, [refreshKey, search]);
@@ -263,6 +266,17 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     return row;
   };
   const startRowRename = (id: string) => { renamedRow.current = id; };
+  // the current row can land above a scrolled list (a new chat's first send moves it to the top): show it when it appears
+  // or moves to the top, then leave the user's scrolling alone; scroll-padding-top keeps it below the sticky heads
+  const shownCurrent = useRef({ id: "", first: false });
+  useEffect(() => {
+    const row = sessionId ? chatListElement.current?.querySelector<HTMLElement>(`a[data-chat-id="${CSS.escape(sessionId)}"]`) : null;
+    if (!sessionId || !row) return;
+    const first = chats[0]?.session_id === sessionId;
+    const shown = shownCurrent.current;
+    shownCurrent.current = { id: sessionId, first };
+    if (shown.id !== sessionId || (first && !shown.first)) row.scrollIntoView({ block: "nearest" });
+  }, [sessionId, chats]);
   useEffect(() => { if (returnRowFocus()) renamedRow.current = null; }, [chats]);
   useEffect(() => {
     const release = (event: FocusEvent) => {
