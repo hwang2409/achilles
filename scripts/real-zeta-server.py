@@ -343,7 +343,12 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "layout": {
                             "blocks": [
                                 {"type": "text", "text": "layout updated without reload"},
-                                {"type": "metric", "label": "all books", "collection": "books", "count": True},
+                                {
+                                    "type": "metric",
+                                    "label": "all books",
+                                    "collection": "books",
+                                    "count": True,
+                                },
                                 {
                                     "type": "metric",
                                     "label": (
