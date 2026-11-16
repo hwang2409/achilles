@@ -20,8 +20,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .brand-row strong { font-size: 16px; letter-spacing: .02em; }
 .brand-row > span:last-of-type { color: var(--fulcrum-muted); font-size: 12px; }
 .brand-row button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
-.brand-mark { position: relative; width: 11px; height: 11px; background: var(--fulcrum-accent); }
-.brand-mark::after { content: ""; position: absolute; width: 11px; height: 11px; left: 5px; top: 5px; background: color-mix(in srgb, var(--fulcrum-accent) 55%, white); }
+.brand-mark { width: 11px; height: 11px; background: var(--fulcrum-accent); }
 .new-chat, .chat-search { flex: 0 0 40px; margin: 12px 16px 0; display: flex; align-items: center; gap: 10px; padding: 0 10px; }
 .new-chat { justify-content: flex-start; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .new-chat kbd { margin-left: auto; font-size: 14px; }

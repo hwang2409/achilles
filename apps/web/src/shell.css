@@ -9,13 +9,14 @@
 .page-list a,
 .chat-row { position: relative; border-left: 2px solid transparent; }
 .page-list a { gap: 10px; padding: 6px 14px 6px 10px; font-size: 13px; }
-.page-list a > span { position: absolute; left: 4px; color: var(--fulcrum-muted); }
+.page-list a > span { flex: 0 0 auto; color: var(--fulcrum-muted); }
 .page-list a b,
 .chat-row strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .chat-row { padding: 8px 14px 8px 10px; }
 .chat-row strong { font-size: 13px; line-height: 20px; }
 .chat-row > span { margin-top: 2px; font-size: 12px; line-height: 16px; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.sidebar > footer > .settings-button { border-color: transparent; background: transparent; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 10%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
