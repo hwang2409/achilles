@@ -72,13 +72,16 @@
 }
 .transcript [data-part="md-table"] {
   display: block;
-  max-width: 100%;
+  width: max-content;
+  min-width: 100%;
   margin: 0 0 12px;
   overflow-x: auto;
   border-collapse: collapse;
   font-size: 13px;
   line-height: 20px;
 }
+.transcript [data-part="md-table"] :is(thead, tbody) { display: block; width: 100%; }
+.transcript [data-part="md-table"] tr { display: table; width: 100%; table-layout: fixed; }
 .transcript [data-part="md-table"] :is(th, td) { padding: 6px 12px; border: 1px solid var(--fulcrum-border); text-align: left; vertical-align: top; }
 .transcript [data-part="md-table"] th { background: var(--fulcrum-surface); font-weight: 700; }
 .transcript [data-part="md-table"] :is(th, td)[align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
@@ -115,8 +118,6 @@
 }
 .transcript [data-part="tool-status"] { grid-column: 4; grid-row: 1; color: var(--fulcrum-muted); font-size: 12px; }
 .transcript [data-part="tool-body"] > * + * { border-top: 0; }
-.transcript [data-part="tool-args-details"] { display: none; }
-.transcript [data-part="tool-body"] > [data-part="tool-args-details"]:only-child { display: none; }
 .transcript [data-part="tool-body"]:has(> [data-part="tool-args-details"]:only-child) { border-top: 0; }
 .transcript [data-part="tool-foot"] { display: none; }
 .transcript [data-part="tool-body"] { border-top: 1px solid var(--fulcrum-border); }
