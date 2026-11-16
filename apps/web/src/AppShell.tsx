@@ -105,7 +105,6 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
 export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
   const [query, setQuery] = useState("");
@@ -221,7 +220,6 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   }, [paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); if (!narrow) setCollapsed((value) => !value); }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
         const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
@@ -321,11 +319,11 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     });
   };
 
-  return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
+  return <div className={`app-shell ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
-      <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span>{!narrow && <button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button>}</div>
+      <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong></div>
       <button className="new-chat" onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
@@ -340,7 +338,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
         {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
-      <footer><SettingsControl onOpen={openSettings} className="settings-button" /><button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
+      <footer><SettingsControl onOpen={openSettings} className="settings-button" /></footer>
     </aside>
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => { requestFocus(() => firstFocusable(sidebar.current)); setDrawer(true); }}>☰</button>
