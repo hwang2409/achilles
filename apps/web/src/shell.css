@@ -19,6 +19,7 @@
 .chat-row > span { margin-top: 2px; font-size: 12px; line-height: 16px; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .sidebar > footer > .settings-button { border-color: transparent; background: transparent; }
+.sidebar > footer > .palette-button { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 10%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
