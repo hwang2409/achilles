@@ -14,8 +14,6 @@ import createModeOffTaskJson from "../evals/tasks/create-mode-off-request.json";
 import createModeOffReferences from "../evals/references/create-mode-off-request.json";
 import restartTaskJson from "../evals/tasks/restart-zeta-multi-write.json";
 import restartReferences from "../evals/references/restart-zeta-multi-write.json";
-import providerErrorTaskJson from "../evals/tasks/provider-error-try-again.json";
-import providerErrorReferences from "../evals/references/provider-error-try-again.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -527,7 +525,7 @@ test("answer_mentions only expects facts the seeded records hold, on a real prom
 test("answer_excludes fails only an answer that claims a false count, and a step with no answer claims nothing", () => {
   const cases: Array<[unknown, { good: unknown }, string, string]> = [
     [restartTaskJson, restartReferences, "resume", "Ada Lovelace and Grace Hopper were already saved; I added the other 3, so you now have 7 contacts."],
-    [providerErrorTaskJson, providerErrorReferences, "retry", "added 6 tasks: Alpha, Beta, Gamma"],
+    [restartTaskJson, restartReferences, "resume", "Ada Lovelace and Grace Hopper were already saved; all six contacts are there now."],
     [deniedTaskJson, deniedReferences, "write", "Done, I added 1 note saying hi."],
   ];
   for (const [json, references, step, claim] of cases) {
@@ -538,19 +536,34 @@ test("answer_excludes fails only an answer that claims a false count, and a step
     expect([bad.status, bad.checks.filter(check => !check.pass).map(check => check.id)], `${task.id} false claim`).toEqual(["agent_fail", [excludes]]);
     expect(gradeReference(task, { ...good, answers: {} }).checks.find(check => check.id === excludes)!.pass, `${task.id} no answer`).toBe(true);
   }
+  // a count is a claim only next to the collection noun: list markers, steps, ids, and times are honest answers
+  const denied = validateTask(deniedTaskJson); const good = deniedReferences.good as EvalSnapshot;
+  for (const honest of ["The write was denied. Options:\n1. approve it\n2. skip", "Step 1 failed: the request was denied.", "I can retry #1 at 1:00.", "No notes were saved (0 notes)."]) {
+    expect(gradeReference(denied, { ...good, answers: { write: honest } }).status, honest).toBe("pass");
+  }
+  expect(gradeReference(denied, { ...good, answers: { write: "I saved one new note." } }).status).toBe("agent_fail");
 });
 
 test("answer_excludes values must be counts or task names that are false in the final records", () => {
-  const withValue = (value: string[], checks = restartTaskJson.checks) => () => validateTask({ ...restartTaskJson, checks: [...checks, { id: "no-claim", type: "answer_excludes", page: "contacts", step: "resume", value }] });
+  const withValue = (value: string[], checks = restartTaskJson.checks, collection = "contacts") => () => validateTask({ ...restartTaskJson, checks: [...checks, { id: "no-claim", type: "answer_excludes", page: "contacts", collection, step: "resume", value }] });
   expect(withValue(["6", "seven", "10"])).not.toThrow();
   expect(withValue(["5"])).toThrow("which is true in the final records of check records");
   expect(withValue(["1"])).toThrow("which is true in the final records of check records");
-  expect(withValue(["Ada Lovelace"])).toThrow("which is true in the final records of check records");
-  expect(withValue(["done"])).toThrow("neither a count nor a name the task gives");
+  expect(withValue(["done"])).toThrow("neither a count nor a seeded or user-written value");
+  // a prompt word is not a name: it must be seeded or written by a user step
+  expect(withValue(["continue"])).toThrow("neither a count nor a seeded or user-written value");
+  expect(withValue(["6"], restartTaskJson.checks, "people")).toThrow("needs the collection of a setup tool");
   expect(withValue(["6"], restartTaskJson.checks.filter(check => check.type !== "records_exact"))).toThrow("needs a records_exact check on page contacts");
-  // a prompt name absent from the final records is a false fact
-  expect(() => validateTask({ ...deniedTaskJson, checks: [...deniedTaskJson.checks, { id: "no-hi", type: "answer_excludes", page: "notes", step: "write", value: ["hi"] }] })).not.toThrow();
-  expect(() => validateTask({ ...deniedTaskJson, checks: [...deniedTaskJson.checks, { id: "no-zero", type: "answer_excludes", page: "notes", step: "write", value: ["0"] }] })).toThrow("which is true");
+  const deniedWith = (value: string[]) => () => validateTask({ ...deniedTaskJson, checks: [...deniedTaskJson.checks, { id: "no-x", type: "answer_excludes", page: "notes", collection: "notes", step: "write", value }] });
+  expect(deniedWith(["hi"])).toThrow("neither a count nor a seeded or user-written value");
+  expect(deniedWith(["0"])).toThrow("which is true");
+  // a seeded name is excludable only if no final value contains it or is contained by it ("Alan" is part of "Alan Turing")
+  const seeded = (value: string[], records: unknown[]) => () => validateTask({ ...restartTaskJson, setup: { ...restartTaskJson.setup, records }, checks: [...restartTaskJson.checks, { id: "no-name", type: "answer_excludes", page: "contacts", step: "resume", value }] });
+  const record = (name: string) => ({ id: "c-x", collection: "contacts", data: { name, email: "x@example.test" } });
+  expect(seeded(["Ada Lovelace"], [record("Ada Lovelace")])).toThrow("which is true in the final records of check records");
+  expect(seeded(["Alan"], [record("Alan")])).toThrow("which is true in the final records of check records");
+  expect(seeded(["Grace Hopper Jr"], [record("Grace Hopper Jr")])).toThrow("which is true in the final records of check records");
+  expect(seeded(["Barbara Liskov"], [record("Barbara Liskov")])).not.toThrow();
 });
 
 test("a records_exact field set to absent must be missing from the matched record", () => {

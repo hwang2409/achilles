@@ -250,14 +250,15 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
 // form_submit values are input the harness types, not expectations
 const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["overwrite_disclosed", "approval_outcomes", "form_submit", "operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count", "tool_evolution"]);
 function nestedTokens(value: unknown): string[] {
-  if (isAbsent(value)) return [];
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
   return typeof value === "string" ? [value] : [];
 }
 export function expectationTokens(check: TaskCheck): string[] {
   if (SCHEMA_RELATIVE_CHECKS.has(check.type)) return [];
-  return [...new Set(Object.entries(check).filter(([key]) => EXPECTATION_TOKEN_KEYS.has(key)).flatMap(([, value]) => nestedTokens(value)).map(token => token.replace(/^achilles__/, "")))];
+  // a top-level records_exact row field set to { absent: true } is a marker, not an expected literal; the grader honors it only there
+  const literal = (key: string, value: unknown) => check.type === "records_exact" && key === "value" && Array.isArray(value) ? value.map(row => row && typeof row === "object" && !Array.isArray(row) ? Object.fromEntries(Object.entries(row).filter(([, item]) => !isAbsent(item))) : row) : value;
+  return [...new Set(Object.entries(check).filter(([key]) => EXPECTATION_TOKEN_KEYS.has(key)).flatMap(([key, value]) => nestedTokens(literal(key, value))).map(token => token.replace(/^achilles__/, "")))];
 }
 const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
 // An answer may only be graded for a fact the seeded records hold: a record's string value, or a
@@ -288,6 +289,39 @@ export function mentions(answer: string, value: string) {
   const edges = /^\d+$/.test(value) ? ["(?<!\\d[.,])", "(?![.,]\\d)"] : ["(?<![\\p{L}\\p{N}]-)", "(?!-[\\p{L}\\p{N}])"];
   return new RegExp(`(?<![\\p{L}\\p{N}])${edges[0]}${escapeRegex(value)}(?![\\p{L}\\p{N}])${edges[1]}`, "iu").test(answer);
 }
+// an answer_excludes count value as a number (digits or a word), or -1 for a name
+const excludedCount = (value: string) => /^\d+$/.test(value) ? Number(value) : NUMBER_WORDS.indexOf(value.toLowerCase());
+// "<count> <collection noun>": digits or a word, then at most one word, then the noun, singular or plural ("6 contacts",
+// "all six contacts", "1 new note"); a bare number ("1. approve", "step 1", "#1", "1:00") never matches
+function claimsCount(answer: string, count: number, collection: string) {
+  const plural = collection.replace(/_/g, " "); const noun = escapeRegex(plural.replace(/s$/, ""));
+  const number = [String(count), NUMBER_WORDS[count]].filter(Boolean).map(escapeRegex).join("|");
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?<!\\d[.,])(?:${number})\\s+(?:[\\p{L}-]+\\s+)?${noun}s?(?![\\p{L}\\p{N}])`, "iu").test(answer);
+}
+// each answer_excludes value must be false in the final state of the page's records_exact checks: a count that is neither
+// the row count nor a one-field-equals count, or a seeded or user-written value that no final row value contains or is contained by
+function lintExcludes(check: TaskCheck, checks: TaskCheck[], setup?: TaskSetup, written: string[] = []) {
+  const finals = checks.filter(item => item.type === "records_exact" && item.page === check.page);
+  if (!finals.length) throw new Error(`check ${check.id} needs a records_exact check on page ${check.page}: its values must be false in that final state`);
+  const values = check.value as string[];
+  if (values.some(value => excludedCount(value) >= 0) && !setup?.tools.some(tool => tool.collection === check.collection)) throw new Error(`check ${check.id} excludes a count, so it needs the collection of a setup tool to name its noun`);
+  for (const value of values) {
+    const number = excludedCount(value); const lower = value.toLowerCase();
+    // a name a prompt only quotes may be a vague word ("note", "add"): it must be stored by the seed or a user write
+    if (number < 0 && !written.some(item => item.toLowerCase() === lower) && !setup?.records.some(record => Object.values(record.data).some(item => typeof item === "string" && item.toLowerCase() === lower))) throw new Error(`check ${check.id} excludes ${JSON.stringify(value)}, which is neither a count nor a seeded or user-written value`);
+    for (const final of finals) {
+      const rows = final.value as unknown[];
+      // [field, value] pairs of each final row; a value row (a string array) has no field names
+      const fields = rows.map(row => (Array.isArray(row) ? row.map(item => ["", item]) : Object.entries(row as Record<string, unknown>)).filter(([, item]) => !isAbsent(item) && (item === null || typeof item !== "object"))).flat();
+      // the real counts: all rows, and the rows where one field equals one value
+      const tally = new Map<string, number>();
+      for (const [field, item] of fields) { const key = `${field}\0${JSON.stringify(item)}`; tally.set(key, (tally.get(key) ?? 0) + 1); }
+      // a part of a final value is true too: "Alan" is said by every answer that names "Alan Turing"
+      const holds = number >= 0 ? number === rows.length || [...tally.values()].includes(number) : fields.some(([, item]) => mentions(value, String(item)) || String(item).toLowerCase().includes(lower));
+      if (holds) throw new Error(`check ${check.id} excludes ${JSON.stringify(value)}, which is true in the final records of check ${final.id}`);
+    }
+  }
+}
 function validateExpectations(checks: TaskCheck[], promptText: string, setup?: TaskSetup, requires: string[] = [], written: string[] = []) {
   const declared = new Set<string>(["inspect_page", ...requires]);
   for (const tool of setup?.tools ?? []) {
@@ -316,25 +350,7 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
     for (const token of nestedTokens(value.set)) if (!promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
     if (!declared.has(check.tool!.replace(/^achilles__/, ""))) throw new Error(`check ${check.id} names undeclared tool ${check.tool}`);
   }
-  for (const check of checks.filter(check => check.type === "answer_excludes")) {
-    const finals = checks.filter(item => item.type === "records_exact" && item.page === check.page);
-    if (!finals.length) throw new Error(`check ${check.id} needs a records_exact check on page ${check.page}: its values must be false in that final state`);
-    for (const value of check.value as string[]) {
-      const number = /^\d+$/.test(value) ? Number(value) : NUMBER_WORDS.indexOf(value.toLowerCase());
-      // a name must come from the task (a prompt quote, a seeded value, or a user write), so vague text cannot satisfy the check
-      if (number < 0 && !mentions(promptText, value) && !seededFact(value, setup, written)) throw new Error(`check ${check.id} excludes ${JSON.stringify(value)}, which is neither a count nor a name the task gives`);
-      for (const final of finals) {
-        const rows = final.value as unknown[];
-        // [field, value] pairs of each final row; a value row (a string array) has no field names
-        const fields = rows.map(row => (Array.isArray(row) ? row.map(item => ["", item]) : Object.entries(row as Record<string, unknown>)).filter(([, item]) => !isAbsent(item) && (item === null || typeof item !== "object")));
-        // the real counts: all rows, and the rows where one field equals one value
-        const tally = new Map<string, number>();
-        for (const [field, item] of fields.flat()) { const key = `${field}\0${JSON.stringify(item)}`; tally.set(key, (tally.get(key) ?? 0) + 1); }
-        const holds = number >= 0 ? number === rows.length || [...tally.values()].includes(number) : fields.flat().some(([, item]) => String(item).toLowerCase() === value.toLowerCase());
-        if (holds) throw new Error(`check ${check.id} excludes ${JSON.stringify(value)}, which is true in the final records of check ${final.id}`);
-      }
-    }
-  }
+  for (const check of checks.filter(check => check.type === "answer_excludes")) lintExcludes(check, checks, setup, written);
   for (const check of checks.filter(check => check.type !== "answer_mentions" && check.type !== "answer_excludes")) for (const token of expectationTokens(check)) {
     // Count names select a closed snapshot collection; layout checks use a fixed document envelope.
     const structural = ["layout_contains", "layout_update"].includes(check.type) && LAYOUT_STRUCTURAL_TOKENS.has(token);
@@ -553,7 +569,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   // none of the values (each false in the final records, by the lint) appears as a whole token; a step with no answer claims nothing
   answer_excludes: ({ check, snapshot }) => {
     const answer = snapshot.answers?.[check.step!];
-    const claimed = typeof answer === "string" ? (check.value as string[]).filter(value => mentions(answer, value)) : [];
+    const claimed = typeof answer === "string" ? (check.value as string[]).filter(value => excludedCount(value) >= 0 ? claimsCount(answer, excludedCount(value), check.collection!) : mentions(answer, value)) : [];
     return !claimed.length || { reason: `answer claims ${JSON.stringify(claimed)}, which the final records do not hold: ${JSON.stringify(String(answer).slice(0, 500))}` } satisfies CheckFailure;
   },
   // the tool's approval requests target exactly the expected records; an approved record ends with `set`,

@@ -222,8 +222,9 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     the page's assigned tools), `tool_evolution` (a tool gained a field and old
     records stay readable), `schema_roundtrip`.
   - records and results: `record` (some record contains `value`),
-    `records_exact` (exactly these records; a row field set to
-    `{ "absent": true }` must be missing from the matched record), `updated_record` (a `transition`
+    `records_exact` (exactly these records; a top-level row field set to
+    `{ "absent": true }` must be missing from the matched record; deeper in a
+    row it is a literal object), `updated_record` (a `transition`
     from `before` to `after` values), `successful_result` (a successful call
     of `tool`, optionally containing `value`), `no_duplicate_writes` (no two
     successful calls with the same arguments; with `collection` and `fields`,
@@ -257,15 +258,24 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   (in a collection, or where one field equals one value) as digits or a word.
   it is a weak signal (cannot see negation, a list marker, or a record id), so
   every value must be a seeded fact, never free-form expected prose.
-- `answer_excludes` is the reverse: it fails when the step's answer mentions any
-  of its `value` list, by the same whole-token match (a step with no answer
-  claims nothing and passes). each value must be false in the final state the
-  task's `records_exact` check on that page describes: a count that is not the
-  number of rows and not the number of rows where one field equals one value,
-  or a name the task gives (a prompt quote, a seeded value, a user write) that
-  no final row holds. so it catches a false claim ("I added 7 contacts" when 5
-  exist), never vague text. pick values a correct answer would not say: the
-  check cannot see negation either.
+- `answer_excludes` is the reverse: it fails when the step's answer claims any
+  of its `value` list (a step with no answer claims nothing and passes). each
+  value must be false in the final state the page's `records_exact` check
+  describes, and the lint rejects any other value:
+  - a count (digits, or a word from zero to twenty) needs `collection`, a setup
+    tool's collection. it matches only next to that noun, singular or plural,
+    with at most one word between: "7 contacts", "all seven contacts", "1 new
+    note". a bare number ("1. approve", "step 1", "#1", "1:00") is never a
+    claim. the count must differ from the number of final rows and from every
+    count of final rows where one field equals one value.
+  - a name must be a seeded record value or a value a user step writes; a word
+    the prompt only quotes is not accepted. it must not contain a final row
+    value or be part of one ("Alan" is part of "Alan Turing", so every honest
+    answer would say it). no shipped task uses a name yet.
+  so a check cannot hold a vague word or a bare number. it still cannot see
+  negation ("not 7 contacts" claims 7), and it cannot catch a false claim with
+  no excluded value in it ("I added the note"): grade that state with
+  `records_exact` and the approval checks.
 - `form_submit` uses the page as a user would. after the agent steps, the
   harness opens the page in a browser and, for each insert form block in the
   active layout, fills every required input from the check's `value` map by the
