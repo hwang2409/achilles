@@ -266,6 +266,17 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     return row;
   };
   const startRowRename = (id: string) => { renamedRow.current = id; };
+  // the current row can land above a scrolled list (a new chat's first send moves it to the top): show it when it appears
+  // or moves to the top, then leave the user's scrolling alone; scroll-padding-top keeps it below the sticky heads
+  const shownCurrent = useRef({ id: "", first: false });
+  useEffect(() => {
+    const row = sessionId ? chatListElement.current?.querySelector<HTMLElement>(`a[data-chat-id="${CSS.escape(sessionId)}"]`) : null;
+    if (!sessionId || !row) return;
+    const first = chats[0]?.session_id === sessionId;
+    const shown = shownCurrent.current;
+    shownCurrent.current = { id: sessionId, first };
+    if (shown.id !== sessionId || (first && !shown.first)) row.scrollIntoView({ block: "nearest" });
+  }, [sessionId, chats]);
   useEffect(() => { if (returnRowFocus()) renamedRow.current = null; }, [chats]);
   useEffect(() => {
     const release = (event: FocusEvent) => {
