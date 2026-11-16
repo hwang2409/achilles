@@ -16,6 +16,8 @@ export type ComposerModel = {
   stopping: boolean;
   /** first in, first out; the head is in flight when `send.id` names it */
   queue: QueuedMessage[];
+  /** a failed head is being edited in the box: the rows behind it wait until that text is sent (it goes first) or cleared */
+  held?: boolean;
   error?: ComposerError;
   send?: Send;
   nextAttempt: number;
@@ -64,16 +66,16 @@ export const inFlight = (model: ComposerModel) => model.sending ? model.queue.fi
 export function composerStatus(model: ComposerModel): { text: string; tone?: "danger" | "busy" } {
   if (model.error) return { text: model.error.text, tone: "danger" };
   if (model.stopping) return { text: "stopping", tone: "busy" };
+  if (model.held && model.queue.length) return { text: "the rest wait until you send or clear the edited message", tone: "busy" };
   if (inFlight(model)) return { text: model.send?.steer ? "queued for the next step" : "sending", tone: "busy" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
   return { text: "" };
 }
 
-/** What the header shows for this composer. A steer waits for the next step, so it counts as queued. */
+/** What the header shows for this composer: it counts only the rows that are not in flight (an in-flight steer is "next step"). */
 export function composerActivity(model: ComposerModel): { sending: boolean; queued: number; failed: boolean } {
-  const steering = Boolean(inFlight(model) && model.send?.steer);
   const waiting = model.queue.filter((item) => item !== inFlight(model) && !item.failed).length;
-  return { sending: Boolean(inFlight(model)) && !steering, queued: waiting + (steering ? 1 : 0), failed: Boolean(model.queue[0]?.failed) };
+  return { sending: Boolean(inFlight(model)), queued: waiting, failed: Boolean(model.queue[0]?.failed) };
 }
 
 const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): ComposerTransition => {
@@ -86,7 +88,7 @@ const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): Compo
 
 const next = (model: ComposerModel, turnRunning: boolean): ComposerTransition => {
   const head = model.queue[0];
-  if (!head || head.failed || model.sending || !canSend(model.state)) return { model };
+  if (!head || head.failed || model.held || model.sending || !canSend(model.state)) return { model };
   return start(model, head, turnRunning);
 };
 
@@ -95,11 +97,13 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "state":
       return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
-      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error } };
+      return { model: { ...model, draft: event.draft, held: model.held && Boolean(event.draft.trim()), error: model.error?.kind === "submit" ? undefined : model.error } };
     case "submit": {
       if (!submitAction(model)) return { model };
       if (model.queue.length >= QUEUE_LIMIT) return { model: { ...model, error: { kind: "submit", text: `at most ${QUEUE_LIMIT} messages can wait. cancel one or wait for a reply.` } } };
-      const queued = { ...model, draft: "", error: undefined, queue: [...model.queue, { id: model.nextQueueId, text: model.draft }], nextQueueId: model.nextQueueId + 1 };
+      const item = { id: model.nextQueueId, text: model.draft };
+      // the edited text of a failed head keeps its place in front of the rows it held back
+      const queued = { ...model, draft: "", error: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
       return next(queued, event.turnRunning);
     }
     case "next":
@@ -119,10 +123,11 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "retry":
       return { model: { ...model, queue: model.queue.map((item) => item.id === event.id ? { ...item, failed: undefined } : item) } };
     case "restore": {
-      // edit a failed message: its text goes back to the front of the box, and its row goes away
+      // edit a failed message: its text goes back to the front of the box, its row goes away, and the rows behind it wait
       const item = model.queue.find((queued) => queued.id === event.id && queued.failed);
       if (!item) return { model };
-      return { model: { ...model, draft: [item.text, model.draft].filter(Boolean).join("\n"), queue: model.queue.filter((queued) => queued !== item) } };
+      const queue = model.queue.filter((queued) => queued !== item);
+      return { model: { ...model, draft: [item.text, model.draft].filter(Boolean).join("\n"), queue, held: queue.length > 0 } };
     }
     case "cancel":
       if (inFlight(model)?.id === event.id) return { model };

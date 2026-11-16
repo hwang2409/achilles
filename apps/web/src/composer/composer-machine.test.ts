@@ -73,9 +73,9 @@ describe("composer delivery machine", () => {
       const submitted = transition(createComposerModel("hello again", "idle"), { type: "submit", turnRunning: false }).model;
       expect(apply(submitted, { type: "edit", draft: "hello again later" }, { type: "confirm", attempt: 1 }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "hello again later", queue: [] });
     }],
-    ["the header counts a waiting steer as queued and shows a failed head", () => {
+    ["the header counts only rows not in flight and shows a failed head", () => {
       const steering = transition(createComposerModel("redirect", "steerable"), { type: "submit", turnRunning: true }).model;
-      expect(composerActivity(steering)).toEqual({ sending: false, queued: 1, failed: false });
+      expect(composerActivity(steering)).toEqual({ sending: true, queued: 0, failed: false });
       const failed = apply(steering, { type: "edit", draft: "later" }, { type: "submit", turnRunning: true }, { type: "reject", attempt: 1, message: "no" }, { type: "settle", attempt: 1 });
       expect(composerActivity(failed)).toEqual({ sending: false, queued: 1, failed: true });
     }],

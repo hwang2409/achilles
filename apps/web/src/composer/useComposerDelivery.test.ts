@@ -202,6 +202,16 @@ const queueCases: QueueCase[] = [
     sent: ["a:first"],
   },
   {
+    name: "edit of a failed first message holds the rows behind it until the edited text is sent; it goes first",
+    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["rows", ["queued second"]], ["sent", ["a:first"]], ["enter", "first fixed"], ["ok"], ["ok"]],
+    sent: ["a:first", "a:first fixed", "a:second"],
+  },
+  {
+    name: "clearing the edited text of a failed first message lets the rows it held go out",
+    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["sent", ["a:first"]], ["type", ""], ["ok"]],
+    sent: ["a:first", "a:second"],
+  },
+  {
     name: "remount while sending: the send settles once, the row goes away",
     steps: [["enter", "first"], ["remount"], ["rows", ["sending first"]], ["ok"]],
     sent: ["a:first"],
@@ -287,6 +297,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
     for (const step of steps) {
       switch (step[0]) {
         case "enter": view.owner.edit(step[1]); void view.owner.submit(); break;
+        case "type": view.owner.edit(step[1]); break;
         case "ok": await sends.release(); break;
         case "fail": await sends.release(new Error(step[1])); break;
         case "x": view.owner.cancel(rowOf(step[1])); break;
