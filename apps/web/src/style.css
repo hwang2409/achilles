@@ -195,6 +195,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
+.main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
 [data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 [data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
