@@ -476,3 +476,74 @@ test("a settle zeta keeps refusing after the turn end retries a bounded number o
   await flushUntil(() => active.state.phase === "ready" && active.state.page.approval_mode === "ask");
   expect(zeta.state.sets).toBe(1);
 });
+
+// zeta serves one attached session: `new_session` and `resume` move it, and a request naming another session is refused
+test("a first send whose create is still pending when an older unsent chat opens leaves that chat alone and is not sent", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const storage = new MemoryStorage();
+  const popListeners: Array<() => void> = [];
+  const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
+  const emptyPage = { ...page, zeta_session_id: null as string | null };
+  const unsent = { ...chat, session_id: "s0", message_sent: false };
+  setGlobals({
+    localStorage: storage,
+    location,
+    history: { pushState() {}, replaceState() {} },
+    addEventListener: (type: string, listener: () => void) => { if (type === "popstate") popListeners.push(listener); },
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(emptyPage);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/home/chats") return Response.json({}, { status: 201 });
+      if (url === "/api/pages/home/session") { emptyPage.zeta_session_id = "s1"; return Response.json({ session_id: "s1" }); }
+      // unsent chats are not listed; `include` finds one by id
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: url.includes("include=s0") ? [unsent] : [], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const created = deferred<unknown>();
+  const requests: string[] = [];
+  let attached: string | null = null;
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq"],
+    request: async (method: string, params: { session_id?: string } = {}) => {
+      if (method === "new_session") { attached = "s1"; requests.push("new_session"); return created.promise; }
+      requests.push(`${method} ${params.session_id ?? ""}`);
+      if (method === "resume") { attached = params.session_id!; return { session: { name: null } }; }
+      if (params.session_id && params.session_id !== attached) throw Object.assign(new Error("session is not active"), { code: -32005 });
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: attached }, state: "idle" };
+      if (method === "send") return {};
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  let active!: ReturnType<typeof useActiveChat>;
+  const clock = new ManualClock();
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "empty");
+
+  let sent!: Promise<void>;
+  await act(async () => { sent = active.send("x1", { steer: false }, () => {}); sent.catch(() => {}); });
+  await flushUntil(() => requests.includes("new_session"));
+  // browser Back to the unsent chat while zeta's reply to `new_session` is still on its way
+  location.search = "?chat=s0";
+  await act(async () => { popListeners.forEach((listener) => listener()); });
+  await flushUntil(() => active.state.phase === "ready");
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
+
+  const settled = requests.length;
+  await act(async () => { created.resolve({ session: { session_id: "s1" } }); await sent.catch(() => {}); });
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  expect(active.creationError).toBeNull();
+  expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
+  expect(requests.slice(settled)).toEqual([]);
+  await expect(sent).rejects.toThrow("another chat opened before this chat was created");
+  expect(storage.getItem("achilles-pending-chats")).toBeNull();
+});

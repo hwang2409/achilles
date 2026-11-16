@@ -10,6 +10,8 @@ export type PendingChat = { sessionId: string; pageId: string; mode: "ask" | "al
 export type ChatCreationInput = { client: ZetaClient; pageId: string; credential: string; cwd: string; mode: "ask" | "allow"; mapExpectedSessionId?: string | null };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem"> & Partial<Pick<globalThis.Storage, "removeItem">>;
 type AttachedChat = { sessionId: string };
+/** The page no longer shows what started this create (another chat opened): it stopped before touching zeta again and forgot its record. */
+export class StaleCreation extends Error { constructor() { super("another chat opened before this chat was created, so the message was not sent"); } }
 type Fetch = typeof fetch;
 
 function isPendingChat(value: unknown): value is PendingChat {
@@ -82,7 +84,9 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     return { ...current, ...change } as PendingChat;
   };
 
-  const finish = async (input: ChatCreationInput, initial: PendingChat): Promise<PendingChat> => {
+  const forget = (pageId: string) => { clearDurable(pageId); complete(pageId); };
+
+  const finish = async (input: ChatCreationInput, initial: PendingChat, live: () => void): Promise<PendingChat> => {
     let record = initial;
     try {
       if (record.stage === "created") {
@@ -93,11 +97,13 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         record = advance(record, { stage: "registered" }); save(record);
       }
       if (record.stage === "registered") {
+        live();
         const approval = await applyApprovalMode(input.client, record.sessionId, record.mode);
         if (approval.pending) throw new Error("the creation approval mode is waiting for the session to become idle");
         record = advance(record, { stage: "approvalApplied" }); save(record);
       }
       if (record.stage === "approvalApplied" && Object.hasOwn(record, "expectedSessionId")) {
+        live();
         const response = await request(`/api/pages/${record.pageId}/session`, {
           method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_session_id: record.expectedSessionId, session_id: record.sessionId }),
         });
@@ -107,6 +113,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       }
       return record;
     } catch (caught) {
+      if (caught instanceof StaleCreation) throw caught;
       const retained = pending(record.pageId);
       if (retained) save({ ...retained, lastError: caught instanceof Error ? caught.message : String(caught) });
       throw caught;
@@ -119,21 +126,26 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     applyCreateMode?: (attached: T, enabled: boolean) => Promise<T>,
     publishReady: (attached: T) => Promise<void> | void = () => {},
     create = true,
+    current: () => boolean = () => true,
   ): Promise<T> | null => {
     contexts.set(input.pageId, input);
     const active = running.get(input.pageId);
     if (active) return active as Promise<T>;
     const existing = pending(input.pageId);
     if (!create && !existing) return null;
+    // zeta serves one attached session: a create whose page moved on must not touch zeta again, or it detaches the shown chat
+    const live = () => { if (!current()) { forget(input.pageId); throw new StaleCreation(); } };
     const operation = (async () => {
       let record = existing;
       if (!record) {
         const result = await input.client.request("new_session", pageBinding(input.credential, input.cwd)) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
+        live();
         record = { sessionId, pageId: input.pageId, mode: input.mode, stage: "created", ...(Object.hasOwn(input, "mapExpectedSessionId") ? { expectedSessionId: input.mapExpectedSessionId } : {}) }; save(record);
       }
-      let prepared = await finish(input, record);
+      let prepared = await finish(input, record, live);
+      live();
       let attached = await attach(prepared.mappedSessionId ?? prepared.sessionId);
       prepared = advance(prepared, { stage: "attached" }); save(prepared);
       const createMode = readModes(storage)[input.pageId];
@@ -149,6 +161,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       complete(input.pageId);
       return attached;
     })().catch((caught) => {
+      if (caught instanceof StaleCreation) throw caught;
       const retained = pending(input.pageId);
       if (retained) save({ ...retained, lastError: caught instanceof Error ? caught.message : String(caught) });
       throw caught;
@@ -170,6 +183,8 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       publish(pageId, pending(pageId));
     },
     ensure,
+    /** Drop the page's failed create, so the page opens on its empty state with the new-chat draft. */
+    discard(pageId: string) { if (!running.has(pageId)) forget(pageId); },
   };
 }
 
