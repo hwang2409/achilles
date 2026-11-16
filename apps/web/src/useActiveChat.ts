@@ -562,7 +562,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const target = routeWithChat(route, chat.session_id);
     if (route !== location.pathname) { location.assign(target); return; }
     // the chat named in the url but not shown (a refused new chat shows the new chat's box): open it again
-    if (chat.session_id === selectedId) { if (state.phase !== "ready") setRouteRefresh((value) => value + 1); return; }
+    if (chat.session_id === selectedId) {
+      if (state.phase !== "ready") { if (`${location.pathname}${location.search}` !== target) history.pushState({}, "", target); setRouteRefresh((value) => value + 1); }
+      return;
+    }
     owner.current.begin(`${keyFromPath()}:${chat.session_id}`);
     setState({ phase: "loading" });
     history.pushState({}, "", target);
@@ -595,6 +598,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const token = owner.current.begin(`new:${key}`, true);
     const focusClaim = claimComposerFocus();
     const run = ++newChatRun.current;
+    // the user left the chat whose first turn runs: its turn end must not select it again
+    pendingSelection.current = null;
     // the page stays (header, new-chat box) while the chat is created; it can wait for an earlier create of the page
     setState(state.phase !== "ready" && state.phase !== "empty" && state.phase !== "busy" ? { phase: "loading" } : { phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
     setCreatingChat(true);
@@ -604,6 +609,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       // there was written for a new chat, so it must never go to the running chat.
       if (next.phase === "busy" && owner.current.current(token)) {
         void showBusy(next.busySessionId, "new");
+        // the address names no chat while the new chat's box shows (a reload opens the page's latest chat and its unsent note)
+        if (new URLSearchParams(location.search).has("chat")) { const url = new URL(location.href); url.searchParams.delete("chat"); history.pushState({}, "", `${url.pathname}${url.search}`); }
         setState({ phase: "empty", page: next.page, serverApprovalMode: next.serverApprovalMode, credential: next.credential, newChat: true });
       }
     } catch (caught) {

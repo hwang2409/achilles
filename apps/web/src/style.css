@@ -215,6 +215,8 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 /* "copy" -> "copied" keeps its width, so the buttons beside it do not move */
 [data-part="composer"] [data-part="composer-queued-copy"] { min-width: 9ch; }
 [data-part="composer-queued-actions"] { display: contents; }
+/* the row's buttons share the text's line box (display: contents): a triple-click must select only the message */
+[data-part="composer-queued-actions"] button { -webkit-user-select: none; user-select: none; }
 /* narrow: a failed row's actions get their own line, so they never split across the label line and the next */
 @media (max-width: 480px) {
   [data-part="composer-queued"][data-failed] [data-part="composer-queued-text"] { flex-basis: 0; }
