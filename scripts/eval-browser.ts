@@ -42,6 +42,15 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     await tab.page.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: READY_MS });
     await tab.page.locator('.connection-state, .connection-banner, [role="status"]:has-text("loading chat…")').waitFor({ state: "hidden", timeout: READY_MS });
   }
+  // types into the page's own composer; a missing composer names what the page shows instead, for diagnosis
+  async function type(tab: Tab, text: string) {
+    const field = tab.page.getByRole("textbox", { name: "message", exact: true });
+    try { await field.fill(text); } catch (error) {
+      const shown = await tab.page.locator("body").innerText({ timeout: 2_000 }).catch(() => "");
+      throw new Error(`${(error as Error).message.split("\n")[0]}; the page shows: ${JSON.stringify(shown.replace(/\s+/g, " ").slice(-600))}`);
+    }
+    await field.press("Enter");
+  }
   // a new chat has no zeta session until its first message, so the id is read after a send
   const shownSession = (tab: Tab) => tab.page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: READY_MS }) as Promise<string | null>;
   async function open(step: TaskStep, pageId: string, route: string) {
@@ -70,10 +79,10 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     await ready(tab); row.session_after = await shownSession(tab);
     const answer = await waitFrame(tab, () => resumeAnswer(tab, before));
     row.attached = answer?.value.result?.attached ?? null; if (answer?.value.error) row.resume_error = answer.value.error;
-    row.turn_ended_before_attach = tab.ends > ends;
+    // zeta answers a plain resume (no `attached`) only when no turn runs, so the turn ended before the page came back
+    row.turn_ended_before_attach = tab.ends > ends || Boolean(answer?.value.result && !answer.value.result.attached);
     if (step.follow_up) {
-      const field = tab.page.getByRole("textbox", { name: "message", exact: true });
-      await field.fill(step.follow_up); await field.press("Enter"); row.follow_up_sent = true;
+      await type(tab, step.follow_up); row.follow_up_sent = true;
     }
   }
   // a frame the page already has, or the first matching one it receives before the ready deadline
@@ -117,8 +126,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
         const trigger: ReloadTrigger = step.reload; const row: Record<string, unknown> = { step: step.id, page_id: pageId, chat_id: step.chat, trigger, fired: false };
         reloads.push(row); armed = { step, tab, count: 0, row };
       }
-      const field = tab.page.getByRole("textbox", { name: "message", exact: true });
-      await field.fill(step.prompt!); await field.press("Enter");
+      await type(tab, step.prompt!);
       const aborted = new Promise<never>((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true })); aborted.catch(() => undefined);
       // a new chat has its zeta session only once the page sends; the observer joins it then
       // shortcut: an event between the send and the join is not seen live; a model reply takes far longer than the join

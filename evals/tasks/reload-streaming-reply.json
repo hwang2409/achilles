@@ -16,10 +16,10 @@
       "kind": "browser_prompt",
       "page": "contacts",
       "chat": "contacts-chat",
-      "prompt": "add the contact Barbara Liskov (barbara@example.test) with add_contact, using the fields name and email. then call list_contacts and reply with one short sentence about each contact, naming each one.",
+      "prompt": "add the contact Barbara Liskov (barbara@example.test) with add_contact, using the fields name and email. then call list_contacts and write two or three sentences about each contact, naming each one. do not write anything before the tool calls.",
       "reload": {
         "on": "assistant_delta",
-        "nth": 20
+        "nth": 3
       }
     }
   ],
