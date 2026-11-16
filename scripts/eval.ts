@@ -100,6 +100,9 @@ if "tools" in inspect.signature(PageStore.create_page).parameters:
     names.append("create_page_with_tools")
 if "page" in getattr(tools, "CREATE_TOOL_SCHEMA", {}).get("properties", {}):
     names.append("create_tool_on_created_page")
+from achilles import pages
+if any(block.get("properties", {}).get("type", {}).get("const") == "list" and "filter" in block["properties"] for block in getattr(pages, "_LAYOUT_BLOCK_SCHEMA", {}).get("oneOf", [])):
+    names.append("list_filter")
 print(json.dumps(names))`;
 export async function productCapabilities(stack: EvalStack) {
   const process = await stack.run("uv", ["run", "--project", stack.achillesDir, "python", "-c", CAPABILITIES_SCRIPT], stack.achillesDir);

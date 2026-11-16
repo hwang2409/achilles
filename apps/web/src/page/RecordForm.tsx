@@ -97,10 +97,13 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
   // The row arrives at a new revision (an agent write): a clean form just shows it; a form with edits keeps them over
   // the new values and says so. The form's own save and "reload row" are the user's choice and need no note.
   const chosenRevision = useRef<unknown>(undefined);
-  const [seenRevision, setSeenRevision] = useState(row?.revision);
-  if (row && row.revision !== seenRevision) {
-    setSeenRevision(row.revision);
-    if (row.revision !== chosenRevision.current && Object.keys(typed).length > 0) setMessage({ kind: "row-changed", text: "this record changed; your edits are kept — review and save, or discard" });
+  const [seenRow, setSeenRow] = useState(row);
+  if (row && row.revision !== seenRow?.revision) {
+    setSeenRow(row);
+    if (row.revision !== chosenRevision.current && Object.keys(typed).length > 0) {
+      const changed = fields.filter((field) => JSON.stringify(row[field.name]) !== JSON.stringify(seenRow?.[field.name])).map((field) => field.name);
+      setMessage({ kind: "row-changed", text: `this record changed${changed.length ? ` (${changed.join(", ")})` : ""}; your edits are kept — review and save, or discard` });
+    }
   }
   const [busy, setBusy] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -182,8 +185,9 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
           while busy, since a disabled button drops focus; submit() ignores a second click */}
       <button type="submit" className="primary" aria-disabled={busy || undefined} onMouseDown={(event) => event.preventDefault()}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
       {row && <button type="button" onClick={cancel}>cancel</button>}
-      {message && <p role={message.kind === "status" ? "status" : "alert"}>{message.text}</p>}
       {message?.kind === "row-changed" && <button type="button" onClick={() => { setTyped({}); setMessage(null); focusField(); }}>discard</button>}
+      {/* a changed record is news, not an error: the user's edits are safe */}
+      {message && <p role={message.kind === "status" || message.kind === "row-changed" ? "status" : "alert"}>{message.text}</p>}
       {message?.kind === "row-conflict" && <button type="button" onClick={() => void reloadRow()}>reload row</button>}
       {message?.kind === "conflict" && <button type="button" onClick={() => { setMessage(null); onReloadTool(); focusField(); }}>reload tool</button>}
     </div>
