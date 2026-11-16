@@ -22,6 +22,7 @@ import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
+import "./chat/markdown.css";
 
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });

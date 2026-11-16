@@ -185,12 +185,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* one jump control: fulcrum's counts only new rows, so achilles owns it and text-only growth is covered too */
 .transcript [data-part="jump-to-latest-lane"] { display: none; }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
-.transcript table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
 html[data-density="compact"] .transcript { line-height: 1.35; }
-.transcript :is(code, pre) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.transcript :is([data-part="md-code-inline"], [data-part="md-code-block"]) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
-/* fulcrum gives ordered markers 3ch; "10." plus its gap needs 4ch or the first digit is clipped */
-.transcript ol[data-part="md-list"] { padding-left: 4ch; }
 .transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
