@@ -11,11 +11,18 @@ import { createComposerDelivery, type ComposerDelivery, type DeliveryOptions } f
 const owners = new Map<string, ComposerDelivery>();
 /** new-chat owner key -> the chat that its first send created */
 const createdChats = new Map<string, string>();
+/** new-chat box -> its text right after `settle` put unsent messages back there (a create that ends later takes it along) */
+const returned = new Map<string, string>();
+const appendDraft = (chat: string, texts: string[]) => draftStore.set(chat, [draftStore.get(chat), ...texts].filter((text) => text.trim()).join("\n\n"));
 
 export const chatQueues = {
-  /** The first send of the page's new-chat composer `newChat` created `chat`. */
+  /** The page now opens `chat` in place of its new-chat composer `newChat`: what `newChat` holds goes with it, its queue
+   * (moved when the chat's composer opens, or by `settle`), or the box text that an earlier `settle` left, while unchanged. */
   created(newChat: string, chat: string) {
-    createdChats.set(newChat, chat);
+    if (owners.has(newChat)) { createdChats.set(newChat, chat); return; }
+    const text = returned.get(newChat);
+    returned.delete(newChat);
+    if (text && draftStore.get(newChat) === text) { appendDraft(chat, [text]); draftStore.set(newChat, ""); }
   },
   /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
    * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
@@ -34,20 +41,24 @@ export const chatQueues = {
       owner = created;
     }
     owners.set(chat, owner);
+    returned.delete(chat); // its box is on screen again
     owner.update(options);
     return owner;
   },
   /** Runs after each commit, and when a send of a chat with no composer ends. Drops owners with no composer and nothing to send. A page's new-chat owner whose
    * chat did not take it (it was not on screen when the chat was created) puts its unsent texts back into
-   * that page's new-chat box, unsent, once its send in flight has ended. */
+   * the box of the chat the page opens now (the created chat, else the new-chat box), unsent, once its send in flight has ended. */
   settle() {
     for (const [chat, owner] of owners) {
       const { queue, sending } = owner.getModel();
       if (owner.attached() || sending) continue;
       if (queue.length && !chat.startsWith("new:")) continue;
+      const box = createdChats.get(chat) ?? chat;
       owners.delete(chat);
       createdChats.delete(chat);
-      if (queue.length) draftStore.set(chat, [draftStore.get(chat), ...queue.map((item) => item.text)].filter((text) => text.trim()).join("\n\n"));
+      if (!queue.length) continue;
+      appendDraft(box, queue.map((item) => item.text));
+      if (box === chat) returned.set(chat, draftStore.get(chat));
     }
   },
 };
