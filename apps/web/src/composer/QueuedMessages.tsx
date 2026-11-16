@@ -1,5 +1,4 @@
-import { inFlight, shownQueue, type ComposerModel } from "./composer-machine";
-import { MAYBE_SENT } from "./chatQueues";
+import { inFlight, MAYBE_SENT, shownQueue, type ComposerModel } from "./composer-machine";
 
 /** Submitted messages, in send order: the in-flight one first ("sending", or "next step" for a steer), then "queued"; a failed one has retry, edit, and cancel. */
 export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model: ComposerModel; onRetry: (id: number) => void; onRestore: (id: number) => void; onCancel: (id: number) => void }) {

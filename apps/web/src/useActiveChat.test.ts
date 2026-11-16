@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { ZetaError } from "@fulcrum/zeta";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
 import * as queues from "./composer/chatQueues";
 import { draftStore } from "./draftStore";
+import { MAYBE_SENT } from "./composer/composer-machine";
 import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
 
 class MemoryStorage {
@@ -211,13 +213,19 @@ describe("message delivery tracking", () => {
     { name: "steer", steer: true, replies: [ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
     { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), ok, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
     { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), ok], log: ["track:d1", "steer:d1", "send:d1"] },
-    { name: "network error on the first request", steer: false, replies: [new Error("socket closed")], log: ["track:d1", "send:d1"], error: "socket closed" },
+    // no answer from zeta: it may hold the text, so the row says so and nothing goes out again by itself
+    { name: "network error on the first request", steer: false, replies: [new Error("socket closed")], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
+    { name: "socket closed before zeta's answer (a close code is not zeta's answer)", steer: false, replies: [new ZetaError("closed", 1006)], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
+    { name: "request timed out", steer: false, replies: [new Error("request timed out")], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
+    { name: "steer status read timed out", steer: true, replies: [ok, new Error("request timed out")], log: ["track:d1", "steer:d1", "delivery_status:d1"], error: MAYBE_SENT },
     { name: "second refusal", steer: false, replies: [refused(-32004), refused(-32005)], log: ["track:d1", "send:d1", "steer:d1"], error: "refused -32005" },
     { name: "reused id zeta still holds", steer: false, replies: [{ accepted: true, duplicate: true }], log: ["track:d1", "send:d1"] },
     { name: "reused id zeta dropped: one send with a fresh id", steer: false, replies: [droppedCopy, ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
     { name: "reused steer id zeta dropped: one steer with a fresh id", steer: true, replies: [droppedCopy, ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "track:fresh", "steer:fresh", "delivery_status:fresh"] },
     { name: "fresh id answered as dropped too: shown, not retried again", steer: false, replies: [droppedCopy, droppedCopy], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"], error: "zeta dropped this message" },
     { name: "reused id zeta took, then forgot (-32010, delivered)", steer: false, replies: [evicted("delivered")], log: ["track:d1", "send:d1"] },
+    { name: "reused id zeta holds, then forgot (-32010, queued)", steer: false, replies: [evicted("queued")], log: ["track:d1", "send:d1"] },
+    { name: "reused id zeta forgot with an outcome it does not name (-32010, unknown): shown as maybe sent, never resent", steer: false, replies: [evicted("unknown")], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
     { name: "reused id zeta dropped, then forgot (-32010, dropped): one send with a fresh id", steer: false, replies: [evicted("dropped"), ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
     { name: "a reply zeta never sends: shown, never a confirm", steer: false, replies: [{ accepted: false, status: "later" }], log: ["track:d1", "send:d1"], error: "zeta did not accept this message" },
   ])("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error }) => {

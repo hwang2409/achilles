@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { chatQueues } from "./composer/chatQueues";
+import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
 
@@ -868,13 +869,13 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
     const first = composer("s1");
     first.edit(UNSENT_TEXT);
     await act(async () => { await first.submit(); });
-    expect(first.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: "connection closed" }]);
+    expect(first.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: MAYBE_SENT }]);
     if (row.box) first.edit(row.box);
     await load();
     expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "s1" });
     const s1 = composer("s1");
     // shown once, as its own failed row; the box keeps what the user typed after it
-    expect(rowsOf(s1), "the unsent message was lost or changed").toEqual([`${UNSENT_TEXT}: connection closed`]);
+    expect(rowsOf(s1), "the unsent message was lost or changed").toEqual([`${UNSENT_TEXT}: ${MAYBE_SENT}`]);
     expect(s1.getModel().draft).toBe(row.box ?? "");
     expect(sendsOfText()).toEqual([]);
     failSend = false;

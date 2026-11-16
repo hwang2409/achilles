@@ -6,6 +6,10 @@ export type QueuedMessage = { id: number; text: string; failed?: string; tries?:
 /** `deliveryId` is tracked once the request goes out; `echoed` once zeta's transcript shows that prompt */
 type Send = { attempt: number; id: number; steer: boolean; deliveryId?: string; echoed?: boolean };
 
+/** a row that left for zeta with no answer (the page unloaded, the socket closed, zeta forgot the id): the chat's
+ * transcript says if zeta took it, and a retry reuses its delivery id */
+export const MAYBE_SENT = "may not have been sent — check before retrying";
+
 /** shortcut: a fixed cap keeps a stuck chat from collecting messages without end; make it a setting if anyone hits it */
 export const QUEUE_LIMIT = 20;
 
@@ -77,6 +81,7 @@ export function composerStatus(model: ComposerModel): { text: string; tone?: "da
   if (model.stopping) return { text: "stopping", tone: "busy" };
   if (model.held && model.queue.length) return { text: "the rest wait for your next enter", tone: "busy" };
   if (inFlight(model)) return { text: model.send?.steer ? "next step" : "sending", tone: "busy" };
+  if (model.queue[0]?.failed === MAYBE_SENT) return { text: `a message ${MAYBE_SENT}`, tone: "danger" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
   return { text: "" };
 }
@@ -131,9 +136,10 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       return { model: { ...model, queue: model.queue.filter((item) => item.id !== model.send!.id), send: undefined } };
     case "reject": {
       if (model.send?.attempt !== event.attempt) return { model };
-      // a failed message stays first in the list with its error; nothing after it goes out until retry, edit, or cancel
-      const { id } = model.send;
-      return { model: { ...model, queue: model.queue.map((item) => item.id === id ? { ...item, failed: event.message, tries: (item.tries ?? 0) + 1 } : item) } };
+      // a failed message stays first in the list with its error; nothing after it goes out until retry, edit, or cancel.
+      // it keeps the id it went out with: zeta may hold it, so the transcript can clear the row and a retry is a duplicate
+      const { id, deliveryId } = model.send;
+      return { model: { ...model, queue: model.queue.map((item) => item.id === id ? { ...item, failed: event.message, tries: (item.tries ?? 0) + 1, ...(deliveryId ? { deliveryId } : {}) } : item) } };
     }
     case "settle":
       if (model.send?.attempt !== event.attempt) return { model: { ...model, sending: false } };

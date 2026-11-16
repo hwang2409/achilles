@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -29,7 +29,11 @@ export type Interjection = { tool: string; nth?: number; user_write?: { tool: st
 // a scripted-provider fault: after the step's first tool result, the next `times` model requests fail with HTTP `status`
 // (zeta retries a 5xx up to 5 attempts, so times 1 is a retried blip and times 5 ends the turn with the error)
 export type ProviderError = { status: number; times: number };
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; new_chat?: string; during?: Interjection; provider_error?: ProviderError };
+// a browser_prompt's send or steer of its prompt meets one fault on the page's socket to zeta (eval-browser.ts): zeta's
+// dropped answer, zeta's -32010 answer (for a delivery zeta took: delivered or queued; for one it never got: unknown),
+// or the socket closing before the request reaches zeta or before zeta's answer reaches the page
+export type DeliveryFault = "dropped" | "evicted_delivered" | "evicted_queued" | "evicted_unknown" | "closed_before_send" | "closed_after_send";
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; new_chat?: string; during?: Interjection; provider_error?: ProviderError; delivery_fault?: DeliveryFault };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown>; data_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" | "hard" };
 export type EvalSnapshot = {
@@ -40,7 +44,7 @@ export type EvalSnapshot = {
   reconnects?: Array<Record<string, unknown>>; form_submits?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
-  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>; interjections?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
+  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>; delivery_faults?: Array<Record<string, unknown>>; interjections?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
   initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
@@ -48,7 +52,7 @@ export type CheckResult = { id: string; pass: boolean; expected: unknown; actual
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt"]);
 const MODEL_STEPS = new Set(["prompt", "annotate", "browser_prompt"]);
 const RELOAD_EVENTS = new Set(["tool_start", "assistant_delta", "approval_request"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser", "reloads"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -84,7 +88,7 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
   if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
-    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "new_chat", "during", "provider_error"], `steps[${i}]`); const step = item as TaskStep;
+    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "new_chat", "during", "provider_error", "delivery_fault"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
     const isWrite = step.kind === "user_write"; const args = step.arguments;
     // the harness fills the current revision, like a form that loaded the record
@@ -98,6 +102,7 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
     const validRule = typeof rule === "string" ? ["approve", "deny"].includes(rule) : sequence && typeof rule.tool === "string" && rule.tool.startsWith("achilles__") && Array.isArray(rule.decisions) && rule.decisions.length > 0 && rule.decisions.every(decision => ["approve", "deny"].includes(decision));
     if (rule !== undefined && (!needsPrompt || approvalMode !== "ask" || !validRule)) throw new Error(`steps[${i}] approval must be approve, deny, or { tool, decisions }, on a prompt step of an approval_mode ask task`);
     validateReload(step, i); validateDuring(step, i, approvalMode); validateProviderError(step, i);
+    if (step.delivery_fault !== undefined && (step.kind !== "browser_prompt" || step.reload !== undefined || !(step.delivery_fault in DELIVERY_FAULTS))) throw new Error(`steps[${i}] delivery_fault needs a browser_prompt step without reload and one of ${Object.keys(DELIVERY_FAULTS).join(", ")}`);
     return step;
   });
 }
@@ -149,6 +154,8 @@ function validateBrowserSteps(steps: TaskStep[], pages: PagePlan[]) {
   for (const step of browser) {
     if (pages.find(page => page.alias === step.page)?.source === "created") throw new Error(`step ${step.id}: browser_prompt needs a fixture or setup page`);
     if ((chats.get(step.page) ?? step.chat) !== step.chat) throw new Error(`step ${step.id}: browser_prompt uses one chat per page`);
+    // the fault needs the chat's session, which the page makes with the chat's first message
+    if (step.delivery_fault && !chats.has(step.page)) throw new Error(`step ${step.id}: a delivery_fault step needs an earlier step in its chat`);
     chats.set(step.page, step.chat);
   }
 }
@@ -213,8 +220,8 @@ function validateCheckShape(check: TaskCheck, i: number) {
     own(value, ["field", "agent_value"], `checks[${i}].value`);
   }
   if (check.type === "error_shown" && (!Number.isInteger(check.value) || (check.value as number) < 400 || (check.value as number) > 599)) throw new Error(`checks[${i}] needs the HTTP status the chat must show`);
-  if (check.step !== undefined && !["answer_mentions", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
-  if ((check.type === "reload" || check.type === "new_chat_kept") && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
+  if (check.step !== undefined && !["answer_mentions", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept", "delivered_once"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
+  if ((check.type === "reload" || check.type === "new_chat_kept" || check.type === "delivered_once") && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
   if (check.type === "no_duplicate_writes" && (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || (check.collection === undefined) !== (check.fields === undefined))) throw new Error(`checks[${i}] needs an achilles tool, and a collection with fields or neither`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
 }
@@ -327,7 +334,7 @@ export function validateTask(value: unknown): EvalTask {
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt, task.approval_mode as EvalTask["approval_mode"]); const checks = validateChecks(task.checks, aliases);
   validateBrowserSteps(steps, page_plan);
-  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (check.type !== "reload" || step.reload) && (check.type !== "new_chat_kept" || step.new_chat))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : check.type === "new_chat_kept" ? "new_chat" : "prompt"} step on page ${check.page}`);
+  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (check.type !== "reload" || step.reload) && (check.type !== "new_chat_kept" || step.new_chat) && (check.type !== "delivered_once" || step.delivery_fault))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : check.type === "new_chat_kept" ? "new_chat" : "prompt"} step on page ${check.page}`);
   for (const check of checks.filter(check => check.type === "overwrite_disclosed")) {
     const { field, agent_value } = check.value as { field: string; agent_value: string | number }; const step = steps.find(item => item.id === check.step);
     if (!step?.during?.user_write || !(field in step.during.user_write.arguments)) throw new Error(`check ${check.id} needs step ${check.step} to have a during user_write that sets ${field}`);
@@ -414,6 +421,21 @@ function selectBlockRecords(block: Record<string, unknown>, records: Array<Recor
   }
   return defaultToAll ? { records, selector: "all records" } : undefined;
 }
+// per fault: how many times the page may send the text again with a fresh id (only zeta's dropped answer: zeta holds
+// nothing), how many copies zeta's history ends with, and the row the page shows ("maybe sent" when zeta never answered)
+const DELIVERY_FAULTS: Record<DeliveryFault, { resends: number; copies: number; shown: string | null }> = {
+  dropped: { resends: 1, copies: 1, shown: null },
+  evicted_delivered: { resends: 0, copies: 1, shown: null },
+  evicted_queued: { resends: 0, copies: 1, shown: null },
+  evicted_unknown: { resends: 0, copies: 0, shown: "maybe sent" },
+  closed_before_send: { resends: 0, copies: 0, shown: "maybe sent" },
+  closed_after_send: { resends: 0, copies: 1, shown: null },
+};
+const userCopies = (history: unknown, text: string) => {
+  let parsed: unknown = []; try { parsed = typeof history === "string" ? JSON.parse(history) : history; } catch {}
+  const needle = JSON.stringify(text).slice(1, -1);
+  return (Array.isArray(parsed) ? parsed : []).filter(row => row?.role === "user" && JSON.stringify(row.content ?? "").includes(needle)).length;
+};
 const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   page_exists: ({ check, snapshot, page }) => rows(snapshot, "pages").some(row => row.id === page && (!check.route || row.route === check.route)),
   count: ({ check, snapshot, page, owned }) => check.name === "pages" ? rows(snapshot, "pages").filter(row => row.id === page).length : owned(check.name as keyof EvalSnapshot).length,
@@ -551,6 +573,23 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const wrong = sent.filter(frame => frame.session_id === row.session_before);
     if (wrong.length) return { reason: `the new chat's text went to the running chat as ${wrong.map(frame => frame.method).join(", ")}`, evidence } satisfies CheckFailure;
     if (!sent.length && row.new_chat_visible !== true) return { reason: "the new chat's text was not sent and is no longer shown", evidence } satisfies CheckFailure;
+    return true;
+  },
+  // the faulted send reached the model at most once: zeta's final history holds the expected copies, the page sent the
+  // text again with a fresh id only for zeta's dropped answer, and the row it shows matches what zeta knows
+  delivered_once: ({ check, snapshot, owned }) => {
+    const row = owned("delivery_faults").find(item => item.step === check.step);
+    if (!row) return { reason: `no delivery fault row for step ${check.step}` } satisfies CheckFailure;
+    const expected = DELIVERY_FAULTS[row.fault as DeliveryFault]; const text = String(row.text);
+    const sent = (row.sent ?? []) as Array<{ method: string; delivery_id: unknown }>; const ids = new Set(sent.map(frame => frame.delivery_id));
+    const copies = userCopies(rows(snapshot, "chats").find(chat => chat.chat_id === row.chat)?.history, text);
+    const shown = (row.shown as { label?: string } | null)?.label ?? null;
+    const evidence = { delivery: row, copies, expected };
+    if (row.fired !== true || !expected) return { reason: "the fault never met the page's send", evidence } satisfies CheckFailure;
+    if (copies > 1) return { reason: `the model saw the text ${copies} times`, evidence } satisfies CheckFailure;
+    if (sent.length !== ids.size || ids.size !== 1 + expected.resends) return { reason: `the page sent the text ${sent.length} times with ${ids.size} delivery ids; expected ${1 + expected.resends}`, evidence } satisfies CheckFailure;
+    if (copies !== expected.copies) return { reason: `zeta's history holds the text ${copies} times; expected ${expected.copies}`, evidence } satisfies CheckFailure;
+    if (shown !== expected.shown) return { reason: `the page shows ${JSON.stringify(row.shown)}; expected ${expected.shown ? `a "${expected.shown}" row` : "no row"}`, evidence } satisfies CheckFailure;
     return true;
   },
   // the page reloaded at its trigger during the turn, came back on the same chat, attached to the running turn, and shows the turn's final answer

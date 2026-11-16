@@ -454,7 +454,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   let browser: BrowserDriver | undefined;
   if (task.steps.some(step => step.kind === "browser_prompt")) {
     const { chromium } = await import(playwrightModule()); const ask = task.approval_mode === "ask";
-    browser = createBrowserDriver({ chromium, origin: stack.achillesOrigin, ask, signal, observer: () => protocol, failure: () => fatal });
+    browser = createBrowserDriver({ chromium, origin: stack.achillesOrigin, ask, signal, observer: () => protocol, failure: () => fatal, faults: task.steps.some(step => step.delivery_fault) });
   }
   const approvals: Record<string, unknown>[] = []; const enqueueDecision = createDecisionQueue(error => { fatal ??= error instanceof Error ? error : new Error(String(error)); void abortAll(); }); const abortAll = async () => { browser?.wake(); if (browser) return browser.stop(); await Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined))); };
   // kill and restart the zeta serve while the turn waits on an approval, then resume the chat on the new serve
@@ -530,7 +530,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await browser?.close(); await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], delivery_faults: browser?.deliveryFaults ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -565,6 +565,8 @@ function scriptedProvider() {
       if (next) toolCalls = (prompt.includes("in one batch") ? missing : [next]).map(title => ({ function: { name: "achilles__add_task", arguments: { title } } }));
       else return new Response(`${JSON.stringify({ message: { content: `added ${SCRIPTED_TASK_NAMES.join(", ")}` }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
     }
+    // delivery checks only need a reply: what is graded is how often the text reached zeta
+    else if (prompt.includes("delivery check")) toolCalls = [];
     else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
     else if (prompt.includes("add_note once")) {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];

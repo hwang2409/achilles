@@ -1,0 +1,116 @@
+{
+  "id": "resend-only-on-dropped",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "notes",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 8,
+  "approval_mode": "allow",
+  "steps": [
+    {
+      "id": "start",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check start: reply with the word ok"
+    },
+    {
+      "id": "dropped",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check dropped: reply with the word ok",
+      "delivery_fault": "dropped"
+    },
+    {
+      "id": "evicted-delivered",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check evicted-delivered: reply with the word ok",
+      "delivery_fault": "evicted_delivered"
+    },
+    {
+      "id": "evicted-queued",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check evicted-queued: reply with the word ok",
+      "delivery_fault": "evicted_queued"
+    },
+    {
+      "id": "evicted-unknown",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check evicted-unknown: reply with the word ok",
+      "delivery_fault": "evicted_unknown"
+    },
+    {
+      "id": "closed-before-send",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check closed-before-send: reply with the word ok",
+      "delivery_fault": "closed_before_send"
+    },
+    {
+      "id": "closed-after-send",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check closed-after-send: reply with the word ok",
+      "delivery_fault": "closed_after_send"
+    },
+    {
+      "id": "end",
+      "kind": "browser_prompt",
+      "page": "notes",
+      "chat": "notes-chat",
+      "prompt": "delivery check end: reply with the word ok"
+    }
+  ],
+  "checks": [
+    {
+      "id": "once-dropped",
+      "type": "delivered_once",
+      "page": "notes",
+      "step": "dropped"
+    },
+    {
+      "id": "once-evicted-delivered",
+      "type": "delivered_once",
+      "page": "notes",
+      "step": "evicted-delivered"
+    },
+    {
+      "id": "once-evicted-queued",
+      "type": "delivered_once",
+      "page": "notes",
+      "step": "evicted-queued"
+    },
+    {
+      "id": "once-evicted-unknown",
+      "type": "delivered_once",
+      "page": "notes",
+      "step": "evicted-unknown"
+    },
+    {
+      "id": "once-closed-before-send",
+      "type": "delivered_once",
+      "page": "notes",
+      "step": "closed-before-send"
+    },
+    {
+      "id": "once-closed-after-send",
+      "type": "delivered_once",
+      "page": "notes",
+      "step": "closed-after-send"
+    }
+  ]
+}
