@@ -1,0 +1,319 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "calls": [
+      {
+        "id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "success": true
+      },
+      {
+        "id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "arguments": {
+          "title": "Beta"
+        },
+        "success": true
+      },
+      {
+        "id": "a2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "arguments": {
+          "title": "Gamma"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "k-0",
+          "revision": 1,
+          "title": "Alpha"
+        }
+      },
+      {
+        "call_id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "k-1",
+          "revision": 1,
+          "title": "Beta"
+        }
+      },
+      {
+        "call_id": "a2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "k-2",
+          "revision": 1,
+          "title": "Gamma"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "tasks",
+        "id": "k-0",
+        "data": {
+          "title": "Alpha"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tasks",
+        "id": "k-1",
+        "data": {
+          "title": "Beta"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tasks",
+        "id": "k-2",
+        "data": {
+          "title": "Gamma"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "write",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "new_chat_typed": true,
+        "new_chat_sent": [],
+        "new_chat_visible": true,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "a2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "decision": "approve"
+      }
+    ],
+    "errors": [],
+    "tools": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_task",
+          "operation": "insert",
+          "collection": "tasks"
+        }
+      ],
+      "records": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "calls": [
+      {
+        "id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "success": true
+      },
+      {
+        "id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "arguments": {
+          "title": "Beta"
+        },
+        "success": true
+      },
+      {
+        "id": "a2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "arguments": {
+          "title": "Gamma"
+        },
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "k-0",
+          "revision": 1,
+          "title": "Alpha"
+        }
+      },
+      {
+        "call_id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "k-1",
+          "revision": 1,
+          "title": "Beta"
+        }
+      },
+      {
+        "call_id": "a2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "k-2",
+          "revision": 1,
+          "title": "Gamma"
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "tasks",
+        "id": "k-0",
+        "data": {
+          "title": "Alpha"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tasks",
+        "id": "k-1",
+        "data": {
+          "title": "Beta"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "tasks",
+        "id": "k-2",
+        "data": {
+          "title": "Gamma"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "write",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "new_chat_typed": true,
+        "new_chat_sent": [
+          {
+            "method": "steer",
+            "session_id": "s1"
+          }
+        ],
+        "new_chat_visible": true,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "a2",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_task",
+        "decision": "approve"
+      }
+    ],
+    "errors": [],
+    "tools": [],
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_task",
+          "operation": "insert",
+          "collection": "tasks"
+        }
+      ],
+      "records": []
+    }
+  }
+}

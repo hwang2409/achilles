@@ -5,7 +5,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { useRunStore, type ComposerProps } from "@fulcrum/react";
+import { useRunStore, type ComposerIntent, type ComposerProps } from "@fulcrum/react";
 import {
   composerActivity,
   createComposerModel,
@@ -13,6 +13,7 @@ import {
   type ComposerEffect,
   type ComposerEvent,
   type ComposerModel,
+  type QueuedMessage,
 } from "./composer-machine";
 import { chatQueues } from "./chatQueues";
 
@@ -32,6 +33,9 @@ export type ComposerAdapterProps = ComposerProps & {
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
 };
 
+/** `deliveryId`: send with this id (a retry of a row that may have been sent), not a new one */
+export type SendIntent = ComposerIntent & { deliveryId?: string };
+
 export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
   onDraftSubmit: (sent: string) => void;
@@ -44,11 +48,9 @@ export type ComposerDelivery = {
   update(options: DeliveryOptions): void;
   sync(state: ComposerProps["state"], defaultValue?: string): void;
   edit(draft: string): void;
-  /** Show a note on the box: why it holds text (an unsent message moved in). */
-  note(text: string): void;
   submit(): Promise<void>;
   retry(id: number): Promise<void>;
-  /** zeta's transcript shows the prompt sent with this delivery id. */
+  /** zeta's transcript shows the prompt sent with this delivery id (in flight now, or a row an earlier page load kept). */
   echo(deliveryId: string): void;
   /** Edit a failed message: its text goes back into the box. */
   restore(id: number): void;
@@ -59,9 +61,10 @@ export type ComposerDelivery = {
   stop(): Promise<void>;
 };
 
-export function createComposerDelivery(options: DeliveryOptions): ComposerDelivery {
+/** `rows`: the chat's unsent messages that an earlier page load kept (all failed) */
+export function createComposerDelivery(options: DeliveryOptions, rows: Omit<QueuedMessage, "id">[] = []): ComposerDelivery {
   let current = options;
-  let model = createComposerModel(options.defaultValue ?? "", options.state);
+  let model = createComposerModel(options.defaultValue ?? "", options.state, rows);
   const listeners = new Set<() => void>();
 
   const apply = (event: ComposerEvent) => {
@@ -79,9 +82,10 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
   let mounts = 0;
   const turnRunning = () => current.isTurnRunning?.() ?? current.state === "steerable";
 
-  const deliver = async ({ attempt: sendAttempt, text, steer }: Extract<ComposerEffect, { type: "submit" }>) => {
+  const deliver = async ({ attempt: sendAttempt, text, steer, deliveryId: reused }: Extract<ComposerEffect, { type: "submit" }>) => {
+    const intent: SendIntent = reused ? { steer, deliveryId: reused } : { steer };
     try {
-      await attempt(() => current.onSubmit(text, { steer }, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
+      await attempt(() => current.onSubmit(text, intent, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
       apply({ type: "confirm", attempt: sendAttempt });
     } catch (failure) {
       apply({ type: "reject", attempt: sendAttempt, message: errorText(failure) });
@@ -117,9 +121,6 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     },
     edit(draft) {
       apply({ type: "edit", draft });
-    },
-    note(text) {
-      apply({ type: "note", text });
     },
     async submit() {
       apply({ type: "state", state: current.state });
@@ -202,6 +203,22 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
     check();
     return store.subscribe(check);
   }, [owner, store, echoWanted]);
+  // a failed row that went out (in flight when an earlier page load ended, or a retry of one that failed): zeta's
+  // transcript shows its delivery id once zeta took it
+  const maybeSent = model.queue.some((item) => item.failed && item.deliveryId);
+  useEffect(() => {
+    if (!maybeSent) return;
+    const check = () => {
+      const taken = new Set<string>();
+      for (const { id } of store.getState().outline) {
+        const item = store.getItem(id);
+        if (item?.type === "user" && item.event.type === "user_message" && item.event.delivery_id) taken.add(item.event.delivery_id);
+      }
+      for (const row of owner.getModel().queue) if (row.failed && row.deliveryId && taken.has(row.deliveryId)) owner.echo(row.deliveryId);
+    };
+    check();
+    return store.subscribe(check);
+  }, [owner, store, maybeSent]);
   const { sending, queued, failed } = composerActivity(model);
   useEffect(() => options.onActivity?.({ sending, queued, failed }), [options.onActivity, sending, queued, failed]);
   useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false }), [options.onActivity]);

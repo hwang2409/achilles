@@ -1,0 +1,69 @@
+{
+  "id": "new-chat-during-running-turn",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "tasks",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 8,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "write",
+      "kind": "browser_prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "add_task each of these, one call per task, with the field title: Alpha, Beta, Gamma. then tell me what you added.",
+      "reload": {
+        "on": "approval_request",
+        "tool": "achilles__add_task",
+        "nth": 2
+      },
+      "new_chat": "this text is for a new chat only"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_task",
+        "operation": "insert",
+        "collection": "tasks"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "kept",
+      "type": "new_chat_kept",
+      "page": "tasks",
+      "step": "write"
+    },
+    {
+      "id": "reload",
+      "type": "reload",
+      "page": "tasks",
+      "step": "write"
+    },
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "Alpha"
+        },
+        {
+          "title": "Beta"
+        },
+        {
+          "title": "Gamma"
+        }
+      ]
+    }
+  ]
+}

@@ -1,91 +1,152 @@
-import { draftStore } from "../draftStore";
+import { inFlight, type QueuedMessage } from "./composer-machine";
 import { createComposerDelivery, type ComposerDelivery, type DeliveryOptions } from "./useComposerDelivery";
+
+/** a row that was in flight when the page unloaded and had left for zeta: the chat's transcript says if zeta took it */
+export const MAYBE_SENT = "may not have been sent — check before retrying";
+/** a row that had not left for zeta when the page unloaded */
+export const NOT_SENT = "not sent before the page reloaded";
+
+type StoredRow = Omit<QueuedMessage, "id">;
+const PREFIX = "achilles:unsent:";
+/** #155 kept a page's first message here (page id -> text) while its create ran */
+const OLD_TEXTS = "achilles-pending-create-texts";
+
+const storage = () => { try { return globalThis.localStorage; } catch { return undefined; } };
+const parse = (value: string): StoredRow[] | undefined => {
+  try {
+    const parsed = JSON.parse(value) as { rows?: unknown };
+    if (!Array.isArray(parsed.rows)) return undefined;
+    return parsed.rows.filter((row): row is StoredRow => typeof row?.text === "string" && typeof row.failed === "string");
+  } catch { return undefined; }
+};
+// shortcut: an entry exists only while a message is unsent, so nothing is swept; a deleted chat's rows stay (a few bytes)
+const readRows = (chat: string): StoredRow[] => {
+  try {
+    const value = storage()?.getItem(PREFIX + chat);
+    if (value == null) return [];
+    const rows = parse(value);
+    if (!rows) storage()?.removeItem(PREFIX + chat);
+    return rows ?? [];
+  } catch { return []; }
+};
+/** Keep `rows` as `chat`'s unsent messages for the next page load. False: the write failed, the rows are in memory only. */
+const writeRows = (chat: string, rows: StoredRow[]): boolean => {
+  const target = storage();
+  if (!target) return false;
+  try {
+    if (rows.length) target.setItem(PREFIX + chat, JSON.stringify({ rows }));
+    else target.removeItem(PREFIX + chat);
+    return true;
+  } catch { return false; }
+};
+/** once per page load: #155's kept first messages become unsent rows of their page's new-chat box */
+const migrateOldTexts = () => {
+  try {
+    const raw = storage()?.getItem(OLD_TEXTS);
+    if (raw == null) return;
+    const texts = JSON.parse(raw) as Record<string, unknown>;
+    let written = true;
+    for (const [page, text] of Object.entries(texts ?? {})) {
+      if (typeof text === "string" && text) written = writeRows(`new:${page}`, [...readRows(`new:${page}`), { text, failed: NOT_SENT }]) && written;
+    }
+    if (written) storage()?.removeItem(OLD_TEXTS);
+  } catch { /* storage is off or the entry is unparsable: nothing to move */ }
+};
+/** what a page load that starts now must show: every row failed, so nothing goes out before the user acts */
+const stored = (owner: ComposerDelivery): StoredRow[] => {
+  const model = owner.getModel();
+  const sending = inFlight(model);
+  return model.queue.flatMap((item): StoredRow[] => {
+    if (item !== sending) return [{ text: item.text, failed: item.failed ?? NOT_SENT, ...(item.tries ? { tries: item.tries } : {}), ...(item.deliveryId ? { deliveryId: item.deliveryId } : {}) }];
+    if (model.send?.echoed) return []; // zeta's transcript shows it: taken
+    return [{ text: item.text, failed: model.send?.deliveryId ? MAYBE_SENT : NOT_SENT, ...(model.send?.deliveryId ? { deliveryId: model.send.deliveryId } : {}) }];
+  });
+};
 
 /**
  * The one owner of each chat's submitted messages: the rows (sending, queued, failed, with tries) and the
- * send in flight. It lives here, keyed by chat id, not in a composer: a remount or a chat switch shows the
- * same rows, so a failed message stays failed and nothing is sent twice. A composer only renders its chat's
- * owner and passes user intents to it. An owner starts sends only while a composer of its chat is attached.
- * shortcut: memory only, so a page reload drops queued messages; persist like drafts if that matters.
+ * send in flight. It lives here, keyed by chat id (a page's new-chat composer is `new:<page>`), not in a composer:
+ * a remount or a chat switch shows the same rows, so a failed message stays failed and nothing is sent twice.
+ * Every change is kept in localStorage per chat, so a page load shows the unsent rows again, all failed (retry, edit, x).
+ * A composer only renders its chat's owner and passes user intents to it. An owner starts sends only while a composer
+ * of its chat is attached.
  */
-const owners = new Map<string, ComposerDelivery>();
-/** new-chat owner key -> the chat that its first send created */
-const createdChats = new Map<string, string>();
-/** new-chat box -> its text right after `settle` put unsent messages back there (a create that ends later takes it along) */
-const returned = new Map<string, string>();
-const appendDraft = (chat: string, texts: string[]) => draftStore.set(chat, [draftStore.get(chat), ...texts].filter((text) => text.trim()).join("\n\n"));
-/** chat -> the note its box shows once its composer opens (unsent text moved there) */
-const notes = new Map<string, string>();
-export const MOVED_NOTE = "written in a new chat; not sent yet";
-export const KEPT_NOTE = "not sent yet";
-/** unsent text went into the stored draft of `box`, from the new-chat box `from`: an open composer of `box` shows it now */
-const noteBox = (box: string, from: string) => {
-  const note = box === from ? KEPT_NOTE : MOVED_NOTE;
-  const owner = owners.get(box);
-  if (!owner) { notes.set(box, note); return; }
-  owner.edit(draftStore.get(box));
-  owner.note(note);
-};
+export function createChatQueues() {
+  migrateOldTexts();
+  const owners = new Map<string, ComposerDelivery>();
+  /** owner -> the chat its rows are kept under (a new-chat owner's created chat, once known) */
+  const keys = new Map<ComposerDelivery, string>();
+  /** new-chat owner key -> the chat that its first send created */
+  const createdChats = new Map<string, string>();
+  /** owners whose last write failed: only memory holds their rows, so `settle` keeps them */
+  const unsaved = new Set<ComposerDelivery>();
+  const keep = (owner: ComposerDelivery) => {
+    const key = keys.get(owner);
+    if (!key) return;
+    if (writeRows(key, stored(owner))) unsaved.delete(owner); else unsaved.add(owner);
+  };
 
-export const chatQueues = {
-  /** The page now opens `chat` in place of its new-chat composer `newChat`: what `newChat` holds goes with it, its queue
-   * (moved when the chat's composer opens, or by `settle`), or the box text that an earlier `settle` left, while unchanged. */
-  created(newChat: string, chat: string) {
-    if (owners.has(newChat)) { createdChats.set(newChat, chat); return; }
-    const text = returned.get(newChat);
-    returned.delete(newChat);
-    if (text && draftStore.get(newChat) === text) { appendDraft(chat, [text]); draftStore.set(newChat, ""); noteBox(chat, newChat); }
-  },
-  /** A page load finishes, or drops, a first-message create that an earlier load of the page started: that load's send died
-   * with it, so the message goes into the box of the chat the page opens now (`chat`, or the new-chat box `newChat` itself),
-   * unsent, with the new-chat box text. */
-  restore(newChat: string, chat: string, text: string) {
-    const box = draftStore.get(newChat);
-    // the old page may have put the message back into the new-chat box as it unloaded
-    const texts = box.includes(text) ? [box] : [text, box];
-    if (chat === newChat) draftStore.set(chat, texts.filter((item) => item.trim()).join("\n\n"));
-    else { appendDraft(chat, texts); draftStore.set(newChat, ""); }
-    noteBox(chat, newChat);
-  },
-  /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
-   * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
-   * Called during render: a render React throws away still moves it, and the next render finds it under `chat`. */
-  open(chat: string, options: DeliveryOptions, fromNewChat?: string): ComposerDelivery {
-    let owner = owners.get(chat);
-    if (!owner && fromNewChat && createdChats.get(fromNewChat) === chat) {
-      owner = owners.get(fromNewChat);
-      owners.delete(fromNewChat);
-      createdChats.delete(fromNewChat);
-    }
-    if (!owner) {
-      const created = createComposerDelivery(options);
-      const note = notes.get(chat);
-      if (note) created.note(note);
-      // a send that ends while no composer shows the chat settles it at once, not at some later commit
-      created.subscribe(() => { if (!created.attached()) chatQueues.settle(); });
-      owner = created;
-    }
-    owners.set(chat, owner);
-    notes.delete(chat);
-    returned.delete(chat); // its box is on screen again
-    owner.update(options);
-    return owner;
-  },
-  /** Runs after each commit, and when a send of a chat with no composer ends. Drops owners with no composer and nothing to send. A page's new-chat owner whose
-   * chat did not take it (it was not on screen when the chat was created) puts its unsent texts back into
-   * the box of the chat the page opens now (the created chat, else the new-chat box), unsent, once its send in flight has ended. */
-  settle() {
-    for (const [chat, owner] of owners) {
-      const { queue, sending } = owner.getModel();
-      if (owner.attached() || sending) continue;
-      if (queue.length && !chat.startsWith("new:")) continue;
-      const box = createdChats.get(chat) ?? chat;
-      owners.delete(chat);
-      createdChats.delete(chat);
-      if (!queue.length) continue;
-      appendDraft(box, queue.map((item) => item.text));
-      noteBox(box, chat);
-      if (box === chat) returned.set(chat, draftStore.get(chat));
-    }
-  },
-};
+  const queues = {
+    /** The page now opens `chat` in place of its new-chat composer `newChat`: the rows `newChat` holds go with it (its owner
+     * moves when the chat's composer opens, or at `settle`; rows that only a page load kept move now). */
+    created(newChat: string, chat: string) {
+      // a chat that holds rows already (a stale create opens the mapped home chat) keeps its own; these stay in the new-chat box
+      if (owners.has(chat) || readRows(chat).length) return;
+      const owner = owners.get(newChat);
+      if (!owner) { if (writeRows(chat, readRows(newChat))) writeRows(newChat, []); return; }
+      createdChats.set(newChat, chat);
+      keys.set(owner, chat);
+      keep(owner);
+      if (!unsaved.has(owner)) writeRows(newChat, []);
+    },
+    /** how many unsent rows `chat` keeps for a later page load (the page shows a notice for its new-chat box's) */
+    unsent: (chat: string) => readRows(chat).length,
+    /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
+     * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
+     * Called during render: a render React throws away still moves it, and the next render finds it under `chat`. */
+    open(chat: string, options: DeliveryOptions, fromNewChat?: string): ComposerDelivery {
+      let owner = owners.get(chat);
+      if (!owner && fromNewChat && createdChats.get(fromNewChat) === chat) {
+        owner = owners.get(fromNewChat);
+        owners.delete(fromNewChat);
+        createdChats.delete(fromNewChat);
+      }
+      if (!owner) {
+        const created = createComposerDelivery(options, readRows(chat));
+        keys.set(created, chat);
+        let kept: unknown[] = [];
+        created.subscribe(() => {
+          const { queue, send } = created.getModel();
+          if (queue !== kept[0] || send !== kept[1]) { kept = [queue, send]; keep(created); } // not on every keystroke
+          // a send that ends while no composer shows the chat settles it at once, not at some later commit
+          if (!created.attached()) queues.settle();
+        });
+        owner = created;
+      }
+      owners.set(chat, owner);
+      owner.update(options);
+      return owner;
+    },
+    /** Runs after each commit, and when a send of a chat with no composer ends. A new-chat owner whose created chat did not
+     * take it (no composer showed that chat) moves there now. Owners with no composer and nothing in memory that storage
+     * does not hold (no send in flight, no row that would still go out) are dropped: a later `open` reads their rows back. */
+    settle() {
+      for (const [chat, owner] of [...owners]) {
+        const { queue, sending } = owner.getModel();
+        if (owner.attached() || sending) continue;
+        const target = createdChats.get(chat);
+        createdChats.delete(chat);
+        if (target && !owners.has(target)) { owners.delete(chat); owners.set(target, owner); continue; }
+        if (target) { // that chat has an owner of its own: these rows stay in the new-chat box
+          keys.set(owner, chat); keep(owner); keep(owners.get(target)!);
+          continue;
+        }
+        if (queue.some((item) => !item.failed) || unsaved.has(owner)) continue;
+        owners.delete(chat); keys.delete(owner);
+      }
+    },
+  };
+  return queues;
+}
+
+export const chatQueues = createChatQueues();

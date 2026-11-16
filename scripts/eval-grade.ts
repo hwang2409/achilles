@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -19,7 +19,8 @@ export type TaskCheck = {
 };
 export type PagePlan = { alias: string; source: "fixture" | "setup" | "created"; bind_chat: boolean; create_mode: boolean; route?: string };
 // a browser_prompt step types its prompt into the real page; `reload` reloads that page once, at the n-th matching
-// zeta event of the turn, and `follow_up` is typed into the reloaded page while the turn may still run
+// zeta event of the turn, and `follow_up` is typed into the reloaded page while the turn may still run. `new_chat`
+// instead clicks "new chat" on the reloaded page (it took over the running chat) and sends that text there
 export type ReloadTrigger = { on: "tool_start" | "assistant_delta" | "approval_request"; tool?: string; nth?: number };
 // `during` acts while a prompt step's turn runs: before the harness answers the n-th approval request of `tool`
 // in that step, it makes one user write (like a second chat or a form), steers the running turn, or kills the private
@@ -28,7 +29,7 @@ export type Interjection = { tool: string; nth?: number; user_write?: { tool: st
 // a scripted-provider fault: after the step's first tool result, the next `times` model requests fail with HTTP `status`
 // (zeta retries a 5xx up to 5 attempts, so times 1 is a retried blip and times 5 ends the turn with the error)
 export type ProviderError = { status: number; times: number };
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; during?: Interjection; provider_error?: ProviderError };
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; new_chat?: string; during?: Interjection; provider_error?: ProviderError };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown>; data_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" | "hard" };
 export type EvalSnapshot = {
@@ -47,7 +48,7 @@ export type CheckResult = { id: string; pass: boolean; expected: unknown; actual
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt"]);
 const MODEL_STEPS = new Set(["prompt", "annotate", "browser_prompt"]);
 const RELOAD_EVENTS = new Set(["tool_start", "assistant_delta", "approval_request"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser", "reloads"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -83,7 +84,7 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
   if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
-    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "during", "provider_error"], `steps[${i}]`); const step = item as TaskStep;
+    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "new_chat", "during", "provider_error"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
     const isWrite = step.kind === "user_write"; const args = step.arguments;
     // the harness fills the current revision, like a form that loaded the record
@@ -105,6 +106,7 @@ function validateReload(step: TaskStep, i: number) {
   const reload = step.reload;
   if ((reload !== undefined || step.follow_up !== undefined) && step.kind !== "browser_prompt") throw new Error(`steps[${i}] only browser_prompt takes reload and follow_up`);
   if (step.follow_up !== undefined && (reload === undefined || typeof step.follow_up !== "string" || !step.follow_up)) throw new Error(`steps[${i}] follow_up needs text and a reload`);
+  if (step.new_chat !== undefined && (reload === undefined || step.follow_up !== undefined || typeof step.new_chat !== "string" || !step.new_chat)) throw new Error(`steps[${i}] new_chat needs text and a reload, and no follow_up`);
   if (reload === undefined) return;
   if (!reload || typeof reload !== "object" || Array.isArray(reload)) throw new Error(`steps[${i}] reload must be an object`);
   own(reload, ["on", "tool", "nth"], `steps[${i}].reload`);
@@ -211,8 +213,8 @@ function validateCheckShape(check: TaskCheck, i: number) {
     own(value, ["field", "agent_value"], `checks[${i}].value`);
   }
   if (check.type === "error_shown" && (!Number.isInteger(check.value) || (check.value as number) < 400 || (check.value as number) > 599)) throw new Error(`checks[${i}] needs the HTTP status the chat must show`);
-  if (check.step !== undefined && !["answer_mentions", "reload", "denied_step", "restart_recovery", "overwrite_disclosed"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
-  if (check.type === "reload" && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
+  if (check.step !== undefined && !["answer_mentions", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
+  if ((check.type === "reload" || check.type === "new_chat_kept") && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
   if (check.type === "no_duplicate_writes" && (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || (check.collection === undefined) !== (check.fields === undefined))) throw new Error(`checks[${i}] needs an achilles tool, and a collection with fields or neither`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
 }
@@ -325,14 +327,14 @@ export function validateTask(value: unknown): EvalTask {
   const prompt = task.prompt as string | undefined;
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt, task.approval_mode as EvalTask["approval_mode"]); const checks = validateChecks(task.checks, aliases);
   validateBrowserSteps(steps, page_plan);
-  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (check.type !== "reload" || step.reload))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : "prompt"} step on page ${check.page}`);
+  for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (check.type !== "reload" || step.reload) && (check.type !== "new_chat_kept" || step.new_chat))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : check.type === "new_chat_kept" ? "new_chat" : "prompt"} step on page ${check.page}`);
   for (const check of checks.filter(check => check.type === "overwrite_disclosed")) {
     const { field, agent_value } = check.value as { field: string; agent_value: string | number }; const step = steps.find(item => item.id === check.step);
     if (!step?.during?.user_write || !(field in step.during.user_write.arguments)) throw new Error(`check ${check.id} needs step ${check.step} to have a during user_write that sets ${field}`);
     if (!String(step.prompt ?? prompt ?? "").includes(String(agent_value))) throw new Error(`check ${check.id} expects agent_value ${JSON.stringify(agent_value)} without a prompt quote`);
   }
   const written = steps.flatMap(step => Object.entries(step.arguments ?? step.during?.user_write?.arguments ?? {}).filter(([key, value]) => key !== "record_id" && ["string", "number"].includes(typeof value)).map(([, value]) => String(value)));
-  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", step.follow_up ?? "", step.during?.steer ?? "", ...nestedTokens(step.arguments), ...nestedTokens(step.during?.user_write?.arguments)])].join(" "), setup, task.requires as string[] ?? [], written);
+  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", step.follow_up ?? "", step.new_chat ?? "", step.during?.steer ?? "", ...nestedTokens(step.arguments), ...nestedTokens(step.during?.user_write?.arguments)])].join(" "), setup, task.requires as string[] ?? [], written);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused" };
 }
 
@@ -539,6 +541,18 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     return (typeof answer === "string" && mentions(answer, denied)) || { reason: `the answer does not say ${denied} was not created: ${JSON.stringify(String(answer ?? "").slice(0, 500))}`, evidence } satisfies CheckFailure;
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
+  // text typed after "new chat" on a page that took over a running chat was written for a new chat: it never reaches the
+  // running chat, and it is either sent to another chat or still shown unsent on the page
+  new_chat_kept: ({ check, owned }) => {
+    const row = owned("reloads").find(item => item.step === check.step);
+    if (!row) return { reason: `no reload row for step ${check.step}` } satisfies CheckFailure;
+    const evidence = { reload: row }; const sent = (row.new_chat_sent ?? []) as Array<{ method: string; session_id: unknown }>;
+    if (row.fired !== true || row.new_chat_typed !== true) return { reason: "the page never typed the new chat's text during the turn", evidence } satisfies CheckFailure;
+    const wrong = sent.filter(frame => frame.session_id === row.session_before);
+    if (wrong.length) return { reason: `the new chat's text went to the running chat as ${wrong.map(frame => frame.method).join(", ")}`, evidence } satisfies CheckFailure;
+    if (!sent.length && row.new_chat_visible !== true) return { reason: "the new chat's text was not sent and is no longer shown", evidence } satisfies CheckFailure;
+    return true;
+  },
   // the page reloaded at its trigger during the turn, came back on the same chat, attached to the running turn, and shows the turn's final answer
   reload: ({ check, owned }) => {
     const row = owned("reloads").find(item => item.step === check.step);

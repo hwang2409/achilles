@@ -4,8 +4,8 @@ type Store = Pick<ReturnType<typeof createRunStore>, "subscribe" | "getState" | 
 
 /**
  * The one owner of "show jump to latest" for a chat. It shows the control when the transcript store gains a row or
- * its last row changes (a streaming reply) while the reader is not at the bottom, and hides it once the reader is at
- * the bottom. The signal is the store, not the scroll box's height: a virtual timeline stops growing once the
+ * its last non-user row changes (a streaming reply, also one above a queued steer) while the reader is not at the
+ * bottom, and hides it once the reader is at the bottom. The signal is the store, not the scroll box's height: a virtual timeline stops growing once the
  * streaming row leaves its render window. Watch one store at a time; the returned function stops watching.
  *
  * It also re-follows a reader the timeline dropped without a scroll: content grew below but scrollTop has not moved
@@ -26,7 +26,10 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
   const atBottom = () => gap() <= (userScrolled ? 0.5 : 4);
   const tail = () => {
     const { outline } = store.getState();
-    const last = outline.at(-1);
+    // the streaming row, not a steer row zeta queued below it: a user row never grows
+    let index = outline.length - 1;
+    while (index >= 0 && outline[index]!.kind === "user") index -= 1;
+    const last = outline[index];
     return { length: outline.length, last: last && store.getItem(last.id) };
   };
   let seen = tail();

@@ -4,13 +4,15 @@ import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
+import type { SendIntent } from "./composer/useComposerDelivery";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
-type EmptyState = PageAttachment & { phase: "empty" };
+// newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
+type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
 type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean };
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null };
@@ -139,7 +141,6 @@ export async function attachPage(
   applyCreateMode?: (ready: ReadyState, enabled: boolean) => Promise<ReadyState>,
   publishReady: (ready: ReadyState) => Promise<void> | void = () => {},
   forceNew = false,
-  firstMessage?: string,
 ): Promise<EmptyState | ReadyState | BusyState> {
   let ownsLease = false;
   try {
@@ -182,11 +183,7 @@ export async function attachPage(
     const newest = forceNew || create || selectedId || pending ? null : await findNewestChat((chat) => chat.page_id === page.id); requireCurrent(owner, token);
     const candidates = forceNew || pending ? [] : selectedId ? [selectedId] : [...new Set([newest?.session_id, page.zeta_session_id])].filter((id): id is string => Boolean(id));
     for (const sessionId of candidates) {
-      try {
-        const ready = await attachSession(sessionId);
-        creation.restoreUnsent(page.id, ready.sessionId, Boolean(firstUserText(ready.lease.store)));
-        return ready;
-      }
+      try { return await attachSession(sessionId); }
       catch (caught) {
         if (caught instanceof ChatBusyError) return busy(caught.sessionId);
         if (!(caught instanceof SessionNotFoundError)) throw caught;
@@ -195,12 +192,12 @@ export async function attachPage(
         if (sessionId === page.zeta_session_id) create = true;
       }
     }
-    if (!pending && !create) { creation.restoreUnsent(page.id); return { phase: "empty", page, serverApprovalMode, credential }; }
+    if (!pending && !create) return { phase: "empty", page, serverApprovalMode, credential };
 
     const mappingInput = forceNew ? creationInput : { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
     try {
-      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create, text: firstMessage });
-      if (!ready) { creation.restoreUnsent(page.id); return { phase: "empty", page, serverApprovalMode, credential }; }
+      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create });
+      if (!ready) return { phase: "empty", page, serverApprovalMode, credential };
       return ready as ReadyState;
     } catch (caught) {
       // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
@@ -338,6 +335,7 @@ export class DroppedSteerDeliveryError extends Error {}
 
 const TURN_RUNNING = -32004;
 const NO_TURN = -32005;
+const ID_EVICTED = -32010;
 const errorCode = (error: unknown) => (error as { code?: unknown } | null)?.code;
 
 export function pageDeliverySteer(phase: State["phase"], intent: { steer: boolean }) {
@@ -352,22 +350,55 @@ export async function deliverChatMessage(
   steer: boolean,
   track: (id: string) => void,
 ): Promise<"send" | "steer"> {
+  try {
+    return await deliverOnce(client, sessionId, text, deliveryId, steer, track);
+  } catch (error) {
+    // only a reused id (a retry of a row that may have been sent) can come back as zeta's dropped duplicate. a dropped
+    // delivery holds nothing, so one send with a fresh id cannot make a second copy
+    const evicted = errorCode(error) === ID_EVICTED ? (error as { data?: { outcome?: unknown } }).data?.outcome : undefined;
+    // a reused id zeta took and then forgot (-32010): it holds the text unless the delivery was dropped
+    if (evicted === "queued" || evicted === "delivered") return steer ? "steer" : "send";
+    if (!(error instanceof DroppedDuplicateError) && evicted !== "dropped") throw error;
+    return deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
+  }
+}
+
+async function deliverOnce(
+  client: Pick<ZetaClient, "request">,
+  sessionId: string,
+  text: string,
+  deliveryId: string,
+  steer: boolean,
+  track: (id: string) => void,
+): Promise<"send" | "steer"> {
   const first: "send" | "steer" = steer ? "steer" : "send";
   let used = first;
   // tracked before the request: zeta echoes an accepted message before it answers
   track(deliveryId);
   try {
-    await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId });
+    accepted(await client.request(first, { session_id: sessionId, text, delivery_id: deliveryId }));
   } catch (error) {
+    if (error instanceof DroppedDuplicateError) throw error;
     // zeta serve-protocol: "A `send` that arrives right after `turn_end` either starts the turn that carries the steer,
     // or gets `-32004` because that turn has already started; the client should then retry the text as a `steer`."
     // A refused request records no delivery ID, so the one retry reuses it; a second refusal is shown, not retried.
     if (errorCode(error) !== (steer ? NO_TURN : TURN_RUNNING)) throw error;
     used = steer ? "send" : "steer";
-    await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId });
+    accepted(await client.request(used, { session_id: sessionId, text, delivery_id: deliveryId }));
   }
   if (used === "steer") await confirmSteerDelivery(client, deliveryId);
   return used;
+}
+
+class DroppedDuplicateError extends Error {}
+
+// zeta (delivery.py `_duplicate`) answers a new or reused id with `accepted: true` (a reused id it holds, queued or
+// delivered, adds `duplicate: true`), and a reused id it dropped with `{ accepted: false, duplicate: true, status: "dropped" }`
+function accepted(result: unknown) {
+  const reply = (result ?? {}) as { accepted?: unknown; duplicate?: unknown; status?: unknown };
+  if (reply.accepted === true) return;
+  if (reply.accepted === false && reply.duplicate === true && reply.status === "dropped") throw new DroppedDuplicateError("zeta dropped this message before reading it.");
+  throw new Error(`zeta did not accept this message (${JSON.stringify(result) ?? "no reply"}).`);
 }
 
 // marks a steer as queued from the moment its delivery id is tracked until the send settles (resolve or reject);
@@ -494,13 +525,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const route = chat.page_route === "/" ? "/" : chat.page_route;
     const target = routeWithChat(route, chat.session_id);
     if (route !== location.pathname) { location.assign(target); return; }
-    if (chat.session_id === selectedId) return;
+    // the chat named in the url but not shown (a refused new chat shows the new chat's box): open it again
+    if (chat.session_id === selectedId) { if (state.phase !== "ready") setRouteRefresh((value) => value + 1); return; }
     owner.current.begin(`${keyFromPath()}:${chat.session_id}`);
     setState({ phase: "loading" });
     history.pushState({}, "", target);
     setFocusSessionId(null);
     setSelectedId(chat.session_id);
-  }, [selectedId]);
+  }, [selectedId, state.phase]);
 
   const continueWaitingChat = useCallback(async () => {
     const waiting = await findNewestChat((chat) => chat.last_state === "approval");
@@ -529,14 +561,25 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setState({ phase: "loading" });
     try {
       const next = await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, focusClaim.owns()), true);
-      // zeta cannot start a chat while another turn runs: say which chat runs and re-attach the one that was open.
-      if (next.phase === "busy" && owner.current.current(token)) { void showBusy(next.busySessionId, "new"); setRouteRefresh((value) => value + 1); }
+      // zeta cannot start a chat while another turn runs: say which chat runs and keep the new chat's box. text typed
+      // there was written for a new chat, so it must never go to the running chat.
+      if (next.phase === "busy" && owner.current.current(token)) {
+        void showBusy(next.busySessionId, "new");
+        setState({ phase: "empty", page: next.page, serverApprovalMode: next.serverApprovalMode, credential: next.credential, newChat: true });
+      }
     } catch (caught) {
       if (!creation.current.status(context.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     } finally {
       focusClaim.release();
     }
   }, [applyPendingCreateMode, client, publishReady, showBusy, state]);
+
+  // the unsent-rows notice: show the page's new-chat box with its rows; the chat is made only when one of them is sent
+  const openNewChat = useCallback(() => {
+    if (state.phase !== "ready") return;
+    owner.current.begin(`new:${state.page.route === "/" ? "home" : state.page.route.slice(1)}`, true);
+    setState({ phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
+  }, [state]);
 
   const retrySaving = useCallback(() => { setRouteRefresh((value) => value + 1); }, []);
   const retryAttachment = useCallback(() => {
@@ -582,10 +625,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         true,
         applyPendingCreateMode,
         async (ready) => { handedOff = ready; },
-        false,
-        text,
+        empty.newChat,
       );
-      if (attached.phase === "busy") { void showBusy(attached.busySessionId, "attach"); throw new ChatBusyError(attached.busySessionId); }
+      if (attached.phase === "busy") { void showBusy(attached.busySessionId, empty.newChat ? "new" : "attach"); throw new ChatBusyError(attached.busySessionId); }
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
       if (modeToggle.current.stale()?.sessionId === attached.sessionId) { // clear the composer draft only when it was the sent text; a starter button must not erase typed text
         draftStore.set(attached.sessionId, text); if (draftStore.get(`new:${empty.page.id}`) === text) draftStore.set(`new:${empty.page.id}`, ""); }
@@ -615,7 +657,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     return () => { turn.dispose(); if (turnEnd.current === turn) turnEnd.current = null; };
   }, [client, workSessionId, ready?.lease, ready?.rebind, ready?.pendingApprovalMode]); // a new attach (lease) gets a new owner and token
 
-  const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
+  const send = useCallback(async (text: string, intent: SendIntent, track: (id: string) => void) => {
     if (!client || (state.phase !== "ready" && state.phase !== "empty")) throw new Error("zeta is not connected");
     await modeToggle.current.beforeSend();
     const token = owner.current.token();
@@ -623,11 +665,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (state.phase === "ready") await turnEnd.current?.settle();
     const current = state.phase === "ready" ? state : await createFirstChat(state, token, text);
     if (state.phase === "empty") await modeToggle.current.beforeSend();
-    const delivery_id = crypto.randomUUID();
+    const delivery_id = intent.deliveryId ?? crypto.randomUUID();
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
     try {
       await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
-      creation.current.sent(current.page.id);
     } catch (error) {
       if (pendingSelection.current?.sessionId === current.sessionId) pendingSelection.current = null;
       throw error;
@@ -712,5 +753,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }
