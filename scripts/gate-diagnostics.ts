@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential/i;
 
 type FrameSummary = { direction: "received" | "sent"; method?: string; event?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
@@ -98,4 +100,20 @@ export const controlSnapshot = (text: string, secrets: readonly string[] = []): 
   } catch {
     return diagnostic(text, secrets);
   }
+};
+
+// covers `"token": "x"`, `'Authorization': 'Bearer x'`, and `credential=x` in log lines that are not JSON.
+const SECRET_FIELD = /(["']?[\w-]*(?:token|authorization|credential|mcp_bindings)[\w-]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,}&]+)/gi;
+
+// one log line or websocket payload, made safe for a public CI artifact.
+export const redactArtifact = (line: string, secrets: readonly string[] = [], home = homedir()): string => {
+  let text: string;
+  try {
+    const value = JSON.parse(line);
+    text = value && typeof value === "object" ? diagnostic(value, secrets) : diagnostic(line, secrets);
+  } catch {
+    text = diagnostic(line, secrets);
+  }
+  text = text.replace(SECRET_FIELD, (_, key: string, value: string) => value.includes("[redacted]") ? key + value : `${key}[redacted]`);
+  return home.length > 1 ? text.split(home).join("~") : text;
 };

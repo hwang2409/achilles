@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { controlSnapshot, createFrameRing, createGateWait, diagnostic } from "./gate-diagnostics";
+import { controlSnapshot, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 
 const fake = "fake-secret-token";
 test("diagnostics redact all secret-shaped values", () => {
@@ -15,6 +15,19 @@ test("diagnostics redact all secret-shaped values", () => {
   };
   const output = [diagnostic(input, [fake]), controlSnapshot(JSON.stringify(input), [fake]), diagnostic(`Bearer ${fake}`, [fake])].join(" ");
   expect(output).not.toContain(fake);
+});
+
+test("artifact lines redact credentials, bearer values, and home paths", () => {
+  const lines = [
+    JSON.stringify({ method: "hello", params: { controller_token: fake, mcp_bindings: [{ headers: { Authorization: `Bearer ${fake}` } }] } }),
+    `INFO bind {'Authorization': 'Bearer ${fake}'} at /home/tester/zeta`,
+    `credential=${fake}&x=1 token: ${fake}`,
+    `unlisted ${fake}`,
+  ];
+  const output = lines.map((line) => redactArtifact(line, [fake], "/home/tester")).join("\n");
+  expect(output).not.toContain(fake);
+  expect(output).not.toContain("/home/tester");
+  expect(output).toContain("INFO bind");
 });
 
 test.each([
