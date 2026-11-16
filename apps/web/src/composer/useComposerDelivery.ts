@@ -9,6 +9,8 @@ import { useRunStore, type ComposerIntent, type ComposerProps } from "@fulcrum/r
 import {
   composerActivity,
   createComposerModel,
+  inFlight,
+  SendRefused,
   transition,
   type ComposerEffect,
   type ComposerEvent,
@@ -33,7 +35,7 @@ export type ComposerAdapterProps = ComposerProps & {
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
 };
 
-/** `deliveryId`: send with this id (a retry of a row that may have been sent), not a new one */
+/** `deliveryId`: send with this id (a retry of a held row), not a new one */
 export type SendIntent = ComposerIntent & { deliveryId?: string };
 
 export type DeliveryOptions = ComposerProps & {
@@ -88,7 +90,7 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
       await attempt(() => current.onSubmit(text, intent, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
       apply({ type: "confirm", attempt: sendAttempt });
     } catch (failure) {
-      apply({ type: "reject", attempt: sendAttempt, message: errorText(failure) });
+      apply({ type: "reject", attempt: sendAttempt, message: errorText(failure), refused: failure instanceof SendRefused });
     } finally {
       apply({ type: "settle", attempt: sendAttempt });
     }
@@ -203,9 +205,9 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
     check();
     return store.subscribe(check);
   }, [owner, store, echoWanted]);
-  // a failed row that went out (in flight when an earlier page load ended, or a retry of one that failed): zeta's
+  // a held row that is not in flight (in flight when an earlier page load ended, failed, or retried and waiting): zeta's
   // transcript shows its delivery id once zeta took it
-  const maybeSent = model.queue.some((item) => item.failed && item.deliveryId);
+  const maybeSent = model.queue.some((item) => item.held && item !== inFlight(model));
   useEffect(() => {
     if (!maybeSent) return;
     const check = () => {
@@ -214,7 +216,7 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
         const item = store.getItem(id);
         if (item?.type === "user" && item.event.type === "user_message" && item.event.delivery_id) taken.add(item.event.delivery_id);
       }
-      for (const row of owner.getModel().queue) if (row.failed && row.deliveryId && taken.has(row.deliveryId)) owner.echo(row.deliveryId);
+      for (const row of owner.getModel().queue) if (row.held && taken.has(row.held)) owner.echo(row.held);
     };
     check();
     return store.subscribe(check);
