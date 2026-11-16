@@ -101,6 +101,31 @@ test("turn cap report preserves the seeded initial snapshot", async () => {
   }
 }, 100_000);
 
+test("scripted faults: a zeta restart mid-approval resumes the same chat, and a 529 run keeps its write and retries once", async () => {
+  if (!Bun.which("uv")) return; // The web job reruns eval tests after installing uv.
+  const target = resolve(new URL("..", import.meta.url).pathname); const root = await mkdtemp(join(tmpdir(), "achilles-faults-")); const tasks = join(root, "tasks"); let child: ReturnType<typeof Bun.spawn> | undefined;
+  const restart = { id: "restart-scripted", page_plan: [{ alias: "tasks", source: "setup", bind_chat: true, create_mode: false }], agent_turns: 8, approval_mode: "ask", steps: [{ id: "add", kind: "prompt", page: "tasks", chat: "tasks-chat", prompt: "add_task each of these with the field title: Alpha, Beta, Gamma", during: { tool: "achilles__add_task", nth: 2, restart_zeta: true } }, { id: "resume", kind: "prompt", page: "tasks", chat: "tasks-chat", prompt: "continue" }], setup: { tools: [{ name: "add_task", operation: "insert", collection: "tasks" }], records: [] }, checks: [{ id: "records", type: "records_exact", page: "tasks", value: [{ title: "Alpha" }, { title: "Beta" }, { title: "Gamma" }] }, { id: "recovery", type: "restart_recovery", page: "tasks", step: "resume", collection: "tasks", fields: ["title"] }] };
+  try {
+    await mkdir(tasks); await Bun.write(join(tasks, "restart-scripted.json"), JSON.stringify(restart));
+    await Bun.write(join(tasks, "provider-error-try-again.json"), await readFile(join(target, "evals/tasks/provider-error-try-again.json"), "utf8"));
+    const revision = (await readFile(join(target, "zeta.rev"), "utf8")).trim(); const warmZeta = join(target, ".cache/zeta"); const runnerZeta = join(target, ".cache", `zeta-${revision}`);
+    if (await Bun.file(join(warmZeta, ".git/HEAD")).exists() && !await Bun.file(join(runnerZeta, ".git/HEAD")).exists()) await symlink(warmZeta, runnerZeta, "dir").catch(error => { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; });
+    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", "restart-scripted,provider-error-try-again"], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_SKIP_BROWSER_INSTALL: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
+    const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
+    const exitCode = await waitForProcess(child, "scripted fault eval", 150_000);
+    expect(exitCode, `${await stdout}\n${await stderr}`).toBe(0);
+    const report = JSON.parse(await readFile(join(root, "report.json"), "utf8")); const [restarted, faulted] = report.tasks;
+    expect(restarted.status, JSON.stringify(restarted.checks)).toBe("pass");
+    const row = JSON.parse(await readFile(join(root, restarted.transcript), "utf8")).interjections[0];
+    expect(row).toEqual(expect.objectContaining({ action: "restart_zeta", ok: true, history_continuity: true, resumed_session_id: row.original_session_id }));
+    expect(row.started_pid).not.toBe(row.killed_pid);
+    expect(faulted.status, JSON.stringify(faulted.checks)).toBe("pass");
+  } finally {
+    if (child?.exitCode === null) { child.kill(); await Promise.race([child.exited, Bun.sleep(500)]); }
+    await rm(root, { recursive: true, force: true });
+  }
+}, 160_000);
+
 test("suite selection validates every task and sums one command budget", async () => {
   const tasks = await selectTasks();
   expect(tasks.map(task => task.id)).toEqual([...tasks].map(task => task.id).sort());

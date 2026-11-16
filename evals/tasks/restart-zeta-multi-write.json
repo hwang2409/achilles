@@ -1,0 +1,99 @@
+{
+  "id": "restart-zeta-multi-write",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "contacts",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 14,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "write",
+      "kind": "prompt",
+      "page": "contacts",
+      "chat": "contacts-chat",
+      "prompt": "add these 5 contacts with add_contact, one call per contact, using the fields name and email: Ada Lovelace (ada@example.test), Grace Hopper (grace@example.test), Alan Turing (alan@example.test), Katherine Johnson (katherine@example.test), Edsger Dijkstra (edsger@example.test). then tell me how many contacts you added.",
+      "during": {
+        "tool": "achilles__add_contact",
+        "nth": 3,
+        "restart_zeta": true
+      }
+    },
+    {
+      "id": "resume",
+      "kind": "prompt",
+      "page": "contacts",
+      "chat": "contacts-chat",
+      "prompt": "continue"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_contact",
+        "operation": "insert",
+        "collection": "contacts"
+      },
+      {
+        "name": "list_contacts",
+        "operation": "list",
+        "collection": "contacts"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "recovery",
+      "type": "restart_recovery",
+      "page": "contacts",
+      "step": "resume",
+      "collection": "contacts",
+      "fields": [
+        "name"
+      ]
+    },
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "contacts",
+      "value": [
+        {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        },
+        {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        },
+        {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        },
+        {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        },
+        {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      ]
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "contacts",
+      "tool": "achilles__add_contact",
+      "collection": "contacts",
+      "fields": [
+        "email"
+      ]
+    }
+  ]
+}

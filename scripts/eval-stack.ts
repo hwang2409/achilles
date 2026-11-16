@@ -10,7 +10,7 @@ const RESERVED_PORTS = new Set([5190, 5191, 8765]);
 const HTTP_TIMEOUT_MS = 10_000;
 export type CleanupProof = { pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; ports: number[]; pids_dead: boolean; pgids_dead: boolean; ports_closed: boolean; discovery_pid_dead: boolean; discovery_cleaned: boolean };
 export type EvalStackConfig = { achillesDir?: string; zetaRev?: string; model?: string; accountHome?: string; ollamaBaseUrl?: string; maxTurns?: number; root?: string; signal?: AbortSignal; beforeDelete?: (root: string) => Promise<void> };
-export type EvalStack = { achillesOrigin: string; zetaOrigin: string; achillesDir: string; achillesSha: string; zetaSha: string; provider: string; model: string; root: string; accountHome: string; cleanup?: CleanupProof; run(command: string, args: string[], cwd?: string, timeoutMs?: number): Promise<{ exitCode: number; stdout: string; stderr: string }>; close(): Promise<CleanupProof> };
+export type EvalStack = { achillesOrigin: string; zetaOrigin: string; achillesDir: string; achillesSha: string; zetaSha: string; provider: string; model: string; root: string; accountHome: string; cleanup?: CleanupProof; run(command: string, args: string[], cwd?: string, timeoutMs?: number): Promise<{ exitCode: number; stdout: string; stderr: string }>; restartZeta(): Promise<{ killed_pid: number; started_pid: number }>; close(): Promise<CleanupProof> };
 
 export async function fetchDeadline(input: string | URL, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = HTTP_TIMEOUT_MS) {
   const deadline = AbortSignal.timeout(timeoutMs); const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -64,6 +64,13 @@ class ProcessOwner {
       for (let i = 0; i < 20 && processGroups().has(pgid); i++) await Bun.sleep(100);
       if (!processGroups().has(pgid) || !stillOwned()) return;
     }
+  }
+  // a crash, not a shutdown: SIGKILL to the one group this owner started, then wait until the group is gone
+  async kill(owned: ChildProcess) {
+    const pgid = owned.pid; if (!pgid || this.groups.get(pgid) !== owned) throw new Error("eval process owner does not own that process");
+    try { globalThis.process.kill(-pgid, "SIGKILL"); } catch {}
+    for (let i = 0; i < 50 && processGroups().has(pgid); i++) await Bun.sleep(100);
+    if (processGroups().has(pgid)) throw new Error(`process group ${pgid} survived SIGKILL`);
   }
   close() { return this.closing ??= (async () => {
     this.detachAbort(); const before = processGroups(); const owned = [...this.groups.entries()].filter(([pgid, process]) => this.groups.get(pgid) === process && process.exitCode === null); const pgids = owned.map(([pgid]) => pgid); const process_groups = pgids.map(pgid => ({ pgid, pids: [...new Set([pgid, ...(before.get(pgid) ?? [])])] }));
@@ -175,9 +182,15 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
     config.signal?.throwIfAborted();
     const achillesLog = openSync(join(root, "achilles-home/serve.log"), "a"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
     await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
-    const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const zetaProcess = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? 20), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, "--tools", TOOL_POLICY, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog);
-    const discovery = await waitForDiscovery(root, zetaProcess, config.signal); const preflight = await connectEvalProtocol(discovery); await preflight.close();
-    stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), close };
+    const spawnZeta = () => { const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const child = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? 20), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, "--tools", TOOL_POLICY, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog); return child; };
+    let zetaProcess = spawnZeta();
+    const discovery = await waitForDiscovery(root, zetaProcess, config.signal);
+    // the same serve again on the same port and home; the stale discovery file goes first so the wait sees the new process
+    const restartZeta = async () => {
+      const killed_pid = zetaProcess.pid!; await owner.kill(zetaProcess); await rm(join(root, "zeta-home/run/serve.ws.json"), { force: true });
+      zetaProcess = spawnZeta(); await waitForDiscovery(root, zetaProcess, config.signal); return { killed_pid, started_pid: zetaProcess.pid! };
+    }; const preflight = await connectEvalProtocol(discovery); await preflight.close();
+    stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), restartZeta, close };
     return stack;
   } catch (error) { const detail = error as Error & { cleanup?: CleanupProof }; detail.cleanup = await close(); throw detail; }
 }

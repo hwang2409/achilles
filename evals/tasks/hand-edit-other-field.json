@@ -1,0 +1,101 @@
+{
+  "id": "hand-edit-other-field",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "tasks",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 10,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "set",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "set the priority of the task Ship docs to high",
+      "during": {
+        "tool": "achilles__update_task",
+        "nth": 1,
+        "user_write": {
+          "tool": "update_task",
+          "arguments": {
+            "record_id": "t-2",
+            "owner": "Mia"
+          }
+        }
+      }
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_tasks",
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "name": "update_task",
+        "operation": "update",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "id": "t-1",
+        "collection": "tasks",
+        "data": {
+          "title": "Fix login",
+          "priority": "medium",
+          "owner": "Lee"
+        }
+      },
+      {
+        "id": "t-2",
+        "collection": "tasks",
+        "data": {
+          "title": "Ship docs",
+          "priority": "medium",
+          "owner": "Lee"
+        }
+      },
+      {
+        "id": "t-3",
+        "collection": "tasks",
+        "data": {
+          "title": "Plan offsite",
+          "priority": "low",
+          "owner": "Sam"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "Fix login",
+          "priority": "medium",
+          "owner": "Lee"
+        },
+        {
+          "title": "Ship docs",
+          "priority": "high",
+          "owner": "Mia"
+        },
+        {
+          "title": "Plan offsite",
+          "priority": "low",
+          "owner": "Sam"
+        }
+      ]
+    }
+  ]
+}

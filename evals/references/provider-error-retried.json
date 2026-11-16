@@ -1,0 +1,348 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "4666a7fbf9d6a6703c03db03",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "9006b53f7e68f5565236d25f",
+        "name": "add_task",
+        "version": 1,
+        "operation": "insert",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "6534cb34180015cc61a91ed7",
+        "collection": "tasks",
+        "data": {
+          "title": "Alpha"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "dcfb990c1c40b4cc7a64291b",
+        "collection": "tasks",
+        "data": {
+          "title": "Beta"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "482428f7b8498db86de0accd",
+        "collection": "tasks",
+        "data": {
+          "title": "Gamma"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "ollama-ce15dfeb-f8da-44d4-b79a-570d22a45ea2",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "call_id": "ollama-ce15dfeb-f8da-44d4-b79a-570d22a45ea2",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-58939fa9-9bed-48b2-8959-a73e41b22625",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Beta"
+        },
+        "call_id": "ollama-58939fa9-9bed-48b2-8959-a73e41b22625",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-27ff8d29-1e02-4b2b-bb70-930c57ba9b71",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Gamma"
+        },
+        "call_id": "ollama-27ff8d29-1e02-4b2b-bb70-930c57ba9b71",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "ollama-ce15dfeb-f8da-44d4-b79a-570d22a45ea2",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "6534cb34180015cc61a91ed7",
+          "revision": 1,
+          "title": "Alpha"
+        }
+      },
+      {
+        "call_id": "ollama-58939fa9-9bed-48b2-8959-a73e41b22625",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "dcfb990c1c40b4cc7a64291b",
+          "revision": 1,
+          "title": "Beta"
+        }
+      },
+      {
+        "call_id": "ollama-27ff8d29-1e02-4b2b-bb70-930c57ba9b71",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "482428f7b8498db86de0accd",
+          "revision": 1,
+          "title": "Gamma"
+        }
+      }
+    ],
+    "errors": [],
+    "failed_turns": [],
+    "approvals": [],
+    "interjections": [],
+    "turns": 4,
+    "answers": {
+      "add": "added Alpha, Beta, Gamma"
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "4666a7fbf9d6a6703c03db03",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "9006b53f7e68f5565236d25f",
+          "name": "add_task",
+          "version": 1,
+          "operation": "insert",
+          "collection": "tasks"
+        }
+      ],
+      "records": []
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "4666a7fbf9d6a6703c03db03",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "9006b53f7e68f5565236d25f",
+        "name": "add_task",
+        "version": 1,
+        "operation": "insert",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "6534cb34180015cc61a91ed7",
+        "collection": "tasks",
+        "data": {
+          "title": "Alpha"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "dcfb990c1c40b4cc7a64291b",
+        "collection": "tasks",
+        "data": {
+          "title": "Beta"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "482428f7b8498db86de0accd",
+        "collection": "tasks",
+        "data": {
+          "title": "Gamma"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "dup-alpha",
+        "collection": "tasks",
+        "data": {
+          "title": "Alpha"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "ollama-ce15dfeb-f8da-44d4-b79a-570d22a45ea2",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "call_id": "ollama-ce15dfeb-f8da-44d4-b79a-570d22a45ea2",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-58939fa9-9bed-48b2-8959-a73e41b22625",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Beta"
+        },
+        "call_id": "ollama-58939fa9-9bed-48b2-8959-a73e41b22625",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "ollama-27ff8d29-1e02-4b2b-bb70-930c57ba9b71",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Gamma"
+        },
+        "call_id": "ollama-27ff8d29-1e02-4b2b-bb70-930c57ba9b71",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      },
+      {
+        "id": "dup-call",
+        "name": "achilles__add_task",
+        "arguments": {
+          "title": "Alpha"
+        },
+        "call_id": "dup-call",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "ollama-ce15dfeb-f8da-44d4-b79a-570d22a45ea2",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "6534cb34180015cc61a91ed7",
+          "revision": 1,
+          "title": "Alpha"
+        }
+      },
+      {
+        "call_id": "ollama-58939fa9-9bed-48b2-8959-a73e41b22625",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "dcfb990c1c40b4cc7a64291b",
+          "revision": 1,
+          "title": "Beta"
+        }
+      },
+      {
+        "call_id": "ollama-27ff8d29-1e02-4b2b-bb70-930c57ba9b71",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__add_task",
+        "success": true,
+        "data": {
+          "record_id": "482428f7b8498db86de0accd",
+          "revision": 1,
+          "title": "Gamma"
+        }
+      }
+    ],
+    "errors": [],
+    "failed_turns": [],
+    "approvals": [],
+    "interjections": [],
+    "turns": 4,
+    "answers": {
+      "add": "added Alpha, Beta, Gamma"
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "4666a7fbf9d6a6703c03db03",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "9006b53f7e68f5565236d25f",
+          "name": "add_task",
+          "version": 1,
+          "operation": "insert",
+          "collection": "tasks"
+        }
+      ],
+      "records": []
+    }
+  }
+}

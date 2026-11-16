@@ -1,0 +1,560 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "68c9005d6bc1cb4b94d929cf",
+        "name": "update_task",
+        "version": 1,
+        "operation": "update",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "9a2d59eb22a6c12059a48575",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "t-1",
+        "collection": "tasks",
+        "data": {
+          "owner": "Lee",
+          "priority": "medium",
+          "title": "Fix login"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-2",
+        "collection": "tasks",
+        "data": {
+          "owner": "Lee",
+          "priority": "high",
+          "title": "Ship docs"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-3",
+        "collection": "tasks",
+        "data": {
+          "owner": "Sam",
+          "priority": "medium",
+          "title": "Plan offsite"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "name": "achilles__list_tasks",
+        "arguments": {
+          "where": {
+            "field": "title",
+            "equals": "Ship docs"
+          }
+        },
+        "call_id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tasks",
+        "success": true
+      },
+      {
+        "id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "name": "achilles__update_task",
+        "arguments": {
+          "revision": 1,
+          "record_id": "t-2",
+          "priority": "high"
+        },
+        "call_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": false
+      },
+      {
+        "id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "name": "achilles__update_task",
+        "arguments": {
+          "priority": "high",
+          "record_id": "t-2",
+          "revision": 2
+        },
+        "call_id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tasks",
+        "success": true,
+        "data": [
+          {
+            "owner": "Lee",
+            "priority": "medium",
+            "record_id": "t-2",
+            "revision": 1,
+            "title": "Ship docs"
+          }
+        ]
+      },
+      {
+        "call_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": false,
+        "data": {
+          "code": "conflict",
+          "current": {
+            "owner": "Lee",
+            "priority": "low",
+            "record_id": "t-2",
+            "revision": 2,
+            "title": "Ship docs"
+          },
+          "expected": "current record revision",
+          "hint": "the record changed; compare current with your change and retry with current.revision only if your change still applies",
+          "path": "/revision"
+        }
+      },
+      {
+        "call_id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": true,
+        "data": {
+          "owner": "Lee",
+          "priority": "high",
+          "record_id": "t-2",
+          "revision": 3,
+          "title": "Ship docs"
+        }
+      }
+    ],
+    "errors": [
+      {
+        "code": "conflict",
+        "current": {
+          "owner": "Lee",
+          "priority": "low",
+          "record_id": "t-2",
+          "revision": 2,
+          "title": "Ship docs"
+        },
+        "expected": "current record revision",
+        "hint": "the record changed; compare current with your change and retry with current.revision only if your change still applies",
+        "path": "/revision",
+        "call_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": false,
+        "message": "{\"code\": \"conflict\", \"current\": {\"owner\": \"Lee\", \"priority\": \"low\", \"record_id\": \"t-2\", \"revision\": 2, \"title\": \"Ship docs\"}, \"expected\": \"current record revision\", \"hint\": \"the record changed; compare current with your change and retry with current.revision only if your change still applies\", \"path\": \"/revision\"}"
+      }
+    ],
+    "failed_turns": [],
+    "approvals": [
+      {
+        "request_id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tasks",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      }
+    ],
+    "interjections": [
+      {
+        "step": "set",
+        "page_id": "home",
+        "tool": "update_task",
+        "arguments": {
+          "record_id": "t-2",
+          "priority": "low"
+        },
+        "status": 200,
+        "ok": true,
+        "revision_before": 1,
+        "revision_after": 2,
+        "action": "user_write",
+        "request_id": "toolu_01NU971r4yxbofMsJWNUCvaV"
+      }
+    ],
+    "turns": 4,
+    "answers": {
+      "set": "The \"Ship docs\" task (owner Lee) now has priority high.\n\nMy first try failed because someone else edited the task at the same moment and changed its priority from medium to low. I set it to high anyway since that's what you asked for, which replaced their low setting. You may want to check with whoever made that change."
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "68c9005d6bc1cb4b94d929cf",
+          "name": "update_task",
+          "version": 1,
+          "operation": "update",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "9a2d59eb22a6c12059a48575",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-1",
+          "collection": "tasks",
+          "data": {
+            "owner": "Lee",
+            "priority": "medium",
+            "title": "Fix login"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-2",
+          "collection": "tasks",
+          "data": {
+            "owner": "Lee",
+            "priority": "medium",
+            "title": "Ship docs"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-3",
+          "collection": "tasks",
+          "data": {
+            "owner": "Sam",
+            "priority": "medium",
+            "title": "Plan offsite"
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "68c9005d6bc1cb4b94d929cf",
+        "name": "update_task",
+        "version": 1,
+        "operation": "update",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "9a2d59eb22a6c12059a48575",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "t-1",
+        "collection": "tasks",
+        "data": {
+          "owner": "Lee",
+          "priority": "medium",
+          "title": "Fix login"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-2",
+        "collection": "tasks",
+        "data": {
+          "owner": "Lee",
+          "priority": "high",
+          "title": "Ship docs"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "t-3",
+        "collection": "tasks",
+        "data": {
+          "owner": "Sam",
+          "priority": "medium",
+          "title": "Plan offsite"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "name": "achilles__list_tasks",
+        "arguments": {
+          "where": {
+            "field": "title",
+            "equals": "Ship docs"
+          }
+        },
+        "call_id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tasks",
+        "success": true
+      },
+      {
+        "id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "name": "achilles__update_task",
+        "arguments": {
+          "revision": 1,
+          "record_id": "t-2",
+          "priority": "high"
+        },
+        "call_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": false
+      },
+      {
+        "id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "name": "achilles__update_task",
+        "arguments": {
+          "priority": "high",
+          "record_id": "t-2",
+          "revision": 2
+        },
+        "call_id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tasks",
+        "success": true,
+        "data": [
+          {
+            "owner": "Lee",
+            "priority": "medium",
+            "record_id": "t-2",
+            "revision": 1,
+            "title": "Ship docs"
+          }
+        ]
+      },
+      {
+        "call_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": false,
+        "data": {
+          "code": "conflict",
+          "current": {
+            "owner": "Lee",
+            "priority": "low",
+            "record_id": "t-2",
+            "revision": 2,
+            "title": "Ship docs"
+          },
+          "expected": "current record revision",
+          "hint": "the record changed; compare current with your change and retry with current.revision only if your change still applies",
+          "path": "/revision"
+        }
+      },
+      {
+        "call_id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": true,
+        "data": {
+          "owner": "Lee",
+          "priority": "high",
+          "record_id": "t-2",
+          "revision": 3,
+          "title": "Ship docs"
+        }
+      }
+    ],
+    "errors": [
+      {
+        "code": "conflict",
+        "current": {
+          "owner": "Lee",
+          "priority": "low",
+          "record_id": "t-2",
+          "revision": 2,
+          "title": "Ship docs"
+        },
+        "expected": "current record revision",
+        "hint": "the record changed; compare current with your change and retry with current.revision only if your change still applies",
+        "path": "/revision",
+        "call_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "success": false,
+        "message": "{\"code\": \"conflict\", \"current\": {\"owner\": \"Lee\", \"priority\": \"low\", \"record_id\": \"t-2\", \"revision\": 2, \"title\": \"Ship docs\"}, \"expected\": \"current record revision\", \"hint\": \"the record changed; compare current with your change and retry with current.revision only if your change still applies\", \"path\": \"/revision\"}"
+      }
+    ],
+    "failed_turns": [],
+    "approvals": [
+      {
+        "request_id": "toolu_01PLjGLmhi4HTcLJ3PRrTjEq",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__list_tasks",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_01NU971r4yxbofMsJWNUCvaV",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "toolu_018fYjTSTWZMWrpn4CdZQeAM",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      }
+    ],
+    "interjections": [
+      {
+        "step": "set",
+        "page_id": "home",
+        "tool": "update_task",
+        "arguments": {
+          "record_id": "t-2",
+          "priority": "low"
+        },
+        "status": 200,
+        "ok": true,
+        "revision_before": 1,
+        "revision_after": 2,
+        "action": "user_write",
+        "request_id": "toolu_01NU971r4yxbofMsJWNUCvaV"
+      }
+    ],
+    "turns": 4,
+    "answers": {
+      "set": "Done, Ship docs is now high priority."
+    },
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "68c9005d6bc1cb4b94d929cf",
+          "name": "update_task",
+          "version": 1,
+          "operation": "update",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "9a2d59eb22a6c12059a48575",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "t-1",
+          "collection": "tasks",
+          "data": {
+            "owner": "Lee",
+            "priority": "medium",
+            "title": "Fix login"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-2",
+          "collection": "tasks",
+          "data": {
+            "owner": "Lee",
+            "priority": "medium",
+            "title": "Ship docs"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "t-3",
+          "collection": "tasks",
+          "data": {
+            "owner": "Sam",
+            "priority": "medium",
+            "title": "Plan offsite"
+          }
+        }
+      ]
+    }
+  }
+}

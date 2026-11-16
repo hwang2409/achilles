@@ -1,0 +1,82 @@
+{
+  "id": "provider-error-try-again",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "tasks",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "steps": [
+    {
+      "id": "add",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "add_task each of these, one call per task, with the field title: Alpha, Beta, Gamma. then tell me what you added.",
+      "provider_error": {
+        "status": 529,
+        "times": 5
+      }
+    },
+    {
+      "id": "retry",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "try again"
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "add_task",
+        "operation": "insert",
+        "collection": "tasks"
+      },
+      {
+        "name": "list_tasks",
+        "operation": "list",
+        "collection": "tasks"
+      }
+    ],
+    "records": []
+  },
+  "checks": [
+    {
+      "id": "records",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "Alpha"
+        },
+        {
+          "title": "Beta"
+        },
+        {
+          "title": "Gamma"
+        }
+      ]
+    },
+    {
+      "id": "no-duplicates",
+      "type": "no_duplicate_writes",
+      "page": "tasks",
+      "tool": "achilles__add_task",
+      "collection": "tasks",
+      "fields": [
+        "title"
+      ]
+    },
+    {
+      "id": "error-shown",
+      "type": "error_shown",
+      "page": "tasks",
+      "value": 529
+    }
+  ]
+}

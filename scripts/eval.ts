@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { connectEvalProtocol, assertTurnBudget, reserveTurns, type EvalProtocol } from "./eval-protocol";
 import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type EvalStack } from "./eval-stack";
-import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type TaskSetup, type TaskStep } from "./eval-grade";
+import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type ProviderError, type TaskSetup, type TaskStep } from "./eval-grade";
 import { createGateWait } from "./gate-diagnostics";
 import { formFields } from "../apps/web/src/page/formSchema";
 import { loadBaseReport, makeReport, reportJson, reportMarkdown, type BaseReport } from "./eval-report";
@@ -207,7 +207,7 @@ function toolEnd(event: Record<string, any>) {
   return { call, result, data, name: call.name ?? event.data?.name, success: !result.is_error };
 }
 function parseHistory(histories: Array<{ chat: string; page_id: string; rows: any[] }>) {
-  const calls: Record<string, unknown>[] = []; const results: Record<string, unknown>[] = []; const errors: Record<string, unknown>[] = [];
+  const calls: Record<string, unknown>[] = []; const results: Record<string, unknown>[] = []; const errors: Record<string, unknown>[] = []; const failed_turns: Record<string, unknown>[] = [];
   for (const history of histories) {
     const pending = new Map<string, Record<string, unknown>>();
     for (const row of history.rows) {
@@ -218,9 +218,11 @@ function parseHistory(histories: Array<{ chat: string; page_id: string; rows: an
         calls.push({ ...call, ...common }); results.push({ ...common, data });
         if (row.tool_result.is_error === true) errors.push({ ...(data && typeof data === "object" ? data : {}), ...common, message: text });
       } else if (row.event === "error") errors.push({ ...(row.data ?? {}), chat_id: history.chat, page_id: history.page_id });
+      // the row a chat renders as the turn's error, live and after a reload
+      if (row.failed_turn && typeof row.failed_turn === "object") failed_turns.push({ ...row.failed_turn, chat_id: history.chat, page_id: history.page_id });
     }
   }
-  return { calls, results, errors };
+  return { calls, results, errors, failed_turns };
 }
 function pageIdFromResults(results: Array<Record<string, any>>, plan: PagePlan) {
   for (const value of results) { const data = value.data as Record<string, unknown>; if (value.tool === "achilles__create_page" && value.success && (!plan.route || data?.route === plan.route) && typeof data.page_id === "string") return data.page_id; }
@@ -235,11 +237,16 @@ export function finalAnswer(history: any[], prior: number) {
   const text = (row: any) => (Array.isArray(row.content) ? row.content : []).filter((block: any) => block.type === "text" && typeof block.text === "string").map((block: any) => block.text).join("\n").trim();
   return turn.filter(row => row.role === "assistant" && !row.event).map(text).filter(Boolean).at(-1);
 }
-// a steer the turn did not read starts one more turn, so a steered step ends only after a turn end that follows the steer
-async function waitForTerminal(protocol: EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal, steered: () => string | undefined = () => undefined) {
+// a steer the turn did not read starts one more turn, so a steered step ends only after a turn end that follows the steer;
+// a zeta restart loses the turn, so a restarted step ends once the chat is resumed on the new serve
+async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal, steered: () => string | undefined = () => undefined, restart: () => Promise<Error | undefined> | undefined = () => undefined) {
   for (;;) {
-    signal.throwIfAborted(); const error = failure(); if (error) throw error;
-    const history = await protocol.sessionHistory(sessionId); const count = history.filter((row: any) => row.event === "served_turn_end").length;
+    signal.throwIfAborted(); let error = failure(); if (error) throw error;
+    const restarting = restart();
+    if (restarting) { error = await restarting ?? failure(); if (error) throw error; const history = await protocol().sessionHistory(sessionId); return { count: history.filter((row: any) => row.event === "served_turn_end").length, history }; }
+    let history: any[];
+    try { history = await protocol().sessionHistory(sessionId); } catch (failed) { if (restart()) continue; throw failed; }
+    const count = history.filter((row: any) => row.event === "served_turn_end").length;
     const steer = steered(); if (count > prior && (!steer || stepFinished(history, prior, [steer]))) return { count, history }; await Bun.sleep(100);
   }
 }
@@ -434,15 +441,15 @@ export function createDecisionQueue(onError: (error: unknown) => void) {
   let tail: Promise<void> = Promise.resolve();
   return (decide: () => Promise<void>, before?: () => Promise<void>) => { tail = tail.then(async () => { if (before) await before(); await decide(); }).catch(onError); return tail; };
 }
-async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal) {
+async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal, armProviderError: (fault?: ProviderError) => void = () => undefined) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
   const discoveryResponse = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!discoveryResponse.ok) throw new Error(`zeta discovery failed (${discoveryResponse.status})`);
-  const discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
+  let discovery = await discoveryResponse.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
-  let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; const interjections: Array<Record<string, unknown>> = [];
+  let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; let restarting: Promise<Error | undefined> | undefined; const interjections: Array<Record<string, unknown>> = [];
   // a browser task: the real page is zeta's controller and the harness watches as an observer
   let browser: BrowserDriver | undefined;
   if (task.steps.some(step => step.kind === "browser_prompt")) {
@@ -450,6 +457,20 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     browser = createBrowserDriver({ chromium, origin: stack.achillesOrigin, ask, signal, observer: () => protocol, failure: () => fatal });
   }
   const approvals: Record<string, unknown>[] = []; const enqueueDecision = createDecisionQueue(error => { fatal ??= error instanceof Error ? error : new Error(String(error)); void abortAll(); }); const abortAll = async () => { browser?.wake(); if (browser) return browser.stop(); await Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined))); };
+  // kill and restart the zeta serve while the turn waits on an approval, then resume the chat on the new serve
+  const restartAndResume = async (step: TaskStep, chat: string, session: { id: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }, requestId: unknown) => {
+    const row: Record<string, any> = { step: step.id, page_id: session.page_id, chat, action: "restart_zeta", request_id: requestId, original_session_id: session.id, ok: false }; interjections.push(row);
+    try {
+      row.pre_history_ids = (await protocol.sessionHistory(session.id)).map((item: any) => item.id).filter(Boolean);
+      row.records_before = ((await databaseSnapshot(stack)).records ?? []).filter(item => item.page_id === session.page_id).map(item => ({ collection: item.collection, id: item.id, data: item.data }));
+      const old = protocol; Object.assign(row, await stack.restartZeta()); await old.close().catch(() => undefined);
+      const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
+      discovery = await fresh.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
+      protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal });
+      const resumed = await protocol.resume(session.id, session.binding!); row.resumed_session_id = String(resumed.session?.session_id ?? resumed.session_id ?? "");
+      const pre = new Set(row.pre_history_ids); row.after_restart = (await protocol.sessionHistory(session.id)).filter((item: any) => !pre.has(item.id)).map((item: any) => item.event ?? item.role); row.ok = true;
+    } catch (error) { row.error = error instanceof Error ? error.message : String(error); throw error; }
+  };
   const onEvent = (event: Record<string, any>) => {
     events.push(event); browser?.onEvent(event);
     const eventFailure = new Error(JSON.stringify(event)); if (!fatal && stopsSuite(eventFailure)) { fatal = eventFailure; void abortAll(); return; }
@@ -462,13 +483,16 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const request = event.data ?? event; const decision = approvalDecision(approvalRule, request.tool_call?.name, () => ruleRequests++); approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision });
     if (browser) { browser.decide(session[1].id, String(requestId), decision); return; }
     const step = currentStep; const during = step?.during; const fires = during !== undefined && request.tool_call?.name === during.tool && ++duringRequests === (during.nth ?? 1);
+    let finishRestart = (_error?: Error) => {}; if (fires && during.restart_zeta) restarting = new Promise<Error | undefined>(resolve => { finishRestart = resolve; });
     const interject = fires ? async () => {
+      if (during.restart_zeta) return restartAndResume(step!, session[0], session[1], requestId).then(() => finishRestart(), (error: Error) => { finishRestart(error); throw error; });
       if (during.steer) { await protocol.steer(session[1].id, during.steer, crypto.randomUUID()); steered = during.steer; interjections.push({ step: step!.id, page_id: session[1].page_id, action: "steer", request_id: requestId, ok: true }); return; }
       const write = await userWrite(stack, { ...step!, tool: during.user_write!.tool, arguments: during.user_write!.arguments }, session[1].page_id, hidden, signal);
       interjections.push({ ...write, action: "user_write", request_id: requestId });
       if (!write.ok) throw new Error(`user write during ${step!.id} failed (${write.status})`);
     } : undefined;
-    void enqueueDecision(() => protocol.decide(session[1].id, String(requestId), decision), interject);
+    // a restart kills the serve that holds the request, so nothing is left to answer
+    void enqueueDecision(() => fires && during.restart_zeta ? Promise.resolve() : protocol.decide(session[1].id, String(requestId), decision), interject);
   };
   protocol = await connectEvalProtocol(browser ? { url: discovery.url, controller_token: await observerToken(stack, hidden) } : discovery, onEvent, { retryCapacity: true, signal, role: browser ? "observer" : "controller" }); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
@@ -492,13 +516,16 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
         const turn = await browser.prompt(step, pageId, route, id => sessions.set(step.chat, { id, alias: step.page, page_id: pageId }));
         terminals.set(turn.sessionId, turn.history.filter((row: any) => row.event === "served_turn_end").length); const answer = finalAnswer(turn.history, turn.history.filter((row: any) => row.event === "served_turn_end").length - 1); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, turn.history); await turn.check(answer); continue;
       }
-      const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; currentStep = step; duringRequests = 0; steered = undefined; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal, () => steered); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, steered ? terminal.count - 1 : prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
+      const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; currentStep = step; duringRequests = 0; steered = undefined; restarting = undefined; armProviderError(step.provider_error); try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(() => protocol, session.id, prior, () => fatal, signal, () => steered, () => restarting); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, steered ? terminal.count - 1 : prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
     for (const plan of task.page_plan.filter(page => page.source === "created" && !pages.has(page.alias))) { const pageId = pageIdFromResults(tools.results, plan); if (pageId) pages.set(plan.alias, pageId); }
     for (const page of after.pages ?? []) { const plan = task.page_plan.find(candidate => pages.get(candidate.alias) === page.id); if (plan) page.alias = plan.alias; }
     const chats = durable.map(history => ({ chat_id: history.chat, page_id: history.page_id, session_id: sessions.get(history.chat)!.id, history: JSON.stringify(history.rows), first_prompt: task.steps.find(step => step.chat === history.chat)?.prompt ?? task.prompt }));
+    for (const row of interjections.filter(item => item.action === "restart_zeta")) { const ids = new Set((histories.get(String(row.chat)) ?? []).map(item => item.id)); const pre = (row.pre_history_ids ?? []) as string[]; row.history_continuity = pre.length > 0 && pre.every(id => ids.has(id)); delete row.pre_history_ids;
+      // report-only: an approval request the dead serve never closed stays in the chat history with no approval_end
+      const history = histories.get(String(row.chat)) ?? []; const ended = new Set(history.filter(item => item.event === "approval_end").map(item => item.request_id)); row.dangling_approvals = history.filter(item => item.event === "approval_request" && !ended.has(item.request_id)).map(item => item.request_id); }
     for (const reconnect of reconnects) { const ids = new Set((histories.get(reconnect.chat) ?? []).map(row => row.id)); reconnect.history_continuity = reconnect.pre_history_ids.length > 0 && reconnect.pre_history_ids.every((id: string) => ids.has(id)); delete reconnect.pre_history_ids; }
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await browser?.close(); await protocol.close(signal);
@@ -519,14 +546,26 @@ export function validateCatalog(names: string[], required?: string) {
   if (required && !names.includes(required)) throw new Error(`model-visible catalog lacks ${required}: ${names.join(", ")}`);
   const forbidden = names.filter(name => name !== "mcp_discover" && !name.startsWith("achilles__")); if (forbidden.length) throw new Error(`model-visible catalog violates tool policy: ${forbidden.join(", ")}`);
 }
+// the scripted model adds each named record once, one call per request, skipping a record whose result it already sees,
+// so a lost tool result would show up as a duplicate write
+const SCRIPTED_TASK_NAMES = ["Alpha", "Beta", "Gamma"];
 function scriptedProvider() {
-  const requests: Record<string, unknown>[] = [];
+  const requests: Record<string, unknown>[] = []; let fault: (ProviderError & { baseline?: number; left: number }) | undefined;
   const server = Bun.serve({ port: 0, async fetch(request) {
     const url = new URL(request.url); if (url.pathname === "/api/show") return Response.json({ model_info: { "qwen2.context_length": 32_768 } }); if (url.pathname !== "/api/chat") return new Response("not found", { status: 404 });
     const body = await request.json() as Record<string, unknown>; requests.push(body); if (Bun.env.EVAL_FORCE_ERROR === "1") return new Response("forced provider error", { status: 500 });
     const turn = requests.length; const prompt = JSON.stringify((body.messages as unknown[]) ?? []);
+    const toolResults = ((body.messages ?? []) as Array<{ role?: string; tool_name?: string; content?: string }>).filter(message => message.role === "tool");
+    if (fault) { fault.baseline ??= toolResults.length; if (toolResults.length > fault.baseline && fault.left > 0) { fault.left--; return Response.json({ error: "overloaded_error: scripted provider fault" }, { status: fault.status }); } }
     let toolCalls: unknown[] = [];
-    if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
+    if (prompt.includes("add_task each")) {
+      const next = SCRIPTED_TASK_NAMES.find(name => !toolResults.some(message => message.tool_name === "achilles__add_task" && String(message.content).includes(name)));
+      const missing = SCRIPTED_TASK_NAMES.filter(name => !toolResults.some(message => message.tool_name === "achilles__add_task" && String(message.content).includes(name)));
+      // "in one batch": every missing record in one parallel tool batch, so a restart can cut the batch in half
+      if (next) toolCalls = (prompt.includes("in one batch") ? missing : [next]).map(title => ({ function: { name: "achilles__add_task", arguments: { title } } }));
+      else return new Response(`${JSON.stringify({ message: { content: `added ${SCRIPTED_TASK_NAMES.join(", ")}` }, done: true, done_reason: "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
+    }
+    else if (prompt.includes("/run-review") && turn === 1 && Bun.env.EVAL_SKIP_CREATE_PAGE !== "1") toolCalls = [{ function: { name: "achilles__create_page", arguments: { route: "/run-review", title: "Run Review", layout: { blocks: [] } } } }];
     else if (prompt.includes("add_note once")) {
       if (turn === 1) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "reconnect note" } } }];
       else if (prompt.includes("after reconnect") && turn === 3) toolCalls = [{ function: { name: "achilles__list_notes", arguments: {} } }];
@@ -536,7 +575,8 @@ function scriptedProvider() {
     else if (turn === 2) toolCalls = [{ function: { name: "achilles__add_note", arguments: { text: "synthetic note" } } }];
     return new Response(`${JSON.stringify({ message: { content: toolCalls.length ? "" : "done", ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, done: true, done_reason: toolCalls.length ? "tool_calls" : "stop", prompt_eval_count: 7, eval_count: 3 })}\n`, { headers: { "content-type": "application/x-ndjson" } });
   } });
-  return { requests, url: `http://127.0.0.1:${server.port}`, close: () => server.stop(true) };
+  const arm = (next?: ProviderError) => { fault = next ? { ...next, left: next.times } : undefined; };
+  return { requests, arm, url: `http://127.0.0.1:${server.port}`, close: () => server.stop(true) };
 }
 function catalogProof(requests: Record<string, unknown>[], task: EvalTask) {
   const catalogs = requests.map(request => ((request.tools ?? []) as { function?: { name?: string } }[]).map(tool => tool.function?.name).filter((name): name is string => Boolean(name)));
@@ -570,7 +610,9 @@ async function runRepeat(task: EvalTask, index: number, options: { scripted: boo
     else {
       const classification = await classifyTaskSupport(stack, task, options.hidden);
       if (classification) { result = classification; failed = classification.status === "harness_error"; snapshot = failed ? await databaseSnapshot(stack).catch(() => ({})) : await databaseSnapshot(stack); }
-      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal)); result = gradeReference(task, snapshot!); const capabilities = (await productCapabilities(stack)); const missingGoal = (task.goal_capabilities ?? []).find(capability => !capabilities.has(capability)); if (missingGoal && result.status === "agent_fail" && !task.requires?.length) result = { ...result, gap: `capability_missing:${missingGoal}` } as ReturnType<typeof gradeTask>; }
+      // zeta has no seam to fault the real claude provider, so a provider_error task runs only against the scripted provider
+      else if (!provider && task.steps.some(step => step.provider_error)) { result = unsupportedResult(task, ["scripted_provider"]); snapshot = await databaseSnapshot(stack); }
+      else { ({ result, snapshot } = await driveTask(stack, task, options.hidden, options.signal, provider?.arm)); result = gradeReference(task, snapshot!); const capabilities = (await productCapabilities(stack)); const missingGoal = (task.goal_capabilities ?? []).find(capability => !capabilities.has(capability)); if (missingGoal && result.status === "agent_fail" && !task.requires?.length) result = { ...result, gap: `capability_missing:${missingGoal}` } as ReturnType<typeof gradeTask>; }
     }
     if (provider?.requests.length) catalog = catalogProof(provider.requests, task); result.diagnostics.observed_catalog = catalog;
   } catch (error) { const original = error instanceof TaskRunFailure ? error.original : error; if (error instanceof TaskRunFailure) snapshot = error.snapshot; else if (stack) snapshot = await databaseSnapshot(stack).catch(() => ({})); stopSuite = stopsSuite(original);
