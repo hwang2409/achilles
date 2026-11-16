@@ -12,6 +12,7 @@ import { DetailRecord, type DetailFilter } from "./DetailRecord";
 import { FormBlock, refreshSelection, selectRow, useRecordWrites, useSelectedRow } from "./page/RecordForm";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import { usePageTools, type PageTool } from "./page/usePageTools";
+import { HistoryDialog } from "./page/HistoryDialog";
 import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
 import { useSettings } from "./settings";
@@ -147,7 +148,11 @@ export function App() {
     return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
   } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
-  const refreshKey = `${completedTurns}:${completedTools}`;
+  // a restore from the history list changes the layout or a tool without a chat turn
+  const [restores, setRestores] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyOpener = useRef<HTMLElement | null>(null);
+  const refreshKey = `${completedTurns}:${completedTools}:${restores}`;
   const previousRefreshKey = useRef(refreshKey);
   const waiting = Number(approvalCount);
   const [followRequest, setFollowRequest] = useState(0);
@@ -250,7 +255,8 @@ export function App() {
   // a failed create keeps the message typed for it in the page's new-chat box: show it, so the user sees it is safe
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
   const content = <>
-    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}
+    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onRestored={() => setRestores((value) => value + 1)} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
@@ -297,7 +303,7 @@ function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
   return <div className="full-state not-found-state"><p role="alert">page not found</p><div><a className="primary" href="/">go home</a><button className="primary" onClick={() => void onNewChat()}>new chat</button></div></div>;
 }
 
-function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled, toggle, onRename }: { page: Page; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void }) {
+function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled, toggle, onRename, onHistory }: { page: Page; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
   const [overflow, setOverflow] = useState(false);
   const overflowButton = useRef<HTMLButtonElement>(null);
   const actions = useRef<HTMLDivElement>(null);
@@ -345,7 +351,7 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
   const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : page.create_mode ? "create mode on" : "create mode off";
-  const controls = (inMenu: boolean) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button></>;
+  const controls = (inMenu: boolean) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button><button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button></>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;

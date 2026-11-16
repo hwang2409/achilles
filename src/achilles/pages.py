@@ -603,6 +603,7 @@ class PageStore:
         );
         CREATE INDEX IF NOT EXISTS chat_updated_at ON chat(updated_at DESC);
         CREATE INDEX IF NOT EXISTS chat_page_updated_at ON chat(page_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS audit_page_digest ON audit(page_id, version_digest);
         """)
         columns = {row[1] for row in db.execute("PRAGMA table_info(page)")}
         if "create_mode" not in columns:
@@ -886,6 +887,46 @@ class PageStore:
     def inspect_page(self, page_id: str) -> dict[str, Any]:
         with self._connect() as db:
             return self._inspect_page(db, page_id)
+
+    def versions(self, page_id: str) -> dict[str, Any]:
+        """The page's layout and tool versions, newest first, for the user's history list."""
+        with self._connect() as db:
+            # shortcut: the newest 100 layouts and 100 per tool; page the list if a page outgrows it
+            layouts = db.execute(
+                "SELECT lv.version, lv.created_at, lv.document, "
+                "lv.version=COALESCE(p.active_layout_version, 1), "
+                "(SELECT a.action FROM audit a WHERE a.page_id=lv.page_id "
+                "AND a.version_digest=lv.digest AND a.created_at=lv.created_at "
+                "AND a.action IN ('create_page','update_layout','restore_layout') LIMIT 1) "
+                "FROM layout_version lv JOIN page p ON p.id=lv.page_id WHERE lv.page_id=? "
+                "ORDER BY lv.version DESC LIMIT 100",
+                (page_id,),
+            ).fetchall()
+            tools = db.execute(
+                "SELECT t.name, v.version, v.created_at, v.version=pt.active_version "
+                "FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
+                "JOIN tool_version v ON v.tool_id=t.id WHERE pt.page_id=? "
+                "AND (v.version=pt.active_version "
+                "OR v.version > (SELECT MAX(version) FROM tool_version WHERE tool_id=t.id) - 100) "
+                "ORDER BY t.name, v.version DESC",
+                (page_id,),
+            ).fetchall()
+        return {
+            "layout": [
+                {
+                    "version": row[0],
+                    "created_at": row[1],
+                    "block_types": [block["type"] for block in json.loads(row[2])["blocks"]],
+                    "active": bool(row[3]),
+                    "action": row[4],
+                }
+                for row in layouts
+            ],
+            "tools": [
+                {"name": row[0], "version": row[1], "created_at": row[2], "active": bool(row[3])}
+                for row in tools
+            ],
+        }
 
     def records(
         self, page_id: str, collection: str, limit: int = 100
@@ -1380,8 +1421,12 @@ class PageStore:
         return version, digest, detail_summary
 
     def create_tool(
-        self, page_id: str, bundle: Any, validation_prefix: str = ""
+        self, page_id: str, bundle: Any, validation_prefix: str = "", target: str | None = None
     ) -> tuple[dict[str, Any], str, str | None]:
+        """Add a tool version to target (route or id; default page_id) as principal page_id.
+
+        target must be page_id itself or a page page_id created (created_by_page_id).
+        """
         bundle = validate_bundle(bundle, validation_prefix, reject_conflicting_output=True)
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
@@ -1393,6 +1438,21 @@ class PageStore:
                 ).fetchone()
                 if principal is None or not principal[0]:
                     raise PermissionError("forbidden: create mode is off")
+                if target is not None:
+                    owner = db.execute(
+                        "SELECT id FROM page WHERE (id=? OR route=?) "
+                        "AND (id=? OR created_by_page_id=?)",
+                        (target, target, page_id, page_id),
+                    ).fetchone()
+                    if owner is None:
+                        raise ValidationError(
+                            "/page",
+                            "this page or a page created from this page",
+                            "forbidden",
+                            "You can add tools only to this page or to a page created from "
+                            "this page. To change another page, open that page's chat.",
+                        )
+                    page_id = owner[0]
                 tool = db.execute(
                     "SELECT id FROM tool WHERE owner_page_id=? AND name=?",
                     (page_id, bundle["name"]),
@@ -1428,7 +1488,10 @@ class PageStore:
                     (page_id, "create_tool", digest, stamp),
                 )
                 note = _missing_update_note(self._page_tools(db, page_id))
-            return {"tool_id": tool_id, "name": bundle["name"], "version": version}, digest, note
+            created = {"tool_id": tool_id, "name": bundle["name"], "version": version}
+            if target is not None:
+                created["page_id"] = page_id
+            return created, digest, note
         except Exception:
             raise
 
@@ -1439,13 +1502,16 @@ class PageStore:
     def rollback_tool(
         self, page_id: str, name: str, version: Any, expected_version: Any
     ) -> dict[str, Any]:
-        """Make an earlier tool version active if the active one is still expected_version."""
+        """Append a copy of an earlier tool version and make it active, if the active one
+        is still expected_version; the replaced version stays listed, so a restore can be undone."""
         validate_schema(
             {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
         )
         with self.transaction() as db:
             row = db.execute(
-                """SELECT pt.tool_id, pt.active_version, v.digest FROM page_tool pt
+                """SELECT pt.tool_id, pt.active_version, v.digest, v.bundle,
+                (SELECT MAX(version) FROM tool_version WHERE tool_id=pt.tool_id)
+                FROM page_tool pt
                 JOIN tool t ON t.id=pt.tool_id
                 JOIN tool_version v ON v.tool_id=pt.tool_id AND v.version=?
                 WHERE pt.page_id=? AND t.name=?""",
@@ -1465,16 +1531,21 @@ class PageStore:
                     "conflict",
                     "Call inspect_page, set expected_version to the tool's version, and retry.",
                 )
+            restored = row[4] + 1
             stamp = now()
             db.execute(
-                "UPDATE page_tool SET active_version=? WHERE page_id=? AND tool_id=?",
-                (version, page_id, row["tool_id"]),
+                "INSERT INTO tool_version VALUES(?,?,?,?,?)",
+                (row["tool_id"], restored, row["digest"], row["bundle"], stamp),
+            )
+            db.execute(
+                "UPDATE page_tool SET active_version=?,assigned_at=? WHERE page_id=? AND tool_id=?",
+                (restored, stamp, page_id, row["tool_id"]),
             )
             db.execute(
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                 (page_id, "restore_tool", row["digest"], stamp),
             )
-        return {"name": name, "version": version}
+        return {"name": name, "version": restored, "restored_from": version}
 
     def tool_bundle(self, page_id: str, name: str) -> dict[str, Any] | None:
         with self._connect() as db:

@@ -311,11 +311,11 @@ def build_mcp(store: PageStore):
                             "Undo a layout or tool change on this page, for example when the "
                             "user says undo or you need to take back your own change. First "
                             "call achilles__inspect_page. For kind layout, pick a version from "
-                            "layout_versions and pass layout_version as expected_version; this "
-                            "creates a new layout version that copies the old one, so history "
-                            "is kept and the restore can itself be undone. For kind tool, pass "
-                            "the tool name, an earlier version, and the tool's current version "
-                            "as expected_version; this makes that version active again. On a "
+                            "layout_versions and pass layout_version as expected_version. For "
+                            "kind tool, pass the tool name, an earlier version, and the tool's "
+                            "current version as expected_version. Either way this creates a new "
+                            "version that copies the old one, so history is kept and the "
+                            "restore can itself be undone. On a "
                             "version conflict, inspect again and retry. To change another "
                             "page, open that page's chat."
                         ),
@@ -454,9 +454,11 @@ def build_mcp(store: PageStore):
                     }
                 else:
                     created, digest, note = await anyio.to_thread.run_sync(
-                        store.create_tool, page["id"], args["bundle"], "/bundle"
+                        store.create_tool, page["id"], args["bundle"], "/bundle", args.get("page")
                     )
                     result = _with_note({**created, "digest": digest}, note)
+                    if created.get("page_id", page["id"]) != page["id"]:
+                        await notify(created["page_id"])
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:
