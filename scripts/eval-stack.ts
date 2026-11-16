@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { connectEvalProtocol } from "./eval-protocol";
 
 export const TOOL_POLICY = "achilles__*,mcp_discover";
+export const DEFAULT_MAX_TURNS = 20;
 const RESERVED_PORTS = new Set([5190, 5191, 8765]);
 const HTTP_TIMEOUT_MS = 10_000;
 export type CleanupProof = { pids: number[]; pgids: number[]; process_groups: Array<{ pgid: number; pids: number[] }>; ports: number[]; pids_dead: boolean; pgids_dead: boolean; ports_closed: boolean; discovery_pid_dead: boolean; discovery_cleaned: boolean };
@@ -182,7 +183,7 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
     config.signal?.throwIfAborted();
     const achillesLog = openSync(join(root, "achilles-home/serve.log"), "a"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
     await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
-    const spawnZeta = () => { const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const child = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? 20), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, "--tools", TOOL_POLICY, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog); return child; };
+    const spawnZeta = () => { const zetaLog = openSync(join(root, "zeta-home/serve.log"), "a"); const child = owner.spawn("uv", ["run", "--project", zeta, "zeta", "--yolo", "--max-turns", String(config.maxTurns ?? DEFAULT_MAX_TURNS), "serve", "--ws", String(zetaPort), "--ws-origin", achillesOrigin, "--provider", selected.provider, "--model", selected.model, "--tools", TOOL_POLICY, "--cwd", join(root, "page-workspaces"), "--no-auto-memory"], { cwd: root, env, stdio: ["ignore", zetaLog, zetaLog] }); closeSync(zetaLog); return child; };
     let zetaProcess = spawnZeta();
     const discovery = await waitForDiscovery(root, zetaProcess, config.signal);
     // the same serve again on the same port and home; the stale discovery file goes first so the wait sees the new process

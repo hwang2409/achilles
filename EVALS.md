@@ -40,7 +40,7 @@ web app, and a chromium for the browser checks on first use.
 - a zeta revision: `make eval ZETA_REV=<sha>` (cloned into the cache and pinned)
 - keep the full private stack after the run: `make eval KEEP_EVAL=1`
 - compare with an earlier run: `make eval BASE=evals/reports/<run>` puts a
-  "changes since" section at the top of `report.md` (pass -> fail, fail -> pass,
+  "changes since" section after the failures in `report.md` (pass -> fail, fail -> pass,
   turn or token changes over 25%, tasks in only one run)
 - a retained stack for a preview or ux test: `make eval-stack` starts the stack
   for `harness-smoke`, keeps it, and prints the local achilles url, model, tool
@@ -80,7 +80,27 @@ focused-only.
 ## read the report
 
 the report is written to `evals/reports/<timestamp>-<pid>/` (override with
-`REPORT_DIR`). the folder holds `report.md` (the table), `report.json` (the same
+`REPORT_DIR`). `report.md` reads top to bottom:
+
+1. one result line, for example
+   `FAIL 11/12 | achilles 945237c | zeta 378abb4 | model claude/claude-opus-5-5 | 1.9 min | 317147 tokens`.
+   the count is passed runs over graded runs; unsupported runs are left out and
+   counted in brackets. minutes add up each run's wall time. tokens are input,
+   output, cache read, and cache write.
+2. the eval tool set (`achilles__*,mcp_discover`, the task's turn cap, no auto
+   memory) and how live `make dev` page chats differ from it.
+3. `## failures`: one block per failed run with each failed check (expected vs
+   actual, and the reason), the agent's last final answer (first 300
+   characters), and the snapshot path.
+4. the `BASE` diff, when you set `BASE`.
+5. the results: the run header, a table per run (status, score, turns, tool
+   calls, approvals, wall time, tokens), a `diagnostics` table (usage detail,
+   host tools gap, first-call validity, tool errors, cap hit), unmapped values,
+   and the per-task table.
+
+the eval command prints the same result line, tool set, and failures at the end.
+
+the folder holds `report.md`, `report.json` (the same
 data plus every check), `cleanup.json` (the teardown proof), and `snapshots/`
 with one `<task>-<n>.json` per run. with `KEEP_EVAL=1` the whole private stack,
 including zeta sessions and serve logs, is kept under `.cache/evals/<run>/`.

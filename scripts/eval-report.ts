@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { DEFAULT_MAX_TURNS } from "./eval-stack";
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
 export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported" | "needs_review"; cap_hit?: boolean; gap?: string };
@@ -68,17 +69,51 @@ const usageText = (usage: unknown) => {
   const value = usage as TranscriptUsage;
   return `input ${value.input_tokens}; output ${value.output_tokens}; reasoning ${value.reasoning_output_tokens}; cache read ${value.cache_read_input_tokens}; cache write ${value.cache_creation_input_tokens}`;
 };
-export function reportMarkdown(report: EvalReport, base?: BaseReport): string {
+const runPassed = (task: EvalReport["tasks"][number]) => task.pass && task.status !== "needs_review";
+const short = (sha?: string) => sha ? sha.slice(0, 7) : "unavailable";
+const clip = (value: unknown, limit = 200) => { const text = typeof value === "string" ? value : JSON.stringify(value) ?? String(value); return text.length > limit ? `${text.slice(0, limit)}...` : text; };
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+// final answers per run, keyed by the run's snapshot path (`task.transcript`); each value maps step id -> answer
+export type FinalAnswers = Record<string, Record<string, string> | undefined>;
+
+// the top of report.md and the terminal summary: one result line, the eval tool set, then every failed run
+export function reportSummary(report: EvalReport, answers: FinalAnswers = {}): string {
+  const graded = report.tasks.filter(task => task.status !== "unsupported"); const passed = graded.filter(runPassed).length;
+  const unsupported = report.tasks.length - graded.length;
+  const wallMs = report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0);
+  const tokens = totalTokens(report.totals?.usage);
+  const lines = [
+    [`${passed === graded.length ? "PASS" : "FAIL"} ${passed}/${graded.length}${unsupported ? ` (${unsupported} unsupported)` : ""}`, `achilles ${short(report.agent.achilles_sha)}`, `zeta ${short(report.agent.zeta_sha)}`, `model ${report.agent.provider}/${report.agent.model}`, `${(wallMs / 60_000).toFixed(1)} min`, tokens === undefined ? "tokens unavailable" : `${tokens} tokens`].join(" | "),
+    "",
+    `eval agent: tools \`${report.agent.tool_policy}\`, max turns per task from its agent_turns (default ${DEFAULT_MAX_TURNS}), no auto memory.`,
+    "live `make dev` page chats differ: they get zeta's default tool set plus all MCP servers, no turn limit, and default approval \"allow\".",
+    "", "## failures", "",
+  ];
+  const failed = report.tasks.filter(task => task.status !== "unsupported" && !runPassed(task));
+  if (!failed.length) lines.push("none");
+  for (const task of failed) {
+    const run = task.transcript?.match(/-(\d+)\.json$/)?.[1];
+    lines.push(`### ${task.task_id}${run ? ` run ${run}` : ""}: ${task.status ?? "agent_fail"}, score ${task.score}${task.cap_hit ? ", turn cap hit" : ""}`, "");
+    for (const check of task.checks.filter(check => !check.pass)) {
+      const why = check.reason ?? (check.evidence as { message?: unknown } | undefined)?.message;
+      lines.push(`- check \`${check.id}\`: expected ${clip(check.expected)}, actual ${clip(check.actual)}${why ? ` (${clip(why)})` : ""}`);
+    }
+    const final = Object.entries((task.transcript && answers[task.transcript]) || {}).at(-1);
+    lines.push(final ? `- final answer (step \`${final[0]}\`): ${JSON.stringify(final[1].length > 300 ? `${final[1].slice(0, 300)}...` : final[1])}` : "- final answer: none captured");
+    lines.push(`- snapshot: ${task.transcript ?? "unavailable"}`, "");
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+export function reportMarkdown(report: EvalReport, base?: BaseReport, answers: FinalAnswers = {}): string {
   const grouped = aggregateTaskResults(report.tasks);
   const lines = [
-    `# achilles eval ${report.run_id}`, "",
-    `agent: \`${report.agent.provider}/${report.agent.model}\``,
-    `tool policy: \`${report.agent.tool_policy}\``,
+    `# results of run ${report.run_id}`, "",
     `observed catalog: ${report.agent.observed_catalog.length ? report.agent.observed_catalog.map((name) => `\`${name}\``).join(", ") : "none"}`,
     `achilles: ${report.agent.achilles_sha ?? "unavailable"}`,
     `zeta: ${report.agent.zeta_sha ?? "unavailable"}`,
     `repeats: ${report.repeats}`,
-    `totals: ${report.totals?.turns ?? report.tasks.reduce((total, task) => total + task.turns, 0)} turns, ${report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0)} ms wall time`,
+    `totals: ${report.totals?.turns ?? report.tasks.reduce((total, task) => total + task.turns, 0)} turns, ${seconds(report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0))} wall time`,
     `suite tokens: ${usageText(report.totals?.usage)}`,
     `harness errors: ${report.tasks.filter(task => task.status === "harness_error").length}`,
     `unsupported: ${report.tasks.filter(task => task.status === "unsupported").length}`,
@@ -86,11 +121,15 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport): string {
     `cap hits: ${report.tasks.filter(task => task.cap_hit).length}`,
     `conflict seen (report only, not graded): ${report.tasks.filter(task => task.diagnostics?.conflict_seen !== undefined).map(task => `${task.task_id} ${task.diagnostics.conflict_seen ? "yes" : "no"}`).join(", ") || "n/a"}`,
     "account home: provider credentials are read from the configured account home; isolation covers Achilles and Zeta run state, not the external provider account.",
-    "", "| task | status | score | turns | tool calls | approvals | wall time | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors | cap hit |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | --- |",
+    "", "| task | status | score | turns | tool calls | approvals | wall time | tokens |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const task of report.tasks) {
+    lines.push(`| ${task.task_id} | ${task.status ?? (task.pass ? "pass" : "agent_fail")}${task.gap ? ` (${task.gap.startsWith("capability_missing:") ? "goal not reachable on this revision" : task.gap})` : ""} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${seconds(task.wall_ms)} | ${totalTokens(task.usage) ?? "unavailable"} |`);
+  }
+  lines.push("", "## diagnostics", "", "| task | usage | host tools gap | create_page first call | create_tool first call | structured errors | unstructured errors | cap hit |", "| --- | --- | --- | --- | --- | ---: | ---: | --- |");
+  for (const task of report.tasks) {
     const first = task.diagnostics?.first_call_validity ?? {};
-    lines.push(`| ${task.task_id} | ${task.status ?? (task.pass ? "pass" : "agent_fail")}${task.gap ? ` (${task.gap.startsWith("capability_missing:") ? "goal not reachable on this revision" : task.gap})` : ""} | ${task.score} | ${task.turns} | ${task.tool_calls} | ${task.approvals} | ${task.wall_ms} ms | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} | ${task.cap_hit ? "yes" : "no"} |`);
+    lines.push(`| ${task.task_id} | ${usageText(task.usage)} | ${task.host_tools_gap ? "yes" : "no"} | ${first.create_page === undefined ? "n/a" : first.create_page ? "yes" : "no"} | ${first.create_tool === undefined ? "n/a" : first.create_tool ? "yes" : "no"} | ${task.diagnostics?.structured_tool_errors.length ?? 0} | ${task.diagnostics?.unstructured_tool_errors ?? 0} | ${task.cap_hit ? "yes" : "no"} |`);
   }
   lines.push("", "## unmapped values", "");
   if (!report.unmapped_values.length) lines.push("none");
@@ -105,7 +144,7 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport): string {
     const graded = value ? `${value.passes}/${value.total} | ${(value.pass_rate * 100).toFixed(0)}% | ${value.mean_score.toFixed(0)} | ${value.mean_turns.toFixed(1)}` : "0/0 | n/a | n/a | n/a";
     lines.push(`| ${id} | ${runs.length} | ${graded} | ${runs.filter(task => task.cap_hit).length}${value?.cap_action ? ` (${value.cap_action})` : ""} | ${runs.filter(task => task.status === "harness_error").length} |`);
   }
-  return (base ? diffMarkdown(base, report) + "\n" : "") + lines.join("\n") + "\n";
+  return reportSummary(report, answers) + "\n" + (base ? diffMarkdown(base, report) + "\n" : "") + lines.join("\n") + "\n";
 }
 
 // BASE: a saved report folder from an earlier run; its report.json is outside input, so check the fields the diff reads.
