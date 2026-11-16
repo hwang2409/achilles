@@ -54,7 +54,10 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
 .chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
-.transcript [data-part="timeline-scroll"]:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
+.transcript [data-part="timeline-scroll"]:focus-visible { outline: none; }
+/* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
+.transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
+.transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .chat-row.current strong { font-weight: 700; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
