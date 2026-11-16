@@ -183,7 +183,10 @@
         "resumed_session_id": "5d7d3eacf0dc4522984a1c2c9902c63c",
         "after_restart": [],
         "history_continuity": true,
-        "dangling_approvals": []
+        "dangling_approvals": [
+          "ollama-3202ea5d-d2bd-40fb-9f99-e6084833dd5a",
+          "ollama-03a34ce2-4325-4cd3-adf0-d75f5cf671dc"
+        ]
       }
     ],
     "turns": 3,
