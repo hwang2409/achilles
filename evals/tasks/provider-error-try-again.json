@@ -78,6 +78,17 @@
       "type": "error_shown",
       "page": "tasks",
       "value": 529
+    },
+    {
+      "id": "no-false-count",
+      "type": "answer_excludes",
+      "page": "tasks",
+      "step": "retry",
+      "value": [
+        "4",
+        "5",
+        "6"
+      ]
     }
   ]
 }

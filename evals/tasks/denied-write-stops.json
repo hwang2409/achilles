@@ -44,6 +44,15 @@
       "page": "notes",
       "tool": "achilles__add_note",
       "max": 2
+    },
+    {
+      "id": "no-false-claim",
+      "type": "answer_excludes",
+      "page": "notes",
+      "step": "write",
+      "value": [
+        "1"
+      ]
     }
   ]
 }

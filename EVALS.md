@@ -222,7 +222,8 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     the page's assigned tools), `tool_evolution` (a tool gained a field and old
     records stay readable), `schema_roundtrip`.
   - records and results: `record` (some record contains `value`),
-    `records_exact` (exactly these records), `updated_record` (a `transition`
+    `records_exact` (exactly these records; a row field set to
+    `{ "absent": true }` must be missing from the matched record), `updated_record` (a `transition`
     from `before` to `after` values), `successful_result` (a successful call
     of `tool`, optionally containing `value`), `no_duplicate_writes` (no two
     successful calls with the same arguments; with `collection` and `fields`,
@@ -242,7 +243,7 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     `delivered_once` (a faulted send reached the model at most once),
     `restart_recovery`, `overwrite_disclosed` (keeping the user's value passes;
     the agent's value passes only if the answer names the user's value).
-  - text and browser: `answer_mentions`, `prompt` (a chat's first prompt is
+  - text and browser: `answer_mentions`, `answer_excludes`, `prompt` (a chat's first prompt is
     `text`), `browser_text`, `form_submit`.
 - an `approval` check counts approval requests for a `tool`. give `count` for
   an exact number, or `max` to pass when there is at least one request and at
@@ -256,6 +257,15 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
   (in a collection, or where one field equals one value) as digits or a word.
   it is a weak signal (cannot see negation, a list marker, or a record id), so
   every value must be a seeded fact, never free-form expected prose.
+- `answer_excludes` is the reverse: it fails when the step's answer mentions any
+  of its `value` list, by the same whole-token match (a step with no answer
+  claims nothing and passes). each value must be false in the final state the
+  task's `records_exact` check on that page describes: a count that is not the
+  number of rows and not the number of rows where one field equals one value,
+  or a name the task gives (a prompt quote, a seeded value, a user write) that
+  no final row holds. so it catches a false claim ("I added 7 contacts" when 5
+  exist), never vague text. pick values a correct answer would not say: the
+  check cannot see negation either.
 - `form_submit` uses the page as a user would. after the agent steps, the
   harness opens the page in a browser and, for each insert form block in the
   active layout, fills every required input from the check's `value` map by the

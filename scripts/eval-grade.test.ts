@@ -12,6 +12,10 @@ import bulkEditTaskJson from "../evals/tasks/bulk-edit-deny-midway.json";
 import bulkEditReferences from "../evals/references/bulk-edit-deny-midway.json";
 import createModeOffTaskJson from "../evals/tasks/create-mode-off-request.json";
 import createModeOffReferences from "../evals/references/create-mode-off-request.json";
+import restartTaskJson from "../evals/tasks/restart-zeta-multi-write.json";
+import restartReferences from "../evals/references/restart-zeta-multi-write.json";
+import providerErrorTaskJson from "../evals/tasks/provider-error-try-again.json";
+import providerErrorReferences from "../evals/references/provider-error-try-again.json";
 
 const task = { id: "x-task", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 2, steps: [{ id: "do-work", kind: "prompt", page: "p", chat: "chat-a", prompt: "work" }], checks: [{ id: "page", type: "page_exists", page: "p" }] };
 
@@ -518,6 +522,44 @@ test("answer_mentions only expects facts the seeded records hold, on a real prom
   expect(withCheck({ value: ["Neuromancer"] })).toThrow("not a seeded record value or count");
   expect(withCheck({ value: ["3"], step: "missing" })).toThrow("names step missing");
   expect(withCheck({ value: [] })).toThrow("needs a step and non-empty mention values");
+});
+
+test("answer_excludes fails only an answer that claims a false count, and a step with no answer claims nothing", () => {
+  const cases: Array<[unknown, { good: unknown }, string, string]> = [
+    [restartTaskJson, restartReferences, "resume", "Ada Lovelace and Grace Hopper were already saved; I added the other 3, so you now have 7 contacts."],
+    [providerErrorTaskJson, providerErrorReferences, "retry", "added 6 tasks: Alpha, Beta, Gamma"],
+    [deniedTaskJson, deniedReferences, "write", "Done, I added 1 note saying hi."],
+  ];
+  for (const [json, references, step, claim] of cases) {
+    const task = validateTask(json); const good = references.good as EvalSnapshot;
+    expect(gradeReference(task, good).status, `${task.id} good`).toBe("pass");
+    const excludes = task.checks.find(check => check.type === "answer_excludes")!.id;
+    const bad = gradeReference(task, { ...good, answers: { ...good.answers, [step]: claim } });
+    expect([bad.status, bad.checks.filter(check => !check.pass).map(check => check.id)], `${task.id} false claim`).toEqual(["agent_fail", [excludes]]);
+    expect(gradeReference(task, { ...good, answers: {} }).checks.find(check => check.id === excludes)!.pass, `${task.id} no answer`).toBe(true);
+  }
+});
+
+test("answer_excludes values must be counts or task names that are false in the final records", () => {
+  const withValue = (value: string[], checks = restartTaskJson.checks) => () => validateTask({ ...restartTaskJson, checks: [...checks, { id: "no-claim", type: "answer_excludes", page: "contacts", step: "resume", value }] });
+  expect(withValue(["6", "seven", "10"])).not.toThrow();
+  expect(withValue(["5"])).toThrow("which is true in the final records of check records");
+  expect(withValue(["1"])).toThrow("which is true in the final records of check records");
+  expect(withValue(["Ada Lovelace"])).toThrow("which is true in the final records of check records");
+  expect(withValue(["done"])).toThrow("neither a count nor a name the task gives");
+  expect(withValue(["6"], restartTaskJson.checks.filter(check => check.type !== "records_exact"))).toThrow("needs a records_exact check on page contacts");
+  // a prompt name absent from the final records is a false fact
+  expect(() => validateTask({ ...deniedTaskJson, checks: [...deniedTaskJson.checks, { id: "no-hi", type: "answer_excludes", page: "notes", step: "write", value: ["hi"] }] })).not.toThrow();
+  expect(() => validateTask({ ...deniedTaskJson, checks: [...deniedTaskJson.checks, { id: "no-zero", type: "answer_excludes", page: "notes", step: "write", value: ["0"] }] })).toThrow("which is true");
+});
+
+test("a records_exact field set to absent must be missing from the matched record", () => {
+  const pages = [{ id: "p1", alias: "p" }]; const page = (data: object) => ({ page_id: "p1", data });
+  const check = { id: "renamed", type: "records_exact" as const, page: "p", value: [{ title: "Dune", status: "finished", state: { absent: true } }, { title: "Emma" }] };
+  expect(gradeCheck(check, { pages, records: [page({ title: "Emma", state: "todo" }), page({ title: "Dune", status: "finished" })] }).pass).toBe(true);
+  expect(gradeCheck(check, { pages, records: [page({ title: "Emma" }), page({ title: "Dune", status: "finished", state: "done" })] }).pass).toBe(false);
+  // the marker is not an expected literal, so the expectation lint never asks for "absent" in a prompt
+  expect(expectationTokens(check)).not.toContain("absent");
 });
 
 test("a denied step accepts only ask-mode prompt steps, and approval max bounds the retries", () => {

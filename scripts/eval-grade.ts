@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step" | "restart_recovery" | "overwrite_disclosed" | "error_shown" | "new_chat_kept" | "delivered_once" | "answer_excludes";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -52,9 +52,11 @@ export type CheckResult = { id: string; pass: boolean; expected: unknown; actual
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt"]);
 const MODEL_STEPS = new Set(["prompt", "annotate", "browser_prompt"]);
 const RELOAD_EVENTS = new Set(["tool_start", "assistant_delta", "approval_request"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step", "restart_recovery", "overwrite_disclosed", "error_shown", "new_chat_kept", "delivered_once", "answer_excludes"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser", "reloads"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
+// `{ "field": { "absent": true } }` in a records_exact row: the matched record must not have that field
+const isAbsent = (value: unknown) => Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1 && (value as Record<string, unknown>).absent === true);
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
 
 function validateSetup(value: unknown): TaskSetup | undefined {
@@ -191,7 +193,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
   }
   if (["browser_text", "prompt"].includes(check.type) && typeof check.text !== "string") throw new Error(`checks[${i}] needs text`);
   if (check.synonyms !== undefined && (!["browser_text", "schema_roundtrip"].includes(check.type) || !Array.isArray(check.synonyms) || !check.synonyms.length || !check.synonyms.every(value => typeof value === "string"))) throw new Error(`checks[${i}] has invalid synonyms`);
-  if (check.type === "answer_mentions" && (typeof check.step !== "string" || !Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string" && value.trim() === value && value.length > 0))) throw new Error(`checks[${i}] needs a step and non-empty mention values`);
+  if ((check.type === "answer_mentions" || check.type === "answer_excludes") && (typeof check.step !== "string" || !Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(value => typeof value === "string" && value.trim() === value && value.length > 0))) throw new Error(`checks[${i}] needs a step and non-empty mention values`);
   // form_submit: what the harness types into each required input, by the input's schema type
   if (check.type === "form_submit") {
     const value = check.value as Record<string, unknown>;
@@ -220,7 +222,7 @@ function validateCheckShape(check: TaskCheck, i: number) {
     own(value, ["field", "agent_value"], `checks[${i}].value`);
   }
   if (check.type === "error_shown" && (!Number.isInteger(check.value) || (check.value as number) < 400 || (check.value as number) > 599)) throw new Error(`checks[${i}] needs the HTTP status the chat must show`);
-  if (check.step !== undefined && !["answer_mentions", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept", "delivered_once"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
+  if (check.step !== undefined && !["answer_mentions", "answer_excludes", "reload", "denied_step", "restart_recovery", "overwrite_disclosed", "new_chat_kept", "delivered_once"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
   if ((check.type === "reload" || check.type === "new_chat_kept" || check.type === "delivered_once") && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
   if (check.type === "no_duplicate_writes" && (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || (check.collection === undefined) !== (check.fields === undefined))) throw new Error(`checks[${i}] needs an achilles tool, and a collection with fields or neither`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
@@ -248,6 +250,7 @@ const LAYOUT_STRUCTURAL_TOKENS = new Set([
 // form_submit values are input the harness types, not expectations
 const SCHEMA_RELATIVE_CHECKS = new Set<TaskCheck["type"]>(["overwrite_disclosed", "approval_outcomes", "form_submit", "operations", "updated_record", "schema_roundtrip", "list_shows", "detail_selects", "metric_count", "tool_evolution"]);
 function nestedTokens(value: unknown): string[] {
+  if (isAbsent(value)) return [];
   if (Array.isArray(value)) return value.flatMap(nestedTokens);
   if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [key, ...nestedTokens(nested)]);
   return typeof value === "string" ? [value] : [];
@@ -313,7 +316,26 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
     for (const token of nestedTokens(value.set)) if (!promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
     if (!declared.has(check.tool!.replace(/^achilles__/, ""))) throw new Error(`check ${check.id} names undeclared tool ${check.tool}`);
   }
-  for (const check of checks.filter(check => check.type !== "answer_mentions")) for (const token of expectationTokens(check)) {
+  for (const check of checks.filter(check => check.type === "answer_excludes")) {
+    const finals = checks.filter(item => item.type === "records_exact" && item.page === check.page);
+    if (!finals.length) throw new Error(`check ${check.id} needs a records_exact check on page ${check.page}: its values must be false in that final state`);
+    for (const value of check.value as string[]) {
+      const number = /^\d+$/.test(value) ? Number(value) : NUMBER_WORDS.indexOf(value.toLowerCase());
+      // a name must come from the task (a prompt quote, a seeded value, or a user write), so vague text cannot satisfy the check
+      if (number < 0 && !mentions(promptText, value) && !seededFact(value, setup, written)) throw new Error(`check ${check.id} excludes ${JSON.stringify(value)}, which is neither a count nor a name the task gives`);
+      for (const final of finals) {
+        const rows = final.value as unknown[];
+        // [field, value] pairs of each final row; a value row (a string array) has no field names
+        const fields = rows.map(row => (Array.isArray(row) ? row.map(item => ["", item]) : Object.entries(row as Record<string, unknown>)).filter(([, item]) => !isAbsent(item) && (item === null || typeof item !== "object")));
+        // the real counts: all rows, and the rows where one field equals one value
+        const tally = new Map<string, number>();
+        for (const [field, item] of fields.flat()) { const key = `${field}\0${JSON.stringify(item)}`; tally.set(key, (tally.get(key) ?? 0) + 1); }
+        const holds = number >= 0 ? number === rows.length || [...tally.values()].includes(number) : fields.flat().some(([, item]) => String(item).toLowerCase() === value.toLowerCase());
+        if (holds) throw new Error(`check ${check.id} excludes ${JSON.stringify(value)}, which is true in the final records of check ${final.id}`);
+      }
+    }
+  }
+  for (const check of checks.filter(check => check.type !== "answer_mentions" && check.type !== "answer_excludes")) for (const token of expectationTokens(check)) {
     // Count names select a closed snapshot collection; layout checks use a fixed document envelope.
     const structural = ["layout_contains", "layout_update"].includes(check.type) && LAYOUT_STRUCTURAL_TOKENS.has(token);
     if (check.type !== "count" && !structural && !promptText.includes(token) && !declared.has(token)) throw new Error(`check ${check.id} expects ${JSON.stringify(token)} without a prompt quote or declared schema`);
@@ -528,6 +550,12 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (typeof answer !== "string") return { reason: `no final answer captured for step ${check.step}` } satisfies CheckFailure;
     return (check.value as string[]).some(value => mentions(answer, value)) || { reason: `answer mentions none of ${JSON.stringify(check.value)}: ${JSON.stringify(answer.slice(0, 500))}` } satisfies CheckFailure;
   },
+  // none of the values (each false in the final records, by the lint) appears as a whole token; a step with no answer claims nothing
+  answer_excludes: ({ check, snapshot }) => {
+    const answer = snapshot.answers?.[check.step!];
+    const claimed = typeof answer === "string" ? (check.value as string[]).filter(value => mentions(answer, value)) : [];
+    return !claimed.length || { reason: `answer claims ${JSON.stringify(claimed)}, which the final records do not hold: ${JSON.stringify(String(answer).slice(0, 500))}` } satisfies CheckFailure;
+  },
   // the tool's approval requests target exactly the expected records; an approved record ends with `set`,
   // a denied record is never asked again and keeps its seed data, and every other record keeps its seed data
   approval_outcomes: ({ check, snapshot, page, owned }) => {
@@ -671,7 +699,16 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
   record: ({ check, owned }) => owned("records").some(row => structurallyContains(row.data ?? row, check.value)),
   records_exact: ({ check, owned }) => {
     const actual = owned("records").map(row => row.data ?? row); const expected = check.value as unknown[];
-    return actual.length === expected.length && (valueRows(expected) ? matchValueRows(actual, expected) : structurallyContains(actual, expected));
+    if (actual.length !== expected.length) return false;
+    if (valueRows(expected)) return matchValueRows(actual, expected);
+    // each expected row matches a distinct record; a field set to { absent: true } must be missing from that record
+    const matches = (row: unknown, want: unknown) => {
+      if (!want || typeof want !== "object" || Array.isArray(want)) return structurallyContains(row, want);
+      const entries = Object.entries(want);
+      return structurallyContains(row, Object.fromEntries(entries.filter(([, value]) => !isAbsent(value)))) && entries.every(([field, value]) => !isAbsent(value) || !(row && typeof row === "object" && field in row));
+    };
+    const assign = (index: number, used: Set<number>): boolean => index === expected.length || actual.some((row, candidate) => !used.has(candidate) && matches(row, expected[index]) && assign(index + 1, new Set([...used, candidate])));
+    return assign(0, new Set());
   },
   successful_result: ({ check, snapshot, page }) => rows(snapshot, "results").some(row => {
     const actual = row.data ?? row.result; const expected = check.value;
