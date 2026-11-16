@@ -518,6 +518,25 @@ def test_update_catalog_tells_callers_to_pass_the_returned_revision(creation_cli
     )
 
 
+def test_create_tool_page_inside_bundle_names_the_fix(creation_client):
+    # a real run put `page` inside `bundle` and got a bare invalid_input at /bundle
+    root, _, client, headers = creation_client
+    before = state(root)
+    misplaced = {**bundle(name="misplaced_page"), "page": "/reading"}
+    rejected = mcp(
+        client,
+        headers,
+        2,
+        "tools/call",
+        {"name": "create_tool", "arguments": {"bundle": misplaced}},
+    )
+    assert rejected["isError"]
+    error = json.loads(rejected["content"][0]["text"])
+    assert error["code"] == "invalid_input" and error["path"] == "/bundle", error
+    assert error["hint"] == "`page` goes at the top level, not inside `bundle`", error
+    assert state(root) == before
+
+
 def test_create_tool_rejects_wrong_output_and_derives_usable_result(creation_client):
     _, _, client, headers = creation_client
     wrong = bundle(name="wrong_output")
