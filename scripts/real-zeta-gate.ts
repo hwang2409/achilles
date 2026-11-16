@@ -1,10 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { controlSnapshot, createFrameRing, createGateWait, diagnostic } from "./gate-diagnostics";
+import { controlSnapshot, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -33,6 +33,22 @@ if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
 const secrets: string[] = [];
+// failure-only CI artifacts: one stamped log per process instance and the full websocket frame log.
+const artifactDir = process.env.GATE_ARTIFACT_DIR ?? join(root, ".cache/gate-artifacts");
+const artifactSecrets: string[] = [];
+const artifactLogs: { name: string; lines: [string, string][]; partial: string }[] = [];
+const frameLog: [string, number, string, string][] = [];
+let passed = false;
+const writeArtifacts = async () => {
+  await rm(artifactDir, { recursive: true, force: true });
+  await mkdir(artifactDir, { recursive: true });
+  const all = [...secrets, ...artifactSecrets];
+  const safe = ([time, line]: [string, string]) => `${time} ${redactArtifact(line, all)}`;
+  for (const log of artifactLogs)
+    await writeFile(join(artifactDir, `${log.name}.log`), [...log.lines, ...(log.partial ? [["", log.partial] as [string, string]] : [])].map(safe).join("\n") + "\n");
+  await writeFile(join(artifactDir, "frames.log"), frameLog.map(([time, socket, direction, payload]) => `${time} socket=${socket} ${direction} ${redactArtifact(payload, all)}`).join("\n") + "\n");
+  console.error(`gate artifacts written to ${artifactDir}`);
+};
 const redact = (text: string) => diagnostic(text, secrets);
 const safeControl = (text: string) => controlSnapshot(text, secrets);
 const frameRing = createFrameRing();
@@ -53,6 +69,17 @@ const start = (
   });
   children.push(child);
   logs.set(child, "");
+  const kind = args.includes("serve") ? (args.includes("achilles") ? "achilles" : "zeta-serve") : args.some((arg) => arg.endsWith("real-zeta-server.py")) ? "real-zeta-server" : "helper";
+  const log = { name: `${kind}-${artifactLogs.filter((entry) => entry.name.startsWith(`${kind}-`)).length + 1}`, lines: [] as [string, string][], partial: "" };
+  artifactLogs.push(log);
+  const stamp = (data: Buffer) => {
+    const lines = (log.partial + data).split("\n");
+    log.partial = lines.pop()!;
+    const time = new Date().toISOString();
+    for (const line of lines) log.lines.push([time, line]);
+  };
+  child.stdout?.on("data", stamp);
+  child.stderr?.on("data", stamp);
   child.stdout?.on("data", (data) => logs.set(child, logs.get(child)! + data));
   child.stderr?.on("data", (data) => logs.set(child, logs.get(child)! + data));
   return child;
@@ -103,6 +130,7 @@ try {
   );
   await waitFor(async () => await Bun.file(sharedDiscovery).exists(), "shared zeta discovery");
   const shared = JSON.parse(await Bun.file(sharedDiscovery).text());
+  for (const [key, value] of Object.entries(shared)) if (/token/i.test(key) && typeof value === "string") artifactSecrets.push(value);
   let zetaProcess = start(
     "uv",
     [
@@ -159,8 +187,8 @@ try {
   let nextSocket = 0;
   page.on("websocket", (socket) => {
     const socketId = nextSocket++;
-    socket.on("framesent", (event) => { const payload = String(event.payload); frames.push(payload); frameRing.record(socketId, "sent", payload); });
-    socket.on("framereceived", (event) => { const payload = String(event.payload); frames.push(payload); frameRing.record(socketId, "received", payload); });
+    socket.on("framesent", (event) => { const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "sent", payload]); frameRing.record(socketId, "sent", payload); });
+    socket.on("framereceived", (event) => { const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "received", payload]); frameRing.record(socketId, "received", payload); });
   });
   page.on("pageerror", (e) => errors.push(`${e.message}${requestFailures.length ? `; latest request failure: ${requestFailures.at(-1)}` : ""}${consoleErrors.length ? `; latest console error: ${consoleErrors.at(-1)}` : ""}`));
   page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${requestPath(request.url())}: ${request.failure()?.errorText ?? "unknown failure"}`));
@@ -1711,26 +1739,31 @@ try {
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
   if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
+  passed = true;
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 
 } finally {
-  await browser?.close().catch(() => {});
-  for (const child of children) child.kill("SIGTERM");
-  await Promise.all(
-    children.map(
-      (child) =>
-        new Promise<void>((resolve, reject) => {
-          if (child.exitCode !== null || child.signalCode !== null) return resolve();
-          const timer = setTimeout(
-            () => reject(new Error("child did not exit after SIGTERM")),
-            5000,
-          );
-          child.once("exit", () => {
-            clearTimeout(timer);
-            resolve();
-          });
-        }),
-    ),
-  );
-  await rm(temp, { recursive: true, force: true });
+  try {
+    await browser?.close().catch(() => {});
+    for (const child of children) child.kill("SIGTERM");
+    await Promise.all(
+      children.map(
+        (child) =>
+          new Promise<void>((resolve, reject) => {
+            if (child.exitCode !== null || child.signalCode !== null) return resolve();
+            const timer = setTimeout(
+              () => reject(new Error("child did not exit after SIGTERM")),
+              5000,
+            );
+            child.once("exit", () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          }),
+      ),
+    );
+    await rm(temp, { recursive: true, force: true });
+  } finally {
+    if (!passed) await writeArtifacts().catch((error) => console.error(`gate artifacts not written: ${error}`));
+  }
 }
