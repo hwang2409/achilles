@@ -13,7 +13,7 @@
 .chat-search kbd { font-size: 14px; }
 .chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; display: flex; align-items: center; margin: 0; padding: 0 16px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 14px; font-weight: 400; text-transform: lowercase; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.chat-group > .chat-row.current { transform: translateY(27px); }
+.chat-row.current { position: relative; top: 27px; }
 .chat-row.current strong { font-weight: 700; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--fulcrum-border); }
