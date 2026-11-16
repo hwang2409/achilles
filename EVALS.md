@@ -29,6 +29,14 @@ tested without spending the account.
 run everything from the repo root with `make`. the target installs fulcrum, the
 web app, and a chromium for the browser checks on first use.
 
+the one-command flow:
+
+1. `make eval` runs the core suite and compares it with your last core run.
+2. read the first line it prints (`PASS 12/12 | ...` or `FAIL 11/12 | ...`),
+   then the failures under it. `report.md` has the "changes since" diff.
+3. `make eval-history` prints one line per earlier run, newest first: date,
+   achilles sha, zeta sha, suite, `N`, pass x/y, turns, tokens, minutes.
+
 - one task: `make eval TASK=harness-smoke`
 - several tasks: `make eval TASK=harness-smoke,record-crud`
 - the whole suite: `make eval` (no `TASK`) — runs only the core 12 (see
@@ -39,9 +47,12 @@ web app, and a chromium for the browser checks on first use.
 - an older achilles revision: `make eval ACHILLES_DIR=/path/to/old/checkout`
 - a zeta revision: `make eval ZETA_REV=<sha>` (cloned into the cache and pinned)
 - keep the full private stack after the run: `make eval KEEP_EVAL=1`
-- compare with an earlier run: `make eval BASE=evals/reports/<run>` puts a
-  "changes since" section after the failures in `report.md` (pass -> fail, fail -> pass,
-  turn or token changes over 25%, tasks in only one run)
+- compare with an earlier run: every run puts a "changes since" section after
+  the failures in `report.md` (pass -> fail, fail -> pass, turn or token changes
+  over 25%, tasks in only one run). by default (`BASE=last`) the base is the
+  newest earlier run of the same suite in the history dir; a run of the same
+  `TASK` list counts as the same suite. with no such run there is no diff.
+  `BASE=/path/to/run` compares with one saved run folder instead.
 - a retained stack for a preview or ux test: `make eval-stack` starts the stack
   for `harness-smoke`, keeps it, and prints the local achilles url, model, tool
   policy (`achilles__*,mcp_discover`), and the retained state path. it never
@@ -79,8 +90,10 @@ focused-only.
 
 ## read the report
 
-the report is written to `evals/reports/<timestamp>-<pid>/` (override with
-`REPORT_DIR`). `report.md` reads top to bottom:
+the report is written to the history dir,
+`${XDG_CACHE_HOME:-~/.cache}/achilles/evals/<timestamp>-<pid>/` (override with
+`REPORT_DIR`). it stays on this machine, outside the checkout: this repo is
+public, so never commit eval results. `report.md` reads top to bottom:
 
 1. one result line, for example
    `FAIL 11/12 | achilles 945237c | zeta 378abb4 | model claude/claude-opus-5-5 | 1.9 min | 317147 tokens`.
@@ -92,7 +105,7 @@ the report is written to `evals/reports/<timestamp>-<pid>/` (override with
 3. `## failures`: one block per failed run with each failed check (expected vs
    actual, and the reason), the agent's last final answer (first 300
    characters), and the snapshot path.
-4. the `BASE` diff, when you set `BASE`.
+4. the `BASE` diff, when there is a base run.
 5. the results: the run header, a table per run (status, score, turns, tool
    calls, approvals, wall time, tokens), a `diagnostics` table (usage detail,
    host tools gap, first-call validity, tool errors, cap hit), unmapped values,

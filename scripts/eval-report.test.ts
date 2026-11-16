@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { aggregateTaskResults, diffMarkdown, loadBaseReport, makeReport, parseBaseReport, reportJson, reportMarkdown, reportSummary } from "./eval-report";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { aggregateTaskResults, diffMarkdown, historyLine, lastRun, loadBaseReport, makeReport, parseBaseReport, reportJson, reportMarkdown, reportSummary } from "./eval-report";
 
 test("report aggregates pass rate per task and states tools", () => {
   const rows = [{ task_id: "a", pass: true, score: 100, turns: 2, tool_calls: 1, wall_ms: 10 }, { task_id: "a", pass: false, score: 50, turns: 3, tool_calls: 2, wall_ms: 20 }];
@@ -10,7 +13,7 @@ test("report aggregates pass rate per task and states tools", () => {
   const markdown = reportMarkdown(report, undefined, { "snapshots/a-2.json": { ask: "first", answer: "x".repeat(400) } });
   const top = markdown.split("\n");
   expect(top[0]).toBe("FAIL 1/2 | achilles aaaaaaa | zeta bbbbbbb | model claude/claude-opus-5-5 | 1.5 min | tokens unavailable");
-  expect(top[2]).toBe("eval agent: tools `achilles__*,mcp_discover`, max turns per task from its agent_turns (default 20), no auto memory.");
+  expect(top[2]).toBe("eval agent: tools `achilles__*,mcp_discover`, max turns per task from its agent_turns (at most 20), no auto memory.");
   expect(top[3]).toStartWith("live `make dev` page chats differ:");
   expect(markdown).toContain("### a run 2: agent_fail, score 50\n\n- check `count`: expected 3, actual 2 (wrong_value)\n- final answer (step `answer`): \"" + "x".repeat(300) + "...\"\n- snapshot: snapshots/a-2.json");
   expect(markdown).not.toContain("### a run 1");
@@ -118,4 +121,18 @@ test("report starts with the summary, then the base diff, then the results", () 
   expect(summary).toContain("## failures\n\nnone");
   expect(plain.startsWith(summary + "\n# results of run run")).toBe(true);
   expect(reportMarkdown(report, base([row("a", false)]))).toBe(summary + "\n" + diffMarkdown(base([row("a", false)]), report) + "\n" + plain.slice(summary.length + 1));
+});
+
+test("BASE=last picks the newest earlier run of the same suite", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "achilles-history-"));
+  try {
+    const run = async (name: string, runId: string, suite: string) => { await mkdir(join(dir, name)); await writeFile(join(dir, name, "report.json"), JSON.stringify({ run_id: runId, suite, repeats: 1, agent: { achilles_sha: "aaaaaaa111" }, totals: { turns: 4, wall_ms: 60_000 }, tasks: [{ task_id: "a", pass: true, turns: 4 }] })); };
+    await run("old-core", "1000-1", "core"); await run("new-core", "3000-1", "core"); await run("newest-hard", "4000-1", "hard");
+    await mkdir(join(dir, "broken")); await writeFile(join(dir, "broken", "report.json"), "{");
+    const last = await lastRun("core", dir);
+    expect(last?.name).toBe("new-core");
+    expect(historyLine(last!)).toBe("1970-01-01 00:00Z | achilles aaaaaaa | zeta unavailable | core | N=1 | pass 1/1 | 4 turns | tokens unavailable | 1.0 min");
+    expect(await lastRun("record-crud", dir)).toBeUndefined();
+    expect(await lastRun("core", join(dir, "missing"))).toBeUndefined();
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

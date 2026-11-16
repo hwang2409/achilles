@@ -1,12 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { DEFAULT_MAX_TURNS } from "./eval-stack";
 import { PINNED_OUTPUT_UNAVAILABLE, type TranscriptUsage } from "./eval-usage";
 
 export type TaskResult = ReturnType<(typeof import("./eval-grade"))["gradeTask"]> & { status?: "pass" | "agent_fail" | "harness_error" | "unsupported" | "needs_review"; cap_hit?: boolean; gap?: string };
 export type UnmappedValue = { task_id: string; check_id: string; field: string; before: unknown; after: unknown };
 export type EvalReport = {
   run_id: string;
+  // what ran: the SUITE name for a full run, else the sorted TASK ids; BASE=last matches on it
+  suite?: string;
   agent: { provider: string; model: string; tool_policy: string; observed_catalog: string[]; achilles_sha?: string; zeta_sha?: string };
   repeats: number;
   tasks: Array<TaskResult & { transcript?: string }>;
@@ -76,33 +78,37 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 // final answers per run, keyed by the run's snapshot path (`task.transcript`); each value maps step id -> answer
 export type FinalAnswers = Record<string, Record<string, string> | undefined>;
 
+const passCount = (tasks: BaseReport["tasks"]) => { const graded = tasks.filter(task => task.status !== "unsupported"); return { passed: graded.filter(task => task.pass && task.status !== "needs_review").length, graded: graded.length, unsupported: tasks.length - graded.length }; };
+
 // the top of report.md and the terminal summary: one result line, the eval tool set, then every failed run
 export function reportSummary(report: EvalReport, answers: FinalAnswers = {}): string {
-  const graded = report.tasks.filter(task => task.status !== "unsupported"); const passed = graded.filter(runPassed).length;
-  const unsupported = report.tasks.length - graded.length;
+  const { passed, graded, unsupported } = passCount(report.tasks);
   const wallMs = report.totals?.wall_ms ?? report.tasks.reduce((total, task) => total + task.wall_ms, 0);
   const tokens = totalTokens(report.totals?.usage);
   const lines = [
-    [`${passed === graded.length ? "PASS" : "FAIL"} ${passed}/${graded.length}${unsupported ? ` (${unsupported} unsupported)` : ""}`, `achilles ${short(report.agent.achilles_sha)}`, `zeta ${short(report.agent.zeta_sha)}`, `model ${report.agent.provider}/${report.agent.model}`, `${(wallMs / 60_000).toFixed(1)} min`, tokens === undefined ? "tokens unavailable" : `${tokens} tokens`].join(" | "),
+    [`${passed === graded ? "PASS" : "FAIL"} ${passed}/${graded}${unsupported ? ` (${unsupported} unsupported)` : ""}`, `achilles ${short(report.agent.achilles_sha)}`, `zeta ${short(report.agent.zeta_sha)}`, `model ${report.agent.provider}/${report.agent.model}`, `${(wallMs / 60_000).toFixed(1)} min`, tokens === undefined ? "tokens unavailable" : `${tokens} tokens`].join(" | "),
     "",
-    `eval agent: tools \`${report.agent.tool_policy}\`, max turns per task from its agent_turns (default ${DEFAULT_MAX_TURNS}), no auto memory.`,
-    "live `make dev` page chats differ: they get zeta's default tool set plus all MCP servers, no turn limit, and default approval \"allow\".",
+    `eval agent: tools \`${report.agent.tool_policy}\`, max turns per task from its agent_turns (at most 20), no auto memory.`,
+    "live `make dev` page chats differ: zeta's default tool set plus all MCP servers, no turn limit, auto memory on, no `--yolo`.",
     "", "## failures", "",
   ];
   const failed = report.tasks.filter(task => task.status !== "unsupported" && !runPassed(task));
   if (!failed.length) lines.push("none");
-  for (const task of failed) {
-    const run = task.transcript?.match(/-(\d+)\.json$/)?.[1];
-    lines.push(`### ${task.task_id}${run ? ` run ${run}` : ""}: ${task.status ?? "agent_fail"}, score ${task.score}${task.cap_hit ? ", turn cap hit" : ""}`, "");
-    for (const check of task.checks.filter(check => !check.pass)) {
-      const why = check.reason ?? (check.evidence as { message?: unknown } | undefined)?.message;
-      lines.push(`- check \`${check.id}\`: expected ${clip(check.expected)}, actual ${clip(check.actual)}${why ? ` (${clip(why)})` : ""}`);
-    }
-    const final = Object.entries((task.transcript && answers[task.transcript]) || {}).at(-1);
-    lines.push(final ? `- final answer (step \`${final[0]}\`): ${JSON.stringify(final[1].length > 300 ? `${final[1].slice(0, 300)}...` : final[1])}` : "- final answer: none captured");
-    lines.push(`- snapshot: ${task.transcript ?? "unavailable"}`, "");
-  }
+  for (const task of failed) lines.push(...failureBlock(task, answers));
   return lines.join("\n").trimEnd() + "\n";
+}
+
+function failureBlock(task: EvalReport["tasks"][number], answers: FinalAnswers): string[] {
+  const run = task.transcript?.match(/-(\d+)\.json$/)?.[1];
+  const lines = [`### ${task.task_id}${run ? ` run ${run}` : ""}: ${task.status ?? "agent_fail"}, score ${task.score}${task.cap_hit ? ", turn cap hit" : ""}`, ""];
+  for (const check of task.checks.filter(check => !check.pass)) {
+    const why = check.reason ?? (check.evidence as { message?: unknown } | undefined)?.message;
+    lines.push(`- check \`${check.id}\`: expected ${clip(check.expected)}, actual ${clip(check.actual)}${why ? ` (${clip(why)})` : ""}`);
+  }
+  const final = Object.entries((task.transcript && answers[task.transcript]) || {}).at(-1);
+  lines.push(final ? `- final answer (step \`${final[0]}\`): ${JSON.stringify(final[1].length > 300 ? `${final[1].slice(0, 300)}...` : final[1])}` : "- final answer: none captured");
+  lines.push(`- snapshot: ${task.transcript ?? "unavailable"}`, "");
+  return lines;
 }
 
 export function reportMarkdown(report: EvalReport, base?: BaseReport, answers: FinalAnswers = {}): string {
@@ -148,12 +154,12 @@ export function reportMarkdown(report: EvalReport, base?: BaseReport, answers: F
 }
 
 // BASE: a saved report folder from an earlier run; its report.json is outside input, so check the fields the diff reads.
-export type BaseReport = { name: string; run_id: string; tasks: Array<{ task_id: string; pass: boolean; turns: number; status?: string; usage?: unknown }>; achilles_sha?: string; zeta_sha?: string };
+export type BaseReport = { name: string; run_id: string; tasks: Array<{ task_id: string; pass: boolean; turns: number; status?: string; usage?: unknown }>; achilles_sha?: string; zeta_sha?: string; suite?: string; repeats?: number; totals?: { turns?: number; wall_ms?: number; usage?: unknown } };
 export function parseBaseReport(text: string, name: string): BaseReport {
   const fail = (why: string): never => { throw new Error(`BASE ${name}: ${why}`); };
   let data: unknown;
   try { data = JSON.parse(text); } catch (error) { fail(`report.json is not valid json (${(error as Error).message})`); }
-  const report = data as { run_id?: unknown; tasks?: unknown; agent?: unknown };
+  const report = data as { run_id?: unknown; tasks?: unknown; agent?: unknown; suite?: unknown; repeats?: unknown; totals?: unknown };
   if (!report || typeof report !== "object" || !Array.isArray(report.tasks)) fail("report.json has no tasks list");
   const tasks = (report.tasks as unknown[]).map((task, index) => {
     const row = task as { task_id?: unknown; pass?: unknown; turns?: unknown; status?: unknown };
@@ -165,6 +171,9 @@ export function parseBaseReport(text: string, name: string): BaseReport {
     name, run_id: typeof report.run_id === "string" ? report.run_id : "unknown", tasks,
     achilles_sha: typeof agent?.achilles_sha === "string" ? agent.achilles_sha : undefined,
     zeta_sha: typeof agent?.zeta_sha === "string" ? agent.zeta_sha : undefined,
+    suite: typeof report.suite === "string" ? report.suite : undefined,
+    repeats: typeof report.repeats === "number" ? report.repeats : undefined,
+    totals: report.totals && typeof report.totals === "object" ? report.totals as BaseReport["totals"] : undefined,
   };
 }
 export async function loadBaseReport(dir: string): Promise<BaseReport> {
@@ -172,6 +181,23 @@ export async function loadBaseReport(dir: string): Promise<BaseReport> {
   let text: string;
   try { text = await readFile(join(dir, "report.json"), "utf8"); } catch { throw new Error(`BASE ${name}: no readable report.json in that folder`); }
   return parseBaseReport(text, name);
+}
+
+// eval results stay on this machine, outside any checkout: the repo is public
+export const historyDir = () => join(Bun.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "achilles", "evals");
+const startedMs = (run: BaseReport) => Number.parseInt(run.run_id, 10) || 0;
+// every readable run in the history dir, newest first; a folder without a valid report.json is skipped
+export async function readHistory(dir = historyDir()): Promise<BaseReport[]> {
+  let names: string[];
+  try { names = await readdir(dir); } catch { return []; }
+  const runs = await Promise.all(names.map(name => loadBaseReport(join(dir, name)).catch(() => undefined)));
+  return runs.filter((run): run is BaseReport => Boolean(run)).sort((a, b) => startedMs(b) - startedMs(a));
+}
+// BASE=last: the newest run of the same suite, or undefined (no diff) when there is none
+export async function lastRun(suite: string, dir = historyDir()): Promise<BaseReport | undefined> { return (await readHistory(dir)).find(run => run.suite === suite); }
+export function historyLine(run: BaseReport): string {
+  const { passed, graded } = passCount(run.tasks); const ms = startedMs(run); const tokens = totalTokens(run.totals?.usage);
+  return [ms ? new Date(ms).toISOString().slice(0, 16).replace("T", " ") + "Z" : run.name, `achilles ${short(run.achilles_sha)}`, `zeta ${short(run.zeta_sha)}`, run.suite ?? "suite unknown", `N=${run.repeats ?? "?"}`, `pass ${passed}/${graded}`, `${typeof run.totals?.turns === "number" ? run.totals.turns : run.tasks.reduce((total, task) => total + task.turns, 0)} turns`, tokens === undefined ? "tokens unavailable" : `${tokens} tokens`, typeof run.totals?.wall_ms === "number" ? `${(run.totals.wall_ms / 60_000).toFixed(1)} min` : "min unavailable"].join(" | ");
 }
 
 const totalTokens = (usage: unknown) => {

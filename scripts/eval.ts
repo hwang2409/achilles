@@ -7,7 +7,7 @@ import { fetchDeadline, startEvalStack, TOOL_POLICY, type CleanupProof, type Eva
 import { assertSetupPreconditions, declaredSeedMismatches, gradeReference, gradeTask, validateTask, type EvalSnapshot, type EvalTask, type PagePlan, type ProviderError, type TaskSetup, type TaskStep } from "./eval-grade";
 import { createGateWait } from "./gate-diagnostics";
 import { formFields } from "../apps/web/src/page/formSchema";
-import { loadBaseReport, makeReport, reportJson, reportMarkdown, reportSummary, type BaseReport, type FinalAnswers } from "./eval-report";
+import { historyDir, lastRun, loadBaseReport, makeReport, reportJson, reportMarkdown, reportSummary, type BaseReport, type FinalAnswers } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
 import { createBrowserDriver, stepFinished, type BrowserDriver } from "./eval-browser";
 
@@ -639,8 +639,8 @@ async function writeReportArtifacts(staging: string, report: ReturnType<typeof m
   await Bun.write(join(staging, "report.json"), reportJson(report)); await Bun.write(join(staging, "report.md"), reportMarkdown(report, base, finalAnswers(report, repeats))); await Bun.write(join(staging, "cleanup.json"), JSON.stringify(repeats.map(repeat => repeat.cleanup ?? null), null, 2));
   await mkdir(join(staging, "snapshots")); const seen = new Map<string, number>(); for (const repeat of repeats) { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); await Bun.write(join(staging, "snapshots", `${repeat.result.task_id}-${number}.json`), JSON.stringify(repeat.snapshot ?? null, null, 2)); }
 }
-async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, hidden: string[], base?: BaseReport) {
-  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); const completedRepeats = Math.max(0, ...seen.values()); let publicationFailed = false; const ran = repeats.find(repeat => repeat.model); let report = makeReport({ run_id: runId, repeats: completedRepeats, agent: { provider: ran?.provider ?? "unavailable", model: ran?.model ?? "unavailable", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
+async function publishReport(tasks: EvalTask[], repeats: RepeatResult[], output: string, runId: string, suite: string, hidden: string[], base?: BaseReport) {
+  const first = repeats[0]; const seen = new Map<string, number>(); const reportTasks = repeats.map(repeat => { const number = (seen.get(repeat.result.task_id) ?? 0) + 1; seen.set(repeat.result.task_id, number); return { ...repeat.result, transcript: `snapshots/${repeat.result.task_id}-${number}.json` }; }); const completedRepeats = Math.max(0, ...seen.values()); let publicationFailed = false; const ran = repeats.find(repeat => repeat.model); let report = makeReport({ run_id: runId, suite, repeats: completedRepeats, agent: { provider: ran?.provider ?? "unavailable", model: ran?.model ?? "unavailable", tool_policy: TOOL_POLICY, observed_catalog: first.catalog, achilles_sha: first.achilles_sha, zeta_sha: first.zeta_sha }, totals: { turns: repeats.reduce((total, repeat) => total + repeat.result.turns, 0), wall_ms: repeats.reduce((total, repeat) => total + repeat.result.wall_ms, 0) }, tasks: reportTasks });
   const staging = await mkdtemp(join(Bun.env.TMPDIR ?? "/tmp", "achilles-eval-report-"));
   try {
     await writeReportArtifacts(staging, report, repeats, base);
@@ -663,15 +663,16 @@ async function runStackOnly(task: EvalTask, controller: AbortController, hidden:
 
 async function main() {
   const suiteArg = Bun.argv.indexOf("--suite"); const selection = Bun.env.TASK ?? (suiteArg >= 0 ? Bun.argv[suiteArg + 1] : undefined); const repeats = Number(Bun.env.N ?? "1");
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const expandHome = (path: string) => path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path; const base = Bun.env.BASE ? await loadBaseReport(resolve(expandHome(Bun.env.BASE))) : undefined; const suite = Bun.env.SUITE || "core"; if (!["core", "hard"].includes(suite)) throw new Error("SUITE must be core or hard"); const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR, suite as EvalTask["suite"]); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
+  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("N must be at least 1"); const expandHome = (path: string) => path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path; const suite = Bun.env.SUITE || "core"; if (!["core", "hard"].includes(suite)) throw new Error("SUITE must be core or hard"); const tasks = await selectTasks(selection, Bun.env.EVAL_TASKS_DIR, suite as EvalTask["suite"]);
+  const runSuite = selection ? tasks.map(task => task.id).sort().join(",") : suite; const baseArg = Bun.env.BASE || "last"; const base = baseArg === "last" ? await lastRun(runSuite) : await loadBaseReport(resolve(expandHome(baseArg))); assertTurnBudget(reserveTurns(tasks, repeats)); await preflightBrowser(tasks);
   const controller = new AbortController(); let signalCode = 0; const interrupt = (code: number) => { signalCode ||= code; controller.abort(new Error("eval interrupted")); };
   const onSigint = () => interrupt(130); const onSigterm = () => interrupt(143); process.once("SIGINT", onSigint); process.once("SIGTERM", onSigterm); const hidden = hiddenValues();
   try {
     if (Bun.env.EVAL_STACK_ONLY === "1") { if (tasks.length !== 1) throw new Error("EVAL_STACK_ONLY requires one task"); await runStackOnly(tasks[0], controller, hidden); }
     else {
-      const runId = `${Date.now()}-${process.pid}`; const output = resolve(Bun.env.REPORT_DIR ?? join(new URL("../evals/reports/", import.meta.url).pathname, runId)); const results: RepeatResult[] = [];
+      const runId = `${Date.now()}-${process.pid}`; const output = resolve(Bun.env.REPORT_DIR ?? join(historyDir(), runId)); const results: RepeatResult[] = [];
       suite: for (const task of tasks) for (let index = 0; index < repeats; index++) { if (controller.signal.aborted) break suite; const repeat = await runRepeat(task, index, { scripted: Bun.env.EVAL_BACKEND === "scripted", achillesDir: Bun.env.ACHILLES_DIR, keep: Bun.env.KEEP_EVAL === "1", runId: `${runId}-${task.id}`, signal: controller.signal, hidden }); results.push(repeat); if (repeat.stop_suite) break suite; }
-      if (!await publishReport(tasks, results, output, runId, hidden, base)) process.exitCode = 1;
+      if (!await publishReport(tasks, results, output, runId, runSuite, hidden, base)) process.exitCode = 1;
     }
   } finally { process.off("SIGINT", onSigint); process.off("SIGTERM", onSigterm); if (signalCode) process.exitCode = signalCode; }
 }
