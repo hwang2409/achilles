@@ -1382,8 +1382,12 @@ class PageStore:
         return version, digest, detail_summary
 
     def create_tool(
-        self, page_id: str, bundle: Any, validation_prefix: str = ""
+        self, page_id: str, bundle: Any, validation_prefix: str = "", target: str | None = None
     ) -> tuple[dict[str, Any], str, str | None]:
+        """Add a tool version to target (route or id; default page_id) as principal page_id.
+
+        target must be page_id itself or a page page_id created (created_by_page_id).
+        """
         bundle = validate_bundle(bundle, validation_prefix, reject_conflicting_output=True)
         encoded = canonical_bundle(bundle)
         digest = bundle_digest(bundle)
@@ -1395,6 +1399,21 @@ class PageStore:
                 ).fetchone()
                 if principal is None or not principal[0]:
                     raise PermissionError("forbidden: create mode is off")
+                if target is not None:
+                    owner = db.execute(
+                        "SELECT id FROM page WHERE (id=? OR route=?) "
+                        "AND (id=? OR created_by_page_id=?)",
+                        (target, target, page_id, page_id),
+                    ).fetchone()
+                    if owner is None:
+                        raise ValidationError(
+                            "/page",
+                            "this page or a page created from this page",
+                            "forbidden",
+                            "You can add tools only to this page or to a page created from "
+                            "this page. To change another page, open that page's chat.",
+                        )
+                    page_id = owner[0]
                 tool = db.execute(
                     "SELECT id FROM tool WHERE owner_page_id=? AND name=?",
                     (page_id, bundle["name"]),
@@ -1430,7 +1449,10 @@ class PageStore:
                     (page_id, "create_tool", digest, stamp),
                 )
                 note = _missing_update_note(self._page_tools(db, page_id))
-            return {"tool_id": tool_id, "name": bundle["name"], "version": version}, digest, note
+            created = {"tool_id": tool_id, "name": bundle["name"], "version": version}
+            if target is not None:
+                created["page_id"] = page_id
+            return created, digest, note
         except Exception:
             raise
 

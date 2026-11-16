@@ -137,3 +137,25 @@ def test_equals_value_is_bound_not_interpolated(store):
     ]
     with pytest.raises(ValidationError):
         _list(store, where={"field": "status", "equals": {"$ne": None}})
+
+
+def test_multiple_of_cents_is_checked_exactly(store):
+    # regression: float math made 19.99 % 0.01 != 0, so valid cent amounts were rejected
+    amount = {"type": "number", "multipleOf": 0.01}
+    expense = {"type": "object", "properties": {"amount": amount}, "required": ["amount"]}
+    store.create_tool("home", _bundle("add_expense", "insert", expense, expense))
+
+    def add(value):
+        return call_record(store, "home", "add_expense", {"amount": value}, 1, "agent")
+
+    for value in (19.99, 0.07, 12.5, 3, 1e30):
+        assert add(value)["amount"] == value
+    with pytest.raises(ValidationError) as error:
+        add(19.995)
+    assert error.value.path == "/amount"
+
+    count = {"type": "object", "properties": {"n": {"type": "integer", "multipleOf": 3}}}
+    store.create_tool("home", _bundle("add_count", "insert", count, count))
+    assert call_record(store, "home", "add_count", {"n": 9}, 1, "agent")["n"] == 9
+    with pytest.raises(ValidationError):
+        call_record(store, "home", "add_count", {"n": 10}, 1, "agent")
