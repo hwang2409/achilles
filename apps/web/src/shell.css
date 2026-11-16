@@ -4,7 +4,9 @@
 }
 .sidebar { border-right: 1px solid var(--fulcrum-border); }
 .brand-row { padding: 0 14px; }
-.new-chat, .chat-search { margin-left: 14px; margin-right: 14px; }
+.new-chat, .chat-search { margin-left: 14px; margin-right: 14px; font-size: 13px; }
+.new-chat kbd, .chat-search kbd, .sidebar > footer > button kbd { font-size: 12px; }
+.chat-group h2, .sidebar > footer > button { font-size: 13px; }
 .list-head { padding-inline: 14px; font-size: 11px; letter-spacing: .1em; }
 .page-list a,
 .chat-row { position: relative; border-left: 2px solid transparent; }
