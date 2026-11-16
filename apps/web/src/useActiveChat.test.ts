@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ZetaError } from "@fulcrum/zeta";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
 import * as queues from "./composer/chatQueues";
@@ -214,6 +215,7 @@ describe("message delivery tracking", () => {
     { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), ok], log: ["track:d1", "steer:d1", "send:d1"] },
     // no answer from zeta: it may hold the text, so the row says so and nothing goes out again by itself
     { name: "network error on the first request", steer: false, replies: [new Error("socket closed")], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
+    { name: "socket closed before zeta's answer (a close code is not zeta's answer)", steer: false, replies: [new ZetaError("closed", 1006)], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
     { name: "request timed out", steer: false, replies: [new Error("request timed out")], log: ["track:d1", "send:d1"], error: MAYBE_SENT },
     { name: "steer status read timed out", steer: true, replies: [ok, new Error("request timed out")], log: ["track:d1", "steer:d1", "delivery_status:d1"], error: MAYBE_SENT },
     { name: "second refusal", steer: false, replies: [refused(-32004), refused(-32005)], log: ["track:d1", "send:d1", "steer:d1"], error: "refused -32005" },

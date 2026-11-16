@@ -1,0 +1,244 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "notes"
+      }
+    ],
+    "chats": [
+      {
+        "chat_id": "notes-chat",
+        "page_id": "home",
+        "history": "[{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check start: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check dropped: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check evicted-delivered: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check evicted-queued: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check closed-after-send: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check end: reply with the word ok\"}]}]"
+      }
+    ],
+    "delivery_faults": [
+      {
+        "step": "dropped",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "dropped",
+        "text": "delivery check dropped: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-1"
+          },
+          {
+            "method": "send",
+            "delivery_id": "delivery-2"
+          }
+        ],
+        "shown": null
+      },
+      {
+        "step": "evicted-delivered",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "evicted_delivered",
+        "text": "delivery check evicted-delivered: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-3"
+          }
+        ],
+        "shown": null
+      },
+      {
+        "step": "evicted-queued",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "evicted_queued",
+        "text": "delivery check evicted-queued: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-4"
+          }
+        ],
+        "shown": null
+      },
+      {
+        "step": "evicted-unknown",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "evicted_unknown",
+        "text": "delivery check evicted-unknown: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-5"
+          }
+        ],
+        "shown": {
+          "label": "maybe sent",
+          "error": "may not have been sent \u2014 check before retrying"
+        }
+      },
+      {
+        "step": "closed-before-send",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "closed_before_send",
+        "text": "delivery check closed-before-send: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-6"
+          }
+        ],
+        "shown": {
+          "label": "maybe sent",
+          "error": "may not have been sent \u2014 check before retrying"
+        }
+      },
+      {
+        "step": "closed-after-send",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "closed_after_send",
+        "text": "delivery check closed-after-send: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-7"
+          }
+        ],
+        "shown": null
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "notes"
+      }
+    ],
+    "chats": [
+      {
+        "chat_id": "notes-chat",
+        "page_id": "home",
+        "history": "[{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check start: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check dropped: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check evicted-delivered: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check evicted-queued: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check closed-after-send: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check end: reply with the word ok\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"delivery check evicted-delivered: reply with the word ok\"}]}]"
+      }
+    ],
+    "delivery_faults": [
+      {
+        "step": "dropped",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "dropped",
+        "text": "delivery check dropped: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-1"
+          },
+          {
+            "method": "send",
+            "delivery_id": "delivery-2"
+          }
+        ],
+        "shown": null
+      },
+      {
+        "step": "evicted-delivered",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "evicted_delivered",
+        "text": "delivery check evicted-delivered: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-3"
+          },
+          {
+            "method": "send",
+            "delivery_id": "delivery-twice"
+          }
+        ],
+        "shown": null
+      },
+      {
+        "step": "evicted-queued",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "evicted_queued",
+        "text": "delivery check evicted-queued: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-4"
+          }
+        ],
+        "shown": null
+      },
+      {
+        "step": "evicted-unknown",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "evicted_unknown",
+        "text": "delivery check evicted-unknown: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-5"
+          },
+          {
+            "method": "send",
+            "delivery_id": "delivery-resent"
+          }
+        ],
+        "shown": {
+          "label": "maybe sent",
+          "error": "may not have been sent \u2014 check before retrying"
+        }
+      },
+      {
+        "step": "closed-before-send",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "closed_before_send",
+        "text": "delivery check closed-before-send: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-6"
+          }
+        ],
+        "shown": {
+          "label": "not sent",
+          "error": "zeta websocket closed (0)"
+        }
+      },
+      {
+        "step": "closed-after-send",
+        "page_id": "home",
+        "chat": "notes-chat",
+        "fault": "closed_after_send",
+        "text": "delivery check closed-after-send: reply with the word ok",
+        "fired": true,
+        "sent": [
+          {
+            "method": "send",
+            "delivery_id": "delivery-7"
+          }
+        ],
+        "shown": null
+      }
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { SessionLease, ZetaClient } from "@fulcrum/zeta";
+import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
@@ -367,8 +367,9 @@ export async function deliverChatMessage(
     // zeta answered (a drop, a refusal, a reply it never sends): it holds nothing new. no answer (a timeout, a closed
     // socket) or an id zeta forgot without a known outcome: it may hold the text, so the row says so and is never resent
     if (error instanceof DroppedSteerDeliveryError || error instanceof RefusedError) throw error;
+    // a ZetaError's code is the websocket close code, not zeta's answer
     const code = errorCode(error);
-    if (typeof code === "number" && code !== ID_EVICTED) throw error;
+    if (typeof code === "number" && code !== ID_EVICTED && !(error instanceof ZetaError)) throw error;
     throw new Error(MAYBE_SENT);
   }
 }

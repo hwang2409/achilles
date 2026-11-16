@@ -1,4 +1,4 @@
-import type { ReloadTrigger, TaskStep } from "./eval-grade";
+import type { DeliveryFault, ReloadTrigger, TaskStep } from "./eval-grade";
 import type { EvalProtocol } from "./eval-protocol";
 import { createFrameRing } from "./gate-diagnostics";
 
@@ -8,11 +8,19 @@ import { createFrameRing } from "./gate-diagnostics";
 // queues a click. Every page action runs in order on one chain, so a reload queued before a click happens first.
 
 type Frame = { socket: number; direction: "sent" | "received"; value: Record<string, any> };
-type Tab = { page: any; frames: Frame[]; sockets: number; sessionId: string; chat: string; pageId: string; ends: number; onFrame: Set<() => void>; ring: ReturnType<typeof createFrameRing> };
+// the one fault armed for a step's text; `sent` is every send or steer of the text as the page made it (a routed socket's
+// frame events show only what reaches zeta); `answer` is zeta's reply the page must not get as it is
+type Fault = { kind: DeliveryFault; text: string; fired: boolean; sent: Array<{ method: string; delivery_id: unknown }>; answer?: { id: unknown; outcome?: string } };
+type Tab = { page: any; frames: Frame[]; sockets: number; sessionId: string; chat: string; pageId: string; ends: number; onFrame: Set<() => void>; ring: ReturnType<typeof createFrameRing>; fault?: Fault };
 type Armed = { step: TaskStep; tab: Tab; count: number; row: Record<string, unknown> };
 export type BrowserDriver = ReturnType<typeof createBrowserDriver>;
 
 const READY_MS = 20_000;
+// after a faulted send settles, long enough for the page to reconnect and for any send it would make by itself
+const QUIET_MS = 4_000;
+// zeta's answers a faulted send gets instead of the real one (delivery.py `_duplicate`; -32010 is DELIVERY_ID_EVICTED)
+const droppedAnswer = { accepted: false, duplicate: true, status: "dropped" };
+const evictedAnswer = (outcome: string) => ({ code: -32010, message: "delivery id already used", data: { outcome } });
 const log = (line: string) => process.stderr.write(`eval browser: ${line}\n`);
 const SETTINGS_KEY = "achilles-settings";
 const toolName = (event: Record<string, any>) => event.data?.tool_call?.name ?? event.tool_call?.name ?? event.data?.name;
@@ -33,9 +41,9 @@ export function answerProbe(answer: string) {
   return line.slice(0, 60).trim();
 }
 
-export function createBrowserDriver(options: { chromium: any; origin: string; ask: boolean; signal: AbortSignal; observer: () => EvalProtocol; failure: () => Error | undefined }) {
+export function createBrowserDriver(options: { chromium: any; origin: string; ask: boolean; signal: AbortSignal; observer: () => EvalProtocol; failure: () => Error | undefined; faults?: boolean }) {
   let browser: any; let chain: Promise<unknown> = Promise.resolve(); let chainError: unknown;
-  const tabs = new Map<string, Tab>(); const bySession = new Map<string, Tab>(); const reloads: Record<string, unknown>[] = [];
+  const tabs = new Map<string, Tab>(); const bySession = new Map<string, Tab>(); const reloads: Record<string, unknown>[] = []; const deliveryFaults: Record<string, unknown>[] = [];
   const seenRequests = new Set<unknown>(); let armed: Armed | undefined; let wake: () => void = () => {};
   const queue = (action: () => Promise<void>) => { chain = chain.then(action).catch(error => { chainError ??= error; wake(); }); };
 
@@ -65,6 +73,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
       const record = (direction: Frame["direction"]) => (event: { payload: unknown }) => { tab.ring.record(id, direction, String(event.payload)); try { tab.frames.push({ socket: id, direction, value: JSON.parse(String(event.payload)) }); } catch { return; } for (const listener of tab.onFrame) listener(); };
       socket.on("framesent", record("sent")); socket.on("framereceived", record("received"));
     });
+    if (options.faults) await page.routeWebSocket(() => true, (socket: any) => routeFaults(tab, socket));
     await page.goto(`${options.origin}${route}`, { waitUntil: "domcontentloaded", timeout: READY_MS });
     await ready(tab); tabs.set(step.chat, tab); return tab;
   }
@@ -104,6 +113,40 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     const open = tab.page.locator(".create-mode-alert").getByRole("button", { name: "open it" });
     if (await open.count()) { await open.click(); await ready(tab); }
   }
+  // the page's socket to zeta, passed through as is, except for the first send or steer of the armed fault's text
+  function routeFaults(tab: Tab, socket: any) {
+    const server = socket.connectToServer();
+    const close = () => { socket.close(); server.close(); };
+    const reply = (id: unknown, body: Record<string, unknown>) => socket.send(JSON.stringify({ jsonrpc: "2.0", id, ...body }));
+    socket.onMessage((message: string) => {
+      const fault = tab.fault; let frame: any; try { frame = JSON.parse(String(message)); } catch {}
+      if (!fault || !["send", "steer"].includes(frame?.method) || frame.params?.text !== fault.text) return server.send(message);
+      fault.sent.push({ method: frame.method, delivery_id: frame.params.delivery_id });
+      if (fault.fired) return server.send(message);
+      fault.fired = true; log(`fault ${fault.kind} on ${frame.method}`);
+      if (fault.kind === "dropped") return reply(frame.id, { result: droppedAnswer });
+      if (fault.kind === "evicted_unknown") return reply(frame.id, { error: evictedAnswer("unknown") });
+      if (fault.kind === "closed_before_send") return close();
+      // zeta takes it; its answer is replaced by -32010 with the outcome, or the socket closes before the answer
+      fault.answer = { id: frame.id, ...(fault.kind === "closed_after_send" ? {} : { outcome: fault.kind === "evicted_queued" ? "queued" : "delivered" }) };
+      server.send(message);
+    });
+    server.onMessage((message: string) => {
+      const answer = tab.fault?.answer; let frame: any; if (answer) try { frame = JSON.parse(String(message)); } catch {}
+      if (!answer || frame?.id !== answer.id || !("result" in frame || "error" in frame)) return socket.send(message);
+      tab.fault!.answer = undefined;
+      return answer.outcome ? reply(answer.id, { error: evictedAnswer(answer.outcome) }) : close();
+    });
+  }
+  // what a faulted step leaves: every send of its text, and its row on the page if one is shown; a failed row is
+  // then cancelled, so the next step's send can go out
+  async function recordFault(step: TaskStep, tab: Tab) {
+    const fault = tab.fault!; tab.fault = undefined;
+    const row = tab.page.locator('[data-part="composer-queued"]').filter({ has: tab.page.locator('[data-part="composer-queued-text"]', { hasText: fault.text }) }).first();
+    const shown = await row.count() ? { label: await row.locator('[data-part="composer-queued-label"]').innerText(), error: await row.locator('[data-part="composer-queued-error"]').innerText().catch(() => null) } : null;
+    deliveryFaults.push({ step: step.id, page_id: tab.pageId, chat: step.chat, fault: fault.kind, text: fault.text, fired: fault.fired, sent: fault.sent, shown });
+    if (shown) await row.locator('[data-part="composer-queued-cancel"]').click();
+  }
   // a frame the page already has, or the first matching one it receives before the ready deadline
   function waitFrame(tab: Tab, find: () => Frame | undefined) {
     return new Promise<Frame | undefined>(resolve => {
@@ -115,6 +158,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
 
   return {
     reloads,
+    deliveryFaults,
     // the page's last websocket frames per chat, as safe summaries (method, event, ids, error codes), for diagnosis
     frames: () => Object.fromEntries([...tabs].map(([chat, tab]) => [chat, tab.ring.snapshot()])),
     sessionOf: (chat: string) => tabs.get(chat)?.sessionId,
@@ -145,7 +189,15 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
         const trigger: ReloadTrigger = step.reload; const row: Record<string, unknown> = { step: step.id, page_id: pageId, chat_id: step.chat, trigger, fired: false };
         reloads.push(row); armed = { step, tab, count: 0, row };
       }
+      const fault = step.delivery_fault;
+      if (fault) tab.fault = { kind: fault, text: step.prompt!, fired: false, sent: [] };
       await type(tab, step.prompt!);
+      // zeta never got the text, so no turn starts: the page settles on a failed row; the quiet wait shows any resend
+      if (fault === "evicted_unknown" || fault === "closed_before_send") {
+        await tab.page.locator('[data-part="composer-queued"][data-failed]').filter({ hasText: step.prompt! }).first().waitFor({ timeout: READY_MS });
+        await ready(tab); await tab.page.waitForTimeout(QUIET_MS); await recordFault(step, tab); log(`${step.id}: settled with no turn`);
+        return { sessionId: tab.sessionId, prior, history: await observer.sessionHistory(tab.sessionId), check: async () => {} };
+      }
       const aborted = new Promise<never>((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true })); aborted.catch(() => undefined);
       // a new chat has its zeta session only once the page sends; the observer joins it then
       // shortcut: an event between the send and the join is not seen live; a model reply takes far longer than the join.
@@ -166,9 +218,12 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
         history = await observer.sessionHistory(tab.sessionId);
         const status = await observer.status();
         if (stepFinished(history, prior, texts) && !(row?.fired && step.follow_up && !row.follow_up_sent) && (status.state === "idle" || status.session?.session_id !== tab.sessionId)) break;
-        await Promise.race([woken, aborted]);
+        // shortcut: after the page's socket to zeta closes and reconnects, the observer saw no more events of the chat in
+        // 2 of 2 local runs, so the history is also read once a second; find why if a task needs live events after one
+        await Promise.race([woken, aborted, Bun.sleep(1_000)]);
       }
       armed = undefined; await chain; if (chainError) throw chainError; log(`${step.id}: turn ended`);
+      if (fault) { await ready(tab); await tab.page.waitForTimeout(QUIET_MS); await recordFault(step, tab); }
       const row = reloads.find(item => item.step === step.id);
       return { sessionId: tab.sessionId, prior, history, check: async (answer: string | undefined) => {
         if (!row?.fired) return;
