@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { QUEUE_LIMIT, createComposerModel, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
+import { QUEUE_LIMIT, composerActivity, createComposerModel, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
 
 const apply = (model: ComposerModel, ...events: ComposerEvent[]) => events.reduce((current, event) => transition(current, event).model, model);
 
@@ -18,11 +18,12 @@ describe("composer delivery machine", () => {
       const running = transition(createComposerModel("kept while running", "running"), { type: "submit", turnRunning: true });
       expect(running).toEqual({ model: expect.objectContaining({ draft: "kept while running", queue: [] }) });
     }],
-    ["enter while a send is pending moves only the new text out of the box into the queue", () => {
+    ["enter while a send is pending queues the box text behind it and empties the box", () => {
       const pending = transition(createComposerModel("first", "idle"), { type: "submit", turnRunning: false }).model;
-      const queued = apply(pending, { type: "edit", draft: "first\nsecond" }, { type: "submit", turnRunning: false });
-      expect(queued).toMatchObject({ draft: "first", sending: true, queue: [{ id: 1, text: "second" }] });
-      expect(transition(queued, { type: "submit", turnRunning: false }).model.queue).toHaveLength(1);
+      expect(pending).toMatchObject({ draft: "", sending: true, queue: [{ id: 1, text: "first" }] });
+      const queued = apply(pending, { type: "edit", draft: "second" }, { type: "submit", turnRunning: false });
+      expect(queued).toMatchObject({ draft: "", queue: [{ text: "first" }, { text: "second" }] });
+      expect(transition(queued, { type: "submit", turnRunning: false }).model.queue).toHaveLength(2);
       expect(apply(queued, { type: "confirm", attempt: 1 }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "", queue: [{ text: "second" }] });
     }],
     ["the queue has a cap and says so", () => {
@@ -37,7 +38,7 @@ describe("composer delivery machine", () => {
     }],
     ["submit await has no frontend cancellation operation", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit", turnRunning: false });
-      expect(submitted.model).toMatchObject({ draft: "hello", sending: true });
+      expect(submitted.model).toMatchObject({ draft: "", sending: true, queue: [{ text: "hello" }] });
     }],
     ["enter during IME composition", () => {
       expect(enterAction({ key: "Enter", shiftKey: false, isComposing: true, keyCode: 13, mode: "insert" })).toBe("ignore");
@@ -66,12 +67,17 @@ describe("composer delivery machine", () => {
     ["submit publish rejects", () => {
       const submitted = transition(createComposerModel("hello", "idle"), { type: "submit", turnRunning: false }).model;
       const failed = apply(submitted, { type: "reject", attempt: 1, message: "denied" }, { type: "settle", attempt: 1 });
-      expect(failed).toMatchObject({ draft: "hello", sending: false, error: { kind: "submit", text: "denied" } });
+      expect(failed).toMatchObject({ draft: "", sending: false, error: undefined, queue: [{ text: "hello", failed: "denied", tries: 1 }] });
     }],
-    ["draft clears only on confirmed send", () => {
+    ["the box never changes when a submitted message settles", () => {
       const submitted = transition(createComposerModel("hello again", "idle"), { type: "submit", turnRunning: false }).model;
-      expect(apply(submitted, { type: "edit", draft: "hello again later" }, { type: "settle", attempt: 1 }).draft).toBe("hello again later");
-      expect(apply(submitted, { type: "edit", draft: "hello again later" }, { type: "confirm", attempt: 1 }).draft).toBe(" later");
+      expect(apply(submitted, { type: "edit", draft: "hello again later" }, { type: "confirm", attempt: 1 }, { type: "settle", attempt: 1 })).toMatchObject({ draft: "hello again later", queue: [] });
+    }],
+    ["the header counts a waiting steer as queued and shows a failed head", () => {
+      const steering = transition(createComposerModel("redirect", "steerable"), { type: "submit", turnRunning: true }).model;
+      expect(composerActivity(steering)).toEqual({ sending: false, queued: 1, failed: false });
+      const failed = apply(steering, { type: "edit", draft: "later" }, { type: "submit", turnRunning: true }, { type: "reject", attempt: 1, message: "no" }, { type: "settle", attempt: 1 });
+      expect(composerActivity(failed)).toEqual({ sending: false, queued: 1, failed: true });
     }],
   ];
 

@@ -29,11 +29,11 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const group = useRef<HTMLDivElement>(null);
   const focusLost = useRef(false);
   const stopFocused = useRef(false);
-  const { model, edit, dismissError, submit, stop, retry, cancel } = useComposerDelivery(props);
+  const { model, edit, submit, stop, retry, restore, cancel } = useComposerDelivery(props);
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const action = submitAction(model);
-  const queues = action === "queue" || (model.queue.length > 0 && !model.held);
+  const queues = model.sending || model.waiting || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
   const hint =
     state === "running"
@@ -62,9 +62,10 @@ export function PlainComposer(props: ComposerAdapterProps) {
     event.preventDefault();
     submit();
   };
+  const focusInput = () => input.current?.focus({ preventScroll: true });
   const onFormSubmit = (event: FormEvent) => {
     event.preventDefault();
-    input.current?.focus({ preventScroll: true });
+    focusInput();
     submit();
   };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
@@ -121,7 +122,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
       aria-busy={model.sending || model.stopping || undefined}
       onSubmit={onFormSubmit}
     >
-      <QueuedMessages model={model} onRetry={retry} onCancel={(id) => { cancel(id); input.current?.focus({ preventScroll: true }); }} />
+      <QueuedMessages model={model} onRetry={(id) => { retry(id); focusInput(); }} onRestore={(id) => { restore(id); focusInput(); }} onCancel={(id) => { cancel(id); focusInput(); }} />
       <div data-part="composer-field" data-value={model.draft}>
         <textarea
           ref={input}
@@ -150,9 +151,6 @@ export function PlainComposer(props: ComposerAdapterProps) {
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>
-          {model.error?.kind === "dropped" ? (
-            <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button>
-          ) : null}
         </p>
         {running && onStop ? (
           <button

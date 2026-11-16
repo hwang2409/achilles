@@ -12,31 +12,31 @@ type Scenario = {
   remount?: boolean;
   race?: "send-to-steer" | "steer-to-send" | "double-rejection";
   expectedMethods?: Array<"send" | "steer">;
-  expectedDraft: string;
-  expectedError?: string;
-  resendDropped?: boolean;
+  /** a failed message stays as a row with this error; the box stays empty */
+  expectedFailure?: string;
+  retryDropped?: boolean;
 };
 
+const dropped = "zeta dropped this message before reading it.";
 const scenarios: Scenario[] = [
-  { name: "send ok", state: "idle", expectedDraft: "" },
+  { name: "send ok", state: "idle" },
   // zeta started the turn that carries an end-of-turn steer, so send gets -32004: one steer retry with the same delivery id
-  { name: "send rejected after turn_end", state: "idle", race: "send-to-steer", expectedMethods: ["send", "steer"], statuses: [{ status: "queued" }, { status: "queued" }, { status: "delivered" }], statusReads: 3, draftWhileQueued: true, expectedDraft: "" },
-  { name: "send rejected after turn_end, steer dropped", state: "idle", race: "send-to-steer", expectedMethods: ["send", "steer"], statuses: [{ status: "dropped" }], statusReads: 1, expectedDraft: "keep this exact draft", expectedError: "this message was not sent. your text is still here; press send to try again." },
-  { name: "steer rejected after turn ends", state: "steerable", race: "steer-to-send", expectedMethods: ["steer", "send"], expectedDraft: "" },
-  { name: "fallback is not retried", state: "idle", race: "double-rejection", expectedMethods: ["send", "steer"], expectedDraft: "keep this exact draft", expectedError: "no turn is running" },
-  { name: "steer consumed", state: "steerable", statuses: [{ status: "delivered" }], statusReads: 1, expectedDraft: "" },
+  { name: "send rejected after turn_end", state: "idle", race: "send-to-steer", expectedMethods: ["send", "steer"], statuses: [{ status: "queued" }, { status: "queued" }, { status: "delivered" }], statusReads: 3, draftWhileQueued: true },
+  { name: "send rejected after turn_end, steer dropped", state: "idle", race: "send-to-steer", expectedMethods: ["send", "steer"], statuses: [{ status: "dropped" }], statusReads: 1, expectedFailure: dropped },
+  { name: "steer rejected after turn ends", state: "steerable", race: "steer-to-send", expectedMethods: ["steer", "send"] },
+  { name: "fallback is not retried", state: "idle", race: "double-rejection", expectedMethods: ["send", "steer"], expectedFailure: "no turn is running" },
+  { name: "steer consumed", state: "steerable", statuses: [{ status: "delivered" }], statusReads: 1 },
   {
     name: "steer dropped",
     state: "steerable",
     statuses: [{ status: "queued" }, { status: "dropped" }, { status: "delivered" }, { status: "dropped" }],
     statusReads: 4,
-    expectedDraft: "keep this exact draft",
-    expectedError: "this message was not sent. your text is still here; press send to try again.",
-    resendDropped: true,
+    expectedFailure: dropped,
+    retryDropped: true,
   },
-  { name: "steer evicted after consumption", state: "steerable", statuses: [{ status: "evicted", outcome: "delivered" }], statusReads: 1, expectedDraft: "" },
-  { name: "reload or remount during delivery", state: "idle", remount: true, expectedDraft: " plus new" },
-  { name: "duplicate queued echo", state: "steerable", statuses: [{ status: "queued" }, { status: "delivered" }], statusReads: 2, expectedDraft: "" },
+  { name: "steer evicted after consumption", state: "steerable", statuses: [{ status: "evicted", outcome: "delivered" }], statusReads: 1 },
+  { name: "reload or remount during delivery", state: "idle", remount: true },
+  { name: "duplicate queued echo", state: "steerable", statuses: [{ status: "queued" }, { status: "delivered" }], statusReads: 2 },
 ];
 
 test.each(scenarios)("delivery owner: $name", async (scenario) => {
@@ -79,10 +79,7 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
     state: scenario.state,
     defaultValue: persisted,
     onDraftChange: (text: string) => { persisted = text; },
-    onDeliveryConfirm: (sent: string) => {
-      persisted = persisted.startsWith(sent) ? persisted.slice(sent.length) : persisted;
-      remounted?.sync(scenario.state, persisted);
-    },
+    onDraftSubmit: (sent: string) => { persisted = persisted.startsWith(sent) ? persisted.slice(sent.length) : persisted; },
     onSubmit: async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
       const id = `delivery-${deliveryIds.length + 1}`;
       deliveryIds.push(id);
@@ -93,29 +90,30 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
 
   try {
     const pending = owner.submit();
+    // enter took the text out of the box and out of the stored draft at once
+    expect(owner.getModel().draft).toBe("");
+    expect(persisted).toBe("");
     if (scenario.remount) {
       remounted = createComposerDelivery({ ...options, defaultValue: persisted });
-      remounted.edit("keep this exact draft plus new");
+      remounted.edit(" plus new");
       releaseSend?.();
     }
     await pending;
 
-    expect(owner.getModel().draft).toBe(scenario.remount ? "" : scenario.expectedDraft);
-    expect(persisted).toBe(scenario.expectedDraft);
-    expect(owner.getModel().error?.text).toBe(scenario.expectedError);
-    if (scenario.resendDropped) {
-      expect(owner.getModel().error?.kind).toBe("dropped");
-      await owner.submit();
+    expect(owner.getModel().draft).toBe("");
+    expect(persisted).toBe(scenario.remount ? " plus new" : "");
+    expect(owner.getModel().queue).toEqual(scenario.expectedFailure ? [{ id: 1, text: "keep this exact draft", failed: scenario.expectedFailure, tries: 1 }] : []);
+    if (scenario.retryDropped) {
+      await owner.retry(1);
       expect(deliveryIds).toEqual(["delivery-1", "delivery-2"]);
-      expect(owner.getModel().draft).toBe("");
+      expect(owner.getModel().queue).toEqual([]);
       owner.edit("keep this exact draft");
       await owner.submit();
-      expect(owner.getModel().draft).toBe("keep this exact draft");
-      expect(owner.getModel().error?.kind).toBe("dropped");
+      expect(owner.getModel()).toMatchObject({ draft: "", queue: [{ text: "keep this exact draft", failed: dropped }] });
     }
-    if (scenario.remount) expect(remounted?.getModel().draft).toBe(scenario.expectedDraft);
+    if (scenario.remount) expect(remounted?.getModel().draft).toBe(" plus new");
     if (scenario.statusReads) expect(statusReads).toBe(scenario.statusReads);
-    if (scenario.draftWhileQueued) expect(draftsWhileQueued).toEqual(Array(4).fill("keep this exact draft"));
+    if (scenario.draftWhileQueued) expect(draftsWhileQueued).toEqual(Array(4).fill(""));
     if (scenario.expectedMethods) {
       expect(methods.map(({ method }) => method)).toEqual(scenario.expectedMethods);
       expect(new Set(methods.map(({ deliveryId }) => deliveryId)).size).toBe(1);
@@ -138,7 +136,7 @@ function heldSends() {
 }
 
 const owner = (onSubmit: (text: string) => Promise<void>, extra: Partial<Parameters<typeof createComposerDelivery>[0]> = {}) => createComposerDelivery({
-  state: "idle", defaultValue: "first", onDraftChange: () => {}, onDeliveryConfirm: () => {}, onSubmit, ...extra,
+  state: "idle", defaultValue: "first", onDraftChange: () => {}, onDraftSubmit: () => {}, onSubmit, ...extra,
 });
 
 test("enter during a pending send delivers the next draft once, in order, after the first settles", async () => {
@@ -149,7 +147,7 @@ test("enter during a pending send delivers the next draft once, in order, after 
     state: "idle",
     defaultValue: "first",
     onDraftChange: () => {},
-    onDeliveryConfirm: () => {},
+    onDraftSubmit: () => {},
     onSubmit: async (text: string) => { sent.push(text); if (sent.length === 1) await first; },
   });
   const pending = owner.submit();
@@ -162,13 +160,29 @@ test("enter during a pending send delivers the next draft once, in order, after 
   expect(owner.getModel()).toMatchObject({ draft: "", sending: false, queue: [] });
 });
 
+test("enter takes the text out of the box at once: the box is always a new message, and a submitted message goes out once", async () => {
+  const sends = heldSends();
+  const composer = owner(sends.onSubmit, { state: "steerable" });
+  void composer.submit();
+  expect(sends.sent).toEqual(["first"]);
+  expect(composer.getModel().draft).toBe("");
+  // the in-flight message is the first row of the list
+  expect(composer.getModel().queue).toMatchObject([{ text: "first" }]);
+  composer.edit("firsx"); // typing now never edits the message already submitted
+  void composer.submit();
+  await sends.release();
+  await sends.release();
+  expect(sends.sent).toEqual(["first", "firsx"]);
+  expect(composer.getModel()).toMatchObject({ draft: "", queue: [] });
+});
+
 test("two enters in a row while a send is pending: both go out once, in order, each as its own send", async () => {
   const sends = heldSends();
   const composer = owner(sends.onSubmit);
   void composer.submit();
   composer.edit("second"); void composer.submit();
   composer.edit("third"); void composer.submit();
-  expect(composer.getModel()).toMatchObject({ draft: "", queue: [{ text: "second" }, { text: "third" }] });
+  expect(composer.getModel()).toMatchObject({ draft: "", queue: [{ text: "first" }, { text: "second" }, { text: "third" }] });
   await sends.release();
   expect(sends.sent).toEqual(["first", "second"]);
   await sends.release();
@@ -182,7 +196,7 @@ test("a message canceled with x or with esc is never sent", async () => {
   const composer = owner(sends.onSubmit);
   void composer.submit();
   for (const text of ["second", "third", "fourth"]) { composer.edit(text); void composer.submit(); }
-  const [, third] = composer.getModel().queue;
+  const third = composer.getModel().queue.find((item) => item.text === "third")!;
   composer.cancel(third.id); // the x
   composer.cancel(); // esc in an empty box: the last one
   await sends.release();
@@ -208,18 +222,19 @@ test("a queued message that fails stays first with its error; nothing after it g
   expect(composer.getModel().queue).toEqual([]);
 });
 
-test("a failed send from the box holds the queue until a send from the box succeeds", async () => {
+test("a failed message stays a row and never comes back on its own; retry counts tries, and edit puts its text back in the box", async () => {
   const sends = heldSends();
   const composer = owner(sends.onSubmit);
   void composer.submit();
-  composer.edit("first\nsecond"); void composer.submit();
+  composer.edit("typed meanwhile");
   await sends.release(new Error("denied"));
-  expect(sends.sent).toEqual(["first"]);
-  expect(composer.getModel()).toMatchObject({ draft: "first", held: true, error: { kind: "submit", text: "denied" }, queue: [{ text: "second" }] });
-  void composer.submit(); // enter on the failed text sends it again, ahead of the queue
-  await sends.release();
-  await sends.release();
-  expect(sends.sent).toEqual(["first", "first", "second"]);
+  expect(composer.getModel()).toMatchObject({ draft: "typed meanwhile", queue: [{ id: 1, text: "first", failed: "denied", tries: 1 }] });
+  void composer.retry(1);
+  await sends.release(new Error("denied again"));
+  expect(composer.getModel().queue).toMatchObject([{ text: "first", failed: "denied again", tries: 2 }]);
+  composer.restore(1);
+  expect(composer.getModel()).toMatchObject({ draft: "first\ntyped meanwhile", queue: [] });
+  expect(sends.sent).toEqual(["first", "first"]);
 });
 
 test("the first message of a new chat: the queue moves to the created chat and goes out there once, in order", async () => {

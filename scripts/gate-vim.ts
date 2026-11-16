@@ -251,7 +251,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const delayedSteerResponse = requests().slice(delayedBeforeSteer).find((frame) => frame.id === delayedSteer.id && (frame.result || frame.error));
   const delayedDraft = await confirmedStock.inputValue();
   if (delayedSteerResponse?.error) {
-    if (delayedDraft !== "steer while running") throw new Error(`rejected delayed steer changed its draft: ${JSON.stringify(delayedDraft)}`);
+    if (delayedDraft !== "") throw new Error(`enter did not take the delayed steer out of the box: ${JSON.stringify(delayedDraft)}`);
     await waitFor(async () => requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running"), "delayed steer fallback send");
     const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
     if (fallbackSend?.params?.delivery_id !== delayedSteer.params?.delivery_id) throw new Error("delayed steer fallback did not reuse its delivery id");
@@ -262,7 +262,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   } else if (delayedSteerResponse?.result) {
     const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
     if (fallbackSend) throw new Error(`successful delayed steer also sent a fallback: ${JSON.stringify(fallbackSend)}`);
-    if (delayedDraft !== "" && delayedDraft !== "steer while running") throw new Error(`successful delayed steer changed its draft: ${JSON.stringify(delayedDraft)}`);
+    if (delayedDraft !== "") throw new Error(`enter did not take the delayed steer out of the box: ${JSON.stringify(delayedDraft)}`);
   } else {
     throw new Error(`delayed steer had no response: ${JSON.stringify(delayedSteerResponse)}`);
   }

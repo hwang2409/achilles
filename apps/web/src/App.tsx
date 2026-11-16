@@ -37,7 +37,7 @@ function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
 
 const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimComposer }) => ({ default: VimComposer })));
 
-type ComposerActivity = { sending: boolean; queued: number };
+type ComposerActivity = { sending: boolean; queued: number; failed: boolean };
 
 // `fromNewChat`: this chat was just created from the page's new-chat composer, so it takes that composer's queue
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
@@ -56,7 +56,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }:
     ...props,
     defaultValue: draft,
     onDraftChange: (text: string) => draftStore.set(sessionId, text),
-    onDeliveryConfirm: (sent: string) => draftStore.confirm(sessionId, sent),
+    onDraftSubmit: (sent: string) => draftStore.confirm(sessionId, sent),
     parkQueue: (queue: Parameters<typeof chatQueues.park>[1]) => chatQueues.park(sessionId, queue),
     takeQueue: () => chatQueues.take(fromNewChat ? [fromNewChat, sessionId] : [sessionId]),
     onActivity,
@@ -79,6 +79,7 @@ function activeLastState(waiting: number, outcome: string, turn: "idle" | "runni
 function headerState(lost: boolean, lastState: string, outcome: string, activity: ComposerActivity) {
   if (lost) return "offline";
   if (lastState === "approval") return lastState;
+  if (activity.failed) return "unsent";
   if (activity.queued) return "queued";
   if (activity.sending && lastState !== "running") return "sending";
   return lastState === "idle" && (outcome === "cancelled" || outcome === "disconnected") ? "stopped" : lastState;
@@ -151,7 +152,7 @@ export function App() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
-  const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0 });
+  const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0, failed: false });
   // after every slot has parked or taken its queue in this commit
   useLayoutEffect(() => chatQueues.settleNewChats());
   const send: typeof active.send = (text, intent, track) => {
@@ -329,7 +330,7 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
   // "create mode" becomes its hollow square alone; role="img" plus aria-label keeps the full name for screen readers.
   const autoApprove = page.approval_mode === "allow";
   const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
-  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state === "queued" && queued > 1 ? `${queued} queued` : state}</span>{foldMarkers}<button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state === "unsent" ? "not sent" : state === "queued" && queued > 1 ? `${queued} queued` : state}</span>{foldMarkers}<button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {

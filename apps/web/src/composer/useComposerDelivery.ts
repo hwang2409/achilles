@@ -6,11 +6,10 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useRunStore, type ComposerProps } from "@fulcrum/react";
-import { DroppedSteerDeliveryError } from "../useActiveChat";
 import {
+  composerActivity,
   createComposerModel,
   transition,
-  waitingCount,
   type ComposerEffect,
   type ComposerEvent,
   type ComposerModel,
@@ -27,11 +26,12 @@ export type ParkedQueue = { texts: string[]; after: Promise<SendOutcome> };
 
 export type ComposerAdapterProps = ComposerProps & {
   onDraftChange: (text: string) => void;
-  onDeliveryConfirm: (sent: string) => void;
+  /** Enter took this text out of the box; the stored draft drops it */
+  onDraftSubmit: (sent: string) => void;
   /** keeps this chat's queue when the composer unmounts; the next composer of the chat takes it */
   parkQueue?: (parked: ParkedQueue) => void;
   takeQueue?: () => ParkedQueue | undefined;
-  onActivity?: (activity: { sending: boolean; queued: number }) => void;
+  onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
 };
 
 type DeliveryOptions = ComposerAdapterProps & {
@@ -44,9 +44,10 @@ export type ComposerDelivery = {
   update(options: DeliveryOptions): void;
   sync(state: ComposerProps["state"], defaultValue?: string): void;
   edit(draft: string): void;
-  dismissError(): void;
   submit(): Promise<void>;
   retry(id: number): Promise<void>;
+  /** Edit a failed message: its text goes back into the box. */
+  restore(id: number): void;
   cancel(id?: number): void;
   /** Mount: take the chat's parked queue. The returned detach parks it again; a detached owner never starts a send. */
   attach(): () => void;
@@ -59,18 +60,14 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
   const listeners = new Set<() => void>();
 
   const apply = (event: ComposerEvent) => {
-    // a queued message never sat in the box, so its confirm leaves the stored draft alone
-    const confirmedText = event.type === "confirm" && model.send?.attempt === event.attempt && model.send.queuedId === undefined
-      ? model.send.sent
-      : undefined;
     const draft = model.draft;
     const result = transition(model, event);
     if (result.model !== model) {
       model = result.model;
       for (const listener of listeners) listener();
     }
-    if (event.type === "edit" || (event.type === "submit" && model.draft !== draft)) current.onDraftChange(model.draft);
-    if (confirmedText !== undefined) current.onDeliveryConfirm(confirmedText);
+    if (event.type === "submit" && model.draft !== draft) current.onDraftSubmit(draft);
+    else if (model.draft !== draft || event.type === "edit") current.onDraftChange(model.draft);
     return result.effect;
   };
 
@@ -79,7 +76,6 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
   const turnRunning = () => current.isTurnRunning?.() ?? current.state === "steerable";
 
   const deliver = async ({ attempt: sendAttempt, text, steer }: Extract<ComposerEffect, { type: "submit" }>) => {
-    const queued = model.send?.queuedId !== undefined;
     let done!: (outcome: SendOutcome) => void;
     sending = new Promise((resolve) => { done = resolve; });
     let outcome: SendOutcome = {};
@@ -87,13 +83,9 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       await attempt(() => current.onSubmit(text, { steer }, () => {}));
       apply({ type: "confirm", attempt: sendAttempt });
     } catch (failure) {
-      outcome = { failed: errorText(failure), text: queued ? text : undefined };
-      apply({
-        type: "reject",
-        attempt: sendAttempt,
-        message: outcome.failed!,
-        dropped: failure instanceof DroppedSteerDeliveryError,
-      });
+      const failed = errorText(failure);
+      outcome = { failed, text };
+      apply({ type: "reject", attempt: sendAttempt, message: failed });
     } finally {
       apply({ type: "settle", attempt: sendAttempt });
       sending = undefined;
@@ -129,9 +121,6 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     edit(draft) {
       apply({ type: "edit", draft });
     },
-    dismissError() {
-      apply({ type: "dismiss-error" });
-    },
     async submit() {
       apply({ type: "state", state: current.state });
       const effect = apply({ type: "submit", turnRunning: turnRunning() });
@@ -141,6 +130,10 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     async retry(id) {
       apply({ type: "retry", id });
       await drain();
+    },
+    restore(id) {
+      apply({ type: "restore", id });
+      void drain();
     },
     cancel(id) {
       apply(id === undefined ? { type: "cancel-last" } : { type: "cancel", id });
@@ -155,11 +148,11 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       }
       return () => {
         detached = true;
-        const inFlight = model.send?.queuedId;
+        const sendingNow = model.sending;
         const waiting = model.waiting;
-        const texts = model.queue.filter((item) => item.id !== inFlight).map((item) => item.text);
+        const texts = model.queue.filter((item) => !sendingNow || item.id !== model.send?.id).map((item) => item.text);
         apply({ type: "detach" });
-        if (texts.length || inFlight !== undefined || waiting)
+        if (texts.length || sendingNow || waiting)
           current.parkQueue?.({ texts, after: sending ?? parked?.after ?? Promise.resolve({}) });
       };
     },
@@ -195,16 +188,15 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
   useLayoutEffect(() => {
     owner.sync(options.state, options.defaultValue);
   }, [owner, options.defaultValue, options.state]);
-  const sendingNow = model.sending && model.send?.queuedId === undefined;
-  const queued = waitingCount(model);
-  useEffect(() => options.onActivity?.({ sending: sendingNow, queued }), [options.onActivity, sendingNow, queued]);
-  useEffect(() => () => options.onActivity?.({ sending: false, queued: 0 }), [options.onActivity]);
+  const { sending, queued, failed } = composerActivity(model);
+  useEffect(() => options.onActivity?.({ sending, queued, failed }), [options.onActivity, sending, queued, failed]);
+  useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false }), [options.onActivity]);
 
   const edit = useCallback((draft: string) => owner.edit(draft), [owner]);
-  const dismissError = useCallback(() => owner.dismissError(), [owner]);
   const submit = useCallback(() => void owner.submit(), [owner]);
   const stop = useCallback(() => void owner.stop(), [owner]);
   const retry = useCallback((id: number) => void owner.retry(id), [owner]);
+  const restore = useCallback((id: number) => owner.restore(id), [owner]);
   const cancel = useCallback((id?: number) => owner.cancel(id), [owner]);
-  return { model, edit, dismissError, submit, stop, retry, cancel, getModel: owner.getModel };
+  return { model, edit, submit, stop, retry, restore, cancel, getModel: owner.getModel };
 }

@@ -28,21 +28,15 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const initialDefaultValue = useRef(defaultValue).current;
   const focusedRef = useRef(true);
   const editable = useRef(new Compartment()).current;
-  const onDeliveryConfirm = useCallback((sent: string) => {
-    props.onDeliveryConfirm(sent);
-    const view = viewRef.current;
-    if (!view || !view.state.doc.toString().startsWith(sent)) return;
-    view.dispatch({ changes: { from: 0, to: sent.length } });
-  }, [props.onDeliveryConfirm]);
-  const deliveryProps = { ...props, onDeliveryConfirm };
-  const { model, edit, dismissError, submit: submitDraft, stop, retry, cancel, getModel } = useComposerDelivery(deliveryProps);
-  // queueing moves the text out of the box; the editor owns its document, so follow the model here
-  const submit = () => {
-    submitDraft();
+  const { model, edit, submit: submitDraft, stop, retry, restore: restoreDraft, cancel, getModel } = useComposerDelivery(props);
+  // enter and edit move text out of and into the box; the editor owns its document, so follow the model here
+  const followModel = () => {
     const view = viewRef.current;
     const draft = getModel().draft;
     if (view && view.state.doc.toString() !== draft) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: draft } });
   };
+  const submit = () => { submitDraft(); followModel(); };
+  const restore = (id: number) => { restoreDraft(id); followModel(); viewRef.current?.focus(); };
   const modelRef = useRef<ComposerModel>(model);
   const submitRef = useRef(submit);
   modelRef.current = model;
@@ -148,7 +142,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const action = submitAction(model);
-  const queues = action === "queue" || (model.queue.length > 0 && !model.held);
+  const queues = model.sending || model.waiting || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
   const hint = mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send · esc leave" : "i focus · j/k scroll chat · ? shortcuts";
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
@@ -158,7 +152,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   }, []);
 
   return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
-    <QueuedMessages model={model} onRetry={retry} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
+    <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
       <div className="vim-guidance">
@@ -166,7 +160,6 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
           <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
-          {model.error?.kind === "dropped" ? <button type="button" data-part="composer-dismiss" aria-label="dismiss delivery warning" onClick={dismissError}>dismiss</button> : null}
         </p>
       </div>
       <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>

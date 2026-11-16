@@ -392,7 +392,7 @@ export async function confirmSteerDelivery(
     const status = result as DeliveryStatus;
     const outcome = status.status === "evicted" ? status.outcome : status.status;
     if (outcome === "delivered") return deliveryId;
-    if (outcome === "dropped") throw new DroppedSteerDeliveryError("this message was not sent. your text is still here; press send to try again.");
+    if (outcome === "dropped") throw new DroppedSteerDeliveryError("zeta dropped this message before reading it.");
     if (outcome !== "queued") throw new Error(`steer delivery status: ${status.status}`);
     // a steer waits for the next model step, which can follow a long tool run or an approval
     await new Promise((resolve) => setTimeout(resolve, 250));
