@@ -14,7 +14,7 @@
 .metric-block strong { min-width: 0; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .metric-block strong.metric-value-long { white-space: normal; overflow-wrap: anywhere; }
 .metric-block small, .metric-delta { color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
-.metric-delta { margin-left: auto; align-self: center; white-space: nowrap; }
+.metric-delta { white-space: nowrap; }
 .metric-warn { color: var(--fulcrum-warn); }
 .record-mark { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; margin: 5px 2px 0 0; outline: 1px solid var(--fulcrum-muted); outline-offset: -1px; vertical-align: 1px; }
 .record-mark-reading, .record-mark-in-progress { background: linear-gradient(90deg, var(--fulcrum-accent) 50%, transparent 50%); outline-color: var(--fulcrum-accent); }
@@ -30,7 +30,7 @@
 .record-list th:first-child, .record-list td:first-child { width: 43%; }
 .record-list th:nth-child(2), .record-list td:nth-child(2) { width: 27%; }
 .record-list th:nth-child(3), .record-list td:nth-child(3) { width: 18%; }
-.record-list th:nth-child(4), .record-list td:nth-child(4) { width: 12%; }
+.record-list th:nth-child(4), .record-list td:nth-child(4) { width: 16%; }
 .record-list td { height: 40px; min-width: 0; overflow: hidden; padding: 0 8px; border-top: 1px solid var(--fulcrum-border); white-space: nowrap; text-overflow: ellipsis; }
 .record-list td:first-child, .record-list th:first-child { padding-left: 12px; }
 .record-list td:not(:first-child) { color: var(--fulcrum-muted); }
@@ -66,15 +66,19 @@
 .metric-value-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .record-count { font-weight: 400; }
 .record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
+.record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
+.record-detail dd .record-mark { margin-right: 6px; }
 .selected-note, .form-note { color: var(--fulcrum-muted); font-size: 12px; font-weight: 400; }
-@media (max-width: 500px) {
-  .record-list table { table-layout: auto; }
-  .record-list th:first-child, .record-list td:first-child { width: auto; min-width: 0; }
-  .record-list th:nth-child(2), .record-list td:nth-child(2) { width: auto; }
-  .record-list th:nth-child(3), .record-list td:nth-child(3), .record-list th:nth-child(4), .record-list td:nth-child(4) { width: auto; }
+@media (max-width: 640px) {
+  .record-list table { table-layout: fixed; }
+  .record-list th[data-column="author"], .record-list td[data-column="author"],
+  .record-list th[data-column="pages"], .record-list td[data-column="pages"] { display: none; }
+  .record-list th[data-column="title"], .record-list td[data-column="title"] { width: auto; }
+  .record-list th[data-column="status"], .record-list td[data-column="status"] { width: 92px; }
+  .record-list th[data-column="updated"], .record-list td[data-column="updated"] { width: 78px; }
   .record-list td { padding-inline: 4px; }
   .record-list td:first-child, .record-list th:first-child { padding-left: 0; }
-  .record-list td:not(:first-child) { white-space: normal; }
+  .record-list td:not(:first-child) { white-space: nowrap; }
   .record-status { gap: 4px; }
 }
 

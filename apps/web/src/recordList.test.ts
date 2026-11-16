@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
-import { LayoutBlock, RecordList } from "./App";
+import { LayoutBlock, PageView, RecordList } from "./App";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import type { PageTool } from "./page/usePageTools";
 
@@ -184,15 +184,33 @@ describe("list columns", () => {
 });
 
 
-test("reveals later rows and selects them by keyboard and click", async () => {
+test("page metrics render a live static layout value", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: [{ id: "score", type: "metric", label: "score", value: 1 }] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(result.getByText("1")).toBeTruthy();
+  result.rerender(React.createElement(PageView, { page: { ...page, active_layout_version: 2, layout: { blocks: [{ id: "score", type: "metric", label: "score", value: 2 }] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(result.getByText("2")).toBeTruthy();
+});
+
+test("keyboard and click selection update the row and detail", async () => {
   holdFetches();
-  const result = renderList(props);
-  await settle(calls[0], Array.from({ length: 6 }, (_, index) => ({ record_id: `book-${index}`, title: `book ${index}` })));
-  expect(result.getByText("show 1 more")).toBeTruthy();
-  fireEvent.click(result.getByRole("button", { name: "show 1 more" }));
-  const later = result.getByRole("row", { name: /book 5/ });
-  expect(later).toBeTruthy();
-  later.focus();
-  fireEvent.keyDown(later, { key: "Enter" });
-  fireEvent.click(later);
+  const page = { title: "reading", route: "/reading", layout: { blocks: [
+    { type: "list", title: "books", collection: "books", fields: ["title", "status"] },
+    { type: "detail", title: "selected book", collection: "books", fields: ["title"], filter: { field: "status", equals: "reading" } },
+  ] } };
+  const result = render(React.createElement(PageView, { page, pageId: "selection-page", credential: "secret", refreshKey: "0" }));
+  const first = { record_id: "book-1", title: "first book", status: "reading" };
+  const second = { record_id: "book-2", title: "second book", status: "reading" };
+  await settle(calls[0], [first, second]);
+  await settle(calls[1], [first]);
+  const rows = result.getAllByRole("row");
+  await act(async () => {
+    rows[1].focus();
+    fireEvent.keyDown(rows[1], { key: "Enter" });
+  });
+  expect(rows[1].getAttribute("aria-selected")).toBe("true");
+  expect(result.getAllByText("first book").length).toBeGreaterThan(1);
+  await act(async () => fireEvent.click(rows[2]));
+  expect(rows[2].getAttribute("aria-selected")).toBe("true");
+  expect(result.getAllByText("second book").length).toBeGreaterThan(1);
 });

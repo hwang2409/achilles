@@ -30,10 +30,15 @@ export function PageView({ page, pageId, credential, refreshKey }: PageViewProps
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>
     </header>
     <div className="page-blocks">{groupBlocks(content).map((group) => {
-      const key = group.map((block) => blockIdentity(block, content)).join("|");
+      const key = group.length === 1 ? blockIdentity(group[0], content) : metricStripIdentity(group[0], content);
       return group.length === 1 ? <LayoutBlock key={key} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} /> : <div className="metric-strip" key={key}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />)}</div>;
     })}</div>
   </main>;
+}
+
+function metricStripIdentity(block: Record<string, unknown>, blocks: Array<Record<string, unknown>>): string {
+  if (typeof block.id === "string" && block.id) return `metric-strip:${block.id}`;
+  return `metric-strip:${blockIdentity(block, blocks).split(":")[0]}:${String(block.label ?? block.title ?? "metrics")}`;
 }
 
 function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<string, unknown>>): string {
@@ -61,7 +66,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
 }
 
 function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
-  const [value, setValue] = useState(block.value == null ? (block.count ? "…" : "0") : String(block.value));
+  const [countValue, setCountValue] = useState(block.count ? "…" : "");
   useEffect(() => {
     if (!block.count || typeof block.collection !== "string") return;
     let live = true;
@@ -72,13 +77,14 @@ function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<
       query.set("equals", JSON.stringify(where.equals));
     }
     void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(block.collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then((response) => {
-      if (live) setValue(response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—");
-    }).catch(() => { if (live) setValue("—"); });
+      if (live) setCountValue(response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—");
+    }).catch(() => { if (live) setCountValue("—"); });
     return () => { live = false; };
   }, [block.collection, block.count, block.where, credential, pageId, refreshKey]);
+  const value = block.count ? countValue : block.value == null ? "0" : String(block.value);
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`${block.warn ? "metric-warn " : ""}metric-value${String(value).length > 10 ? " metric-value-long" : ""}`}>{value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${String(value).length > 10 ? " metric-value-long" : ""}`}>{value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
@@ -114,6 +120,11 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => { const row = event.currentTarget; if (event.key === "Enter" || event.key === " ") onSelect?.(record, row); else if (event.key === "Escape") onSelect?.(null, row); else if (event.key === "ArrowDown") (row.nextElementSibling as HTMLElement | null)?.focus(); else if (event.key === "ArrowUp") (row.previousElementSibling as HTMLElement | null)?.focus(); else return; event.preventDefault(); };
   const visible = expanded ? loadedRecords : loadedRecords.slice(0, 5);
-  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{total.toLocaleString()}</span></h2><span>sorted by updated</span></header>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><table role={onSelect ? "grid" : undefined} aria-label={title} data-collection={collection}><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{visible.map((record, index) => <tr key={String(record.record_id ?? index)} data-record-id={record.record_id == null ? undefined : String(record.record_id)} {...onSelect && { tabIndex: record.record_id === tabStop ? 0 : -1, "aria-selected": record.record_id === selectedId, onFocus: () => setFocusedId(record.record_id), onClick: (event: MouseEvent<HTMLTableRowElement>) => onSelect(record, event.currentTarget), onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column} className={column === "status" ? "record-status-cell" : column === "updated" ? "record-updated-cell" : undefined}>{column === "status" ? <span className="record-status"><RecordMark status={String(record[column] ?? "")} />{formatRecordValue(record[column]) || "—"}</span> : formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>{total > 5 && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${total - 5} more`}</button><small>{expanded ? `${loadedRecords.length} of ${total}` : `5 of ${total}`}</small></div>}</>}</section>;
+  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{total.toLocaleString()}</span></h2><span>sorted by updated</span></header>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><LoadedRecordTable columns={columns} records={visible} collection={collection} title={title} selectedId={selectedId} tabStop={tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{total > 5 && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${total - 5} more`}</button><small>{expanded ? `${loadedRecords.length} of ${total}` : `5 of ${total}`}</small></div>}</>}</section>;
 }
+
+function LoadedRecordTable({ columns, records, collection, title, selectedId, tabStop, onSelect, onFocus, onKeyDown }: { columns: string[]; records: Record<string, unknown>[]; collection?: string; title: string; selectedId?: unknown; tabStop?: unknown; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void; onFocus: (id: unknown) => void; onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => void }) {
+  return <table role={onSelect ? "grid" : undefined} aria-label={title} data-collection={collection}><thead><tr>{columns.map((column) => <th key={column} data-column={column}>{column}</th>)}</tr></thead><tbody>{records.map((record, index) => <tr key={String(record.record_id ?? index)} data-record-id={record.record_id == null ? undefined : String(record.record_id)} {...onSelect && { tabIndex: record.record_id === tabStop ? 0 : -1, "aria-selected": record.record_id === selectedId, onFocus: () => onFocus(record.record_id), onClick: (event: MouseEvent<HTMLTableRowElement>) => onSelect(record, event.currentTarget), onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column} data-column={column} className={column === "status" ? "record-status-cell" : column === "updated" ? "record-updated-cell" : undefined}>{column === "status" ? <span className="record-status"><RecordMark status={String(record[column] ?? "")} />{formatRecordValue(record[column]) || "—"}</span> : formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>;
+}
+
 function formatRecordValue(value: unknown): string { return value !== null && typeof value === "object" ? JSON.stringify(value) : String(value ?? ""); }

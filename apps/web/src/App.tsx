@@ -24,7 +24,7 @@ import "./style.css";
 import "./page/page.css";
 import "./chat/markdown.css";
 
-export { LayoutBlock, RecordList, RecordListView } from "./page/PageView";
+export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
