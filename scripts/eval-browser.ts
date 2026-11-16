@@ -85,6 +85,23 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     if (step.follow_up) {
       await type(tab, step.follow_up); row.follow_up_sent = true;
     }
+    if (step.new_chat) await newChat(tab, step.new_chat, row);
+  }
+  // the reloaded page took over the running chat; the user clicks "new chat" and sends text written for that new chat.
+  // records every send or steer of that text and whether the page still shows it, then goes back to the running chat
+  // the way a user would ("open it" on the notice), so the turn's approvals can still be answered on its card
+  async function newChat(tab: Tab, text: string, row: Record<string, unknown>) {
+    const before = tab.frames.length;
+    await tab.page.getByRole("button", { name: "new chat" }).first().click();
+    // done when the page shows why no chat started, or a new chat's empty view
+    await tab.page.locator('.create-mode-alert:has-text("still running"), .empty-chat').first().waitFor({ timeout: READY_MS });
+    await ready(tab); await type(tab, text); row.new_chat_typed = true;
+    // the page answers an Enter at once: a send, a steer, or a failed row; zeta answers a request within this wait
+    await tab.page.waitForTimeout(2_000);
+    row.new_chat_sent = tab.frames.slice(before).filter(frame => frame.direction === "sent" && ["send", "steer"].includes(frame.value.method) && frame.value.params?.text === text).map(frame => ({ method: frame.value.method, session_id: frame.value.params.session_id }));
+    row.new_chat_visible = (await tab.page.locator("#message-composer").innerText()).includes(text) || (await tab.page.getByRole("textbox", { name: "message", exact: true }).inputValue()).includes(text);
+    const open = tab.page.locator(".create-mode-alert").getByRole("button", { name: "open it" });
+    if (await open.count()) { await open.click(); await ready(tab); }
   }
   // a frame the page already has, or the first matching one it receives before the ready deadline
   function waitFrame(tab: Tab, find: () => Frame | undefined) {
@@ -120,7 +137,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     },
     wake: () => wake(),
     // `register` names the page's chat before the observer joins it, so its approval requests find their chat
-    async prompt(step: TaskStep, pageId: string, route: string, register: (sessionId: string) => void) {
+    async prompt(step: TaskStep, pageId: string, route: string, register: (sessionId: string) => void, replay: (event: Record<string, unknown>) => void) {
       const tab = await open(step, pageId, route); const observer = options.observer(); log(`${step.id}: sending the prompt through the page`);
       const prior = tab.sessionId ? (await observer.sessionHistory(tab.sessionId)).filter((row: any) => row.event === "served_turn_end").length : 0;
       if (step.reload) {
@@ -130,10 +147,13 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
       await type(tab, step.prompt!);
       const aborted = new Promise<never>((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true })); aborted.catch(() => undefined);
       // a new chat has its zeta session only once the page sends; the observer joins it then
-      // shortcut: an event between the send and the join is not seen live; a model reply takes far longer than the join
+      // shortcut: an event between the send and the join is not seen live; a model reply takes far longer than the join.
+      // an approval request in that gap (a scripted model asks at once) is still pending, so it is replayed from the join
       if (!tab.sessionId) {
         const shown = await shownSession(tab); if (!shown) throw new Error(`browser page ${route} shows no chat after the first message`);
-        tab.sessionId = shown; bySession.set(shown, tab); register(shown); await observer.subscribe(shown);
+        tab.sessionId = shown; bySession.set(shown, tab); register(shown);
+        const joined = await observer.subscribe(shown) as { status?: { pending_approvals?: Array<Record<string, unknown>> } };
+        for (const request of joined?.status?.pending_approvals ?? []) replay({ event: "approval_request", session_id: shown, ...request });
       }
       const texts = [step.prompt!]; let history: any[] = [];
       for (;;) {
