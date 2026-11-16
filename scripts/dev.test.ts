@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaCacheError, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
+import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
@@ -43,23 +43,11 @@ function processesContaining(text: string): string[] {
 
 async function diagnostic(args: string[]): Promise<string> {
   const child = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-  const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-    .then(([stdout, stderr]) => stdout + stderr);
-  let timedOut = false;
-  const result = await Promise.race([
-    output,
-    Bun.sleep(5_000).then(() => { timedOut = true; return ""; }),
+  const [output] = await Promise.all([
+    Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]).then(([stdout, stderr]) => stdout + stderr),
+    child.exited,
   ]);
-  if (timedOut) {
-    try { child.kill("SIGKILL"); } catch {}
-    await Promise.race([
-      child.exited,
-      Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping diagnostic pid ${child.pid}`); }),
-    ]);
-    return `[diagnostic timeout: ${args.join(" ")}]`;
-  }
-  await child.exited;
-  return result;
+  return output;
 }
 
 async function killAndReap(child: Bun.Subprocess): Promise<void> {
@@ -106,7 +94,6 @@ test("zeta invocations use one selected executable", () => {
     ["default", "/repo/.cache/zeta/.venv/bin/zeta", "'/repo/.cache/zeta/.venv/bin/zeta' mcp remove achilles --scope user && '/repo/.cache/zeta/.venv/bin/zeta' mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles", "ok"],
     ["path", "zeta", "'zeta' mcp remove achilles --scope user && 'zeta' mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles", "ok"],
     ["path mismatch", "zeta", zetaRemediationMessage(pin), "behind"],
-    ["dirty cache", "/repo/.cache/zeta/.venv/bin/zeta", ".cache/zeta has local changes; make dev will not change it", "dirty"],
   ] as const;
   for (const [name, executable, command, kind] of cases) {
     if (kind === "behind") {
@@ -114,7 +101,6 @@ test("zeta invocations use one selected executable", () => {
       expect(decision.kind, name).toBe("behind");
       expect(decision.kind === "behind" ? decision.message : "", name).toBe(command);
     }
-    else if (kind === "dirty") expect(zetaCacheError(" M src/zeta.ts"), name).toBe(command);
     else expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/", executable), name).toMatchObject({ kind: "different", command });
   }
 });
@@ -134,7 +120,7 @@ test("default zeta selection is isolated and path selection is explicit", () => 
     delete process.env.ACHILLES_USE_PATH_ZETA;
     expect(zetaExecutable()).toBe(resolve(root, ".cache/zeta/.venv/bin/zeta"));
     process.env.ACHILLES_USE_PATH_ZETA = "1";
-    expect(zetaExecutable()).toBe("zeta");
+    expect(zetaExecutable()).toBe(Bun.which("zeta") ?? "zeta");
   } finally {
     if (old === undefined) delete process.env.ACHILLES_USE_PATH_ZETA;
     else process.env.ACHILLES_USE_PATH_ZETA = old;
@@ -317,8 +303,23 @@ if (args[0] === "mcp" && args[1] === "show") {
 process.exit(0);
 `);
   await Promise.all(["uv", "open", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
+  const fakeGit = resolve(bin, "git");
+  await writeFile(fakeGit, `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_GIT_CALLS"
+case "$*" in *status*) exec /usr/bin/git "$@";; *fetch*|*checkout*) exit 0;; esac
+exec /usr/bin/git "$@"
+`);
+  await chmod(fakeGit, 0o755);
+  const cachedZeta = resolve(root, ".cache/zeta/.venv/bin/zeta");
+  const cachedZetaBackup = await Bun.file(cachedZeta).exists() ? await readFile(cachedZeta) : null;
+  await rm(resolve(root, ".cache/zeta/dirty-test-file"), { force: true });
+  await mkdir(resolve(root, ".cache/zeta/.venv/bin"), { recursive: true });
+  await writeFile(cachedZeta, await readFile(fakeZeta));
+  await chmod(cachedZeta, 0o755);
+  await mkdir(resolve(root, ".cache/zeta/.git"), { recursive: true });
 
   const port = await freePort();
+  const gitCalls = resolve(temp, "git-calls");
   const baseEnv = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
@@ -329,6 +330,7 @@ process.exit(0);
     ACHILLES_DEV_SKIP_BUILD: "1",
     FAKE_MCP_URL: `http://127.0.0.1:${port}/mcp/`,
     FAKE_ZETA_CALLS: calls,
+    FAKE_GIT_CALLS: gitCalls,
     FAKE_SERVER_PIDS: serverPids,
     FAKE_PARENT_PID: String(process.pid),
   };
@@ -352,7 +354,8 @@ process.exit(0);
     expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
     expect(startedServe?.[startedServe.indexOf("--ws-discovery") + 1]).toBe(resolve(achillesHome, "run/serve.json"));
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
-    const firstZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    const firstZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity & { executable: string };
+    expect(firstZetaState.executable).toBe(fakeZeta);
     zetaPid = firstZetaState.pid;
     discovered.push(firstZetaState);
     expect(callsAfterFirst.some((args) => args[0] === "mcp" && ["add", "remove"].includes(args[1]) && !args.includes("--help"))).toBe(false);
@@ -364,8 +367,28 @@ process.exit(0);
     expect(second.exitCode, second.stderr).toBe(0);
     const secondState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
     expect(secondState.pid).toBe(firstState.pid);
+
+    const defaultRun = await runDev({ ...baseEnv, ACHILLES_USE_PATH_ZETA: "0" });
+    expect(defaultRun.exitCode, defaultRun.stderr).toBe(0);
+    expect(alive(firstZetaState.pid), "switching zeta mode must stop the path-owned server").toBe(false);
+    const defaultZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity & { executable: string };
+    expect(defaultZetaState.executable).toBe(cachedZeta);
+    expect(alive(defaultZetaState.pid)).toBe(true);
+    discovered.push(defaultZetaState);
+
+    const dirtyFile = resolve(root, ".cache/zeta/dirty-test-file");
+    await writeFile(dirtyFile, "must remain");
+    const beforeGitCalls = (await readFile(gitCalls, "utf8")).split("\n").filter(Boolean).length;
+    const dirtyRun = await runDev({ ...baseEnv, ACHILLES_USE_PATH_ZETA: "0" });
+    expect(dirtyRun.exitCode).not.toBe(0);
+    expect(dirtyRun.stderr).toContain(".cache/zeta has local changes; make dev will not change it\n");
+    expect(await readFile(dirtyFile, "utf8")).toBe("must remain");
+    const afterGitCalls = (await readFile(gitCalls, "utf8")).split("\n").filter(Boolean);
+    expect(afterGitCalls.slice(beforeGitCalls).some((call) => call.includes("fetch"))).toBe(false);
+    await rm(dirtyFile);
+
     const callsAfterSecond = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
-    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(1);
+    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(2);
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
 
     const ownedDiscovery = resolve(achillesHome, "run/serve.json");
@@ -498,7 +521,11 @@ process.exit(0);
     try {
       if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
     } catch (error) { cleanupErrors.push(String(error)); }
-    try { await rm(temp, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
+    try {
+      if (cachedZetaBackup) await writeFile(cachedZeta, cachedZetaBackup);
+      else await rm(cachedZeta, { force: true });
+      await rm(temp, { recursive: true, force: true });
+    } catch (error) { cleanupErrors.push(String(error)); }
     if (cleanupErrors.length || survivors.size) {
       const details = [...survivors].map(([pid, command]) => `pid ${pid} ${command}`);
       throw new Error([...cleanupErrors, ...details].join("\n"));

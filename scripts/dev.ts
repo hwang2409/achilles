@@ -14,6 +14,7 @@ type Discovery = { pid: number; port: number; origins: string[] };
 export type ServeDecision = { kind: "reuse"; document: Discovery; origin: string } | { kind: "start" } | { kind: "origin-missing"; command: string };
 export type ProcessIdentity = { pid: number; started: string; command: string };
 type AchillesState = ProcessIdentity & { stamp: string };
+type ZetaServeState = ProcessIdentity & { executable: string };
 export type AchillesDecision = { kind: "start" } | { kind: "restart"; saved: AchillesState } | { kind: "reuse" } | { kind: "foreign"; pid: number };
 type McpConfig = { transport?: string; url?: string };
 export type McpDecision = { kind: "add" } | { kind: "unchanged" } | { kind: "different"; command: string };
@@ -130,7 +131,7 @@ async function backupOnce(file: string) {
   try { await output.writeFile(await readFile(file)); await output.sync(); } finally { await output.close(); }
 }
 export function zetaExecutable(): string {
-  return process.env.ACHILLES_USE_PATH_ZETA === "1" ? "zeta" : resolve(root, ".cache/zeta/.venv/bin/zeta");
+  return process.env.ACHILLES_USE_PATH_ZETA === "1" ? Bun.which("zeta") ?? "zeta" : resolve(root, ".cache/zeta/.venv/bin/zeta");
 }
 export function zetaCacheError(status: string): string | null {
   return status ? ".cache/zeta has local changes; make dev will not change it" : null;
@@ -172,14 +173,14 @@ async function attachServe(discovery: string, requestedOrigin: string): Promise<
   throw new Error(`ACHILLES_ZETA_DISCOVERY does not name a live zeta serve: ${discovery}`);
 }
 async function chooseOwnedServe(discovery: string, requestedOrigin: string, executable: string): Promise<{ origin: string; discovery: string }> {
-  let saved: ProcessIdentity | null = null;
+  let saved: ZetaServeState | null = null;
   try { saved = JSON.parse(await readFile(resolve(cache, "zeta-serve.json"), "utf8")); } catch {}
   const savedIdentity = saved ? await processIdentity(saved.pid) : null;
   const document = await readDiscovery(discovery) as Partial<Discovery> | null;
   const discoveryIdentity = document?.pid === saved?.pid ? savedIdentity : document?.pid ? await processIdentity(document.pid) : null;
   const decision = serveDecision(document, requestedOrigin, discoveryIdentity?.command ?? null);
   if (saved && ownedProcessMatches(saved, savedIdentity)) {
-    if (document?.pid === saved.pid && decision.kind === "reuse") {
+    if (saved.executable === executable && document?.pid === saved.pid && decision.kind === "reuse") {
       console.log(`reusing achilles zeta serve on port ${decision.document.port}`);
       return { origin: decision.origin, discovery };
     }
@@ -196,7 +197,7 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string, exec
   catch (error) { child.kill(); await child.exited; throw new Error(`${error instanceof Error ? error.message : error}. fix the error and retry:\n${await tail(logPath)}`); }
   if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
   const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
-  await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
+  await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify({ ...identityAfter, executable })); child.unref();
   console.log(`started achilles zeta serve on port ${ws}`); return { origin: alternate, discovery };
 }
 async function chooseServe(requestedOrigin: string, executable: string): Promise<{ origin: string; discovery: string }> {
@@ -284,15 +285,7 @@ async function checkZetaRevision() {
   if (decision.kind === "behind") throw new Error(decision.message);
   if (decision.kind === "unknown") console.error(`warning: cannot verify the installed zeta is at least the pin ${pin}: ${decision.reason}; continuing`);
 }
-async function prerequisites(): Promise<string> {
-  const fixes: Record<string, string> = {
-    bun: "curl -fsSL https://bun.sh/install | bash",
-    uv: "curl -LsSf https://astral.sh/uv/install.sh | sh",
-    git: process.platform === "darwin" ? "xcode-select --install" : "sudo apt-get install -y git",
-  };
-  for (const command of ["bun", "uv", "git"]) {
-    if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) throw new Error(`missing ${command}: ${fixes[command]}`);
-  }
+async function ensureZetaPrerequisite(): Promise<string> {
   if (process.env.ACHILLES_USE_PATH_ZETA !== "1") await ensurePinnedZeta();
   else if (!Bun.which("zeta")) throw new Error("missing zeta: install zeta or unset ACHILLES_USE_PATH_ZETA");
   const zeta = zetaExecutable();
@@ -317,6 +310,17 @@ async function prerequisites(): Promise<string> {
   if (!process.env.ACHILLES_ZETA_DISCOVERY && process.env.ACHILLES_USE_PATH_ZETA === "1") await checkZetaRevision();
   await mkdir(home, { recursive: true });
   return zeta;
+}
+async function prerequisites(): Promise<string> {
+  const fixes: Record<string, string> = {
+    bun: "curl -fsSL https://bun.sh/install | bash",
+    uv: "curl -LsSf https://astral.sh/uv/install.sh | sh",
+    git: process.platform === "darwin" ? "xcode-select --install" : "sudo apt-get install -y git",
+  };
+  for (const command of ["bun", "uv", "git"]) {
+    if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) throw new Error(`missing ${command}: ${fixes[command]}`);
+  }
+  return await ensureZetaPrerequisite();
 }
 async function dev() {
   const zeta = await prerequisites();
