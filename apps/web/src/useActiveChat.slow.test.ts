@@ -842,14 +842,18 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
       expect(rowsOf(composer("chat"))).toEqual([]);
       expect(sendsOfText(), "text written for the new chat reached the running chat").toEqual([]);
       expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
-      // the turn ends; "new chat" makes the chat the text was written for, and the row moves there, still unsent
+      // the turn ends; the notice's "open" shows the new-chat box with the row, still unsent, and makes no chat
       running = false;
-      await act(async () => { await harness.active.newChat(); });
-      await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
-      const s1 = composer("s1", "new:home");
-      expect(s1.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat is still running") }]);
+      await act(async () => { harness.active.openNewChat(); });
+      expect(requests.filter((method) => method === "new_session"), "open made a chat").toHaveLength(0);
+      await flushUntil(() => harness.active.state.phase === "empty");
+      const box2 = composer("new:home");
+      expect(box2.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat is still running") }]);
       expect(sendsOfText()).toEqual([]);
-      await act(async () => { await s1.retry(s1.getModel().queue[0]!.id); });
+      // retry makes the chat the text was written for, and sends it there once
+      await act(async () => { await box2.retry(box2.getModel().queue[0]!.id); });
+      await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
+      expect(requests.filter((method) => method === "new_session")).toHaveLength(1);
       expect(sendsOfText(), "sent other than once, to the new chat").toEqual([{ method: "send", session: "s1", text: UNSENT_TEXT }]);
       // zeta took it: a later page load shows it nowhere and sends nothing
       await load();

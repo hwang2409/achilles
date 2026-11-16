@@ -97,7 +97,7 @@ export function createChatQueues() {
       createdChats.set(newChat, chat);
       keys.set(owner, chat);
       keep(owner);
-      writeRows(newChat, []);
+      if (!unsaved.has(owner)) writeRows(newChat, []);
     },
     /** how many unsent rows `chat` keeps for a later page load (the page shows a notice for its new-chat box's) */
     unsent: (chat: string) => readRows(chat).length,

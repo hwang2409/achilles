@@ -15,7 +15,7 @@ import {
   type ComposerModel,
   type QueuedMessage,
 } from "./composer-machine";
-import { chatQueues, MAYBE_SENT } from "./chatQueues";
+import { chatQueues } from "./chatQueues";
 
 const attempt = (action: () => unknown) =>
   new Promise<unknown>((resolve) => resolve(action()));
@@ -203,8 +203,9 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
     check();
     return store.subscribe(check);
   }, [owner, store, echoWanted]);
-  // a row in flight when an earlier page load ended: zeta's transcript shows its delivery id once zeta took it
-  const maybeSent = model.queue.some((item) => item.failed === MAYBE_SENT);
+  // a failed row that went out (in flight when an earlier page load ended, or a retry of one that failed): zeta's
+  // transcript shows its delivery id once zeta took it
+  const maybeSent = model.queue.some((item) => item.failed && item.deliveryId);
   useEffect(() => {
     if (!maybeSent) return;
     const check = () => {
@@ -213,7 +214,7 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
         const item = store.getItem(id);
         if (item?.type === "user" && item.event.type === "user_message" && item.event.delivery_id) taken.add(item.event.delivery_id);
       }
-      for (const row of owner.getModel().queue) if (row.failed === MAYBE_SENT && row.deliveryId && taken.has(row.deliveryId)) owner.echo(row.deliveryId);
+      for (const row of owner.getModel().queue) if (row.failed && row.deliveryId && taken.has(row.deliveryId)) owner.echo(row.deliveryId);
     };
     check();
     return store.subscribe(check);

@@ -574,6 +574,13 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     }
   }, [applyPendingCreateMode, client, publishReady, showBusy, state]);
 
+  // the unsent-rows notice: show the page's new-chat box with its rows; the chat is made only when one of them is sent
+  const openNewChat = useCallback(() => {
+    if (state.phase !== "ready") return;
+    owner.current.begin(`new:${state.page.route === "/" ? "home" : state.page.route.slice(1)}`, true);
+    setState({ phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
+  }, [state]);
+
   const retrySaving = useCallback(() => { setRouteRefresh((value) => value + 1); }, []);
   const retryAttachment = useCallback(() => {
     owner.current.clear();
@@ -746,5 +753,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }
