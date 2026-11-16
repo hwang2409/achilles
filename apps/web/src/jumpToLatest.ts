@@ -18,6 +18,8 @@ type Store = Pick<ReturnType<typeof createRunStore>, "subscribe" | "getState" | 
 export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (shown: boolean) => void, follow: () => void): () => void {
   // the reader moved up by their own input; a WebKit wheel scroll lands after its event, so mark it at the input
   let userScrolled = false;
+  // and that input's scroll has landed: a follow write queued before the input must not count as a return to the bottom
+  let movedUp = false;
   const gap = () => scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop;
   const atBottom = () => gap() <= (userScrolled ? 0.5 : 4);
   const tail = () => {
@@ -41,7 +43,8 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
   let lastTop = scroll.scrollTop;
   const onScroll = () => {
     // back down at the bottom (a scroll, "jump to latest", or a send): the timeline follows again
-    if (userScrolled && scroll.scrollTop > lastTop && gap() <= 1) userScrolled = false;
+    if (userScrolled && scroll.scrollTop < lastTop) movedUp = true;
+    else if (movedUp && scroll.scrollTop > lastTop && gap() <= 1) userScrolled = movedUp = false;
     lastTop = scroll.scrollTop;
     if (!atBottom()) return;
     bottomTop = scroll.scrollTop;

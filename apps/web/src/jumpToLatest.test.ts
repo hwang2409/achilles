@@ -29,6 +29,8 @@ const cases: Case[] = [
   { name: "a 3 px wheel up stops following", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { wheel(-3); scrollTo(3); store.dispatch(delta("m1", " more")); grow(68); store.dispatch(delta("m1", " more")); }, shown: true, follows: 0 },
   // WebKit applies a wheel scroll after its event; a delta in between still sees the old bottom scrollTop
   { name: "a 40 px wheel up before its late scroll", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { wheel(-40); grow(68); store.dispatch(delta("m1", " more")); scrollTo(108); }, shown: true, follows: 0 },
+  // Chromium: a follow write queued before the wheel lands first (down, at the bottom), then the wheel's own scroll
+  { name: "a wheel up after a queued follow write", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { wheel(-3); grow(20); scrollTo(0); scrollTo(3); grow(68); store.dispatch(delta("m1", " more")); }, shown: true, follows: 0 },
   { name: "back at the bottom after a wheel up, the snap re-follows again", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { wheel(-3); scrollTo(3); scrollTo(0); scrollTo(1); grow(68); store.dispatch(delta("m1", " more")); }, shown: false, follows: 1 },
   { name: "chat switch resets it", fromBottom: 2000, act: (store, _box, rewatch) => { store.dispatch(delta("m1", " more")); rewatch(); }, shown: false },
 ];
