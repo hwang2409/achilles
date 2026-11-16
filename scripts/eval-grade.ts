@@ -680,6 +680,9 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     if (row.ok !== true) return { reason: `the restart failed: ${String(row.error ?? "unknown")}`, evidence } satisfies CheckFailure;
     if (row.resumed_session_id !== row.original_session_id) return { reason: "the chat came back as a different session", evidence } satisfies CheckFailure;
     if (row.history_continuity !== true) return { reason: "rows from before the restart are missing from the chat", evidence } satisfies CheckFailure;
+    // an approval the dead turn left open must be closed (approval_end) by the end: an open one keeps a live card on the page
+    const dangling = (row.dangling_approvals ?? []) as unknown[];
+    if (dangling.length) return { reason: `${dangling.length} approval request(s) of the dead turn were never closed`, evidence } satisfies CheckFailure;
     const answer = snapshot.answers?.[check.step!];
     if (typeof answer !== "string") return { reason: `no turn finished after the restart (step ${check.step})`, evidence } satisfies CheckFailure;
     const field = check.fields![0]; const before = ((row.records_before ?? []) as Array<Record<string, unknown>>).filter(item => item.collection === check.collection).map(item => (item.data as Record<string, unknown> | undefined)?.[field]).filter((value): value is string => typeof value === "string");
