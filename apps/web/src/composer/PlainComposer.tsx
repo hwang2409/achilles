@@ -24,6 +24,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
     placeholder,
     className,
     onStop,
+    questionWaiting,
   } = props;
   const id = useId();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -135,7 +136,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           data-tone={tone}
           title={model.error?.text}
         >
-          <ComposerHint id={`${id}-hint`} state={state} queues={queues} hidden={Boolean(message)} />
+          <ComposerHint id={`${id}-hint`} state={state} queues={queues} questionWaiting={questionWaiting} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>

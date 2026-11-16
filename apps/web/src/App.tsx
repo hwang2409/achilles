@@ -43,7 +43,7 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean; held: boolean };
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
     (listener) => {
@@ -63,6 +63,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }:
     chatId: sessionId,
     fromNewChat,
     onActivity,
+    questionWaiting,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
@@ -160,7 +161,7 @@ export function App() {
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const [transcript, setTranscript] = useState<HTMLElement | null>(null);
+  const transcript = useRef<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
   const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0, failed: false, held: false });
   // after every composer of this commit has attached to its chat's queue owner
@@ -208,7 +209,7 @@ export function App() {
   }, [ready?.sessionId]);
   // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
   useLayoutEffect(() => {
-    const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
+    const scroll = transcript.current;
     if (!store || !scroll) return;
     // fulcrum's scroll box takes no focus, and webkit never focuses a scroller by itself: ArrowUp/PageUp could not scroll it
     scroll.tabIndex = 0; scroll.setAttribute("role", "region"); scroll.setAttribute("aria-label", "transcript");
@@ -221,7 +222,7 @@ export function App() {
     scroll.addEventListener("keydown", arrows);
     const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
     return () => { scroll.removeEventListener("keydown", arrows); stop(); };
-  }, [store, transcript]);
+  }, [store]);
   const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
@@ -273,14 +274,14 @@ export function App() {
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
         <div className="page-chat">
-        <section ref={ready ? setTranscript : undefined} className="transcript">{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? (element) => { transcript.current = element; } : undefined} className="transcript">{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual scrollRef={transcript} renderJumpToLatest={() => null} followRequest={followRequest} />}{ready && showJumpToLatest && <button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
-          const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
+          const scroll = transcript.current;
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
         }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} props={composerProps} />
         </div>
         </div>
       </RunProvider>}

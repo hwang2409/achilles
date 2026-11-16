@@ -15,18 +15,12 @@ kbd { color: var(--fulcrum-muted); font: inherit; }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
 .app-shell { height: 100%; display: grid; background: var(--fulcrum-bg); }
 .sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--fulcrum-border); }
-.brand-row strong { font-size: 16px; letter-spacing: .02em; }
-.brand-row > span:last-of-type { color: var(--fulcrum-muted); font-size: 12px; }
-.brand-row button { width: 40px; height: 40px; margin-left: auto; color: var(--fulcrum-muted); }
 .new-chat { justify-content: flex-start; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .chat-search { border: 1px solid var(--fulcrum-border); }
 .chat-search > span { color: var(--fulcrum-muted); font-size: 20px; }
 .chat-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
 .chat-search input::placeholder { color: var(--fulcrum-muted); }
 .chat-search:focus-within { border-color: var(--fulcrum-accent); }
-.list-head { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border: 0; text-transform: uppercase; letter-spacing: .14em; font-size: 14px; color: var(--fulcrum-muted); }
-.list-head b { color: var(--fulcrum-accent); }
 .page-list { flex: 0 0 auto; min-height: 0; max-height: 40%; display: flex; flex-direction: column; overflow: hidden; margin-top: 14px; border-bottom: 1px solid var(--fulcrum-border); padding-bottom: 8px; }
 .page-list.has-pages { min-height: 168px; }
 .page-list-scroll { min-height: 0; overflow-y: auto; }
@@ -40,20 +34,6 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
    (36px list head + 36px group head) instead of hidden under them. */
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
-.chat-row { position: relative; display: block; padding: 10px 48px 10px 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
-.chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.4; font-weight: 500; }
-.chat-row > span { display: flex; gap: 4px; min-width: 0; margin-top: 5px; color: var(--fulcrum-muted); font-size: 14px; }
-.chat-row-meta { overflow: hidden; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
-.chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
-.chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
-.chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
-.transcript [data-part="timeline-scroll"]:focus-visible { outline: none; }
-/* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
-.transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
-.transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
-.chat-row.state-running { border-left-color: var(--fulcrum-accent); }
-.chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 8%, transparent); }
-.chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
 /* hidden until the row is hovered, focused, or the pencil itself has keyboard focus; F2 (row title/aria-keyshortcuts, and the ? shortcuts sheet) stays the discoverable path */
 .chat-row-rename { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; padding: 0; opacity: 0; }
 .chat-row:hover .chat-row-rename, .chat-row:focus-within .chat-row-rename, .chat-row-rename:focus-visible { opacity: 1; }
@@ -183,7 +163,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript :is([data-part="md-code-inline"], [data-part="md-code-block"]) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 /* fulcrum gives ordered markers 3ch; "10." plus its gap needs 4ch or the first digit is clipped */
 .transcript ol[data-part="md-list"] { padding-left: 4ch; }
-.transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
 .main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }

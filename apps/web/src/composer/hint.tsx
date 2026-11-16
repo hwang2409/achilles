@@ -6,12 +6,14 @@ type VimMode = "insert" | "normal" | "visual";
 const SEGMENT_WIDTH = 9;
 const SEPARATOR_WIDTH = 12;
 
-export function composerHintSegments({ state, mode = "plain", queues = false, focused = true }: {
+export function composerHintSegments({ state, mode = "plain", queues = false, focused = true, questionWaiting = false }: {
   state: ComposerState;
   mode?: VimMode | "plain";
   queues?: boolean;
   focused?: boolean;
+  questionWaiting?: boolean;
 }) {
+  if (questionWaiting) return ["enter answer"];
   if (state === "running") return ["stop or wait to send"];
   const action = queues ? "queue" : state === "steerable" ? "steer" : "send";
   if (mode === "plain") return [
@@ -42,10 +44,12 @@ export function ComposerHint(props: {
   mode?: VimMode | "plain";
   queues?: boolean;
   focused?: boolean;
+  questionWaiting?: boolean;
+  override?: string;
   id: string;
   hidden?: boolean;
 }) {
-  const segments = composerHintSegments(props);
+  const segments = props.override ? [props.override] : composerHintSegments(props);
   const [width, setWidth] = useState(Number.POSITIVE_INFINITY);
   useEffect(() => {
     const element = document.getElementById(props.id)?.parentElement;
@@ -56,7 +60,7 @@ export function ComposerHint(props: {
     observer.observe(element);
     return () => observer.disconnect();
   }, [props.id]);
-  const visible = fitHintSegments(segments, width);
+  const visible = props.override ? segments : fitHintSegments(segments, width);
   return <span data-part="composer-hint" id={props.id} hidden={props.hidden}>
     {visible.map((segment, index) => <span key={segment} data-hint-segment={index}>{index > 0 && " · "}{segment}</span>)}
   </span>;

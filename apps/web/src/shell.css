@@ -4,7 +4,7 @@
 }
 .brand-mark { width: 11px; height: 11px; background: var(--fulcrum-accent); }
 @media (min-width: 761px) and (min-height: 501px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
 }
 
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
@@ -36,6 +36,8 @@
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 10%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
 .chat-row.current strong { font-weight: 700; }
+.chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
+.chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 
 .chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
@@ -51,9 +53,9 @@
 .run-state { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 
 .page-chat { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
-.transcript { flex: 1 1 0; min-height: 0; padding-top: 32px; padding-bottom: 16px; }
+.transcript { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-top: 32px; padding-bottom: 16px; }
+.transcript > [data-part="timeline"] { width: 100%; max-width: 880px; margin: 0 auto; }
 .empty-chat h1 { max-width: 34ch; font-size: 24px; line-height: 32px; }
-.transcript > [data-part="timeline-frame"] { width: 100%; height: 100%; }
 .main-pane [data-part="composer"] {
   width: min(880px, calc(100% - 32px));
   margin: 0 auto 24px;
