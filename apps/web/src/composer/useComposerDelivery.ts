@@ -35,7 +35,7 @@ export type ComposerAdapterProps = ComposerProps & {
 export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
   onDraftSubmit: (sent: string) => void;
-  /** the user cancelled (x) a submitted message that zeta never took */
+  /** a submitted message that zeta never took left the queue: cancelled (x), or edited (its text back in the box) */
   onCancel?: (text: string) => void;
   isTurnRunning?: () => boolean;
 };
@@ -137,7 +137,10 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       await drain();
     },
     restore(id) {
+      const item = model.queue.find((queued) => queued.id === id);
       apply({ type: "restore", id });
+      // the text is back in the box, so the box draft is its only home: a kept copy must not come back after a reload
+      if (item && !model.queue.includes(item)) current.onCancel?.(item.text);
       void drain();
     },
     cancel(id) {

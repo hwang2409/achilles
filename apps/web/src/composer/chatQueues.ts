@@ -45,7 +45,8 @@ export const chatQueues = {
     const texts = box.includes(text) ? [box] : [text, box];
     // in the new-chat box it goes on to the chat that the page creates next (`created`), unless the box shows first
     if (chat === newChat) { draftStore.set(chat, texts.filter((item) => item.trim()).join("\n\n")); returned.set(chat, draftStore.get(chat)); }
-    else { appendDraft(chat, texts); draftStore.set(newChat, ""); }
+    // a box that already holds the text (a page load that moved it there before) shows it once
+    else { appendDraft(chat, texts.filter((item) => !draftStore.get(chat).includes(item))); draftStore.set(newChat, ""); }
     noteBox(chat, newChat);
   },
   /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
