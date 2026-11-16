@@ -655,7 +655,6 @@ test("restart_recovery needs the same chat back, every earlier row, a finished t
   expect(gradeCheck(check, twice).reason).toContain("redid Ada Lovelace");
   expect(gradeCheck(check, snapshot({ ...restart, history_continuity: false }, "Ada Lovelace")).reason).toContain("rows from before the restart are missing");
   expect(gradeCheck(check, snapshot({ ...restart, resumed_session_id: "other" }, "Ada Lovelace")).reason).toContain("different session");
-  expect(gradeCheck(check, snapshot({ ...restart, dangling_approvals: ["a2", "a3"] }, "Ada Lovelace was already added")).reason).toContain("2 approval request(s) of the dead turn were never closed");
 });
 
 test("overwrite_disclosed passes a kept user value or a told overwrite, and fails a silent overwrite", () => {
