@@ -157,12 +157,15 @@ async function refreshFailureHarness(failures: number) {
   const requests: string[] = [];
   const state = { refreshes: 0, serverCreateMode: false, created: false };
   const lastRefresh = deferred<void>();
+  const listeners = new Map<string, () => void>();
+  const assigned: string[] = [];
+  const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign(url: string) { assigned.push(url); } };
   setGlobals({
     localStorage: new MemoryStorage(),
-    location: { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} },
+    location,
     history: { pushState() {}, replaceState() {} },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type: string, listener: () => void) { listeners.set(type, listener); },
+    removeEventListener(type: string, listener: () => void) { if (listeners.get(type) === listener) listeners.delete(type); },
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/pages/home") return Response.json({ ...emptyPage, create_mode: state.serverCreateMode });
@@ -201,10 +204,15 @@ async function refreshFailureHarness(failures: number) {
     replayRevision: () => 1,
     finishReplay: () => true,
   };
-  const harness = { active: null as unknown as ReturnType<typeof useActiveChat>, requests, state, lastRefresh };
   const clock = new ManualClock();
   const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
-  await act(async () => { mounted = render(createElement(Harness)); });
+  // a page load (reload, or a page switch's location.assign): a new hook with nothing kept in memory
+  const load = async () => {
+    if (mounted) await act(async () => { mounted?.unmount(); });
+    await act(async () => { mounted = render(createElement(Harness)); });
+  };
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat>, requests, state, lastRefresh, listeners, assigned, location, load };
+  await load();
   await flushUntil(() => harness.active.state.phase === "empty");
   return harness;
 }
@@ -274,19 +282,40 @@ test("a failed tool refresh on the new chat button keeps its notice across the c
   expect(requests.filter((method) => method === "mcp_refresh_tools")).toHaveLength(2);
 });
 
-test("new chat during the first turn of a just-made chat stays on the new chat when that turn ends", async () => {
+type Harness = Awaited<ReturnType<typeof refreshFailureHarness>>;
+const other = { ...chat, session_id: "other", page_route: "/" };
+// the first chat's first turn runs; then the user does `move`. the turn end selects that chat only when nobody moved.
+const pendingSelectionRows: { name: string; move: (harness: Harness) => Promise<void>; selected: string | null }[] = [
+  { name: "no navigation selects the chat when its first turn ends", move: async () => {}, selected: "fresh" },
+  { name: "new chat", move: async (harness) => { await harness.active.newChat(); }, selected: "second" },
+  { name: "a sidebar click on another chat", move: async (harness) => { harness.active.selectChat(other); }, selected: "other" },
+  { name: "back/forward to another chat", move: async (harness) => { harness.location.search = "?chat=other"; harness.listeners.get("popstate")?.(); }, selected: "other" },
+  { name: "a page switch loads another page", move: async (harness) => {
+    harness.active.selectChat({ ...other, page_route: "/notes" });
+    expect(harness.assigned).toEqual(["/notes?chat=other"]);
+    await harness.load();
+  }, selected: null },
+  { name: "a reload", move: async (harness) => { harness.location.search = "?chat=fresh"; await harness.load(); }, selected: "fresh" },
+  { name: "a second chat's turn ending", move: async (harness) => {
+    harness.active.selectChat(other);
+    await act(async () => {});
+    harness.active.recordLastState("running"); // the other chat's own turn runs, then ends (the "idle" below)
+  }, selected: "other" },
+];
+
+test.each(pendingSelectionRows)("the first turn's end selects its chat only if the user stayed: $name", async (row) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const harness = await refreshFailureHarness(0);
   harness.lastRefresh.resolve();
   await act(async () => { await harness.active.send("make a reading list", { steer: false }, () => {}); });
   expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "fresh" });
+  expect(harness.active.selectedId).toBeNull();
   await act(async () => { harness.active.recordLastState("running"); });
-  await act(async () => { await harness.active.newChat(); });
-  await flushUntil(() => harness.active.selectedId === "second");
-  // the first chat's turn ends after the user left it: it must not take the view back
+  await act(async () => { await row.move(harness); });
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
   await act(async () => { harness.active.recordLastState("idle"); });
   for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
-  expect(harness.active.selectedId).toBe("second");
+  expect(harness.active.selectedId).toBe(row.selected);
 });
 
 test("a page refresh keeps the header create mode while the tool refresh still fails", async () => {
