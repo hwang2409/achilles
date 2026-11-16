@@ -5,7 +5,7 @@ import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
 import { chatQueues } from "./composer/chatQueues";
-import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
+import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
@@ -201,10 +201,14 @@ export async function attachPage(
         applyCreateMode,
         publishReady,
         create,
+        () => owner.current(token),
       );
       if (!ready) return { phase: "empty", page, serverApprovalMode, credential };
       return ready as ReadyState;
     } catch (caught) {
+      // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
+      // this runs at most once: the record is gone, and a newer create for this page would make this token stale
+      if (caught instanceof StaleCreation) { if (!owner.current(token)) throw caught; return attachPage(client, key, selectedId, owner, creation, token, create, applyCreateMode, publishReady, forceNew); }
       if (caught instanceof ChatBusyError) return busy(caught.sessionId);
       if (errorCode(caught) === TURN_RUNNING && !creation.status(page.id).pending) return busy(await runningSession(client));
       throw new PendingCreationError(caught, mappingInput);
@@ -543,6 +547,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setAttachSlow(false);
     setRouteRefresh((value) => value + 1);
   }, []);
+  // a create that keeps failing is never a dead end: drop it and open the page again (its empty state keeps the new-chat draft)
+  const discardCreation = useCallback(() => {
+    if (creationPageId) creation.current.discard(creationPageId);
+    retryAttachment();
+  }, [creationPageId, retryAttachment]);
   const retryBusy = useCallback(() => {
     const retry = busy?.retry; setBusy(null);
     if (retry === "new") void newChat(); else retryAttachment();
@@ -704,5 +713,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }
