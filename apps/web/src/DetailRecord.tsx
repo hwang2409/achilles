@@ -60,15 +60,16 @@ export function DetailRecord({ title, collection, fields, filter, pageId, creden
 
 export function DetailRecordView({ title, collection, fields, filter, records, total, error, refreshing, selected }: DetailRecordViewProps & { refreshing: boolean }) {
   const filterValue = formatValue(filter.equals) || "—";
-  const selectedMatches = Boolean(selected);
-  const shownRecords = selectedMatches ? [selected] : records;
-  const selectedTitle = selectedMatches ? String(selected?.title ?? selected?.name ?? selected?.label ?? title) : title;
+  const selectedMatches = selected !== undefined;
+  const shownRecords = selected ? [selected] : records;
+  const firstRecord = shownRecords?.[0];
+  const selectedTitle = selectedMatches ? String(selected.title ?? selected.name ?? selected.label ?? title) : title;
   return <section className="record-detail">
     <h2>{selectedMatches ? <>{selectedTitle} <small className="selected-note">selected</small></> : title}</h2>
     {error ? <p role="alert">{error}</p>
       : <>{refreshing && <p role="status">loading record…</p>}{shownRecords === null ? null
-      : shownRecords.length === 0 ? <p>no {collection} with {filter.field} = {filterValue} yet</p>
-      : <><dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(shownRecords[0][field] ?? "")} />{formatValue(shownRecords[0][field]) || "—"}</> : formatValue(shownRecords[0][field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="match-note">{total} records match</p>}</>}</>}
+      : !firstRecord ? <p>no {collection} with {filter.field} = {filterValue} yet</p>
+      : <><dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(firstRecord[field] ?? "")} />{formatValue(firstRecord[field]) || "—"}</> : formatValue(firstRecord[field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="match-note">{total} records match</p>}</>}</>}
   </section>;
 }
 
