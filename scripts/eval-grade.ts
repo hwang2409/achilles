@@ -1,6 +1,6 @@
 export type TaskCheck = {
   id: string;
-  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes";
+  type: "page_exists" | "count" | "tool" | "tool_absent" | "refused_tool_name" | "operations" | "updated_record" | "schema_roundtrip" | "approval" | "reconnect" | "record" | "records_exact" | "successful_result" | "no_error" | "browser_text" | "prompt" | "same_page" | "layout_contains" | "list_shows" | "detail_selects" | "metric_count" | "layout_update" | "layout_restore" | "no_unrecovered_error" | "assigned_tools_only" | "tool_evolution" | "answer_mentions" | "no_new_page" | "form_submit" | "approval_outcomes" | "reload" | "no_duplicate_writes" | "denied_step";
   required?: boolean;
   page?: string;
   chat?: string;
@@ -21,7 +21,10 @@ export type PagePlan = { alias: string; source: "fixture" | "setup" | "created";
 // a browser_prompt step types its prompt into the real page; `reload` reloads that page once, at the n-th matching
 // zeta event of the turn, and `follow_up` is typed into the reloaded page while the turn may still run
 export type ReloadTrigger = { on: "tool_start" | "assistant_delta" | "approval_request"; tool?: string; nth?: number };
-export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string };
+// `during` acts while a prompt step's turn runs: before the harness answers the n-th approval request of `tool`
+// in that step, it makes one user write (like a second chat or a form) or steers the running turn
+export type Interjection = { tool: string; nth?: number; user_write?: { tool: string; arguments: Record<string, unknown> }; steer?: string };
+export type TaskStep = { id: string; kind: "prompt" | "annotate" | "reconnect" | "user_write" | "browser_prompt"; page: string; chat: string; prompt?: string; tool?: string; arguments?: Record<string, unknown>; approval?: "approve" | "deny" | { tool: string; decisions: Array<"approve" | "deny"> }; reload?: ReloadTrigger; follow_up?: string; during?: Interjection };
 export type TaskSetup = { tools: Array<{ name: string; operation: "list" | "get" | "insert" | "update"; collection: string; input_schema?: Record<string, unknown>; data_schema?: Record<string, unknown> }>; records: Array<{ id: string; collection: string; data: Record<string, unknown> }>; initial_layout?: { blocks: unknown[] } };
 export type EvalTask = { id: string; prompt?: string; page_plan: PagePlan[]; agent_turns: number; steps: TaskStep[]; checks: TaskCheck[]; setup?: TaskSetup; approval_mode?: "allow" | "ask"; requires?: string[]; goal_capabilities?: string[]; suite: "core" | "focused" | "hard" };
 export type EvalSnapshot = {
@@ -32,7 +35,7 @@ export type EvalSnapshot = {
   reconnects?: Array<Record<string, unknown>>; form_submits?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
-  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
+  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>; interjections?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
   initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };
@@ -40,7 +43,7 @@ export type CheckResult = { id: string; pass: boolean; expected: unknown; actual
 const STEP_KINDS = new Set(["prompt", "annotate", "reconnect", "user_write", "browser_prompt"]);
 const MODEL_STEPS = new Set(["prompt", "annotate", "browser_prompt"]);
 const RELOAD_EVENTS = new Set(["tool_start", "assistant_delta", "approval_request"]);
-const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes"]);
+const CHECK_TYPES = new Set(["page_exists", "count", "tool", "tool_absent", "refused_tool_name", "operations", "updated_record", "schema_roundtrip", "approval", "reconnect", "record", "records_exact", "successful_result", "no_error", "browser_text", "prompt", "same_page", "layout_contains", "list_shows", "detail_selects", "metric_count", "layout_update", "layout_restore", "no_unrecovered_error", "assigned_tools_only", "tool_evolution", "answer_mentions", "no_new_page", "form_submit", "approval_outcomes", "reload", "no_duplicate_writes", "denied_step"]);
 const SNAPSHOT_COLLECTIONS = new Set(["pages", "tools", "tool_versions", "assignments", "records", "layouts", "chats", "calls", "results", "approvals", "reconnects", "errors", "browser", "reloads"]);
 const own = (value: object, keys: string[], where: string) => { for (const key of Object.keys(value)) if (!keys.includes(key)) throw new Error(`${where}: unknown key ${key}`); };
 const identifier = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_-]*$/.test(value);
@@ -76,7 +79,7 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
   if ((taskPrompt && missingPrompts !== 1) || (!taskPrompt && missingPrompts > 0)) throw new Error("task needs exactly one prompt source per step");
   return value.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`steps[${i}] must be an object`);
-    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up"], `steps[${i}]`); const step = item as TaskStep;
+    own(item, ["id", "page", "chat", "prompt", "kind", "tool", "arguments", "approval", "reload", "follow_up", "during"], `steps[${i}]`); const step = item as TaskStep;
     if (!identifier(step.id) || !STEP_KINDS.has(step.kind) || !aliases.has(step.page) || !identifier(step.chat)) throw new Error(`invalid steps[${i}]`);
     const isWrite = step.kind === "user_write"; const args = step.arguments;
     // the harness fills the current revision, like a form that loaded the record
@@ -89,7 +92,7 @@ function validateSteps(value: unknown, aliases: Set<string>, taskPrompt?: string
     if (sequence) own(rule, ["tool", "decisions"], `steps[${i}].approval`);
     const validRule = typeof rule === "string" ? ["approve", "deny"].includes(rule) : sequence && typeof rule.tool === "string" && rule.tool.startsWith("achilles__") && Array.isArray(rule.decisions) && rule.decisions.length > 0 && rule.decisions.every(decision => ["approve", "deny"].includes(decision));
     if (rule !== undefined && (!needsPrompt || approvalMode !== "ask" || !validRule)) throw new Error(`steps[${i}] approval must be approve, deny, or { tool, decisions }, on a prompt step of an approval_mode ask task`);
-    validateReload(step, i);
+    validateReload(step, i); validateDuring(step, i, approvalMode);
     return step;
   });
 }
@@ -103,6 +106,24 @@ function validateReload(step: TaskStep, i: number) {
   own(reload, ["on", "tool", "nth"], `steps[${i}].reload`);
   if (!RELOAD_EVENTS.has(reload.on) || (reload.nth !== undefined && (!Number.isInteger(reload.nth) || reload.nth < 1))) throw new Error(`steps[${i}] reload needs on: tool_start, assistant_delta, or approval_request, and a positive nth`);
   if (reload.on === "tool_start" ? typeof reload.tool !== "string" || !reload.tool.startsWith("achilles__") : reload.tool !== undefined && (reload.on !== "approval_request" || typeof reload.tool !== "string")) throw new Error(`steps[${i}] reload tool must be an achilles tool; tool_start requires one`);
+}
+
+const validWriteArguments = (args: unknown) => Boolean(args) && typeof args === "object" && !Array.isArray(args) && typeof (args as Record<string, unknown>).record_id === "string" && !("revision" in (args as object));
+function validateDuring(step: TaskStep, i: number, approvalMode?: EvalTask["approval_mode"]) {
+  const during = step.during; if (during === undefined) return;
+  // the approval request pauses the turn, so the action lands at a known point; the browser path has no such hook
+  if (step.kind !== "prompt" || approvalMode !== "ask") throw new Error(`steps[${i}] during needs a prompt step of an approval_mode ask task`);
+  if (!during || typeof during !== "object" || Array.isArray(during)) throw new Error(`steps[${i}] during must be an object`);
+  own(during, ["tool", "nth", "user_write", "steer"], `steps[${i}].during`);
+  if (typeof during.tool !== "string" || !during.tool.startsWith("achilles__") || (during.nth !== undefined && (!Number.isInteger(during.nth) || during.nth < 1))) throw new Error(`steps[${i}] during needs an achilles tool and a positive nth`);
+  if ((during.user_write === undefined) === (during.steer === undefined)) throw new Error(`steps[${i}] during needs exactly one of user_write or steer`);
+  if (during.steer !== undefined && (typeof during.steer !== "string" || !during.steer)) throw new Error(`steps[${i}] during steer needs text`);
+  const write = during.user_write;
+  if (write !== undefined) {
+    if (!write || typeof write !== "object" || Array.isArray(write)) throw new Error(`steps[${i}] during user_write must be an object`);
+    own(write, ["tool", "arguments"], `steps[${i}].during.user_write`);
+    if (!identifier(write.tool) || !validWriteArguments(write.arguments)) throw new Error(`steps[${i}] during user_write needs tool and arguments with record_id and no revision`);
+  }
 }
 
 // the browser holds zeta's one controller slot, so a browser task never mixes in protocol-driven model steps
@@ -167,7 +188,9 @@ function validateCheckShape(check: TaskCheck, i: number) {
     const set = value.set as Record<string, unknown>;
     if (!Array.isArray(value.records) || !value.records.length || !value.records.every(id => typeof id === "string") || new Set(value.records).size !== value.records.length || !set || typeof set !== "object" || Array.isArray(set) || !Object.keys(set).length) throw new Error(`checks[${i}] needs unique record ids and a non-empty set`);
   }
-  if (check.step !== undefined && !["answer_mentions", "reload"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
+  // denied_step: one create_tool request was denied; that tool is never asked again or created, every other named tool exists, and the step's answer names it
+  if (check.type === "denied_step" && (check.tool !== "achilles__create_tool" || typeof check.step !== "string" || !Array.isArray(check.value) || !(check.value as unknown[]).length || !(check.value as unknown[]).every(identifier))) throw new Error(`checks[${i}] needs tool achilles__create_tool, a step, and the tool names the step creates`);
+  if (check.step !== undefined && !["answer_mentions", "reload", "denied_step"].includes(check.type)) throw new Error(`checks[${i}] has an unused step`);
   if (check.type === "reload" && typeof check.step !== "string") throw new Error(`checks[${i}] needs the step that reloads`);
   if (check.type === "no_duplicate_writes" && (typeof check.tool !== "string" || !check.tool.startsWith("achilles__") || (check.collection === undefined) !== (check.fields === undefined))) throw new Error(`checks[${i}] needs an achilles tool, and a collection with fields or neither`);
   if (check.type === "page_exists" && check.route !== undefined && !check.route.startsWith("/")) throw new Error(`checks[${i}] has invalid route`);
@@ -206,8 +229,10 @@ export function expectationTokens(check: TaskCheck): string[] {
 const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
 // An answer may only be graded for a fact the seeded records hold: a record's string value, or a
 // count of records in a collection (optionally where one field equals one value), as digits or a word.
-function seededFact(value: string, setup?: TaskSetup) {
+function seededFact(value: string, setup?: TaskSetup, written: string[] = []) {
   const records = setup?.records ?? []; const lower = value.toLowerCase();
+  // a value a scripted user write stored is a fact of the task too, as a record value
+  if (written.some(item => item.toLowerCase() === lower)) return true;
   if (records.some(record => Object.values(record.data).some(item => typeof item === "string" && item.toLowerCase() === lower))) return true;
   const number = /^\d+$/.test(value) ? Number(value) : NUMBER_WORDS.indexOf(lower);
   if (number < 0) return false;
@@ -230,7 +255,7 @@ export function mentions(answer: string, value: string) {
   const edges = /^\d+$/.test(value) ? ["(?<!\\d[.,])", "(?![.,]\\d)"] : ["(?<![\\p{L}\\p{N}]-)", "(?!-[\\p{L}\\p{N}])"];
   return new RegExp(`(?<![\\p{L}\\p{N}])${edges[0]}${escapeRegex(value)}(?![\\p{L}\\p{N}])${edges[1]}`, "iu").test(answer);
 }
-function validateExpectations(checks: TaskCheck[], promptText: string, setup?: TaskSetup, requires: string[] = []) {
+function validateExpectations(checks: TaskCheck[], promptText: string, setup?: TaskSetup, requires: string[] = [], written: string[] = []) {
   const declared = new Set<string>(["inspect_page", ...requires]);
   for (const tool of setup?.tools ?? []) {
     declared.add(tool.name); declared.add(tool.collection); const properties = tool.input_schema?.properties;
@@ -248,7 +273,7 @@ function validateExpectations(checks: TaskCheck[], promptText: string, setup?: T
   }
   for (const token of nestedTokens(setup?.initial_layout)) declared.add(token);
   for (const check of checks.filter(check => check.type === "answer_mentions")) for (const value of check.value as string[]) {
-    if (!seededFact(value, setup)) throw new Error(`check ${check.id} expects ${JSON.stringify(value)} in the answer, which is not a seeded record value or count`);
+    if (!seededFact(value, setup, written)) throw new Error(`check ${check.id} expects ${JSON.stringify(value)} in the answer, which is not a seeded record value or count`);
   }
   for (const check of checks) {
     for (const field of check.fields ?? []) if (!promptText.includes(field) && !declared.has(field)) throw new Error(`check ${check.id} expects list field ${JSON.stringify(field)} without a prompt quote or declared schema`);
@@ -280,7 +305,8 @@ export function validateTask(value: unknown): EvalTask {
   const setup = validateSetup(task.setup); const steps = validateSteps(task.steps, aliases, prompt, task.approval_mode as EvalTask["approval_mode"]); const checks = validateChecks(task.checks, aliases);
   validateBrowserSteps(steps, page_plan);
   for (const check of checks) if (check.step !== undefined && !steps.some(step => step.id === check.step && step.page === check.page && MODEL_STEPS.has(step.kind) && (check.type !== "reload" || step.reload))) throw new Error(`check ${check.id} names step ${check.step}, which is not a ${check.type === "reload" ? "reloading" : "prompt"} step on page ${check.page}`);
-  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", step.follow_up ?? "", ...nestedTokens(step.arguments)])].join(" "), setup, task.requires as string[] ?? []);
+  const written = steps.flatMap(step => Object.entries(step.arguments ?? step.during?.user_write?.arguments ?? {}).filter(([key, value]) => key !== "record_id" && ["string", "number"].includes(typeof value)).map(([, value]) => String(value)));
+  validateExpectations(checks, [prompt, ...steps.flatMap(step => [step.prompt ?? "", step.follow_up ?? "", step.during?.steer ?? "", ...nestedTokens(step.arguments), ...nestedTokens(step.during?.user_write?.arguments)])].join(" "), setup, task.requires as string[] ?? [], written);
   return { id: task.id, prompt, page_plan, agent_turns: task.agent_turns as number, goal_capabilities: task.goal_capabilities as string[] | undefined, approval_mode: task.approval_mode as EvalTask["approval_mode"], requires: task.requires as string[] | undefined, setup, steps, checks, suite: (task.suite as EvalTask["suite"]) ?? "focused" };
 }
 
@@ -469,6 +495,22 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
       if (!approved && !sameSeedValue(data(snapshot, id), data(snapshot.initial ?? {}, id))) return { reason: `record ${id} changed without an approved write`, evidence: { record: id, before: data(snapshot.initial ?? {}, id), after: data(snapshot, id) } } satisfies CheckFailure;
     }
     return true;
+  },
+  // shortcut: reads the tool name at bundle.name, so only create_tool; add a key when another authoring tool needs it
+  denied_step: ({ check, snapshot, owned }) => {
+    const names = check.value as string[]; const calls = new Map(rows(snapshot, "calls").map(call => [call.id, call]));
+    const requests = owned("approvals").filter(row => row.tool === check.tool).map(row => ({ name: ((calls.get(row.request_id)?.arguments as { bundle?: { name?: unknown } } | undefined)?.bundle?.name), decision: row.decision }));
+    const index = requests.findIndex(request => request.decision === "deny");
+    if (index < 0) return { reason: `no ${check.tool} request was denied (${requests.length} requests)`, evidence: { requests } } satisfies CheckFailure;
+    const denied = requests[index].name; const evidence = { requests, denied };
+    if (typeof denied !== "string" || !names.includes(denied)) return { reason: `the denied request created ${JSON.stringify(denied)}, which is not one of ${JSON.stringify(names)}`, evidence } satisfies CheckFailure;
+    if (requests.slice(index + 1).some(request => request.name === denied)) return { reason: `asked again to create ${denied} after it was denied`, evidence } satisfies CheckFailure;
+    const present = new Set(owned("tool_versions").map(row => String(row.name)));
+    if (present.has(denied)) return { reason: `denied tool ${denied} exists on the page`, evidence } satisfies CheckFailure;
+    const missing = names.filter(name => name !== denied && !present.has(name));
+    if (missing.length) return { reason: `the rest was not finished: missing ${missing.join(", ")}`, evidence } satisfies CheckFailure;
+    const answer = snapshot.answers?.[check.step!];
+    return (typeof answer === "string" && mentions(answer, denied)) || { reason: `the answer does not say ${denied} was not created: ${JSON.stringify(String(answer ?? "").slice(0, 500))}`, evidence } satisfies CheckFailure;
   },
   approval: ({ check, owned }) => owned("approvals").filter(row => row.tool === check.tool).length,
   // the page reloaded at its trigger during the turn, came back on the same chat, attached to the running turn, and shows the turn's final answer
@@ -669,13 +711,19 @@ export function setupPreconditionFailures(task: EvalTask, snapshot: EvalSnapshot
   return failures;
 }
 function userWriteFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
-  return task.steps.filter(step => step.kind === "user_write").flatMap(step => {
+  const during = task.steps.filter(step => step.during?.user_write).flatMap(step => {
+    // no row: the agent never made the n-th request, so the write never had its moment; the graded state shows it
+    const write = rows(snapshot, "interjections").find(row => row.step === step.id);
+    if (!write) return [];
+    return write.ok === true && write.revision_after === Number(write.revision_before) + 1 ? [] : [`user write during ${step.id} failed (${write.status})`];
+  });
+  return [...during, ...task.steps.filter(step => step.kind === "user_write").flatMap(step => {
     const write = rows(snapshot, "user_writes").find(row => row.step === step.id);
     // a write that never ran because the agent used every turn first is the agent's cap hit, not a harness error
     if (!write && (snapshot.turns ?? 0) >= task.agent_turns) return [];
     if (!write || write.ok !== true) return [`user write ${step.id} failed (${write?.status ?? "not run"})`];
     return write.revision_after === Number(write.revision_before) + 1 ? [] : [`user write ${step.id} did not bump the revision`];
-  });
+  })];
 }
 function setupFailures(task: EvalTask, snapshot: EvalSnapshot): string[] {
   const failures = userWriteFailures(task, snapshot);
@@ -696,7 +744,7 @@ export function hostToolsGap(snapshot: EvalSnapshot): boolean {
 export type EvalDiagnostics = { first_call_validity: Record<string, boolean>; observed_catalog?: string[]; structured_tool_errors: Array<{ code: unknown; path: unknown; expected: unknown }>; unstructured_tool_errors: number; conflict_seen?: boolean };
 // report-only evidence for user_write tasks: did the agent's stale write get a conflict? an agent that reads again first never sees one, so this is never graded
 function conflictSeen(task: EvalTask, snapshot: EvalSnapshot): { conflict_seen?: boolean } {
-  const tools = new Set(task.steps.filter(step => step.kind === "user_write").map(step => `achilles__${step.tool}`));
+  const tools = new Set(task.steps.flatMap(step => step.kind === "user_write" ? [step.tool] : step.during?.user_write ? [step.during.user_write.tool] : []).map(tool => `achilles__${tool}`));
   if (!tools.size) return {};
   return { conflict_seen: rows(snapshot, "results").some(row => tools.has(String(row.tool)) && (row.data as { code?: unknown } | undefined)?.code === "conflict") };
 }

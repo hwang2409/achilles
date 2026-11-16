@@ -1,0 +1,158 @@
+{
+  "id": "concurrent-edit-budget",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "projects",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "raise",
+      "kind": "prompt",
+      "page": "projects",
+      "chat": "projects-chat",
+      "prompt": "add 50 to the budget of every active project",
+      "during": {
+        "tool": "achilles__update_project",
+        "nth": 1,
+        "user_write": {
+          "tool": "update_project",
+          "arguments": {
+            "record_id": "p-4",
+            "budget": 180
+          }
+        }
+      }
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_projects",
+        "operation": "list",
+        "collection": "projects"
+      },
+      {
+        "name": "update_project",
+        "operation": "update",
+        "collection": "projects"
+      }
+    ],
+    "records": [
+      {
+        "id": "p-1",
+        "collection": "projects",
+        "data": {
+          "name": "Atlas",
+          "status": "active",
+          "budget": 200
+        }
+      },
+      {
+        "id": "p-2",
+        "collection": "projects",
+        "data": {
+          "name": "Beacon",
+          "status": "archived",
+          "budget": 150
+        }
+      },
+      {
+        "id": "p-3",
+        "collection": "projects",
+        "data": {
+          "name": "Cobalt",
+          "status": "active",
+          "budget": 400
+        }
+      },
+      {
+        "id": "p-4",
+        "collection": "projects",
+        "data": {
+          "name": "Delta",
+          "status": "active",
+          "budget": 120
+        }
+      },
+      {
+        "id": "p-5",
+        "collection": "projects",
+        "data": {
+          "name": "Ember",
+          "status": "active",
+          "budget": 250
+        }
+      },
+      {
+        "id": "p-6",
+        "collection": "projects",
+        "data": {
+          "name": "Fjord",
+          "status": "archived",
+          "budget": 90
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "budgets",
+      "type": "records_exact",
+      "page": "projects",
+      "value": [
+        {
+          "name": "Atlas",
+          "status": "active",
+          "budget": 250
+        },
+        {
+          "name": "Beacon",
+          "status": "archived",
+          "budget": 150
+        },
+        {
+          "name": "Cobalt",
+          "status": "active",
+          "budget": 450
+        },
+        {
+          "name": "Delta",
+          "status": "active",
+          "budget": 230
+        },
+        {
+          "name": "Ember",
+          "status": "active",
+          "budget": 300
+        },
+        {
+          "name": "Fjord",
+          "status": "archived",
+          "budget": 90
+        }
+      ]
+    },
+    {
+      "id": "updates-recovered",
+      "type": "no_unrecovered_error",
+      "page": "projects",
+      "tool": "achilles__update_project"
+    },
+    {
+      "id": "told-user",
+      "type": "answer_mentions",
+      "page": "projects",
+      "step": "raise",
+      "value": [
+        "180"
+      ]
+    }
+  ]
+}

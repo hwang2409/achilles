@@ -1,0 +1,175 @@
+{
+  "id": "steer-status-correction",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "tasks",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "close",
+      "kind": "prompt",
+      "page": "tasks",
+      "chat": "tasks-chat",
+      "prompt": "set the status of every Apollo task to done",
+      "during": {
+        "tool": "achilles__update_task",
+        "nth": 2,
+        "steer": "actually use status paused, not done"
+      }
+    }
+  ],
+  "setup": {
+    "tools": [
+      {
+        "name": "list_tasks",
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "name": "update_task",
+        "operation": "update",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "id": "k-1",
+        "collection": "tasks",
+        "data": {
+          "title": "Draft launch plan",
+          "project": "Apollo",
+          "status": "open"
+        }
+      },
+      {
+        "id": "k-2",
+        "collection": "tasks",
+        "data": {
+          "title": "Book venue",
+          "project": "Hermes",
+          "status": "open"
+        }
+      },
+      {
+        "id": "k-3",
+        "collection": "tasks",
+        "data": {
+          "title": "Review budget",
+          "project": "Apollo",
+          "status": "blocked"
+        }
+      },
+      {
+        "id": "k-4",
+        "collection": "tasks",
+        "data": {
+          "title": "Write press note",
+          "project": "Apollo",
+          "status": "open"
+        }
+      },
+      {
+        "id": "k-5",
+        "collection": "tasks",
+        "data": {
+          "title": "Order badges",
+          "project": "Hermes",
+          "status": "blocked"
+        }
+      },
+      {
+        "id": "k-6",
+        "collection": "tasks",
+        "data": {
+          "title": "Test signup flow",
+          "project": "Apollo",
+          "status": "open"
+        }
+      },
+      {
+        "id": "k-7",
+        "collection": "tasks",
+        "data": {
+          "title": "Send invites",
+          "project": "Hermes",
+          "status": "open"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "corrected",
+      "type": "approval_outcomes",
+      "page": "tasks",
+      "tool": "achilles__update_task",
+      "collection": "tasks",
+      "value": {
+        "records": [
+          "k-1",
+          "k-3",
+          "k-4",
+          "k-6"
+        ],
+        "set": {
+          "status": "paused"
+        }
+      }
+    },
+    {
+      "id": "final-tasks",
+      "type": "records_exact",
+      "page": "tasks",
+      "value": [
+        {
+          "title": "Draft launch plan",
+          "project": "Apollo",
+          "status": "paused"
+        },
+        {
+          "title": "Book venue",
+          "project": "Hermes",
+          "status": "open"
+        },
+        {
+          "title": "Review budget",
+          "project": "Apollo",
+          "status": "paused"
+        },
+        {
+          "title": "Write press note",
+          "project": "Apollo",
+          "status": "paused"
+        },
+        {
+          "title": "Order badges",
+          "project": "Hermes",
+          "status": "blocked"
+        },
+        {
+          "title": "Test signup flow",
+          "project": "Apollo",
+          "status": "paused"
+        },
+        {
+          "title": "Send invites",
+          "project": "Hermes",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "id": "no-double-write",
+      "type": "no_duplicate_writes",
+      "page": "tasks",
+      "tool": "achilles__update_task"
+    }
+  ]
+}

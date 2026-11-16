@@ -9,7 +9,7 @@ import { createGateWait } from "./gate-diagnostics";
 import { formFields } from "../apps/web/src/page/formSchema";
 import { loadBaseReport, makeReport, reportJson, reportMarkdown, type BaseReport } from "./eval-report";
 import { readTranscriptUsage } from "./eval-usage";
-import { createBrowserDriver, type BrowserDriver } from "./eval-browser";
+import { createBrowserDriver, stepFinished, type BrowserDriver } from "./eval-browser";
 
 export { startEvalStack, TOOL_POLICY } from "./eval-stack";
 export { assertTurnBudget, reserveTurns, REQUIRED_FEATURES, connectEvalProtocol, enforceTurnBudget } from "./eval-protocol";
@@ -235,11 +235,12 @@ export function finalAnswer(history: any[], prior: number) {
   const text = (row: any) => (Array.isArray(row.content) ? row.content : []).filter((block: any) => block.type === "text" && typeof block.text === "string").map((block: any) => block.text).join("\n").trim();
   return turn.filter(row => row.role === "assistant" && !row.event).map(text).filter(Boolean).at(-1);
 }
-async function waitForTerminal(protocol: EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal) {
+// a steer the turn did not read starts one more turn, so a steered step ends only after a turn end that follows the steer
+async function waitForTerminal(protocol: EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal, steered: () => string | undefined = () => undefined) {
   for (;;) {
     signal.throwIfAborted(); const error = failure(); if (error) throw error;
     const history = await protocol.sessionHistory(sessionId); const count = history.filter((row: any) => row.event === "served_turn_end").length;
-    if (count > prior) return { count, history }; await Bun.sleep(100);
+    const steer = steered(); if (count > prior && (!steer || stepFinished(history, prior, [steer]))) return { count, history }; await Bun.sleep(100);
   }
 }
 
@@ -427,6 +428,12 @@ export function approvalDecision(rule: TaskStep["approval"], tool: unknown, next
   if (rule === undefined || typeof rule === "string") return rule ?? "approve";
   return tool === rule.tool ? rule.decisions[next()] ?? "approve" : "approve";
 }
+// answers approvals one at a time, in arrival order: a step's `during` action finishes before its request is answered,
+// and a later request waits for it, so the action lands before any write it is meant to race
+export function createDecisionQueue(onError: (error: unknown) => void) {
+  let tail: Promise<void> = Promise.resolve();
+  return (decide: () => Promise<void>, before?: () => Promise<void>) => { tail = tail.then(async () => { if (before) await before(); await decide(); }).catch(onError); return tail; };
+}
 async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], outerSignal: AbortSignal) {
   const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("task deadline exceeded")), TASK_TIMEOUT_MS); const signal = AbortSignal.any([outerSignal, timeout.signal]);
   const pages = await preparePage(stack, task, signal); const initial = await databaseSnapshot(stack); assertSetupPreconditions(task, initial);
@@ -435,13 +442,14 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
+  let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; const interjections: Array<Record<string, unknown>> = [];
   // a browser task: the real page is zeta's controller and the harness watches as an observer
   let browser: BrowserDriver | undefined;
   if (task.steps.some(step => step.kind === "browser_prompt")) {
     const { chromium } = await import(playwrightModule()); const ask = task.approval_mode === "ask";
     browser = createBrowserDriver({ chromium, origin: stack.achillesOrigin, ask, signal, observer: () => protocol, failure: () => fatal });
   }
-  const approvals: Record<string, unknown>[] = []; const abortAll = async () => { browser?.wake(); if (browser) return browser.stop(); await Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined))); };
+  const approvals: Record<string, unknown>[] = []; const enqueueDecision = createDecisionQueue(error => { fatal ??= error instanceof Error ? error : new Error(String(error)); void abortAll(); }); const abortAll = async () => { browser?.wake(); if (browser) return browser.stop(); await Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined))); };
   const onEvent = (event: Record<string, any>) => {
     events.push(event); browser?.onEvent(event);
     const eventFailure = new Error(JSON.stringify(event)); if (!fatal && stopsSuite(eventFailure)) { fatal = eventFailure; void abortAll(); return; }
@@ -452,7 +460,15 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     if (requestId && approvals.some(row => row.request_id === requestId)) return;
     if (task.approval_mode !== "ask" || !requestId || !session) { fatal = new Error("undeclared approval request"); void abortAll(); return; }
     const request = event.data ?? event; const decision = approvalDecision(approvalRule, request.tool_call?.name, () => ruleRequests++); approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision });
-    if (browser) browser.decide(session[1].id, String(requestId), decision); else void protocol.decide(session[1].id, String(requestId), decision).catch(error => { fatal = error; });
+    if (browser) { browser.decide(session[1].id, String(requestId), decision); return; }
+    const step = currentStep; const during = step?.during; const fires = during !== undefined && request.tool_call?.name === during.tool && ++duringRequests === (during.nth ?? 1);
+    const interject = fires ? async () => {
+      if (during.steer) { await protocol.steer(session[1].id, during.steer, crypto.randomUUID()); steered = during.steer; interjections.push({ step: step!.id, page_id: session[1].page_id, action: "steer", request_id: requestId, ok: true }); return; }
+      const write = await userWrite(stack, { ...step!, tool: during.user_write!.tool, arguments: during.user_write!.arguments }, session[1].page_id, hidden, signal);
+      interjections.push({ ...write, action: "user_write", request_id: requestId });
+      if (!write.ok) throw new Error(`user write during ${step!.id} failed (${write.status})`);
+    } : undefined;
+    void enqueueDecision(() => protocol.decide(session[1].id, String(requestId), decision), interject);
   };
   protocol = await connectEvalProtocol(browser ? { url: discovery.url, controller_token: await observerToken(stack, hidden) } : discovery, onEvent, { retryCapacity: true, signal, role: browser ? "observer" : "controller" }); const started = Date.now();
   const getSession = async (chat: string, alias: string) => {
@@ -476,7 +492,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
         const turn = await browser.prompt(step, pageId, route, id => sessions.set(step.chat, { id, alias: step.page, page_id: pageId }));
         terminals.set(turn.sessionId, turn.history.filter((row: any) => row.event === "served_turn_end").length); const answer = finalAnswer(turn.history, turn.history.filter((row: any) => row.event === "served_turn_end").length - 1); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, turn.history); await turn.check(answer); continue;
       }
-      const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
+      const session = await getSession(step.chat, step.page); if (!session) break; approvalRule = step.approval; ruleRequests = 0; currentStep = step; duringRequests = 0; steered = undefined; try { const deliveryId = crypto.randomUUID(); deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId)); } catch (error) { const detail = error as Error & { sessionId?: string; pageId?: string }; detail.sessionId = session.id; detail.pageId = session.page_id; throw detail; } const prior = terminals.get(session.id) ?? 0; const terminal = await waitForTerminal(protocol, session.id, prior, () => fatal, signal, () => steered); terminals.set(session.id, terminal.count); const answer = finalAnswer(terminal.history, steered ? terminal.count - 1 : prior); if (answer !== undefined) answers[step.id] = answer; histories.set(step.chat, terminal.history);
     }
     for (const [chat, session] of sessions) if (!histories.has(chat)) histories.set(chat, await protocol.sessionHistory(session.id));
     const durable = [...histories].map(([chat, rows]) => ({ chat, page_id: sessions.get(chat)!.page_id, rows })); const tools = parseHistory(durable); const after = await databaseSnapshot(stack);
@@ -487,7 +503,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await browser?.close(); await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -495,7 +511,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }
-    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
+    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, interjections, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await browser?.close(); await protocol.close(); }
 }
 

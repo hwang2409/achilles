@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { assertTurnBudget, enforceTurnBudget, reserveTurns } from "./eval-protocol";
-import { approvalDecision, classifyTaskSupport, finalAnswer, insertForms, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
+import { approvalDecision, classifyTaskSupport, createDecisionQueue, finalAnswer, insertForms, relatedPages, scanArtifactTree, scanSecrets, selectTasks, stopsSuite, validateCatalog, validateReservedBundles, verifySetup } from "./eval";
 import { gradeReference, validateTask, type TaskSetup } from "./eval-grade";
 
 const targetRun = (target: string) => async (command: string, args: string[], cwd?: string) => {
@@ -110,7 +110,8 @@ test("suite selection validates every task and sums one command budget", async (
   const hard = await selectTasks(undefined, undefined, "hard");
   expect(hard.length).toBeGreaterThan(0);
   expect(hard.every(task => task.suite === "hard")).toBe(true);
-  expect(() => assertTurnBudget(reserveTurns(hard, 3))).not.toThrow();
+  // the hard suite fits one command at N=1; N=3 runs take a TASK= subset
+  expect(() => assertTurnBudget(reserveTurns(hard, 1))).not.toThrow();
 });
 
 test("turn reservation is command-wide", () => {
@@ -249,4 +250,18 @@ test("a decision list answers the n-th request of its tool and approves the rest
   expect(["achilles__list_tickets", "achilles__update_ticket", "achilles__update_ticket", "achilles__update_ticket"].map(tool => approvalDecision(rule, tool, next))).toEqual(["approve", "approve", "deny", "approve"]);
   expect(approvalDecision("deny", "achilles__anything", next)).toBe("deny");
   expect(approvalDecision(undefined, "achilles__anything", next)).toBe("approve");
+});
+
+test("a during action finishes before its approval is answered, and later answers wait for it", async () => {
+  const order: string[] = []; let release!: () => void; const errors: unknown[] = [];
+  const enqueue = createDecisionQueue(error => errors.push(error));
+  const first = enqueue(async () => { order.push("answer 1"); }, () => new Promise<void>(resolve => { release = () => { order.push("user write"); resolve(); }; }));
+  const second = enqueue(async () => { order.push("answer 2"); });
+  await Bun.sleep(10); expect(order).toEqual([]);
+  release(); await Promise.all([first, second]);
+  expect(order).toEqual(["user write", "answer 1", "answer 2"]);
+  // a failed action reports once and does not answer its request; later requests still get answers
+  await enqueue(async () => { order.push("answer 3"); }, async () => { throw new Error("write failed"); });
+  await enqueue(async () => { order.push("answer 4"); });
+  expect(order.slice(3)).toEqual(["answer 4"]); expect(errors.map(error => (error as Error).message)).toEqual(["write failed"]);
 });

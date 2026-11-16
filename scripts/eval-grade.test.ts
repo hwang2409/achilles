@@ -620,3 +620,16 @@ test("a browser task cannot mix protocol prompts, and a reload names its trigger
   expect(() => validateTask({ ...base, steps: [browser, { id: "s2", kind: "prompt", page: "p", chat: "c", prompt: "again" }] })).toThrow("cannot also have prompt");
   expect(() => validateTask({ ...base, steps: [{ ...browser, reload: { on: "tool_start" } }] })).toThrow("tool_start requires one");
 });
+
+test("a prompt step of an ask task can write or steer during its turn, at the n-th approval request of a tool", () => {
+  const base = { id: "during-task", approval_mode: "ask", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 4, checks: [{ id: "c", type: "no_error", page: "p" }] };
+  const step = { id: "s1", kind: "prompt", page: "p", chat: "c", prompt: "add 50 to every budget" };
+  const write = { tool: "achilles__update_project", user_write: { tool: "update_project", arguments: { record_id: "p-4", budget: 180 } } };
+  expect(validateTask({ ...base, steps: [{ ...step, during: write }] }).steps[0].during).toEqual(write);
+  expect(validateTask({ ...base, steps: [{ ...step, during: { tool: "achilles__update_task", nth: 2, steer: "use paused" } }] }).steps[0].during?.steer).toBe("use paused");
+  expect(() => validateTask({ ...base, approval_mode: "allow", steps: [{ ...step, during: write }] })).toThrow("approval_mode ask");
+  expect(() => validateTask({ ...base, steps: [{ ...step, during: { ...write, steer: "and steer" } }] })).toThrow("exactly one of user_write or steer");
+  expect(() => validateTask({ ...base, steps: [{ ...step, during: { ...write, user_write: { tool: "update_project", arguments: { record_id: "p-4", revision: 1 } } } }] })).toThrow("no revision");
+  // the value a scripted user write stores may be graded in the answer, like a seeded value
+  expect(() => validateTask({ ...base, steps: [{ ...step, during: write }], checks: [{ id: "told", type: "answer_mentions", page: "p", step: "s1", value: ["180"] }] })).not.toThrow();
+});
