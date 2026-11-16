@@ -454,9 +454,11 @@ def build_mcp(store: PageStore):
                     }
                 else:
                     created, digest, note = await anyio.to_thread.run_sync(
-                        store.create_tool, page["id"], args["bundle"], "/bundle"
+                        store.create_tool, page["id"], args["bundle"], "/bundle", args.get("page")
                     )
                     result = _with_note({**created, "digest": digest}, note)
+                    if created.get("page_id", page["id"]) != page["id"]:
+                        await notify(created["page_id"])
             except ValidationError as exc:
                 return _safe_error(exc)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, PermissionError) as exc:

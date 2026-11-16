@@ -290,6 +290,88 @@ def test_inspect_page_allows_creator_and_keeps_other_pages_scoped(creation_clien
     assert json.loads(missing["content"][0]["text"]) == expected
 
 
+@pytest.fixture
+def page_family(creation_client):
+    """home created /reading, /other, /loose (no creator); /other created /grandchild."""
+    root, store, client, home = creation_client
+    ids = {}
+    for request_id, route in enumerate(("/reading", "/other", "/loose"), 2):
+        created = mcp(
+            client,
+            home,
+            request_id,
+            "tools/call",
+            {"name": "create_page", "arguments": {**request(), "route": route}},
+        )
+        ids[route] = json.loads(created["content"][0]["text"])["page_id"]
+    with store.transaction() as db:  # a page from before created_by_page_id, or made by the user
+        db.execute("UPDATE page SET created_by_page_id=NULL WHERE id=?", (ids["/loose"],))
+    store.set_create_mode(ids["/other"], True)
+    other = initialize(client, store.ensure_credential(ids["/other"]), 5)
+    mcp(
+        client,
+        other,
+        6,
+        "tools/call",
+        {"name": "create_page", "arguments": {**request(), "route": "/grandchild"}},
+    )
+
+    def call(headers, request_id, name, page=None):
+        arguments = {"bundle": bundle(name=name)} | ({} if page is None else {"page": page})
+        result = mcp(
+            client,
+            headers,
+            request_id,
+            "tools/call",
+            {"name": "create_tool", "arguments": arguments},
+        )
+        return result.get("isError", False), json.loads(result["content"][0]["text"])
+
+    def names(route):
+        return {tool["name"] for tool in store.page_tools(store.page(route)["id"])}
+
+    return root, ids, home, other, call, names
+
+
+def test_create_tool_page_adds_to_this_page_or_a_page_it_created(page_family):
+    _, ids, home, _, call, names = page_family
+    error, value = call(home, 7, "child_tool", "/reading")
+    assert not error, value
+    assert value["page_id"] == ids["/reading"]
+    assert "child_tool" in names("/reading") and "child_tool" not in names("/")
+
+    error, value = call(home, 8, "child_by_id", ids["/reading"])
+    assert not error and value["page_id"] == ids["/reading"], value
+
+    error, value = call(home, 9, "own_tool", "/")
+    assert not error and value["page_id"] == "home" and "own_tool" in names("/"), value
+
+    error, value = call(home, 10, "plain_tool")
+    assert not error and "page_id" not in value
+    assert "plain_tool" in names("/")
+
+
+@pytest.mark.parametrize(
+    ("caller", "page"),
+    [
+        ("home", "/grandchild"),  # a page another page created
+        ("home", "/loose"),  # a page with no stored creator
+        ("home", "/missing"),
+        ("other", "/reading"),  # a sibling: same creator, not this page
+        ("other", "/"),  # the caller's own creator
+    ],
+)
+def test_create_tool_page_refuses_pages_this_page_did_not_create(page_family, caller, page):
+    root, _, home, other, call, _ = page_family
+    before = state(root)
+    error, value = call({"home": home, "other": other}[caller], 7, "sneaky", page)
+    assert error
+    assert value["code"] == "forbidden" and value["path"] == "/page", value
+    assert "only to this page or to a page created from this page" in value["hint"]
+    assert "Bearer" not in json.dumps(value)
+    assert state(root) == before
+
+
 def test_create_mode_off_lists_read_only_inspect_and_no_write_builtins(creation_client):
     root, store, client, headers = creation_client
     created = mcp(client, headers, 2, "tools/call", {"name": "create_page", "arguments": request()})
@@ -770,8 +852,10 @@ def test_authoring_guidance_and_result_notes_through_public_mcp(creation_client,
         update_committed = threading.Event()
         original_create_tool = PageStore.create_tool
 
-        def pause_after_insert_commit(self, page_id, tool_bundle, validation_prefix=""):
-            created = original_create_tool(self, page_id, tool_bundle, validation_prefix)
+        def pause_after_insert_commit(
+            self, page_id, tool_bundle, validation_prefix="", target=None
+        ):
+            created = original_create_tool(self, page_id, tool_bundle, validation_prefix, target)
             if tool_bundle["implementation"]["operation"] == "insert":
                 insert_committed.set()
                 assert update_committed.wait(timeout=10)
