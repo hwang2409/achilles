@@ -27,7 +27,10 @@ export function PageView({ page, pageId, credential, refreshKey }: PageViewProps
       <div><h1>{page.title}</h1>{lead && <p className="page-lead">{lead}</p>}</div>
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>
     </header>
-    <div className="page-blocks">{groupBlocks(content).map((group, index) => group.length === 1 ? <LayoutBlock key={index} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} /> : <div className="metric-strip" key={index}>{group.map((block) => <MetricBlock key={String(block.label)} block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />)}</div>)}</div>
+    <div className="page-blocks">{groupBlocks(content).map((group) => {
+      const key = group.map((block) => `${String(block.type)}:${String(block.title ?? block.label ?? block.collection ?? "")}`).join("|");
+      return group.length === 1 ? <LayoutBlock key={key} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} /> : <div className="metric-strip" key={key}>{group.map((block) => <MetricBlock key={String(block.label)} block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />)}</div>;
+    })}</div>
   </main>;
 }
 
