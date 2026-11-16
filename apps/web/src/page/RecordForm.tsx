@@ -60,14 +60,15 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
   const order = fields ?? (tool && shown ? schemaColumns(shown, tool.collection) : undefined);
   const label = tool && tool.operation === "update" && row ? editingLabel(tool, order, row) : "";
-  const heading = label ? `${title} · ${label}` : title;
+  const heading = title;
+  const headingNote = tool?.operation === "update" ? `runs ${toolName} on the selected row` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
     : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
     : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
-  return <section ref={section} className="record-form"><h2>{heading}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+  return <section ref={section} className="record-form"><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // Names which record a form edits by its first listed field, in the form heading.

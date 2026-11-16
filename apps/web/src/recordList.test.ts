@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import React from "react";
-import { cleanup, render, type RenderResult } from "@testing-library/react";
+import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
 import { LayoutBlock, RecordList } from "./App";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import type { PageTool } from "./page/usePageTools";
@@ -181,4 +181,18 @@ describe("list columns", () => {
     await act(async () => {});
     expect(headers(result)).toEqual(["title", "status", "pages", "author"]);
   });
+});
+
+
+test("reveals later rows and selects them by keyboard and click", async () => {
+  holdFetches();
+  const result = renderList(props);
+  await settle(calls[0], Array.from({ length: 6 }, (_, index) => ({ record_id: `book-${index}`, title: `book ${index}` })));
+  expect(result.getByText("show 1 more")).toBeTruthy();
+  fireEvent.click(result.getByRole("button", { name: "show 1 more" }));
+  const later = result.getByRole("row", { name: /book 5/ });
+  expect(later).toBeTruthy();
+  later.focus();
+  fireEvent.keyDown(later, { key: "Enter" });
+  fireEvent.click(later);
 });

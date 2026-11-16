@@ -63,3 +63,19 @@
 .record-form-actions { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .record-form-actions p { margin: 0; color: var(--fulcrum-muted); font-size: 12px; }
 @media (max-width: 760px) { .page-content { padding: 24px 20px 40px; } .page-head { align-items: flex-start; flex-direction: column; gap: 8px; margin-bottom: 24px; } .page-layout-version { align-self: flex-start; } .page-blocks { gap: 24px; } .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .metric-block { padding-inline: 10px; } .record-form form { grid-template-columns: 1fr; } .record-field:nth-child(n):not(.record-field-check) { grid-column: 1; } }
+.metric-value-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.record-count { font-weight: 400; }
+.record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
+.selected-note, .form-note { color: var(--fulcrum-muted); font-size: 12px; font-weight: 400; }
+@media (max-width: 500px) {
+  .record-list table { table-layout: auto; }
+  .record-list th:first-child, .record-list td:first-child { width: auto; min-width: 0; }
+  .record-list th:nth-child(2), .record-list td:nth-child(2) { width: auto; }
+  .record-list th:nth-child(3), .record-list td:nth-child(3), .record-list th:nth-child(4), .record-list td:nth-child(4) { width: auto; }
+  .record-list td { padding-inline: 4px; }
+  .record-list td:first-child, .record-list th:first-child { padding-left: 0; }
+  .record-list td:not(:first-child) { white-space: normal; }
+  .record-status { gap: 4px; }
+}
+
+@media (min-width: 1100px), (max-height: 500px) and (min-width: 700px) { .page-view.docked > .page-content { flex: 1 1 0; min-width: 0; } }
