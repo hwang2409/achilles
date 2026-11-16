@@ -607,6 +607,7 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
     chatQueues.settle();
   };
   const settle = async (done: () => boolean = () => false) => {
+    commit();
     for (let flush = 0; flush < 40 && !done(); flush += 1) { await act(async () => {}); commit(); }
   };
   const navigate = async (search: string) => {
@@ -654,7 +655,7 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
       expect(requests.filter((call) => call === "new_session").length).toBeLessThanOrEqual(row.message === "none" ? 0 : 1);
       if (row.message === "visible") {
         const key = shownKey()!;
-        const shown = draftStore.get(key).includes("x1") || view!.owner.getModel().queue.some((item) => item.text === "x1");
+        const shown = draftStore.get(key).includes("x1") || view?.owner.getModel().queue.some((item) => item.text === "x1") === true;
         expect({ key, shown }).toEqual({ key, shown: true });
       }
     }
