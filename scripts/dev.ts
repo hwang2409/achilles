@@ -93,10 +93,30 @@ async function ensureFulcrum() {
   if (old !== sourceHash) {
     run(["bun", "install", "--frozen-lockfile"], fulcrum);
     process.env.FULCRUM_DIR = fulcrum;
-    run(["bun", "run", "scripts/fulcrum.ts"], root);
+    run(["bun", "run", "scripts/fulcrum.ts", "--build-vendor"], root);
     await writeFile(stamp, sourceHash);
   } else console.log("fulcrum build unchanged");
   return stamp;
+}
+async function webDepsStamp() {
+  const app = resolve(root, "apps/web");
+  const vendor = resolve(root, "vendor/fulcrum");
+  const tarballs: string[] = [];
+  if (existsSync(vendor)) for await (const entry of new Bun.Glob("*.tgz").scan({ cwd: vendor })) tarballs.push(resolve(vendor, entry));
+  return await digest([resolve(app, "package.json"), resolve(app, "bun.lock"), ...tarballs]);
+}
+export function webInstallDecision(previous: string | null, stamp: string): "install" | "skip" {
+  return previous === stamp ? "skip" : "install";
+}
+async function ensureWebDependencies() {
+  const stampFile = resolve(root, ".cache/web-deps.stamp");
+  const stamp = await webDepsStamp();
+  let previous: string | null = null;
+  try { previous = (await readFile(stampFile, "utf8")).trim(); } catch {}
+  if (webInstallDecision(previous, stamp) === "skip") { console.log("web deps unchanged"); return; }
+  process.env.FULCRUM_DIR = resolve(root, ".cache/fulcrum");
+  run(["bun", "run", "scripts/fulcrum.ts", "--install-web"], root);
+  await writeFile(stampFile, stamp);
 }
 async function freePort() {
   return await new Promise<number>((ok, fail) => { const server = createServer(); server.once("error", fail); server.listen(0, "127.0.0.1", () => { const value = (server.address() as any).port; server.close(() => ok(value)); }); });
@@ -216,17 +236,35 @@ async function zetaInstallCommand() {
   const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
   return `git clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${shellQuote(pin)} && uv tool install --editable .cache/zeta`;
 }
-async function zetaUpgradeCommand() {
+async function zetaCheckout(): Promise<string | null> {
   const listed = Bun.spawnSync(["uv", "tool", "list", "--show-paths"]);
   const toolDir = listed.exitCode === 0 ? listed.stdout.toString().match(/^zeta .+ \((.+)\)$/m)?.[1] : undefined;
-  if (toolDir) {
-    try {
-      const receipt = await readFile(resolve(toolDir, "uv-receipt.toml"), "utf8");
-      const checkout = receipt.match(/(?:editable|(?<!install-)path) = "([^"]+)"/)?.[1];
-      if (checkout) return `git -C ${shellQuote(checkout)} pull --ff-only`;
-    } catch {}
-  }
+  if (!toolDir) return null;
+  try {
+    const receipt = await readFile(resolve(toolDir, "uv-receipt.toml"), "utf8");
+    return receipt.match(/(?:editable|(?<!install-)path) = "([^"]+)"/)?.[1] ?? null;
+  } catch { return null; }
+}
+async function zetaUpgradeCommand() {
+  const checkout = await zetaCheckout();
+  if (checkout) return `git -C ${shellQuote(checkout)} pull --ff-only`;
   return "uv tool upgrade zeta";
+}
+export type ZetaRevision = { kind: "ok" } | { kind: "behind"; command: string } | { kind: "unknown"; reason: string };
+export function zetaRevisionDecision(pin: string, checkout: string | null, headKnown: boolean, pinIsAncestor: boolean): ZetaRevision {
+  if (!checkout) return { kind: "unknown", reason: "zeta is not installed from a git checkout" };
+  if (!headKnown) return { kind: "unknown", reason: `the installed zeta at ${checkout} is not a git checkout` };
+  if (pinIsAncestor) return { kind: "ok" };
+  return { kind: "behind", command: `git -C ${shellQuote(checkout)} fetch && git -C ${shellQuote(checkout)} checkout --detach ${pin} && uv tool install --editable ${shellQuote(checkout)}` };
+}
+async function checkZetaRevision() {
+  const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
+  const checkout = await zetaCheckout();
+  const headKnown = checkout !== null && Bun.spawnSync(["git", "-C", checkout, "rev-parse", "HEAD"]).exitCode === 0;
+  const pinIsAncestor = headKnown && Bun.spawnSync(["git", "-C", checkout!, "merge-base", "--is-ancestor", pin, "HEAD"]).exitCode === 0;
+  const decision = zetaRevisionDecision(pin, checkout, headKnown, pinIsAncestor);
+  if (decision.kind === "behind") throw new Error(`installed zeta is older than the pin ${pin}; update it or set ACHILLES_ZETA_DISCOVERY to attach:\n${decision.command}`);
+  if (decision.kind === "unknown") console.error(`warning: cannot verify the installed zeta is at least the pin ${pin}: ${decision.reason}; continuing`);
 }
 async function prerequisites() {
   const fixes: Record<string, string> = {
@@ -253,6 +291,7 @@ async function prerequisites() {
     if (kind === "serve") throw new Error(`zeta too old: update zeta or set ACHILLES_ZETA_DISCOVERY to attach\nminimum zeta: 8f4b469\n${upgrade}, then restart zeta sessions`);
     throw new Error(`missing zeta mcp: ${upgrade}`);
   }
+  if (!process.env.ACHILLES_ZETA_DISCOVERY) await checkZetaRevision();
   await mkdir(home, { recursive: true });
 }
 async function dev() {
@@ -261,6 +300,7 @@ async function dev() {
   // Test hook: skip dependency and web builds while exercising the real dev entry.
   if (process.env.ACHILLES_DEV_SKIP_BUILD !== "1") {
     run(["uv", "sync", "--group", "test"]); const fulcrumStamp = await ensureFulcrum();
+    await ensureWebDependencies();
     const hash = await digest([...(await filesUnder(resolve(root, "apps/web"))), fulcrumStamp]);
     let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
     if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");

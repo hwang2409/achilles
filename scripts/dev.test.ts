@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, type ProcessIdentity } from "./dev";
+import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaRevisionDecision, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
@@ -104,6 +105,27 @@ test("an existing different MCP entry is left unchanged with an exact fix comman
     kind: "different",
     command: "zeta mcp remove achilles --scope user && zeta mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles",
   });
+});
+
+test("web dependencies install only when the web-deps stamp changed", () => {
+  // The old make dev installed web deps inside the fulcrum build step, so a stamp that
+  // only tracked fulcrum never saw a changed apps/web/package.json. The web-deps stamp
+  // must drive the install on its own: equal stamp skips, any change installs.
+  expect(webInstallDecision("web-stamp-a", "web-stamp-a")).toBe("skip");
+  expect(webInstallDecision("web-stamp-a", "web-stamp-b")).toBe("install");
+  expect(webInstallDecision(null, "web-stamp-a")).toBe("install");
+});
+
+test("make dev refuses an installed zeta older than the pin", () => {
+  const pin = "d6776edb3a60e7207eabcd1055e01a3aab092a83";
+  const checkout = "/home/u/zeta";
+  expect(zetaRevisionDecision(pin, checkout, true, true)).toEqual({ kind: "ok" });
+  expect(zetaRevisionDecision(pin, checkout, true, false)).toEqual({
+    kind: "behind",
+    command: `git -C '${checkout}' fetch && git -C '${checkout}' checkout --detach ${pin} && uv tool install --editable '${checkout}'`,
+  });
+  expect(zetaRevisionDecision(pin, null, false, false).kind).toBe("unknown");
+  expect(zetaRevisionDecision(pin, checkout, false, false).kind).toBe("unknown");
 });
 
 test("stop ownership requires pid, start time, and exact command", () => {
@@ -451,3 +473,116 @@ process.exit(0);
     }
   }
 }, 60_000);
+
+test("make dev refuses an installed zeta that predates the pin before starting serve", async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), "achilles-zeta-rev-test-"));
+  const bin = resolve(temp, "bin");
+  const home = resolve(temp, "home");
+  const achillesHome = resolve(temp, "achilles-home");
+  const toolDir = resolve(temp, "tool");
+  const checkout = resolve(temp, "checkout");
+  const started = resolve(temp, "started");
+  const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
+  await mkdir(bin, { recursive: true });
+  await mkdir(toolDir, { recursive: true });
+  await mkdir(checkout, { recursive: true });
+  // A real git checkout that does not contain the pin commit, so make dev cannot confirm it is new enough.
+  expect(Bun.spawnSync(["git", "init", "-q", checkout]).exitCode).toBe(0);
+  await writeFile(resolve(checkout, "f"), "x");
+  expect(Bun.spawnSync(["git", "-C", checkout, "add", "f"]).exitCode).toBe(0);
+  expect(Bun.spawnSync(["git", "-C", checkout, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"]).exitCode).toBe(0);
+  await writeFile(resolve(toolDir, "uv-receipt.toml"), `[tool]\neditable = "${checkout}"\n`);
+  await writeFile(resolve(bin, "uv"), `#!/bin/sh\nif [ "$1 $2" = "tool list" ]; then echo "zeta v0.1.0 (${toolDir})"; exit 0; fi\nexit 0\n`);
+  await writeFile(resolve(bin, "zeta"), `#!/bin/sh
+case "$*" in
+  "serve --help") echo "--ws --ws-origin --ws-discovery"; exit 0;;
+  *--help*) echo "add show remove --scope --json --url"; exit 0;;
+  serve*) : > "${started}"; exit 1;;
+  *) exit 0;;
+esac
+`);
+  await Promise.all(["uv", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    HOME: temp,
+    ZETA_HOME: home,
+    ACHILLES_HOME: achillesHome,
+    ACHILLES_DEV_SKIP_BUILD: "1",
+  };
+  try {
+    const child = Bun.spawn(["bun", "scripts/dev.ts"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const exitCode = await child.exited;
+    const stderr = await new Response(child.stderr).text();
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain(`installed zeta is older than the pin ${pin}`);
+    expect(stderr).toContain(`git -C '${checkout}' fetch`);
+    expect(stderr).toContain(`checkout --detach ${pin}`);
+    expect(existsSync(started)).toBe(false);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("web dependencies reinstall when apps/web changed even if the fulcrum build is unchanged", async () => {
+  const cache = resolve(root, ".cache");
+  const fulcrumCache = resolve(cache, "fulcrum");
+  const stampFiles = ["fulcrum-build.stamp", "web-build.stamp", "web-deps.stamp"].map((name) => resolve(cache, name));
+  if (existsSync(fulcrumCache)) throw new Error(`refusing to clobber ${fulcrumCache}; clear .cache/fulcrum and retry`);
+  const savedStamps = await Promise.all(stampFiles.map(async (path) => (existsSync(path) ? await readFile(path) : null)));
+  const temp = await mkdtemp(resolve(tmpdir(), "achilles-web-deps-test-"));
+  const bin = resolve(temp, "bin");
+  const home = resolve(temp, "home");
+  const achillesHome = resolve(temp, "achilles-home");
+  const calls1 = resolve(temp, "bun-calls-1");
+  const calls2 = resolve(temp, "bun-calls-2");
+  await mkdir(bin, { recursive: true });
+  await mkdir(cache, { recursive: true });
+  await writeFile(resolve(bin, "uv"), "#!/bin/sh\nexit 0\n");
+  await writeFile(resolve(bin, "zeta"), `#!/bin/sh\ncase "$*" in\n  *--help*) echo "add show remove --scope --json --url"; exit 0;;\n  *) exit 0;;\nesac\n`);
+  await writeFile(resolve(bin, "git"), `#!/bin/sh
+for a in "$@"; do dest="$a"; done
+case "$*" in
+  clone*) mkdir -p "$dest/.git" "$dest/packages/core"; echo x > "$dest/packages/core/index.ts"; exit 0;;
+  *ls-files*) echo "packages/core/index.ts"; exit 0;;
+  *) exit 0;;
+esac
+`);
+  await writeFile(resolve(bin, "bun"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_BUN_CALLS"\nexit 0\n`);
+  await Promise.all(["uv", "zeta", "git", "bun"].map((name) => chmod(resolve(bin, name), 0o755)));
+  const baseEnv = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    HOME: temp,
+    ZETA_HOME: home,
+    ACHILLES_HOME: achillesHome,
+    ACHILLES_ZETA_DISCOVERY: resolve(temp, "missing-serve.json"),
+  };
+  const runDev = async (callsFile: string) => {
+    const child = Bun.spawn([process.execPath, "scripts/dev.ts"], { cwd: root, env: { ...baseEnv, FAKE_BUN_CALLS: callsFile }, stdout: "pipe", stderr: "pipe" });
+    const exitCode = await child.exited;
+    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { exitCode, stdout, stderr, calls: existsSync(callsFile) ? await readFile(callsFile, "utf8") : "" };
+  };
+  try {
+    // First run clones the fake fulcrum, builds the vendor, installs web deps, and writes the stamps.
+    const first = await runDev(calls1);
+    expect(first.stderr).toContain("does not name a live zeta serve");
+    expect(first.calls).toMatch(/scripts\/fulcrum\.ts/);
+
+    // Simulate a changed apps/web (e.g. a new dependency) while the fulcrum build is unchanged.
+    await writeFile(resolve(cache, "web-deps.stamp"), "stale-apps-web-package-json");
+    const second = await runDev(calls2);
+    expect(second.stderr).toContain("does not name a live zeta serve");
+    expect(second.stdout).toContain("fulcrum build unchanged");
+    // The bug: the old make dev skipped the web install here; it must now run from its own stamp.
+    expect(second.calls).toContain("scripts/fulcrum.ts --install-web");
+  } finally {
+    await rm(fulcrumCache, { recursive: true, force: true });
+    await Promise.all(stampFiles.map(async (path, i) => {
+      if (savedStamps[i] === null) await rm(path, { force: true });
+      else await writeFile(path, savedStamps[i]!);
+    }));
+    await rm(temp, { recursive: true, force: true });
+  }
+}, 30_000);

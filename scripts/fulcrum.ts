@@ -73,8 +73,14 @@ export async function prepareWebDependencies(force = false) {
   await writeFile(marker, `${digest}\n`);
 }
 
-if (process.argv.includes("--prepare-web")) {
-  if (!(await Promise.all(packages.map(name => Bun.file(resolve(vendor, `fulcrum-${name}.tgz`)).exists())).then(results => results.every(Boolean)))) await buildVendor();
+const tarballsExist = () => Promise.all(packages.map(name => Bun.file(resolve(vendor, `fulcrum-${name}.tgz`)).exists())).then(results => results.every(Boolean));
+if (process.argv.includes("--build-vendor")) {
+  await buildVendor();
+} else if (process.argv.includes("--install-web")) {
+  if (!(await tarballsExist())) await buildVendor();
+  await prepareWebDependencies(true);
+} else if (process.argv.includes("--prepare-web")) {
+  if (!(await tarballsExist())) await buildVendor();
   await prepareWebDependencies();
 } else {
   await buildVendor();
