@@ -1,6 +1,6 @@
 /* transcript typography and tool rows for the design-v4 chat specimen. */
 .transcript [data-part="message"] {
-  --fulcrum-measure: calc(100% - var(--cursor-gutter));
+  --fulcrum-measure: 880px;
   font-size: 14px;
   line-height: 22px;
   text-wrap: pretty;
