@@ -297,7 +297,11 @@
         "resumed_session_id": "5e939a5251824d0aac9d3e44a8ee0c3a",
         "after_restart": [],
         "history_continuity": true,
-        "dangling_approvals": []
+        "dangling_approvals": [
+          "toolu_01WqcnkWVFPMVXdpBgpVfUTr",
+          "toolu_014W5a1p8Lpcox7uNi6NucQi",
+          "toolu_01Vjd7gRp5qVW7ZDETpQt8ov"
+        ]
       }
     ],
     "turns": 3,
