@@ -465,6 +465,22 @@ def test_null_active_layout_version_reads_version_one_not_latest(tmp_path):
     assert store.inspect_page(page_id)["layout_version"] == 1
 
 
+def test_versions_summary_labels_each_layout_from_its_first_block(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    page, _, _, _, _ = store.create_page(
+        "/n", "n", {"blocks": [{"type": "text", "text": "  v1  the   start "}]}
+    )
+    pid = page["id"]
+    store.set_create_mode(pid, True)
+    store.update_layout(pid, {"blocks": [{"type": "detail", "title": "pick", "fields": ["id"]}]}, 1)
+    store.update_layout(pid, {"blocks": [{"type": "metric", "label": "runs", "value": "3"}]}, 2)
+    store.update_layout(pid, {"blocks": []}, 3)
+    summaries = [row["summary"] for row in store.versions(pid)["layout"]]
+    # newest first: empty -> None, metric -> label, detail -> title, text -> collapsed text
+    assert summaries == [None, "runs", "pick", "v1 the start"]
+
+
 def test_save_session_compare_and_set_has_one_winner(tmp_path):
     import threading
 
