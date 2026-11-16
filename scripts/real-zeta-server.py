@@ -13,7 +13,10 @@ from tests.support.fake_backend import FakeBackend, ScriptedTurn
 from zeta.mcp.server_actor import MCPServerActor
 from zeta.protocol.types import MessageRole, TextContent, ToolCall
 from zeta.providers.completion import owned_completion
+from zeta.runtime.loop.agent import AgentLoop
 from zeta.server.delivery import DeliveryRequests
+from zeta.server.handlers.registry import HANDLERS
+from zeta.server.protocol import MethodDescriptor
 from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
@@ -57,10 +60,6 @@ class BarrierBackend(FakeBackend):
     async def complete(self, messages, tool_schemas):
         backend = self.opening.get(self.opening_prompt(messages), self)
         turn_index = len(self.calls)
-        last_result = messages[-1].tool_result if messages else None
-        if last_result is not None and last_result.tool_call_id == "reload-add-book":
-            # the reply after the reload's page tool waits until the reloaded page has attached
-            await hold(self.control, "reload_reply_barrier")
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
             if event.type.name == "MESSAGE_END":
@@ -439,6 +438,23 @@ def make_server() -> tuple[ZetaServer, Path, str]:
             ]
         ),
         ScriptedTurn(content=[TextContent("reload book added")]),
+        # a foreground tool running across a reload: its output so far shows once after it
+        ScriptedTurn(
+            tool_calls=[
+                ToolCall(
+                    "reload-bash",
+                    "bash",
+                    {
+                        "command": (
+                            'echo tool-line "before-reload"; '
+                            f"while [ ! -e {cwd / 'release-reload-tool'} ]; do sleep 0.05; done; "
+                            'echo tool-line "after-reload"'
+                        )
+                    },
+                )
+            ]
+        ),
+        ScriptedTurn(content=[TextContent("reload tool complete")]),
         ScriptedTurn(content=[TextContent("stock complete")]),
         ScriptedTurn(content=[TextContent("vim complete")]),
         ScriptedTurn(content=[TextContent("focus complete")], delay=5),
@@ -609,6 +625,36 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
                 await hold(control, "reload_tool_barrier")
         return await original_call_tool(actor, tool_name, *args, **kwargs)
 
+    def held_history(original):
+        async def handler(client, request_id, params):
+            # the reloaded page's first history read waits until the reply is published, rowless
+            document = json.loads(control.read_text())
+            if (
+                document.get("hold_reload_history") == params.get("session_id")
+                and "reload_history_barrier" not in document
+            ):
+                await hold(control, "reload_history_barrier")
+            return await original(client, request_id, params)
+
+        return handler
+
+    for method in (
+        MethodDescriptor.SESSION_HISTORY,
+        MethodDescriptor.SESSION_HISTORY_AND_SUBSCRIBE,
+    ):
+        HANDLERS[method] = held_history(HANDLERS[method])
+    original_append_reply = AgentLoop._append_turn_message_with_approvals
+
+    async def held_append_reply(loop, message, *args, **kwargs):
+        # zeta publishes assistant_message before it writes the reply's row: hold that row write
+        if any(
+            isinstance(block, TextContent) and block.text == "reload book added"
+            for block in message.content
+        ):
+            await hold(control, "reload_row_barrier")
+        return await original_append_reply(loop, message, *args, **kwargs)
+
+    AgentLoop._append_turn_message_with_approvals = held_append_reply
     MCPServerActor.call_tool = held_call_tool
     MCPServerActor.suspend = counted_suspend
     MCPServerActor._handle_call = recorded_handle_call

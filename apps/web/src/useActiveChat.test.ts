@@ -141,13 +141,13 @@ async function waitBounded<T>(wait: Promise<T>, cancel: () => void, drain: () =>
 
 function attachmentClient(onRequest?: (method: string, params?: unknown) => void | Promise<void>) {
   return {
-    features: ["session_mcp_bindings"],
+    features: ["session_mcp_bindings", "session_replay_seq"],
     request: async (method: string, params?: unknown) => {
       await onRequest?.(method, params);
       if (method === "new_session") return { session: { session_id: "created-on-zeta" } };
       if (method === "resume") return { session: { name: "" } };
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-      if (method === "session_history") return { messages: [], next_offset: null };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: "created-on-zeta" }, state: "idle" };
       throw new Error(`unexpected ${method}`);
     },
@@ -347,11 +347,11 @@ describe("active chat attachment", () => {
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         if (method === "resume") return { session: { name: "zeta auto name" } };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
         throw new Error(`unexpected ${method}`);
       },
@@ -377,11 +377,11 @@ describe("active chat attachment", () => {
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch;
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         if (method === "resume") return { session: {} };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "chat" }, state: "idle" };
         throw new Error(`unexpected ${method}`);
       },
@@ -414,7 +414,7 @@ describe("active chat attachment", () => {
       request: async (method: string) => {
         if (method === "resume") return { session: { name: "" } };
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") { statusRequests += 1; if (statusRequests === 2) { reached(); await statusGate; } return { session: { session_id: "s" }, state: "idle" }; }
         throw new Error(`unexpected ${method}`);
       },
@@ -528,7 +528,7 @@ describe("attachment while a turn runs", () => {
         if (method === "resume") throw busyError();
         if (method === "status") return running;
         if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: running.state, pending_approvals: running.pending_approvals } };
         throw new Error(`unexpected ${method}`);
       },
       replay: async (_id: string, refresh: () => Promise<typeof events>) => { events = await refresh(); return { store: { getState: () => ({ outline: [] }), resync(next: typeof events) { events = next; } }, release() {} }; },
@@ -620,13 +620,13 @@ describe("chat creation lifecycle", () => {
       if (fail === name && !failed) { failed = true; throw new Error(`forced ${name} failure`); }
     };
     const client = {
-      features: ["session_mcp_bindings"],
+      features: ["session_mcp_bindings", "session_replay_seq"],
       request: async (method: string) => {
         await step(method);
         if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }
         if (method === "resume") { await step("attach"); attaches += 1; return { session: { name: "" } }; }
         if (method === "session_settings") return { model: "offline", approval_mode: approval };
-        if (method === "session_history") return { messages: [], next_offset: null };
+        if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "owned-session" }, state: "idle" };
         if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
         if (method === "send") { deliveries += 1; return {}; }
