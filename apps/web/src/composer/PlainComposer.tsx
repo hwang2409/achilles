@@ -13,6 +13,7 @@ import {
   useComposerDelivery,
   type ComposerAdapterProps,
 } from "./useComposerDelivery";
+import { ComposerHint } from "./hint";
 
 /** A textarea adapter for the shared Achilles composer delivery module. */
 export function PlainComposer(props: ComposerAdapterProps) {
@@ -35,13 +36,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint = state === "running"
-    ? ["stop or wait to send"]
-    : queues
-      ? ["enter queue", "esc cancels last"]
-      : steer
-        ? ["enter steer", "shift+enter new line"]
-        : ["enter send", "shift+enter new line"];
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -140,13 +135,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           data-tone={tone}
           title={model.error?.text}
         >
-          <span
-            data-part="composer-hint"
-            id={`${id}-hint`}
-            hidden={Boolean(message)}
-          >
-            {hint.map((segment, index) => <span key={segment} data-hint-segment={index}>{index > 0 && " · "}{segment}</span>)}
-          </span>
+          <ComposerHint id={`${id}-hint`} state={state} queues={queues} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>

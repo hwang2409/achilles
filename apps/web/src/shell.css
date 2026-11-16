@@ -2,8 +2,20 @@
 .app-shell {
   grid-template-columns: 288px minmax(0, 1fr);
 }
-.sidebar { border-right: 1px solid var(--fulcrum-border); }
-.brand-row { padding: 0 14px; }
+.brand-mark { width: 11px; height: 11px; background: var(--fulcrum-accent); }
+@media (min-width: 761px) and (min-height: 501px) {
+  .app-shell.sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
+}
+
+.sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
+.new-chat, .chat-search { flex: 0 0 40px; margin: 12px 16px 0; display: flex; align-items: center; gap: 10px; padding: 0 10px; }
+.new-chat kbd { margin-left: auto; font-size: 14px; }
+.chat-search kbd { font-size: 14px; }
+.chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; display: flex; align-items: center; margin: 0; padding: 0 16px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 14px; font-weight: 400; text-transform: lowercase; }
+.chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.chat-row.current strong { font-weight: 700; }
+.main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--fulcrum-border); }
 .new-chat, .chat-search { margin-left: 14px; margin-right: 14px; font-size: 13px; }
 .new-chat kbd, .chat-search kbd, .sidebar > footer > button kbd { font-size: 12px; }
 .chat-group h2, .sidebar > footer > button { font-size: 13px; }
@@ -25,13 +37,17 @@
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
 .chat-row.current strong { font-weight: 700; }
 
-.chat-header { height: 56px; flex-basis: 56px; padding: 0 24px; }
-.chat-heading { gap: 8px; }
-.chat-heading span { order: 0; flex: 0 1 auto; max-width: 24ch; }
-.chat-heading strong { order: 1; flex: 1 1 auto; font-weight: 600; }
-.chat-actions { gap: 12px; }
+.chat-header { container-type: inline-size; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
+.chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
+.chat-heading span { order: 0; flex: 0 0 auto; white-space: nowrap; }
+.chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: 14px; }
 .chat-actions button { min-height: 30px; padding: 6px 11px; font-size: 12px; }
-.approval-mode { padding: 6px 11px; color: var(--fulcrum-muted); border: 1px solid var(--fulcrum-border); font-size: 12px; }
+.approval-mode { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
+.approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
+.approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
+.approval-mode.mode-allow { color: var(--fulcrum-warn); }
+.approval-mode.mode-allow::before { background: var(--fulcrum-warn); }
 .run-state { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 
 .page-chat { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
@@ -53,7 +69,7 @@
 }
 .main-pane [data-part="composer-bar"] { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 6px 8px 8px 14px; }
 .main-pane [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; }
-.main-pane [data-part="composer-hint"] { display: block; overflow: hidden; white-space: nowrap; }
+.main-pane [data-part="composer-hint"] { display: block; white-space: nowrap; }
 .main-pane [data-part="composer-submit"],
 .main-pane [data-part="composer-stop"] { min-height: 32px; padding: 0 12px; font-size: 13px; }
 .main-pane [data-part="composer-submit"] { color: var(--fulcrum-bg); background: var(--fulcrum-accent); border-color: var(--fulcrum-accent); }
@@ -63,11 +79,8 @@
 .main-pane .vim-composer { --inset: 12px; }
 .main-pane .vim-composer [data-part="composer-bar"] { padding-top: 6px; }
 
-@container (max-width: 640px) {
-  [data-part="composer-hint"] [data-hint-segment="1"],
-  [data-part="composer-hint"] [data-hint-segment="2"],
-  [data-part="composer-hint"] [data-hint-segment="3"],
-  [data-part="composer-hint"] [data-hint-segment="4"] { display: none; }
+@media (max-width: 639px) {
+  [data-part="composer-hint"] { display: none; }
 }
 @container (max-width: 480px) {
   .vim-guidance { flex-wrap: nowrap; }
