@@ -108,6 +108,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .approval-mode.mode-allow { color: var(--fulcrum-warn); }
 .approval-mode.mode-allow::before { background: var(--fulcrum-warn); }
 .header-overflow, .header-menu, .fold-indicator { display: none; }
+/* the status wrapper is transparent to layout on desktop; below 40em it becomes a narrow right-aligned
+   column (run state over the mode words), so the mode words never steal the title's horizontal room */
+.header-status { display: contents; }
 /* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
    width): 64em of header leaves the title about 30 characters beside the full actions. em follows the
    ui font size; ch would also follow the font face, and a wide fallback face folded them at 1440. */
@@ -137,14 +140,18 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .fold-long { display: none; }
   /* a long state ("maybe not sent", "waiting on you") wraps to two lines (9ch: never one word a line) instead of pushing ••• off-screen */
   .run-state { min-width: 9ch; white-space: normal; }
-  /* make room for the create word beside the icons: tighten the indicator and let the title ellipsize to a lower floor */
-  .fold-indicator { gap: 8px; padding-left: 8px; }
-  .chat-heading { min-width: 3em; }
+  /* stack run state over the named mode words in a narrow column, so the title keeps its full width and
+     no mode is ever a bare square; the divider is dropped since the marks sit under the run state now */
+  .header-status { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; min-width: 0; }
+  .fold-indicator { gap: 6px; padding-left: 0; border-left: none; }
+  .header-status .fold-mark::before { width: 7px; height: 7px; margin-right: 5px; }
+  .chat-actions { gap: 10px; }
+  .chat-heading { min-width: 0; }
 }
-/* the narrowest phones (~320) cannot fit the create word and a readable title together, so the word drops to its
-   accent chip alone there; the word returns at 390, and the full name stays in the aria-label and the ••• menu */
+/* the narrowest phones (~320) cannot fit the mode words and a readable title together, so the mode words fold
+   into the ••• menu there (run state stays); the words return at 390, and each stays named in its aria-label */
 @container (max-width: 20em) {
-  .fold-mid { display: none; }
+  .fold-indicator { display: none; }
 }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
