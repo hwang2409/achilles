@@ -67,7 +67,13 @@ TOOL_BUNDLE_SCHEMA = {
 }
 CREATE_TOOL_SCHEMA = {
     "type": "object",
-    "properties": {"bundle": TOOL_BUNDLE_SCHEMA},
+    "properties": {
+        "bundle": TOOL_BUNDLE_SCHEMA,
+        "page": {
+            "type": "string",
+            "description": "route or id of a page this page created; default this page",
+        },
+    },
     "required": ["bundle"],
     "additionalProperties": False,
 }

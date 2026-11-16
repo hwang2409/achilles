@@ -1,0 +1,100 @@
+{
+  "id": "build-habit-tracker",
+  "prompt": "make a habit tracker page, starting empty. store habits in a collection called habits; each habit has a name and a status that is done or skipped. put a count of done habits at the top, then a list of habits and a form to add one.",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "habits",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 14,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat"
+    },
+    {
+      "id": "add-one",
+      "kind": "prompt",
+      "page": "habits",
+      "chat": "habits-chat",
+      "prompt": "use this page's tools to add a habit named Synthetic Stretch with status done, then check that the done count at the top of the page is right"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "habits"
+    },
+    {
+      "id": "one-record",
+      "type": "count",
+      "page": "habits",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "record",
+      "type": "schema_roundtrip",
+      "page": "habits",
+      "value": [
+        "Synthetic Stretch",
+        "done"
+      ]
+    },
+    {
+      "id": "list",
+      "type": "list_shows",
+      "page": "habits",
+      "value": "Synthetic Stretch"
+    },
+    {
+      "id": "metric",
+      "type": "metric_count",
+      "page": "habits",
+      "value": {
+        "collection": "habits",
+        "where": {
+          "field": "status",
+          "equals": "done"
+        },
+        "count": 1,
+        "position": "first"
+      }
+    },
+    {
+      "id": "form-submit",
+      "type": "form_submit",
+      "page": "habits",
+      "value": {
+        "string": "Form Habit",
+        "integer": "1",
+        "number": "1"
+      }
+    },
+    {
+      "id": "page-tools-only",
+      "type": "assigned_tools_only",
+      "page": "habits"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "habits"
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
+  ]
+}
