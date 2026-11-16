@@ -226,7 +226,8 @@ a task is one json file in `evals/tasks/<id>.json`. fields:
     `{ "absent": true }` must be missing from the matched record; deeper in a
     row it is a literal object), `updated_record` (a `transition`
     from `before` to `after` values), `successful_result` (a successful call
-    of `tool`, optionally containing `value`), `no_duplicate_writes` (no two
+    of `tool`, optionally containing `value`; with `step`, only a call made
+    while that step's turn ran counts), `no_duplicate_writes` (no two
     successful calls with the same arguments; with `collection` and `fields`,
     no two records share those values).
   - layouts: `layout_contains`, `layout_update` (one block added to v1 on this

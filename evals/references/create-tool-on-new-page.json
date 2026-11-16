@@ -284,6 +284,7 @@
         "page_id": "home",
         "chat_id": "home-chat",
         "call_id": "call-2",
+        "step": "add-action",
         "tool": "achilles__create_tool",
         "success": true,
         "data": {
@@ -614,6 +615,7 @@
         "page_id": "home",
         "chat_id": "home-chat",
         "call_id": "call-2",
+        "step": "add-action",
         "tool": "achilles__create_tool",
         "success": true,
         "data": {
