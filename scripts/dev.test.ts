@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -56,6 +56,12 @@ async function killAndReap(child: Bun.Subprocess): Promise<void> {
     child.exited,
     Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping pid ${child.pid}`); }),
   ]);
+}
+
+async function sourceRuntimeSnapshot(): Promise<string> {
+  const status = Bun.spawnSync(["git", "status", "--porcelain", "--ignored"], { cwd: root }).stdout.toString();
+  const cache = Bun.spawnSync(["find", ".cache", "-print"], { cwd: root });
+  return `${status}\0${cache.stdout.toString()}`;
 }
 
 async function spawnTracked(args: string[], options: Parameters<typeof Bun.spawn>[1]) {
@@ -228,15 +234,28 @@ exit 0
 });
 
 test("the real dev entry preserves MCP wiring and owns its process lifecycle", async () => {
+  const sourceSnapshot = await sourceRuntimeSnapshot();
   const temp = await mkdtemp(resolve(tmpdir(), "achilles-dev-test-"));
+  const testRootPath = resolve(temp, "testRoot");
+  await mkdir(testRootPath, { recursive: true });
+  const testRoot = await realpath(testRootPath);
+  await Promise.all([
+    cp(resolve(root, "Makefile"), resolve(testRoot, "Makefile")),
+    cp(resolve(root, "zeta.rev"), resolve(testRoot, "zeta.rev")),
+    cp(resolve(root, "pyproject.toml"), resolve(testRoot, "pyproject.toml")),
+    cp(resolve(root, "uv.lock"), resolve(testRoot, "uv.lock")),
+    cp(resolve(root, "scripts/dev.ts"), resolve(testRoot, "scripts/dev.ts")),
+    cp(resolve(root, "scripts/stop.ts"), resolve(testRoot, "scripts/stop.ts")),
+    cp(resolve(root, "scripts/locked.py"), resolve(testRoot, "scripts/locked.py")),
+    cp(resolve(root, "src/achilles"), resolve(testRoot, "src/achilles"), { recursive: true }),
+  ]);
   const home = resolve(temp, "home");
   const bin = resolve(temp, "bin");
   const achillesHome = resolve(temp, "achilles-home");
   const calls = resolve(temp, "zeta-calls.jsonl");
   const serverPids = resolve(temp, "server-pids.jsonl");
-  const webStamp = resolve(root, ".cache/web-build.stamp");
-  const devCache = resolve(root, ".cache/dev");
-  const oldWebStamp = await Bun.file(webStamp).exists() ? await readFile(webStamp) : null;
+  const webStamp = resolve(testRoot, ".cache/web-build.stamp");
+  const devCache = resolve(testRoot, ".cache/dev");
   const managed: ProcessIdentity[] = [];
   const spawned: Bun.Subprocess[] = [];
   const discovered: ProcessIdentity[] = [];
@@ -252,7 +271,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
     if (await Bun.file(resolve(devCache, state)).exists()) throw new Error("refusing to replace existing make dev state");
   }
   await rm(devCache, { recursive: true, force: true });
-  await mkdir(resolve(root, ".cache"), { recursive: true });
+  await mkdir(resolve(testRoot, ".cache"), { recursive: true });
   await writeFile(webStamp, "test-web-stamp-1");
 
   const fakeServer = resolve(temp, "server.ts");
@@ -310,12 +329,15 @@ case "$*" in *status*) exec /usr/bin/git "$@";; *fetch*|*checkout*) exit 0;; esa
 exec /usr/bin/git "$@"
 `);
   await chmod(fakeGit, 0o755);
-  const cachedZeta = resolve(root, ".cache/zeta/.venv/bin/zeta");
-  const cachedZetaBackup = await Bun.file(cachedZeta).exists() ? await readFile(cachedZeta) : null;
-  await mkdir(resolve(root, ".cache/zeta/.venv/bin"), { recursive: true });
+  const cachedZeta = resolve(testRoot, ".cache/zeta/.venv/bin/zeta");
+  await mkdir(resolve(testRoot, ".cache/zeta/.venv/bin"), { recursive: true });
   await writeFile(cachedZeta, await readFile(fakeZeta));
   await chmod(cachedZeta, 0o755);
-  await mkdir(resolve(root, ".cache/zeta/.git"), { recursive: true });
+  await writeFile(resolve(testRoot, ".cache/zeta/.gitignore"), ".venv/\n");
+  const zetaFixture = resolve(testRoot, ".cache/zeta");
+  expect(Bun.spawnSync(["git", "init", "-q", zetaFixture]).exitCode).toBe(0);
+  expect(Bun.spawnSync(["git", "-C", zetaFixture, "add", ".gitignore"]).exitCode).toBe(0);
+  expect(Bun.spawnSync(["git", "-C", zetaFixture, "-c", "user.email=test@example.invalid", "-c", "user.name=test", "commit", "-qm", "fixture"]).exitCode).toBe(0);
 
   const port = await freePort();
   const gitCalls = resolve(temp, "git-calls");
@@ -339,7 +361,7 @@ exec /usr/bin/git "$@"
     return tracked;
   };
   const runDev = async (env = baseEnv) => {
-    const { child } = await track(["make", "--silent", "dev"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const { child } = await track(["make", "--silent", "dev"], { cwd: testRoot, env, stdout: "pipe", stderr: "pipe" });
     const exitCode = await child.exited;
     return { exitCode, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
   };
@@ -425,7 +447,7 @@ exec /usr/bin/git "$@"
     expect(thirdState.stamp).not.toBe(firstState.stamp);
 
     const block = resolve(temp, "block");
-    const { child: held } = await track(["make", "--silent", "dev"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
+    const { child: held } = await track(["make", "--silent", "dev"], { cwd: testRoot, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(`${block}.ready`).exists(), "first make dev to hold its lock");
     const lockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     const concurrent = await runDev({ ...baseEnv, FAKE_ZETA_BLOCK: block });
@@ -441,7 +463,7 @@ exec /usr/bin/git "$@"
     const launcherReady = resolve(temp, "launcher-ready");
     const launcherRelease = resolve(temp, "launcher-release");
     await writeFile(launcher, `import os\nimport time\nfrom pathlib import Path\nPath(${JSON.stringify(launcherReady)}).write_text(str(os.getpid()))\nwhile not Path(${JSON.stringify(launcherRelease)}).exists(): time.sleep(0.01)\nos.execvp("python3", ["python3", "scripts/locked.py", "python3", ${JSON.stringify(waiter)}])\n`);
-    const { child: crashed, identity: crashedIdentity } = await track(["python3", launcher], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const { child: crashed, identity: crashedIdentity } = await track(["python3", launcher], { cwd: testRoot, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(launcherReady).exists(), "launcher identity to be captured");
     await writeFile(launcherRelease, "release");
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
@@ -450,14 +472,14 @@ exec /usr/bin/git "$@"
     if (crashedChildIdentity) discovered.push(crashedChildIdentity);
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     crashedLockIdentity = crashedIdentity.pid === crashedLockPid ? crashedIdentity : null;
-    const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: testRoot, stdout: "pipe", stderr: "pipe" });
     expect(await rejected.exited).toBe(1);
     expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
     expect(crashedLockIdentity).not.toBeNull();
     expect(ownedProcessMatches(crashedIdentity, await processIdentity(crashed.pid))).toBe(false);
     crashed.kill("SIGKILL");
     await crashed.exited;
-    const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: testRoot, stdout: "pipe", stderr: "pipe" });
     const recoveredExit = await recovered.exited;
     const recoveredStderr = await new Response(recovered.stderr).text();
     if (recoveredExit !== 0) {
@@ -469,7 +491,7 @@ exec /usr/bin/git "$@"
     await stop(crashedChildIdentity!);
     crashedChildPid = 0;
 
-    const { child: stopped } = await track(["make", "--silent", "stop"], { cwd: root, env: baseEnv, stdout: "pipe", stderr: "pipe" });
+    const { child: stopped } = await track(["make", "--silent", "stop"], { cwd: testRoot, env: baseEnv, stdout: "pipe", stderr: "pipe" });
     const stopExit = await stopped.exited;
     expect(stopExit, await new Response(stopped.stderr).text()).toBe(0);
     expect(alive(thirdState.pid)).toBe(false);
@@ -526,11 +548,7 @@ exec /usr/bin/git "$@"
     }
     try { await rm(devCache, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
     try {
-      if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
-    } catch (error) { cleanupErrors.push(String(error)); }
-    try {
-      if (cachedZetaBackup) await writeFile(cachedZeta, cachedZetaBackup);
-      else await rm(cachedZeta, { force: true });
+      expect(await sourceRuntimeSnapshot()).toBe(sourceSnapshot);
       await rm(temp, { recursive: true, force: true });
     } catch (error) { cleanupErrors.push(String(error)); }
     if (cleanupErrors.length || survivors.size) {
