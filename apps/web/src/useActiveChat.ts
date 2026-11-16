@@ -4,6 +4,7 @@ import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
+import { chatQueues } from "./composer/chatQueues";
 import { createChatCreationOwner, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, rebindPage, runningSession, SessionNotFoundError, watchTurnEnd } from "./zeta/session";
 
@@ -579,6 +580,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
       if (modeToggle.current.stale()?.sessionId === attached.sessionId) { // clear the composer draft only when it was the sent text; a starter button must not erase typed text
         draftStore.set(attached.sessionId, text); if (draftStore.get(`new:${empty.page.id}`) === text) draftStore.set(`new:${empty.page.id}`, ""); }
+      chatQueues.created(`new:${empty.page.id}`, attached.sessionId); // before the chat renders, so its composer takes the new-chat queue
       publishReady(attached, token, true, focusClaim.owns(), false);
       return attached;
     } finally {

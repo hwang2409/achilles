@@ -39,7 +39,7 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean };
 
-// `fromNewChat`: this chat was just created from the page's new-chat composer, so it takes that composer's queue owner
+// `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(

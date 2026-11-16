@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { restoreFocus } from "../keyboard";
-import { composerStatus, enterAction, submitAction } from "./composer-machine";
+import { composerStatus, enterAction, inFlight, submitAction } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
 import {
   useComposerDelivery,
@@ -44,7 +44,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           ? "enter to steer · shift+enter new line"
           : "enter to send · shift+enter for a new line";
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Escape" && !model.draft && model.queue.length && !event.nativeEvent.isComposing) {
+    if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       cancel();
       return;

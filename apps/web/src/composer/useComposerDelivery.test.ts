@@ -164,9 +164,10 @@ test("enter takes the text out of the box at once: the box is always a new messa
 // What the user does, and what the test checks, against the chat queue owner (`chatQueues`):
 // enter (type the text, press Enter), ok / fail (zeta answers the oldest send), x / esc / retry / edit (row buttons and keys),
 // remount (the chat's composer remounts), switch (another chat's composer replaces it), created (the first message of
-// the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), rows / box / sent (checks).
+// the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), unsent (an older chat of the page
+// that never got its first message opens; App offers it the new-chat owner like any unsent chat), rows / box / sent (checks).
 type Step =
-  | ["enter" | "x" | "retry" | "edit" | "switch" | "fail", string]
+  | ["enter" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail", string]
   | ["ok" | "esc" | "remount" | "created"]
   | ["rows", string[]]
   | ["box", string]
@@ -245,6 +246,11 @@ const queueCases: QueueCase[] = [
     steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["switch", "b"], ["ok"], ["switch", "new"], ["box", "second"]],
     sent: ["new:first"],
   },
+  {
+    name: "unsent other chat opened while a new chat is created: the new-chat queue does not move",
+    steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["unsent", "s0"], ["rows", []], ["ok"]],
+    sent: ["new:first"],
+  },
 ];
 
 test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: expectedSent, rows: expectedRows = [] }) => {
@@ -289,7 +295,8 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         case "edit": view.owner.restore(rowOf(step[1])); break;
         case "remount": replace(view.chat); break;
         case "switch": replace(step[1]); break;
-        case "created": replace("s1", "new"); break;
+        case "unsent": replace(step[1], "new"); break;
+        case "created": chatQueues.created(key("new"), key("s1")); replace("s1", "new"); break;
         case "rows": expect(rows()).toEqual(step[1]); break;
         case "box": expect(view.owner.getModel().draft).toBe(step[1]); break;
         case "sent": expect(sent).toEqual(step[1]); break;

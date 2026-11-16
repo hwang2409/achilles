@@ -9,15 +9,23 @@ import { createComposerDelivery, type ComposerDelivery, type DeliveryOptions } f
  * shortcut: memory only, so a page reload drops queued messages; persist like drafts if that matters.
  */
 const owners = new Map<string, ComposerDelivery>();
+/** new-chat owner key -> the chat that its first send created */
+const createdChats = new Map<string, string>();
 
 export const chatQueues = {
-  /** The owner of `chat`. `fromNewChat`: the page's new-chat composer created this chat, so its owner (with
-   * the first send still in flight) becomes this chat's owner. */
+  /** The first send of the page's new-chat composer `newChat` created `chat`. */
+  created(newChat: string, chat: string) {
+    createdChats.set(newChat, chat);
+  },
+  /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
+   * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
+   * Called during render: a render React throws away still moves it, and the next render finds it under `chat`. */
   open(chat: string, options: DeliveryOptions, fromNewChat?: string): ComposerDelivery {
     let owner = owners.get(chat);
-    if (!owner && fromNewChat) {
+    if (!owner && fromNewChat && createdChats.get(fromNewChat) === chat) {
       owner = owners.get(fromNewChat);
       owners.delete(fromNewChat);
+      createdChats.delete(fromNewChat);
     }
     if (!owner) {
       const created = createComposerDelivery(options);
@@ -38,6 +46,7 @@ export const chatQueues = {
       if (owner.attached() || sending) continue;
       if (queue.length && !chat.startsWith("new:")) continue;
       owners.delete(chat);
+      createdChats.delete(chat);
       if (queue.length) draftStore.set(chat, [draftStore.get(chat), ...queue.map((item) => item.text)].filter((text) => text.trim()).join("\n\n"));
     }
   },
