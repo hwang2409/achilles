@@ -199,7 +199,17 @@ export function App() {
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
     if (!store || !scroll) return;
-    return watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
+    // fulcrum's scroll box takes no focus, and webkit never focuses a scroller by itself: ArrowUp/PageUp could not scroll it
+    scroll.tabIndex = 0; scroll.setAttribute("role", "region"); scroll.setAttribute("aria-label", "transcript");
+    // webkit scrolls a focused box on PageUp but not on the arrows; a row's own ArrowUp/ArrowDown (row navigation) is not the box's
+    const arrows = (event: KeyboardEvent) => {
+      if (event.target !== scroll || (event.key !== "ArrowUp" && event.key !== "ArrowDown") || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      scroll.scrollBy({ top: event.key === "ArrowUp" ? -40 : 40 });
+    };
+    scroll.addEventListener("keydown", arrows);
+    const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
+    return () => { scroll.removeEventListener("keydown", arrows); stop(); };
   }, [store, transcript]);
   const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);

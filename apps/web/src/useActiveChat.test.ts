@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
+import * as queues from "./composer/chatQueues";
+const { chatQueues } = queues;
+import { composerStatus } from "./composer/composer-machine";
+import { draftStore } from "./draftStore";
 import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
 
 class MemoryStorage {
@@ -605,20 +609,25 @@ describe("chat creation lifecycle", () => {
     { name: "pending create mode is applied before ready", pendingMode: true },
     { name: "pending create mode is visible after reopen", pendingMode: true, reopen: true },
     { name: "pending create mode can be turned off after reopen", pendingMode: true, reopen: true, turnOff: true },
-  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, doubleEnter, pendingMode, pendingModeWriteFailure, reopen, turnOff }) => {
+    // the page loads again during the first message's create (a reload, or a sidebar page and Back): the old page's send died
+    ...(["new_session", "register", "set_settings", "map", "attach", "mode"] as const).flatMap((stage) => [false, true].map((pageSwitch) => (
+      { name: `${pageSwitch ? "page switch and back" : "reload"} during ${stage} keeps the first message unsent`, reloadAt: stage, pageSwitch, pendingMode: stage === "mode" }))),
+  ])("$name", async ({ cancel, fail, failWrite, restart, duplicate, doubleEnter, pendingMode, pendingModeWriteFailure, reopen, turnOff, reloadAt, pageSwitch }) => {
     const storage = new MemoryStorage();
     let sessions = 0; let registrations = 0; let mappings = 0; let attaches = 0; let modes = 0; let publishes = 0; let deliveries = 0; let approval = "ask";
     const appliedModes: boolean[] = [];
     let failed = false;
     const reached = deferred<void>();
     const gate = deferred<void>();
+    let reloadBlocked = false;
+    const sent: string[] = [];
     const step = async (name: string) => {
-      if (cancel === name) { reached.resolve(); await gate.promise; }
+      if (cancel === name || (reloadAt === name && !reloadBlocked)) { reloadBlocked = true; reached.resolve(); await gate.promise; }
       if (fail === name && !failed) { failed = true; throw new Error(`forced ${name} failure`); }
     };
     const client = {
       features: ["session_mcp_bindings", "session_replay_seq"],
-      request: async (method: string) => {
+      request: async (method: string, params?: unknown) => {
         await step(method);
         if (method === "new_session") { sessions += 1; return { session: { session_id: "owned-session" } }; }
         if (method === "resume") { await step("attach"); attaches += 1; return { session: { name: "" } }; }
@@ -626,7 +635,7 @@ describe("chat creation lifecycle", () => {
         if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "owned-session" }, state: "idle" };
         if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
-        if (method === "send") { deliveries += 1; return {}; }
+        if (method === "send") { deliveries += 1; sent.push((params as { text?: string })?.text ?? ""); return {}; }
         throw new Error(`unexpected ${method}`);
       },
       replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
@@ -636,7 +645,8 @@ describe("chat creation lifecycle", () => {
     const fetcher = (async (resource: string | URL | Request) => {
       const url = String(resource);
       if (url === "/api/pages/home") return Response.json(page(null));
-      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url === "/api/pages/other") return Response.json({ ...page(null), id: "other", route: "/other" });
+      if (url === "/api/pages/home/credential" || url === "/api/pages/other/credential") return Response.json({ credential: "synthetic" });
       if (url.startsWith("/api/chats?")) return Response.json({ chats: [], next: null });
       const name = url.endsWith("/chats") ? "register" : "map";
       await step(name);
@@ -659,6 +669,54 @@ describe("chat creation lifecycle", () => {
       await step("mode"); modes += 1; appliedModes.push(enabled); return attached;
     };
     const publish = async () => { await step("publish"); publishes += 1; };
+    if (reloadAt) {
+      const message = `${reloadAt}${pageSwitch ? " page" : ""} first message PINEAPPLE`;
+      draftStore.set("new:home", ""); draftStore.set("owned-session", "");
+      let oldPageAlive = true;
+      // the old page: Enter on the empty page starts the create with the first message, then the page goes away mid-step
+      const oldPage = owner.ensure({ input: input(client, true), current: () => oldPageAlive, attach: async (sessionId) => { await step("attach"); return { sessionId }; }, applyCreateMode: applyMode, publishReady: publish, text: message })!;
+      // each page load has its own owner; the last one is the page the user presses Enter on
+      let pageOwner = owner;
+      const load = async (key: string) => {
+        const attachment = createAttachmentOwner();
+        pageOwner = createChatCreationOwner(storage, fetcher);
+        try { return await withFetch(fetcher, () => attachPage(client as never, key, null, attachment, pageOwner, attachment.begin(key, true), false, applyMode)); }
+        finally { attachment.clear(); }
+      };
+      try {
+        await waitBounded(reached.promise, () => gate.resolve(), () => oldPage.catch(() => {}));
+        oldPageAlive = false;
+        if (pageSwitch) {
+          expect((await load("other")).phase).toBe("empty");
+          expect(draftStore.get("new:other")).not.toContain("PINEAPPLE");
+        }
+        const opened = await load("home");
+        // no record before new_session answers: the page opens empty, the message in its new-chat box; else the created chat
+        const box = reloadAt === "new_session" ? "new:home" : "owned-session";
+        expect(opened).toMatchObject(reloadAt === "new_session" ? { phase: "empty" } : { phase: "ready", sessionId: "owned-session" });
+        expect(draftStore.get(box)).toBe(message);
+        expect(deliveries).toBe(0);
+        const delivery = chatQueues.open(box, {
+          state: "idle", defaultValue: draftStore.get(box),
+          onDraftChange: (text) => draftStore.set(box, text), onDraftSubmit: (text) => draftStore.confirm(box, text),
+          onSubmit: async (text, intent, track) => {
+            const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }), text })!;
+            await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track);
+          },
+        });
+        const detach = delivery.attach();
+        try {
+          expect(delivery.getModel().draft).toBe(message);
+          expect(composerStatus(delivery.getModel()).text).toBe(box === "new:home" ? queues.KEPT_NOTE : queues.MOVED_NOTE);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          expect(deliveries).toBe(0);
+          await delivery.submit();
+          expect(sent).toEqual([message]);
+          expect(composerStatus(delivery.getModel()).text).toBe("");
+        } finally { detach(); chatQueues.settle(); }
+      } finally { gate.resolve(); await oldPage.catch(() => {}); }
+      return;
+    }
     const run = () => reopen
       ? withFetch(fetcher, async () => {
         try { return await attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish); }

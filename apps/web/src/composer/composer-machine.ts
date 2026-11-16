@@ -20,6 +20,8 @@ export type ComposerModel = {
   /** a failed head was put back in the box: the rows behind it wait for the next Enter (the box text, if any, goes first) */
   held?: boolean;
   error?: ComposerError;
+  /** says why the box holds text the user did not type here (an unsent message moved in); goes on Enter or when the box empties */
+  note?: string;
   send?: Send;
   nextAttempt: number;
   nextQueueId: number;
@@ -32,6 +34,7 @@ export type ComposerEffect =
 export type ComposerEvent =
   | { type: "state"; state: ComposerState }
   | { type: "edit"; draft: string }
+  | { type: "note"; text: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "next"; turnRunning: boolean }
   | { type: "track"; attempt: number; deliveryId: string }
@@ -76,7 +79,7 @@ export function composerStatus(model: ComposerModel): { text: string; tone?: "da
   if (model.held && model.queue.length) return { text: "the rest wait for your next enter", tone: "busy" };
   if (inFlight(model)) return { text: model.send?.steer ? "next step" : "sending", tone: "busy" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
-  return { text: "" };
+  return { text: model.note ?? "" };
 }
 
 /** What the header shows for this composer: it counts only the rows that are not in flight (an in-flight steer is "next step"). */
@@ -104,14 +107,16 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "state":
       return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
-      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error } };
+      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error, note: event.draft.trim() ? model.note : undefined } };
+    case "note":
+      return { model: { ...model, note: event.text } };
     case "submit": {
       if (!submitAction(model)) return { model };
       if (!model.draft.trim()) return next({ ...model, held: false }, event.turnRunning);
       if (model.queue.length >= QUEUE_LIMIT) return { model: { ...model, error: { kind: "submit", text: `at most ${QUEUE_LIMIT} messages can wait. cancel one or wait for a reply.` } } };
       const item = { id: model.nextQueueId, text: model.draft };
       // the edited text of a failed head keeps its place in front of the rows it held back
-      const queued = { ...model, draft: "", error: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
+      const queued = { ...model, draft: "", error: undefined, note: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
       return next(queued, event.turnRunning);
     }
     case "next":
