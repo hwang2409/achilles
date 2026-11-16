@@ -77,7 +77,8 @@ function activeLastState(waiting: number, outcome: string, turn: "idle" | "runni
 }
 
 // the header shows what the user is waiting on: an approval first, another chat's turn, then their own messages, then
-// the turn. `chat`: false on a page with no chat yet, whose unsent rows say "not sent" themselves (no chat is not sent)
+// the turn. `chat`: false while no message of this chat reached zeta (no chat yet, or one made but never sent to): its
+// unsent rows say "not sent" themselves, and the chat has nothing that is not sent
 function headerState(lost: boolean, lastState: string, outcome: string, activity: ComposerActivity, busy: boolean, chat: boolean) {
   if (lost) return "offline";
   if (lastState === "approval") return lastState;
@@ -246,7 +247,7 @@ export function App() {
   // rows typed in the new-chat box that no chat took (a refused create): the page opens another chat, so say they wait
   const unsentNew = ready ? chatQueues.unsent(`new:${ready.page.id}`) : 0;
   const content = <>
-    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}

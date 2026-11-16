@@ -134,7 +134,11 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   /* the title keeps a minimum width; the marks get shorter instead of pushing it off-screen */
   .chat-heading { min-width: 6em; }
 }
-@container (max-width: 40em) { .fold-long { display: none; } }
+@container (max-width: 40em) {
+  .fold-long { display: none; }
+  /* a long state ("maybe not sent", "waiting on you") wraps to two lines (9ch: never one word a line) instead of pushing ••• off-screen */
+  .run-state { min-width: 9ch; white-space: normal; }
+}
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
 .run-state.state-approval::before { background: var(--fulcrum-warn); }
@@ -209,7 +213,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 [data-part="composer"] [data-part="composer-queued-cancel"] { --action: var(--fulcrum-muted); min-width: 0; min-height: 28px; padding: 0 8px; background: transparent; color: var(--fulcrum-fg); border-color: var(--fulcrum-border); font-size: 12px; }
 [data-part="composer"] [data-part="composer-queued-cancel"] { width: 28px; padding: 0; font-size: 16px; }
 /* "copy" -> "copied" keeps its width, so the buttons beside it do not move */
-[data-part="composer"] [data-part="composer-queued-copy"] { min-width: 8ch; }
+[data-part="composer"] [data-part="composer-queued-copy"] { min-width: 9ch; }
 [data-part="composer-queued-actions"] { display: contents; }
 /* narrow: a failed row's actions get their own line, so they never split across the label line and the next */
 @media (max-width: 480px) {
