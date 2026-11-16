@@ -17,7 +17,7 @@ export type ComposerModel = {
   stopping: boolean;
   /** first in, first out; the head is in flight when `send.id` names it */
   queue: QueuedMessage[];
-  /** a failed head is being edited in the box: the rows behind it wait until that text is sent (it goes first) or cleared */
+  /** a failed head was put back in the box: the rows behind it wait for the next Enter (the box text, if any, goes first) */
   held?: boolean;
   error?: ComposerError;
   send?: Send;
@@ -56,9 +56,10 @@ export function createComposerModel(draft: string, state: ComposerState): Compos
 const canSend = (state: ComposerState) => state !== "running" && state !== "read-only";
 const busy = (model: ComposerModel) => model.sending || model.queue.length > 0;
 
-/** What Enter does now: send the box, queue it behind other messages, or nothing. */
+/** What Enter does now: send the box, queue it behind other messages, or nothing. On an empty box it lets held rows go. */
 export function submitAction(model: ComposerModel): "send" | "queue" | null {
-  if (!canSend(model.state) || !model.draft.trim()) return null;
+  if (!canSend(model.state)) return null;
+  if (!model.draft.trim()) return model.held && model.queue.length ? "queue" : null;
   return busy(model) ? "queue" : "send";
 }
 
@@ -72,8 +73,8 @@ export const shownQueue = (model: ComposerModel) => model.send?.echoed ? model.q
 export function composerStatus(model: ComposerModel): { text: string; tone?: "danger" | "busy" } {
   if (model.error) return { text: model.error.text, tone: "danger" };
   if (model.stopping) return { text: "stopping", tone: "busy" };
-  if (model.held && model.queue.length) return { text: "the rest wait until you send or clear the edited message", tone: "busy" };
-  if (inFlight(model)) return { text: model.send?.steer ? "queued for the next step" : "sending", tone: "busy" };
+  if (model.held && model.queue.length) return { text: "the rest wait for your next enter", tone: "busy" };
+  if (inFlight(model)) return { text: model.send?.steer ? "next step" : "sending", tone: "busy" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
   return { text: "" };
 }
@@ -103,9 +104,10 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "state":
       return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
-      return { model: { ...model, draft: event.draft, held: model.held && Boolean(event.draft.trim()), error: model.error?.kind === "submit" ? undefined : model.error } };
+      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error } };
     case "submit": {
       if (!submitAction(model)) return { model };
+      if (!model.draft.trim()) return next({ ...model, held: false }, event.turnRunning);
       if (model.queue.length >= QUEUE_LIMIT) return { model: { ...model, error: { kind: "submit", text: `at most ${QUEUE_LIMIT} messages can wait. cancel one or wait for a reply.` } } };
       const item = { id: model.nextQueueId, text: model.draft };
       // the edited text of a failed head keeps its place in front of the rows it held back

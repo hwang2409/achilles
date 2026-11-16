@@ -478,7 +478,8 @@ test("a settle zeta keeps refusing after the turn end retries a bounded number o
 });
 
 // zeta serves one attached session: `new_session` and `resume` move it, and a request naming another session is refused
-test("a first send whose create is still pending when an older unsent chat opens leaves that chat alone and is not sent", async () => {
+// browser Back to an older unsent chat while one zeta call of the first send's create is still on its way
+for (const hold of ["new_session", "session_settings s1", "resume s1"]) test(`a first send whose create is held at ${hold} when an older unsent chat opens leaves that chat alone and is not sent`, async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new MemoryStorage();
   const popListeners: Array<() => void> = [];
@@ -503,15 +504,20 @@ test("a first send whose create is still pending when an older unsent chat opens
       throw new Error(`unexpected fetch ${url}`);
     },
   });
-  const created = deferred<unknown>();
+  const held = deferred<void>();
+  let holding = false;
   const requests: string[] = [];
   let attached: string | null = null;
   const zeta = {
     features: ["session_mcp_bindings", "session_replay_seq"],
     request: async (method: string, params: { session_id?: string } = {}) => {
-      if (method === "new_session") { attached = "s1"; requests.push("new_session"); return created.promise; }
-      requests.push(`${method} ${params.session_id ?? ""}`);
-      if (method === "resume") { attached = params.session_id!; return { session: { name: null } }; }
+      const call = method === "new_session" ? method : `${method} ${params.session_id ?? ""}`;
+      requests.push(call);
+      // zeta switches its attached session when it gets the call; only the reply is held
+      if (method === "new_session" || method === "resume") attached = params.session_id ?? "s1";
+      if (call === hold && !holding) { holding = true; await held.promise; }
+      if (method === "new_session") return { session: { session_id: "s1" } };
+      if (method === "resume") return { session: { name: null } };
       if (params.session_id && params.session_id !== attached) throw Object.assign(new Error("session is not active"), { code: -32005 });
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
@@ -531,19 +537,24 @@ test("a first send whose create is still pending when an older unsent chat opens
 
   let sent!: Promise<void>;
   await act(async () => { sent = active.send("x1", { steer: false }, () => {}); sent.catch(() => {}); });
-  await flushUntil(() => requests.includes("new_session"));
-  // browser Back to the unsent chat while zeta's reply to `new_session` is still on its way
+  await flushUntil(() => holding);
   location.search = "?chat=s0";
   await act(async () => { popListeners.forEach((listener) => listener()); });
-  await flushUntil(() => active.state.phase === "ready");
-  expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
+  // before zeta named the new session nothing is pending, so s0 opens at once; later the page joins the running create
+  if (hold === "new_session") {
+    await flushUntil(() => active.state.phase === "ready");
+    expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
+  }
 
   const settled = requests.length;
-  await act(async () => { created.resolve({ session: { session_id: "s1" } }); await sent.catch(() => {}); });
-  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  await act(async () => { held.resolve(); await sent.catch(() => {}); });
+  for (let flush = 0; flush < 10; flush += 1) await act(async () => {});
   expect(active.creationError).toBeNull();
   expect(active.state).toMatchObject({ phase: "ready", sessionId: "s0" });
-  expect(requests.slice(settled)).toEqual([]);
+  expect(attached).toBe("s0");
+  // the stopped create sends nothing more for s1 and never sends the message
+  expect(requests.slice(settled).filter((call) => call.endsWith("s1") && call !== "session_settings s1")).toEqual([]);
+  expect(requests).not.toContain("send s1");
   await expect(sent).rejects.toThrow("another chat opened before this chat was created");
   expect(storage.getItem("achilles-pending-chats")).toBeNull();
 });

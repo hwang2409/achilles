@@ -206,8 +206,9 @@ export async function attachPage(
       if (!ready) return { phase: "empty", page, serverApprovalMode, credential };
       return ready as ReadyState;
     } catch (caught) {
-      // a joined create of an earlier attachment stopped and forgot its record: this attachment shows the empty page
-      if (caught instanceof StaleCreation) { if (!owner.current(token)) throw caught; return { phase: "empty", page, serverApprovalMode, credential }; }
+      // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
+      // this runs at most once: the record is gone, and a newer create for this page would make this token stale
+      if (caught instanceof StaleCreation) { if (!owner.current(token)) throw caught; return attachPage(client, key, selectedId, owner, creation, token, create, applyCreateMode, publishReady, forceNew); }
       if (caught instanceof ChatBusyError) return busy(caught.sessionId);
       if (errorCode(caught) === TURN_RUNNING && !creation.status(page.id).pending) return busy(await runningSession(client));
       throw new PendingCreationError(caught, mappingInput);

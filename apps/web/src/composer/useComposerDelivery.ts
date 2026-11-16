@@ -114,9 +114,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       void drain();
     },
     edit(draft) {
-      const held = model.held;
       apply({ type: "edit", draft });
-      if (held && !model.held) void drain(); // the edited message was cleared: the rows it held go out
     },
     async submit() {
       apply({ type: "state", state: current.state });

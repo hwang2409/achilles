@@ -167,7 +167,7 @@ test("enter takes the text out of the box at once: the box is always a new messa
 // the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), unsent (an older chat of the page
 // that never got its first message opens; App offers it the new-chat owner like any unsent chat), rows / box / sent (checks).
 type Step =
-  | ["enter" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail", string]
+  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail", string]
   | ["ok" | "esc" | "remount" | "created"]
   | ["rows", string[]]
   | ["box", string]
@@ -207,8 +207,13 @@ const queueCases: QueueCase[] = [
     sent: ["a:first", "a:first fixed", "a:second"],
   },
   {
-    name: "clearing the edited text of a failed first message lets the rows it held go out",
-    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["sent", ["a:first"]], ["type", ""], ["ok"]],
+    name: "clearing the edited text of a failed first message sends nothing; the held rows wait for the next enter",
+    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["type", ""], ["sent", ["a:first"]], ["rows", ["queued second"]], ["enter", "first again"], ["ok"], ["ok"]],
+    sent: ["a:first", "a:first again", "a:second"],
+  },
+  {
+    name: "enter on an empty box after an edit lets the held rows go",
+    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["type", ""], ["enter", ""], ["ok"]],
     sent: ["a:first", "a:second"],
   },
   {

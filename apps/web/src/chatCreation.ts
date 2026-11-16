@@ -162,6 +162,8 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       return attached;
     })().catch((caught) => {
       if (caught instanceof StaleCreation) throw caught;
+      // any failure after the page moved on (a stale attach included) stops this create for good
+      if (!current()) { forget(input.pageId); throw new StaleCreation(); }
       const retained = pending(input.pageId);
       if (retained) save({ ...retained, lastError: caught instanceof Error ? caught.message : String(caught) });
       throw caught;
