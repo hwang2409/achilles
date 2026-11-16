@@ -476,7 +476,7 @@ def test_versions_summary_labels_each_layout_from_its_first_block(tmp_path):
     store.update_layout(pid, {"blocks": [{"type": "detail", "title": "pick", "fields": ["id"]}]}, 1)
     store.update_layout(pid, {"blocks": [{"type": "metric", "label": "runs", "value": "3"}]}, 2)
     store.update_layout(pid, {"blocks": []}, 3)
-    summaries = [row["summary"] for row in store.versions(pid)["layout"]]
+    summaries = [row.get("summary") for row in store.versions(pid)["layout"]]
     # newest first: empty -> None, metric -> label, detail -> title, text -> collapsed text
     assert summaries == [None, "runs", "pick", "v1 the start"]
 

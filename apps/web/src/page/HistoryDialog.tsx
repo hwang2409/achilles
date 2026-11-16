@@ -24,7 +24,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   const refocus = useRef<string | null>(null);
   const auth = { Authorization: `Bearer ${credential}` };
   // a touch device has no Esc key, so the close control reads "close" there and keeps the "esc" hint on a keyboard
-  const touchOnly = !window.matchMedia("(any-pointer: fine)").matches;
+  const touchOnly = window.matchMedia("(any-pointer: coarse)").matches;
   useLayoutEffect(() => {
     const node = dialog.current;
     node?.showModal();
