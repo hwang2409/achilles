@@ -274,13 +274,13 @@ export function App() {
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <div className="layout-blocks">{activePage.layout.blocks.map((block, index) => <LayoutBlock key={index} block={block} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />)}</div>}
         <div className="page-chat">
-        <section ref={ready ? (element) => { transcript.current = element; } : undefined} className="transcript">{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual scrollRef={transcript} renderJumpToLatest={() => null} followRequest={followRequest} />}{ready && <button type="button" data-part="jump-to-latest" hidden={!showJumpToLatest} onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? (element) => { transcript.current = element; } : undefined} className="transcript">{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual scrollRef={transcript} renderJumpToLatest={() => null} followRequest={followRequest} />}{ready && <div data-part="jump-to-latest-lane"><button type="button" data-part="jump-to-latest" hidden={!showJumpToLatest} onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
           const scroll = transcript.current;
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
-        }}>jump to latest</button>}</section>
+        }}>jump to latest</button></div>}</section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} props={composerProps} />
         </div>
         </div>
