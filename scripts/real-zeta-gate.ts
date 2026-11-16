@@ -38,6 +38,7 @@ const artifactDir = process.env.GATE_ARTIFACT_DIR ?? join(root, ".cache/gate-art
 const artifactSecrets: string[] = [];
 const artifactLogs: { name: string; lines: [string, string][]; partial: { stdout: string; stderr: string } }[] = [];
 const frameLog: [string, number, string, string][] = [];
+const artifactNotes: [string, string][] = [];
 let passed = false;
 const writeArtifacts = async () => {
   await rm(artifactDir, { recursive: true, force: true });
@@ -47,6 +48,7 @@ const writeArtifacts = async () => {
   const safe = ([time, line]: [string, string]) => `${time} ${redactArtifact(line, all)}`;
   for (const log of artifactLogs)
     await writeFile(join(artifactDir, `${log.name}.log`), [...log.lines, ...Object.values(log.partial).filter(Boolean).map((line) => [now, line] as [string, string])].map(safe).join("\n") + "\n");
+  if (artifactNotes.length) await writeFile(join(artifactDir, "notes.log"), artifactNotes.map(safe).join("\n") + "\n");
   await writeFile(join(artifactDir, "frames.log"), frameLog.map(([time, socket, direction, payload]) => `${time} socket=${socket} ${direction} ${redactArtifact(payload, all)}`).join("\n") + "\n");
   console.error(`gate artifacts written to ${artifactDir}`);
 };
@@ -57,6 +59,8 @@ const readDiscovery = async (path: string) => {
   for (const [key, value] of Object.entries(document)) if (/token/i.test(key) && typeof value === "string") artifactSecrets.push(value);
   return document;
 };
+// a pre-kill read is diagnostics only: a missing or partial file adds a note and never fails or masks the gate.
+const listTokens = (path: string) => readDiscovery(path).catch((error) => { artifactNotes.push([new Date().toISOString(), `discovery read failed before SIGTERM: ${error}`]); });
 const redact = (text: string) => diagnostic(text, secrets);
 const safeControl = (text: string) => controlSnapshot(text, secrets);
 const frameRing = createFrameRing();
@@ -151,6 +155,14 @@ try {
     ],
     env,
   );
+  // the control file pid is the python server's os.getpid(), not the uv pid, and the server writes it after its discovery file.
+  // so a new control pid and an existing discovery file mean the new server listens.
+  const controlPid = async () => { try { return JSON.parse(await Bun.file(control).text()).pid; } catch { return undefined; } };
+  const restartZeta = async (label: string) => {
+    const previousPid = await controlPid();
+    zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
+    await waitFor(async () => (await controlPid()) !== previousPid && await Bun.file(ownDiscovery).exists(), label);
+  };
   await waitFor(async () => await Bun.file(ownDiscovery).exists(), "achilles zeta discovery");
   const pending = await readDiscovery(ownDiscovery);
   for (const key of ["controller_token", "observer_token"])
@@ -210,25 +222,13 @@ try {
   if (!(await setupAlert.innerText()).includes("add it to $ZETA_HOME/mcp.json"))
     throw new Error(`missing mcp setup instruction: ${redact(await page.locator("body").innerText())}`);
   await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
-  const firstZetaPid = zetaProcess.pid;
   zetaProcess.kill("SIGTERM");
   if (!(await waitForExit(zetaProcess, 15_000))) {
     zetaProcess.kill("SIGKILL");
     await waitForExit(zetaProcess, 5_000);
     throw new Error("zeta shutdown timeout after 15 seconds");
   }
-  zetaProcess = start(
-    "uv",
-    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
-    env,
-  );
-  await waitFor(async () => {
-    try {
-      return JSON.parse(await Bun.file(control).text()).pid !== firstZetaPid;
-    } catch {
-      return false;
-    }
-  }, "restarted zeta");
+  await restartZeta("restarted zeta");
   const field = page.getByRole("textbox", { name: "message" });
   await gateWait.playwright(field, "waitFor", { timeout: 20000 }).catch(async () => {
     throw new Error(
@@ -1625,17 +1625,15 @@ try {
   await gateCreationApprovalDefaults(page, requests, approvalModeResponse, gateWait);
 
   await gateVim(page, control, waitFor, async (check) => {
-    const previousPid = JSON.parse(await Bun.file(control).text()).pid;
     try {
       await expectBrowserErrors(page, [], async () => {
-        await readDiscovery(ownDiscovery);
+        await listTokens(ownDiscovery);
         zetaProcess.kill("SIGTERM");
         if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta shutdown timeout during vim read-only gate");
         await check();
       });
     } finally {
-      zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
-      await waitFor(async () => JSON.parse(await Bun.file(control).text()).pid !== previousPid, "zeta restart after vim read-only gate");
+      await restartZeta("zeta restart after vim read-only gate");
     }
   }, requests, gateWait);
 
@@ -1701,7 +1699,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
     const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
-    await readDiscovery(ownDiscovery);
+    await listTokens(ownDiscovery);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
     await gateWait.playwright(page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }), "waitFor", { timeout: 20_000 });
@@ -1711,16 +1709,7 @@ try {
   if ((await page.locator("[data-session-id]").count()) !== 1) throw new Error("dropped connection hid the attached transcript");
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
-  const droppedPid = zetaProcess.pid;
-  zetaProcess = start(
-    "uv",
-    ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")],
-    env,
-  );
-  await waitFor(async () => {
-    try { return JSON.parse(await Bun.file(control).text()).pid !== droppedPid; }
-    catch { return false; }
-  }, "zeta reconnect after dropped connection");
+  await restartZeta("zeta reconnect after dropped connection");
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
@@ -1728,7 +1717,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
-    await readDiscovery(ownDiscovery);
+    await listTokens(ownDiscovery);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
     const heldRequests: Route[] = [];
