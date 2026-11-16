@@ -1,0 +1,473 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "calls": [
+      {
+        "id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "l0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_contacts",
+        "arguments": {},
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test",
+          "record_id": "r0",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "l0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_contacts",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "name": "Ada Lovelace",
+              "email": "ada@example.test"
+            },
+            {
+              "name": "Grace Hopper",
+              "email": "grace@example.test"
+            },
+            {
+              "name": "Alan Turing",
+              "email": "alan@example.test"
+            },
+            {
+              "name": "Katherine Johnson",
+              "email": "katherine@example.test"
+            },
+            {
+              "name": "Edsger Dijkstra",
+              "email": "edsger@example.test"
+            },
+            {
+              "name": "Barbara Liskov",
+              "email": "barbara@example.test"
+            }
+          ]
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-1",
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-2",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-3",
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-4",
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-5",
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r0",
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "reply",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [],
+    "errors": [],
+    "tools": [],
+    "answers": {
+      "reply": "Ada Lovelace wrote the first program. ... Edsger Dijkstra gave us shortest paths. Barbara Liskov defined substitution."
+    },
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_contact",
+          "operation": "insert",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "name": "list_contacts",
+          "operation": "list",
+          "collection": "contacts"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-1",
+          "data": {
+            "name": "Ada Lovelace",
+            "email": "ada@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-2",
+          "data": {
+            "name": "Grace Hopper",
+            "email": "grace@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-3",
+          "data": {
+            "name": "Alan Turing",
+            "email": "alan@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-4",
+          "data": {
+            "name": "Katherine Johnson",
+            "email": "katherine@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-5",
+          "data": {
+            "name": "Edsger Dijkstra",
+            "email": "edsger@example.test"
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "contacts"
+      }
+    ],
+    "calls": [
+      {
+        "id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "arguments": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        },
+        "success": true
+      },
+      {
+        "id": "l0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_contacts",
+        "arguments": {},
+        "success": true
+      }
+    ],
+    "results": [
+      {
+        "call_id": "a0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test",
+          "record_id": "r0",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "a1",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__add_contact",
+        "success": true,
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test",
+          "record_id": "r1",
+          "revision": 1
+        }
+      },
+      {
+        "call_id": "l0",
+        "page_id": "home",
+        "chat_id": "c",
+        "tool": "achilles__list_contacts",
+        "success": true,
+        "data": {
+          "records": [
+            {
+              "name": "Ada Lovelace",
+              "email": "ada@example.test"
+            },
+            {
+              "name": "Grace Hopper",
+              "email": "grace@example.test"
+            },
+            {
+              "name": "Alan Turing",
+              "email": "alan@example.test"
+            },
+            {
+              "name": "Katherine Johnson",
+              "email": "katherine@example.test"
+            },
+            {
+              "name": "Edsger Dijkstra",
+              "email": "edsger@example.test"
+            },
+            {
+              "name": "Barbara Liskov",
+              "email": "barbara@example.test"
+            },
+            {
+              "name": "Barbara Liskov",
+              "email": "barbara@example.test"
+            }
+          ]
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-1",
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-2",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-3",
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-4",
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "c-5",
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r0",
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      },
+      {
+        "page_id": "home",
+        "collection": "contacts",
+        "id": "r1",
+        "data": {
+          "name": "Barbara Liskov",
+          "email": "barbara@example.test"
+        }
+      }
+    ],
+    "reloads": [
+      {
+        "step": "reply",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
+      }
+    ],
+    "approvals": [],
+    "errors": [],
+    "tools": [],
+    "answers": {
+      "reply": "done."
+    },
+    "initial": {
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "name": "add_contact",
+          "operation": "insert",
+          "collection": "contacts"
+        },
+        {
+          "page_id": "home",
+          "name": "list_contacts",
+          "operation": "list",
+          "collection": "contacts"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-1",
+          "data": {
+            "name": "Ada Lovelace",
+            "email": "ada@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-2",
+          "data": {
+            "name": "Grace Hopper",
+            "email": "grace@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-3",
+          "data": {
+            "name": "Alan Turing",
+            "email": "alan@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-4",
+          "data": {
+            "name": "Katherine Johnson",
+            "email": "katherine@example.test"
+          }
+        },
+        {
+          "page_id": "home",
+          "collection": "contacts",
+          "id": "c-5",
+          "data": {
+            "name": "Edsger Dijkstra",
+            "email": "edsger@example.test"
+          }
+        }
+      ]
+    }
+  }
+}

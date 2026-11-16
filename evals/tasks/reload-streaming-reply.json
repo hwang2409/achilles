@@ -1,5 +1,5 @@
 {
-  "id": "reload-then-steer",
+  "id": "reload-streaming-reply",
   "suite": "hard",
   "page_plan": [
     {
@@ -9,20 +9,18 @@
       "create_mode": false
     }
   ],
-  "agent_turns": 12,
+  "agent_turns": 8,
   "steps": [
     {
-      "id": "write",
+      "id": "reply",
       "kind": "browser_prompt",
       "page": "contacts",
       "chat": "contacts-chat",
-      "prompt": "add these 5 contacts with add_contact, one call per contact, using the fields name and email: Ada Lovelace (ada@example.test), Grace Hopper (grace@example.test), Alan Turing (alan@example.test), Katherine Johnson (katherine@example.test), Edsger Dijkstra (edsger@example.test).",
+      "prompt": "add the contact Barbara Liskov (barbara@example.test) with add_contact, using the fields name and email. then call list_contacts and reply with one short sentence about each contact, naming each one.",
       "reload": {
-        "on": "tool_start",
-        "tool": "achilles__add_contact",
-        "nth": 1
-      },
-      "follow_up": "also add a sixth contact the same way: Barbara Liskov (barbara@example.test)"
+        "on": "assistant_delta",
+        "nth": 20
+      }
     }
   ],
   "setup": {
@@ -38,14 +36,55 @@
         "collection": "contacts"
       }
     ],
-    "records": []
+    "records": [
+      {
+        "id": "c-1",
+        "collection": "contacts",
+        "data": {
+          "name": "Ada Lovelace",
+          "email": "ada@example.test"
+        }
+      },
+      {
+        "id": "c-2",
+        "collection": "contacts",
+        "data": {
+          "name": "Grace Hopper",
+          "email": "grace@example.test"
+        }
+      },
+      {
+        "id": "c-3",
+        "collection": "contacts",
+        "data": {
+          "name": "Alan Turing",
+          "email": "alan@example.test"
+        }
+      },
+      {
+        "id": "c-4",
+        "collection": "contacts",
+        "data": {
+          "name": "Katherine Johnson",
+          "email": "katherine@example.test"
+        }
+      },
+      {
+        "id": "c-5",
+        "collection": "contacts",
+        "data": {
+          "name": "Edsger Dijkstra",
+          "email": "edsger@example.test"
+        }
+      }
+    ]
   },
   "checks": [
     {
       "id": "reload",
       "type": "reload",
       "page": "contacts",
-      "step": "write"
+      "step": "reply"
     },
     {
       "id": "records",
@@ -87,6 +126,15 @@
       "fields": [
         "email"
       ]
+    },
+    {
+      "id": "answer",
+      "type": "answer_mentions",
+      "step": "reply",
+      "value": [
+        "Edsger Dijkstra"
+      ],
+      "page": "contacts"
     },
     {
       "id": "no-errors",
