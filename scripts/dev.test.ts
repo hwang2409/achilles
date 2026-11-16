@@ -613,17 +613,17 @@ esac
 }, 30_000);
 
 test("web dependencies reinstall when apps/web changed even if the fulcrum build is unchanged", async () => {
-  const cache = resolve(root, ".cache");
-  const fulcrumCache = resolve(cache, "fulcrum");
-  const fulcrumBackup = resolve(cache, "fulcrum.achilles-test-backup");
-  const stampFiles = ["fulcrum-build.stamp", "web-build.stamp", "web-deps.stamp"].map((name) => resolve(cache, name));
-  await mkdir(cache, { recursive: true });
-  if (existsSync(fulcrumBackup)) throw new Error(`stale ${fulcrumBackup}; remove it and retry`);
-  // CI checks a real fulcrum into .cache/fulcrum; move it aside so this test owns a hermetic one.
-  const hadFulcrum = existsSync(fulcrumCache);
-  if (hadFulcrum) await rename(fulcrumCache, fulcrumBackup);
-  const savedStamps = await Promise.all(stampFiles.map(async (path) => (existsSync(path) ? await readFile(path) : null)));
+  const sourceSnapshot = await sourceRuntimeSnapshot();
   const temp = await mkdtemp(resolve(tmpdir(), "achilles-web-deps-test-"));
+  const testRoot = resolve(temp, "testRoot");
+  const cache = resolve(testRoot, ".cache");
+  await mkdir(resolve(testRoot, "apps/web"), { recursive: true });
+  await Promise.all([
+    cp(resolve(root, "fulcrum.rev"), resolve(testRoot, "fulcrum.rev")),
+    cp(resolve(root, "scripts/dev.ts"), resolve(testRoot, "scripts/dev.ts")),
+    cp(resolve(root, "apps/web/package.json"), resolve(testRoot, "apps/web/package.json")),
+    cp(resolve(root, "apps/web/bun.lock"), resolve(testRoot, "apps/web/bun.lock")),
+  ]);
   const bin = resolve(temp, "bin");
   const home = resolve(temp, "home");
   const achillesHome = resolve(temp, "achilles-home");
@@ -645,6 +645,7 @@ esac
   const baseEnv = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_ROOT: testRoot,
     ACHILLES_USE_PATH_ZETA: "1",
     HOME: temp,
     ZETA_HOME: home,
@@ -652,7 +653,7 @@ esac
     ACHILLES_ZETA_DISCOVERY: resolve(temp, "missing-serve.json"),
   };
   const runDev = async (callsFile: string) => {
-    const child = Bun.spawn([process.execPath, "scripts/dev.ts"], { cwd: root, env: { ...baseEnv, FAKE_BUN_CALLS: callsFile }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, "scripts/dev.ts"], { cwd: testRoot, env: { ...baseEnv, FAKE_BUN_CALLS: callsFile }, stdout: "pipe", stderr: "pipe" });
     const exitCode = await child.exited;
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { exitCode, stdout, stderr, calls: existsSync(callsFile) ? await readFile(callsFile, "utf8") : "" };
@@ -671,12 +672,7 @@ esac
     // The bug: the old make dev skipped the web install here; it must now run from its own stamp.
     expect(second.calls).toContain("scripts/fulcrum.ts --install-web");
   } finally {
-    await rm(fulcrumCache, { recursive: true, force: true });
-    if (hadFulcrum) await rename(fulcrumBackup, fulcrumCache);
-    await Promise.all(stampFiles.map(async (path, i) => {
-      if (savedStamps[i] === null) await rm(path, { force: true });
-      else await writeFile(path, savedStamps[i]!);
-    }));
     await rm(temp, { recursive: true, force: true });
+    expect(await sourceRuntimeSnapshot()).toBe(sourceSnapshot);
   }
 }, 30_000);
