@@ -331,3 +331,148 @@ test("a reload during a pending approval re-binds the page tools, so the approve
   // the user approves now: zeta runs achilles__list_pages with the page binding, or returns a tool error without it
   expect(bound ? "tool ran" : "tool error: MCP server achilles is not attached").toBe("tool ran");
 });
+
+// zeta for the turn-end table: one chat in the forced ask mode (achilles serve with ACHILLES_APPROVAL=ask) whose
+// session is still in allow. phase "setup" is a woken turn before turn_start; "finishing" is just after agent_end,
+// when zeta reports idle but still refuses settings.
+type TurnPhase = "idle" | "setup" | "running" | "finishing";
+type Row = {
+  name: string;
+  phase: TurnPhase;
+  // zeta 461b9490 reports idle during a woken turn's setup; f858c5c1 reports running
+  setupStatus?: "idle" | "running";
+  resumeAttach?: boolean;
+  drive: (zeta: TurnZeta) => Promise<void>;
+  sets: number; // set_settings requests zeta answered with the change applied
+  refused?: number; // set_settings requests zeta refused with -32004
+};
+type TurnZeta = ReturnType<typeof turnZeta>;
+const TURN_RUNNING_ERROR = () => Object.assign(new Error("a turn is already running"), { code: -32004 });
+
+function turnZeta(row: Row) {
+  const state = { phase: row.phase, mode: "allow", sets: 0, refused: 0, refuseNext: 0, beforeJoin: null as null | (() => void) };
+  const running = () => state.phase === "running" || (state.phase === "setup" && (row.setupStatus ?? "running") === "running");
+  const status = () => ({ session: { session_id: "chat" }, state: running() ? "running" : "idle", pending_approvals: [] });
+  const make = () => ({
+    features: ["session_mcp_bindings", "session_replay_seq", ...(row.resumeAttach === false ? [] : ["resume_attach"])],
+    request: async (method: string, params?: { session_id?: string; approval_mode?: string }) => {
+      if (method === "status") return status();
+      if (method === "resume") {
+        if (state.phase !== "idle" && row.resumeAttach === false) throw TURN_RUNNING_ERROR();
+        return { session: { session_id: "chat", name: null }, attached: state.phase === "idle" ? null : "live_turn" };
+      }
+      if (method === "session_settings") return { model: "offline", approval_mode: state.mode };
+      if (method === "set_settings") {
+        if (state.phase !== "idle" || state.refuseNext > 0) { state.refuseNext = Math.max(0, state.refuseNext - 1); state.refused += 1; throw TURN_RUNNING_ERROR(); }
+        state.sets += 1; state.mode = params!.approval_mode!;
+        return { model: "offline", approval_mode: state.mode };
+      }
+      if (method === "session_history_and_subscribe") { state.beforeJoin?.(); state.beforeJoin = null; return { messages: [], next_before: null, history_validator: { end: 0, entry_id: null, repair_generation: null }, status: status() }; }
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  });
+  let client = make();
+  return {
+    state,
+    get client() { return client; },
+    reconnect() { client = make(); return client; },
+    /** zeta's event frames for this chat, as they arrive on the socket */
+    async frames(...events: string[]) {
+      // read inside the test, so the base without the owner still reaches the behavior assertions
+      const owner = await import("./zeta/turnEnd").catch(() => null);
+      let deliver = (_text: string) => {};
+      owner?.teeRunEnds({ send() {}, close() {}, onMessage: (callback) => { deliver = callback; } }, () => client).onMessage(() => {});
+      for (const event of events) await act(async () => { deliver(JSON.stringify({ jsonrpc: "2.0", method: "event", params: { event, session_id: "chat" } })); });
+    },
+    /** the turn ends: zeta is idle, then sends turn_end and agent_end */
+    async end() { state.phase = "idle"; await this.frames("turn_end", "agent_end"); },
+  };
+}
+
+const turnEndRows: Row[] = [
+  { name: "normal turn end (reload during a turn, zeta without resume_attach: rebind, then the mode)", phase: "running", resumeAttach: false, sets: 1, drive: async (zeta) => { await zeta.frames("turn_start"); await zeta.end(); } },
+  { name: "turn end after a reload attached to the live turn", phase: "running", sets: 1, drive: (zeta) => zeta.end() },
+  { name: "woken turn joined during its setup (status running), then it runs and ends", phase: "setup", sets: 1, drive: async (zeta) => { zeta.state.phase = "running"; await zeta.frames("agent_start", "turn_start"); await zeta.end(); } },
+  { name: "-32004 during the woken turn's setup (status idle), then applied at the turn end", phase: "setup", setupStatus: "idle", sets: 1, refused: 2, drive: async (zeta) => { zeta.state.phase = "running"; await zeta.frames("agent_start", "turn_start", "tool_start", "tool_end", "turn_start"); await zeta.end(); } },
+  { name: "turn already ended before the attach (attached null)", phase: "idle", sets: 1, drive: async () => {} },
+  { name: "agent_end before the owner exists (the turn ends while the page loads its history)", phase: "running", sets: 1, drive: async () => {} },
+  { name: "disconnect mid-turn, then reattach while it still runs", phase: "running", sets: 1, drive: async () => {} },
+  { name: "duplicate turn_end and agent_end apply the mode once", phase: "running", sets: 1, drive: async (zeta) => { await zeta.end(); await zeta.frames("turn_end", "agent_end", "agent_end"); } },
+  // an agent_end only wakes the owner; zeta decides: during the setup it refuses (one more refusal), the mode stays pending
+  { name: "a replayed agent_end of an older turn during the setup does not settle early", phase: "setup", setupStatus: "idle", sets: 1, refused: 3, drive: async (zeta) => { await zeta.frames("agent_end"); zeta.state.phase = "running"; await zeta.frames("agent_start", "turn_start"); await zeta.end(); } },
+  { name: "the settle is refused with -32004 once after the turn end, then retried", phase: "running", sets: 1, refused: 1, drive: async (zeta) => { zeta.state.refuseNext = 1; await zeta.end(); } },
+];
+
+test.each(turnEndRows)("a pending ask mode is applied when the turn ends: $name", async (row) => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json({ ...page, approval_mode: "ask" });
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [chat], next: null });
+      if (url === "/api/chats/chat") return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const zeta = turnZeta(row);
+  if (row.name.startsWith("agent_end before the owner")) zeta.state.beforeJoin = () => { zeta.state.phase = "idle"; void zeta.frames("turn_end", "agent_end"); };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = ({ client, connected }: { client: unknown; connected: boolean }) => { active = useActiveChat(client as never, connected, clock as never); return null; };
+  await act(async () => { mounted = render(createElement(Harness, { client: zeta.client, connected: true })); });
+  await flushUntil(() => active.state.phase === "ready");
+  if (row.name.startsWith("disconnect")) {
+    await act(async () => { mounted!.rerender(createElement(Harness, { client: null, connected: false })); });
+    await act(async () => { mounted!.rerender(createElement(Harness, { client: zeta.reconnect(), connected: true })); });
+    await flushUntil(() => active.state.phase === "ready");
+    await zeta.end();
+  }
+  await row.drive(zeta);
+  for (let tick = 0; tick < 3; tick += 1) await act(async () => { clock.advance(300); });
+  for (let flush = 0; flush < 20 && active.state.phase === "ready" && active.state.page.approval_mode !== "ask"; flush += 1) await act(async () => {});
+  expect(active.state).toMatchObject({ phase: "ready", page: { approval_mode: "ask" }, pendingApprovalMode: null });
+  expect({ sets: zeta.state.sets, refused: zeta.state.refused }).toEqual({ sets: row.sets, refused: row.refused ?? 0 });
+});
+
+test("a settle zeta keeps refusing after the turn end retries a bounded number of times, then waits for the next turn end", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json({ ...page, approval_mode: "ask" });
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [chat], next: null });
+      if (url === "/api/chats/chat") return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const zeta = turnZeta({ name: "bound", phase: "running", sets: 0, drive: async () => {} });
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(zeta.client as never, true, clock as never); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => active.state.phase === "ready");
+  zeta.state.phase = "finishing"; // reports idle, refuses every settings change
+  await zeta.frames("turn_end", "agent_end");
+  for (let tick = 0; tick < 20; tick += 1) await act(async () => { clock.advance(1_000); });
+  const { TURN_END_RETRY_LIMIT } = await import("./zeta/turnEnd");
+  expect(zeta.state.refused).toBe(1 + TURN_END_RETRY_LIMIT);
+  expect(active.state).toMatchObject({ phase: "ready", page: { approval_mode: "allow" }, pendingApprovalMode: "ask" });
+  await zeta.end();
+  await flushUntil(() => active.state.phase === "ready" && active.state.page.approval_mode === "ask");
+  expect(zeta.state.sets).toBe(1);
+});

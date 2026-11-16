@@ -1513,8 +1513,7 @@ try {
 
   // A reload during a woken turn's setup (a background task ended; zeta has not sent turn_start yet) attaches to
   // that turn: the page shows the chat, not a busy error, the turn calls a page tool on the re-sent binding, and
-  // the forced ask mode the reloaded page asks for is applied only after the turn ends (zeta refuses it, -32004,
-  // during the setup). The test server holds the woken turn in its setup while achilles restarts in ask mode.
+  // the forced ask mode the reloaded page asks for is applied only after the turn ends (never during the setup). The test server holds the woken turn in its setup while achilles restarts in ask mode.
   await allowField.fill("start a background task");
   await allowField.press("Enter");
   await gateWait.playwright(page.getByText("background task started", { exact: true }), "waitFor", { timeout: 20_000 });
@@ -1544,9 +1543,9 @@ try {
   await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
   const wakeAttach = replyTo("resume");
   if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
-  await waitFor(async () => Boolean(replyTo("set_settings")), "reloaded page asked for ask mode in the woken turn's setup");
-  if (replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
+  // zeta reports the setup as running, so the page keeps the mode pending; an older zeta reported idle and refused it
+  if (replyTo("set_settings") && replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   const wakeHeld = JSON.parse(await Bun.file(control).text());
   await Bun.write(control, JSON.stringify({ ...wakeHeld, release_wake_setup_barrier: true }));

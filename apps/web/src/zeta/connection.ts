@@ -1,5 +1,6 @@
 // adapted from gamma@6cd69671 src/connection.ts
 import { createClient, webSocketTransport, ZetaError, type ZetaClient, type ZetaDiscovery, type ZetaRole } from "@fulcrum/zeta";
+import { teeRunEnds } from "./turnEnd";
 
 /**
  * Connection states. Every waiting state carries `attempt` (failures in a row) and `retryAt` (epoch ms of the next
@@ -91,7 +92,7 @@ async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (c
   try { transport = await webSocketTransport(url.toString(), ["zeta.v1", `zeta.bearer.${token}`]); }
   catch { throw new ZetaError("connect_failed"); }
   opened?.(() => transport.close());
-  const client = createClient(transport, undefined, (handshaken, code) => new ZetaError(handshaken ? "closed" : "connect_failed", code));
+  const client: ZetaClient = createClient(teeRunEnds(transport, () => client), undefined, (handshaken, code) => new ZetaError(handshaken ? "closed" : "connect_failed", code));
   try { const hello = await client.hello(FEATURES, role); negotiatedRequests.set(client, new Set(hello.capabilities?.requests ?? [])); }
   catch (error) {
     transport.close();
