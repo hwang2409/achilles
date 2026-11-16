@@ -239,10 +239,12 @@ async function startAchilles(appOrigin: string, stamp: string) {
 async function ensurePinnedZeta() {
   const checkout = resolve(root, ".cache/zeta");
   const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
-  if (!existsSync(resolve(checkout, ".git"))) {
+  const fresh = !existsSync(resolve(checkout, ".git"));
+  console.log(`preparing pinned zeta in .cache/zeta (${fresh ? "clone + uv sync" : "fetch + checkout + uv sync"})`);
+  if (fresh) {
     await mkdir(dirname(checkout), { recursive: true });
     run(["git", "clone", "https://github.com/hwang2409/zeta", checkout]);
-  }
+  } else run(["git", "-C", checkout, "fetch", "--all", "--tags", "--prune"]);
   run(["git", "-C", checkout, "checkout", "--detach", pin]);
   run(["uv", "sync", "--project", checkout, "--frozen"]);
 }
