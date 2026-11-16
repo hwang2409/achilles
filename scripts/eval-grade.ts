@@ -323,7 +323,8 @@ function lintExcludes(check: TaskCheck, checks: TaskCheck[], setup?: TaskSetup, 
   }
 }
 function validateExpectations(checks: TaskCheck[], promptText: string, setup?: TaskSetup, requires: string[] = [], written: string[] = []) {
-  const declared = new Set<string>(["inspect_page", ...requires]);
+  // the product's built-in tools exist on every page, so a check may name them without a prompt quote
+  const declared = new Set<string>(["inspect_page", "create_page", "create_tool", "update_layout", "restore_version", ...requires]);
   for (const tool of setup?.tools ?? []) {
     declared.add(tool.name); declared.add(tool.collection); const properties = tool.input_schema?.properties;
     if (properties && typeof properties === "object" && !Array.isArray(properties)) for (const [name, schema] of Object.entries(properties)) {

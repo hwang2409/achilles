@@ -1,0 +1,660 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "alias": "home"
+      },
+      {
+        "id": "expenses",
+        "route": "/expenses",
+        "alias": "expenses"
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "expenses",
+        "name": "add_expense"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "expenses",
+        "name": "list_expenses"
+      },
+      {
+        "id": "tl-upd",
+        "page_id": "expenses",
+        "name": "update_expense"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "expenses",
+        "tool_id": "tl-add",
+        "name": "add_expense",
+        "version": 1,
+        "operation": "insert",
+        "collection": "expenses",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "expenses",
+        "tool_id": "tl-list",
+        "name": "list_expenses",
+        "version": 1,
+        "operation": "list",
+        "collection": "expenses",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "expenses",
+        "tool_id": "tl-upd",
+        "name": "update_expense",
+        "version": 1,
+        "operation": "update",
+        "collection": "expenses",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "expenses",
+        "id": "exp-1",
+        "collection": "expenses",
+        "data": {
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "travel"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "expenses",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "expenses",
+              "collection": "expenses"
+            },
+            {
+              "type": "form",
+              "title": "add",
+              "tool": "add_expense"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "call-1",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "arguments": {
+          "route": "/expenses"
+        }
+      },
+      {
+        "id": "call-2",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "page": "/expenses",
+          "bundle": {
+            "name": "update_expense"
+          }
+        }
+      },
+      {
+        "id": "call-3",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__add_expense",
+        "arguments": {
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
+        }
+      },
+      {
+        "id": "call-4",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__update_expense",
+        "arguments": {
+          "record_id": "exp-1",
+          "revision": 1,
+          "category": "travel"
+        }
+      },
+      {
+        "id": "call-5",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__list_expenses",
+        "arguments": {}
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-1",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "expenses",
+          "route": "/expenses"
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-2",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "update_expense",
+          "page_id": "expenses"
+        }
+      },
+      {
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "call_id": "call-3",
+        "tool": "achilles__add_expense",
+        "success": true,
+        "data": {
+          "record_id": "exp-1",
+          "revision": 1,
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
+        }
+      },
+      {
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "call_id": "call-4",
+        "tool": "achilles__update_expense",
+        "success": true,
+        "data": {
+          "record_id": "exp-1",
+          "revision": 2,
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "travel"
+        }
+      },
+      {
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "call_id": "call-5",
+        "tool": "achilles__list_expenses",
+        "success": true,
+        "data": [
+          {
+            "record_id": "exp-1",
+            "revision": 2,
+            "description": "Synthetic Taxi",
+            "amount": 20,
+            "category": "travel"
+          }
+        ]
+      }
+    ],
+    "related_page_ids": [
+      "expenses",
+      "expenses"
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "alias": "home"
+      },
+      {
+        "id": "expenses",
+        "route": "/expenses",
+        "alias": "expenses"
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "expenses",
+        "name": "add_expense"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "expenses",
+        "name": "list_expenses"
+      },
+      {
+        "id": "tl-upd",
+        "page_id": "home",
+        "name": "update_expense"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "expenses",
+        "tool_id": "tl-add",
+        "name": "add_expense",
+        "version": 1,
+        "operation": "insert",
+        "collection": "expenses",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "expenses",
+        "tool_id": "tl-list",
+        "name": "list_expenses",
+        "version": 1,
+        "operation": "list",
+        "collection": "expenses",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tl-upd",
+        "name": "update_expense",
+        "version": 1,
+        "operation": "update",
+        "collection": "expenses",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "description",
+            "amount",
+            "category"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "food",
+                "travel",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "expenses",
+        "id": "exp-1",
+        "collection": "expenses",
+        "data": {
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "expenses",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "expenses",
+              "collection": "expenses"
+            },
+            {
+              "type": "form",
+              "title": "add",
+              "tool": "add_expense"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "call-1",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "arguments": {
+          "route": "/expenses"
+        }
+      },
+      {
+        "id": "call-2",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "update_expense"
+          }
+        }
+      },
+      {
+        "id": "call-3",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__add_expense",
+        "arguments": {
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
+        }
+      },
+      {
+        "id": "call-5",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__list_expenses",
+        "arguments": {}
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-1",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "expenses",
+          "route": "/expenses"
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-2",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "update_expense",
+          "page_id": "home"
+        }
+      },
+      {
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "call_id": "call-3",
+        "tool": "achilles__add_expense",
+        "success": true,
+        "data": {
+          "record_id": "exp-1",
+          "revision": 1,
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
+        }
+      },
+      {
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "call_id": "call-5",
+        "tool": "achilles__list_expenses",
+        "success": true,
+        "data": [
+          {
+            "record_id": "exp-1",
+            "revision": 1,
+            "description": "Synthetic Taxi",
+            "amount": 20,
+            "category": "food"
+          }
+        ]
+      }
+    ],
+    "related_page_ids": [
+      "expenses",
+      "expenses"
+    ]
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "id": "create-tool-on-new-page",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "expenses",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 16,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "make an expense log page, starting empty. each expense has a description, an amount that can have cents, and a category that is food, travel, or other. show a list of expenses and a form to add one."
+    },
+    {
+      "id": "add-action",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "i'd also like to fix mistakes later: let the expenses page's chat change an expense that is already there."
+    },
+    {
+      "id": "use-action",
+      "kind": "prompt",
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "prompt": "use this page's tools to add an expense Synthetic Taxi, amount 20, category food, then change its category to travel, then list the expenses"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "expenses"
+    },
+    {
+      "id": "home-created-tool",
+      "type": "successful_result",
+      "page": "home",
+      "chat": "home-chat",
+      "tool": "achilles__create_tool"
+    },
+    {
+      "id": "no-home-tool",
+      "type": "count",
+      "page": "home",
+      "name": "tool_versions",
+      "count": 0
+    },
+    {
+      "id": "update-on-new-page",
+      "type": "operations",
+      "page": "expenses",
+      "value": [
+        "insert",
+        "update"
+      ]
+    },
+    {
+      "id": "update-works",
+      "type": "updated_record",
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "value": "Synthetic Taxi",
+      "transition": {
+        "before": [
+          "food"
+        ],
+        "after": [
+          "travel"
+        ]
+      }
+    },
+    {
+      "id": "one-record",
+      "type": "count",
+      "page": "expenses",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "page-tools-only",
+      "type": "assigned_tools_only",
+      "page": "expenses"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "expenses"
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools",
+    "create_tool_on_created_page"
+  ]
+}
