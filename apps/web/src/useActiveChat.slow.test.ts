@@ -3,7 +3,6 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { chatQueues } from "./composer/chatQueues";
-import { createComposerDelivery, type DeliveryOptions } from "./composer/useComposerDelivery";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
 
@@ -733,44 +732,29 @@ test("new chat while another chat's turn runs keeps the new chat and never sends
   expect(harness.active.busy).toMatchObject({ sessionId: "chat", retry: "new" });
 });
 
-// a first message kept across a page load (the old page's create or send never finished) may go only into the box of the
-// chat its own create made, else into the new-chat box: never into another chat's box, never sent without an Enter, never twice
-type KeptRow = {
+// unsent rows across a page load, through the page: chatQueues keeps every chat's rows (the new-chat box's too) in browser
+// storage, so a reload shows them as failed rows (retry, edit, x). never in another chat, never sent before the user acts,
+// never twice, never merged into a box
+type UnsentRow = {
   name: string;
-  // "refused": Enter in the new-chat box while another chat's turn runs; "seeded": an earlier page load kept the text
-  start: "refused" | "seeded";
-  // the user presses x on the failed row before the reload
-  cancel?: boolean;
-  // the kept text's create made "chat" (it attached, the send never left); `took`: zeta has it in that transcript
-  own?: boolean;
-  took?: boolean;
-  // the own chat's box already holds the text (an earlier load moved it there)
-  boxHolds?: boolean;
-  // the user presses "edit" on the failed row, then empties the box, before the reload
-  edit?: boolean;
-  // same load: the turn ends and a text-less "new chat" makes s1, which takes the text; then a reload opens s1
-  later?: boolean;
+  // "refused": Enter in the new-chat box while another chat's turn runs; "failed": the first send to the created chat fails
+  start: "refused" | "failed";
+  // "failed": the user types this into the created chat's box before the reload
+  box?: string;
 };
-const keptRows: KeptRow[] = [
-  { name: "a refused create, then a reload, keeps the text for a new chat", start: "refused" },
-  { name: "x on the refused row forgets the text for good", start: "refused", cancel: true },
-  { name: "the opened chat holds a different user message", start: "seeded" },
-  { name: "the opened chat is the one its create made", start: "seeded", own: true },
-  { name: "the chat its create made already holds it", start: "seeded", own: true, took: true },
-  { name: "own chat whose box already holds it", start: "seeded", own: true, boxHolds: true },
-  { name: "edit on the refused row, then an empty box, forgets the text", start: "refused", edit: true },
-  { name: "a later new chat in the same load takes it, then a reload opens that chat", start: "refused", later: true },
+const unsentRows: UnsentRow[] = [
+  { name: "a refused create, then a reload: the row waits for a new chat, then goes there once", start: "refused" },
+  { name: "the first send fails, then a reload: the row is back in the created chat", start: "failed" },
+  // a5e0c5b dropped the first message when the box held a longer text containing it
+  { name: "the first send fails, the box holds a longer text containing it, then a reload: both stay", start: "failed", box: "this works" },
 ];
-const KEPT_TEXT = "second story PINEAPPLE";
-const TEXTS_KEY = "achilles-pending-create-texts";
+const UNSENT_TEXT = "hi";
 
-test.each(keptRows)("kept first message: $name", async (row) => {
+test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new MemoryStorage();
-  if (row.start === "seeded") storage.setItem(TEXTS_KEY, JSON.stringify({ home: KEPT_TEXT }));
-  if (row.own) storage.setItem("achilles-pending-create-text-chats", JSON.stringify({ home: "chat" }));
-  if (row.boxHolds) draftStore.set("chat", KEPT_TEXT);
   let running = row.start === "refused";
+  let failSend = row.start === "failed";
   let created = 0;
   const listed = [chat.session_id];
   const delivered: { method: string; session?: string; text?: string }[] = [];
@@ -792,12 +776,6 @@ test.each(keptRows)("kept first message: $name", async (row) => {
       throw new Error(`unexpected fetch ${url}`);
     },
   });
-  // the running chat already holds an older user message, so "any user message" would wrongly count as delivered
-  const store = (id: string) => ({
-    getState: () => ({ outline: id === "chat" ? [{ id: "u1" }] : [] }),
-    getItem: () => ({ type: "user", event: { type: "user_message", text: row.took ? ` ${KEPT_TEXT}\n` : "older story" } }),
-    resync() {},
-  });
   const zeta = {
     features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
     request: async (method: string, params?: { session_id?: string; text?: string }) => {
@@ -811,108 +789,96 @@ test.each(keptRows)("kept first message: $name", async (row) => {
       if (method === "session_settings" || method === "set_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: running ? "running" : "idle", pending_approvals: [] } };
       if (method === "status") return running ? { session: { session_id: "chat" }, state: "running" } : { state: "idle" };
-      if (method === "send" || method === "steer") { delivered.push({ method, session: params?.session_id, text: params?.text }); return { accepted: true }; }
+      if (method === "send" || method === "steer") {
+        if (failSend) throw new Error("connection closed");
+        delivered.push({ method, session: params?.session_id, text: params?.text }); return { accepted: true };
+      }
       if (method === "delivery_status") return { status: "delivered" };
       throw new Error(`unexpected ${method}`);
     },
-    replay: async (id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: store(id), release() {} }; },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
     replayRevision: () => 1,
     finishReplay: () => true,
   };
   const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
   const clock = new ManualClock();
   const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
-  // a page load: a fresh hook (its own chat-creation owner) over the same browser storage
+  // the composer of `box`, wired the way App wires it; `close` detaches it, the way a page unload or chat switch does
+  let close = () => {};
+  const composer = (box: string, fromNewChat?: string) => {
+    close();
+    const owner = chatQueues.open(box, {
+      state: "idle", defaultValue: draftStore.get(box),
+      onDraftChange: (text) => draftStore.set(box, text), onDraftSubmit: (text) => draftStore.confirm(box, text),
+      onSubmit: (text, intent, track) => harness.active.send(text, intent, track),
+    }, fromNewChat);
+    const detach = owner.attach();
+    close = () => { detach(); chatQueues.settle(); close = () => {}; };
+    return owner;
+  };
+  // a page load: a fresh hook over the same browser storage. the old page's owners hold only failed rows, so they leave
+  // memory (chatQueues.settle) and the new page reads its rows back from storage
   const load = async () => {
+    close();
     if (mounted) await act(async () => { mounted?.unmount(); });
     await act(async () => { mounted = render(createElement(Harness)); });
     await flushUntil(() => harness.active.state.phase === "ready");
   };
-  // the composer of `box`, wired the way App wires it
-  // (`later`: through chatQueues, which puts the failed row back into the box once no composer shows it)
-  const composer = (box: string) => (row.later ? chatQueues.open : (_: string, options: DeliveryOptions) => createComposerDelivery(options))(box, {
-    state: "idle", defaultValue: draftStore.get(box),
-    onDraftChange: (text) => draftStore.set(box, text), onDraftSubmit: (text) => draftStore.confirm(box, text),
-    onSubmit: (text, intent, track) => harness.active.send(text, intent, track),
-    onCancel: (text) => harness.active.cancelled(text),
-  });
-  const sendsOfText = () => delivered.filter((item) => item.text === KEPT_TEXT);
+  const rowsOf = (owner: ReturnType<typeof chatQueues.open>) => owner.getModel().queue.map((item) => `${item.text}: ${item.failed ?? "unsent"}`);
+  const sendsOfText = () => delivered.filter((item) => item.text === UNSENT_TEXT);
   try {
     await load();
     if (row.start === "refused") {
       await act(async () => { await harness.active.newChat(); });
       await flushUntil(() => harness.active.state.phase === "empty" && harness.active.busy !== null);
       const box = composer("new:home");
-      const detach = box.attach();
-      try {
-        box.edit(KEPT_TEXT);
-        await act(async () => { await box.submit(); });
-        // shown once only: as the failed row, not also back in the new-chat box
-        expect(box.getModel().queue).toMatchObject([{ text: KEPT_TEXT, failed: "another chat is still running" }]);
-        expect(box.getModel().draft).toBe("");
-        expect(draftStore.get("new:home")).toBe("");
-        expect(sendsOfText(), "text written for the new chat reached the running chat").toEqual([]);
-        expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
-        if (row.cancel) {
-          box.cancel(box.getModel().queue[0]!.id);
-          expect(storage.getItem(TEXTS_KEY)).toBeNull();
-        }
-        if (row.edit) {
-          box.restore(box.getModel().queue[0]!.id);
-          expect(box.getModel().draft).toBe(KEPT_TEXT);
-          box.edit("");
-          expect(storage.getItem(TEXTS_KEY), "the box draft is the edited text's only home").toBeNull();
-        }
-      } finally { detach(); }
-      if (row.later) {
-        // the failed row goes back into the new-chat box; the turn ends and "new chat" makes s1, which takes it
-        chatQueues.settle();
-        running = false;
-        await act(async () => { await harness.active.newChat(); });
-        await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
-        expect(draftStore.get("s1")).toBe(KEPT_TEXT);
-        expect(draftStore.get("new:home")).toBe("");
-        // a reload opens s1 (the newest chat), the chat that holds the text: it shows there once, not in the new-chat box
-        await load();
-        expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "s1" });
-        expect(draftStore.get("s1"), "shown twice or lost").toBe(KEPT_TEXT);
-        expect(draftStore.get("new:home"), "the text went to the new-chat box, not to the chat that holds it").toBe("");
-        expect(sendsOfText()).toEqual([]);
-        return;
-      }
+      box.edit(UNSENT_TEXT);
+      await act(async () => { await box.submit(); });
+      expect(box.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat is still running") }]);
+      expect(draftStore.get("new:home")).toBe("");
       await load();
-    }
-    // the page opens its newest chat; the text was written for a new chat, so it waits, unsent, in the new-chat box
-    expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
-    expect(draftStore.get("chat")).toBe(row.own && !row.took ? KEPT_TEXT : "");
-    expect(draftStore.get("new:home"), "the kept text was lost").toBe(row.cancel || row.edit || row.own ? "" : KEPT_TEXT);
-    expect(sendsOfText()).toEqual([]);
-    if (row.took) expect(storage.getItem(TEXTS_KEY), "zeta took it, so it is not kept").toBeNull();
-    if (row.cancel || row.edit || row.took) return;
-    if (row.own) {
-      const box = composer("chat");
-      const detach = box.attach();
-      try { await act(async () => { await box.submit(); }); } finally { detach(); }
-      expect(sendsOfText()).toEqual([{ method: "send", session: "chat", text: KEPT_TEXT }]);
+      // the page opens its newest chat (the running one): the row was written for a new chat, so it is not there
+      expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
+      expect(rowsOf(composer("chat"))).toEqual([]);
+      expect(sendsOfText(), "text written for the new chat reached the running chat").toEqual([]);
+      expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+      // the turn ends; "new chat" makes the chat the text was written for, and the row moves there, still unsent
+      running = false;
+      await act(async () => { await harness.active.newChat(); });
+      await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
+      const s1 = composer("s1", "new:home");
+      expect(s1.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: expect.stringContaining("another chat is still running") }]);
+      expect(sendsOfText()).toEqual([]);
+      await act(async () => { await s1.retry(s1.getModel().queue[0]!.id); });
+      expect(sendsOfText(), "sent other than once, to the new chat").toEqual([{ method: "send", session: "s1", text: UNSENT_TEXT }]);
+      // zeta took it: a later page load shows it nowhere and sends nothing
+      await load();
+      expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "s1" });
+      expect(rowsOf(composer("s1"))).toEqual([]);
+      expect(sendsOfText()).toHaveLength(1);
       return;
     }
-    // the turn ends; "new chat" makes the chat the text was written for, and the text moves into its box, still unsent
-    running = false;
+    // "new chat" makes s1; the first send there fails
     await act(async () => { await harness.active.newChat(); });
     await flushUntil(() => harness.active.state.phase === "ready" && harness.active.state.sessionId === "s1");
-    expect(draftStore.get("s1")).toBe(KEPT_TEXT);
-    expect(sendsOfText()).toEqual([]);
-    const box = composer("s1");
-    const detach = box.attach();
-    try { await act(async () => { await box.submit(); }); } finally { detach(); }
-    expect(sendsOfText(), "the kept text was sent other than once, to the new chat").toEqual([{ method: "send", session: "s1", text: KEPT_TEXT }]);
-    // zeta took it: a later page load shows it nowhere and sends nothing
+    const first = composer("s1");
+    first.edit(UNSENT_TEXT);
+    await act(async () => { await first.submit(); });
+    expect(first.getModel().queue).toMatchObject([{ text: UNSENT_TEXT, failed: "connection closed" }]);
+    if (row.box) first.edit(row.box);
     await load();
-    expect(storage.getItem(TEXTS_KEY)).toBeNull();
-    for (const key of ["new:home", "chat", "s1"]) expect(draftStore.get(key)).toBe("");
-    expect(sendsOfText()).toHaveLength(1);
+    expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "s1" });
+    const s1 = composer("s1");
+    // shown once, as its own failed row; the box keeps what the user typed after it
+    expect(rowsOf(s1), "the unsent message was lost or changed").toEqual([`${UNSENT_TEXT}: connection closed`]);
+    expect(s1.getModel().draft).toBe(row.box ?? "");
+    expect(sendsOfText()).toEqual([]);
+    failSend = false;
+    await act(async () => { await s1.retry(s1.getModel().queue[0]!.id); });
+    expect(sendsOfText()).toEqual([{ method: "send", session: "s1", text: UNSENT_TEXT }]);
+    expect(s1.getModel().draft).toBe(row.box ?? "");
   } finally {
+    close();
     for (const key of ["new:home", "chat", "s1"]) draftStore.set(key, "");
-    chatQueues.settle();
   }
 });

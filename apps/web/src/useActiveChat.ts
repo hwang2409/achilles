@@ -64,10 +64,6 @@ export function firstUserText(store: SessionLease["store"]): string {
   return "";
 }
 
-/** the transcript holds a user message with exactly `text` (after trim) */
-const hasUserText = (store: SessionLease["store"], text: string) =>
-  store.getState().outline.some(({ id }) => { const item = store.getItem(id); return item?.type === "user" && item.event.type === "user_message" && item.event.text.trim() === text.trim(); });
-
 // marks the chat sent (it joins the chat list) and stores its first-message title once
 export function persistFirstMessage(sessionId: string, firstMessage: string, onSuccess: () => void): void {
   void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ first_message: firstMessage }) })
@@ -144,7 +140,6 @@ export async function attachPage(
   applyCreateMode?: (ready: ReadyState, enabled: boolean) => Promise<ReadyState>,
   publishReady: (ready: ReadyState) => Promise<void> | void = () => {},
   forceNew = false,
-  firstMessage?: string,
 ): Promise<EmptyState | ReadyState | BusyState> {
   let ownsLease = false;
   try {
@@ -187,11 +182,7 @@ export async function attachPage(
     const newest = forceNew || create || selectedId || pending ? null : await findNewestChat((chat) => chat.page_id === page.id); requireCurrent(owner, token);
     const candidates = forceNew || pending ? [] : selectedId ? [selectedId] : [...new Set([newest?.session_id, page.zeta_session_id])].filter((id): id is string => Boolean(id));
     for (const sessionId of candidates) {
-      try {
-        const ready = await attachSession(sessionId);
-        creation.restoreUnsent(page.id, ready.sessionId, (text) => hasUserText(ready.lease.store, text));
-        return ready;
-      }
+      try { return await attachSession(sessionId); }
       catch (caught) {
         if (caught instanceof ChatBusyError) return busy(caught.sessionId);
         if (!(caught instanceof SessionNotFoundError)) throw caught;
@@ -200,12 +191,12 @@ export async function attachPage(
         if (sessionId === page.zeta_session_id) create = true;
       }
     }
-    if (!pending && !create) { creation.restoreUnsent(page.id); return { phase: "empty", page, serverApprovalMode, credential }; }
+    if (!pending && !create) return { phase: "empty", page, serverApprovalMode, credential };
 
     const mappingInput = forceNew ? creationInput : { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
     try {
-      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create, text: firstMessage });
-      if (!ready) { creation.restoreUnsent(page.id); return { phase: "empty", page, serverApprovalMode, credential }; }
+      const ready = await creation.ensure({ input: mappingInput, current: () => owner.current(token), attach: attachSession, applyCreateMode, publishReady, create });
+      if (!ready) return { phase: "empty", page, serverApprovalMode, credential };
       return ready as ReadyState;
     } catch (caught) {
       // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
@@ -593,7 +584,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         applyPendingCreateMode,
         async (ready) => { handedOff = ready; },
         empty.newChat,
-        text,
       );
       if (attached.phase === "busy") { void showBusy(attached.busySessionId, empty.newChat ? "new" : "attach"); throw new ChatBusyError(attached.busySessionId); }
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
@@ -637,7 +627,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
     try {
       await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);
-      creation.current.sent(current.page.id);
     } catch (error) {
       if (pendingSelection.current?.sessionId === current.sessionId) pendingSelection.current = null;
       throw error;
@@ -654,10 +643,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       setListRefresh((value) => value + 1);
     });
   }, [client, createFirstChat, state, updateReady]);
-
-  const cancelled = useCallback((text: string) => {
-    if (state.phase === "ready" || state.phase === "empty" || state.phase === "busy") creation.current.cancelled(state.page.id, text);
-  }, [state]);
 
   const setPendingCreateMode = useCallback((current: EmptyState, enabled: boolean) => {
     creation.current.setCreateMode(current.page.id, enabled);
@@ -726,5 +711,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, cancelled, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }

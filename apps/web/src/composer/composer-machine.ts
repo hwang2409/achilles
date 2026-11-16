@@ -2,7 +2,7 @@ import type { ComposerState } from "@fulcrum/react";
 
 export type ComposerError = { kind: "submit" | "stop"; text: string };
 /** A submitted message. It left the box on Enter and goes out in order; `tries` counts failed sends. */
-export type QueuedMessage = { id: number; text: string; failed?: string; tries?: number };
+export type QueuedMessage = { id: number; text: string; failed?: string; tries?: number; deliveryId?: string };
 /** `deliveryId` is tracked once the request goes out; `echoed` once zeta's transcript shows that prompt */
 type Send = { attempt: number; id: number; steer: boolean; deliveryId?: string; echoed?: boolean };
 
@@ -20,8 +20,6 @@ export type ComposerModel = {
   /** a failed head was put back in the box: the rows behind it wait for the next Enter (the box text, if any, goes first) */
   held?: boolean;
   error?: ComposerError;
-  /** says why the box holds text the user did not type here (an unsent message moved in); goes on Enter or when the box empties */
-  note?: string;
   send?: Send;
   nextAttempt: number;
   nextQueueId: number;
@@ -34,7 +32,6 @@ export type ComposerEffect =
 export type ComposerEvent =
   | { type: "state"; state: ComposerState }
   | { type: "edit"; draft: string }
-  | { type: "note"; text: string }
   | { type: "submit"; turnRunning: boolean }
   | { type: "next"; turnRunning: boolean }
   | { type: "track"; attempt: number; deliveryId: string }
@@ -52,8 +49,9 @@ export type ComposerEvent =
 
 export type ComposerTransition = { model: ComposerModel; effect?: ComposerEffect };
 
-export function createComposerModel(draft: string, state: ComposerState): ComposerModel {
-  return { state, draft, sending: false, stopping: false, queue: [], nextAttempt: 1, nextQueueId: 1 };
+/** `rows`: unsent messages an earlier page load kept; `deliveryId` names the send a kept row may have made */
+export function createComposerModel(draft: string, state: ComposerState, rows: Omit<QueuedMessage, "id">[] = []): ComposerModel {
+  return { state, draft, sending: false, stopping: false, queue: rows.map((row, index) => ({ ...row, id: index + 1 })), nextAttempt: 1, nextQueueId: rows.length + 1 };
 }
 
 const canSend = (state: ComposerState) => state !== "running" && state !== "read-only";
@@ -79,7 +77,7 @@ export function composerStatus(model: ComposerModel): { text: string; tone?: "da
   if (model.held && model.queue.length) return { text: "the rest wait for your next enter", tone: "busy" };
   if (inFlight(model)) return { text: model.send?.steer ? "next step" : "sending", tone: "busy" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
-  return { text: model.note ?? "" };
+  return { text: "" };
 }
 
 /** What the header shows for this composer: it counts only the rows that are not in flight (an in-flight steer is "next step"). */
@@ -107,16 +105,14 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
     case "state":
       return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
-      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error, note: event.draft.trim() ? model.note : undefined } };
-    case "note":
-      return { model: { ...model, note: event.text } };
+      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error } };
     case "submit": {
       if (!submitAction(model)) return { model };
       if (!model.draft.trim()) return next({ ...model, held: false }, event.turnRunning);
       if (model.queue.length >= QUEUE_LIMIT) return { model: { ...model, error: { kind: "submit", text: `at most ${QUEUE_LIMIT} messages can wait. cancel one or wait for a reply.` } } };
       const item = { id: model.nextQueueId, text: model.draft };
       // the edited text of a failed head keeps its place in front of the rows it held back
-      const queued = { ...model, draft: "", error: undefined, note: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
+      const queued = { ...model, draft: "", error: undefined, held: false, queue: model.held ? [item, ...model.queue] : [...model.queue, item], nextQueueId: model.nextQueueId + 1 };
       return next(queued, event.turnRunning);
     }
     case "next":
@@ -125,6 +121,8 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       if (model.send?.attempt !== event.attempt) return { model };
       return { model: { ...model, send: { ...model.send, deliveryId: event.deliveryId, echoed: false } } };
     case "echo":
+      // a failed row an earlier page load kept with its delivery id: zeta took it after all, so it goes
+      if (model.queue.some((item) => item.failed && item.deliveryId === event.deliveryId)) return { model: { ...model, queue: model.queue.filter((item) => !(item.failed && item.deliveryId === event.deliveryId)) } };
       if (!model.send || model.send.deliveryId !== event.deliveryId) return { model };
       return { model: { ...model, send: { ...model.send, echoed: true } } };
     case "confirm":

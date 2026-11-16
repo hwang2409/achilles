@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { draftStore } from "../draftStore";
 import { deliverChatMessage } from "../useActiveChat";
-import { chatQueues } from "./chatQueues";
+import { createChatQueues, MAYBE_SENT, NOT_SENT } from "./chatQueues";
 import { inFlight } from "./composer-machine";
 import { createComposerDelivery, type ComposerDelivery } from "./useComposerDelivery";
 
@@ -165,10 +165,12 @@ test("enter takes the text out of the box at once: the box is always a new messa
 // enter (type the text, press Enter), ok / fail (zeta answers the oldest send), x / esc / retry / edit (row buttons and keys),
 // remount (the chat's composer remounts), switch (another chat's composer replaces it), created (the first message of
 // the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), unsent (an older chat of the page
-// that never got its first message opens; App offers it the new-chat owner like any unsent chat), rows / box / sent (checks).
+// that never got its first message opens; App offers it the new-chat owner like any unsent chat), made (that create
+// happens while another chat shows), reload (the page loads again: memory and sends in flight are gone, browser storage
+// stays), transcript (zeta's transcript shows the user message sent with that text's delivery id), rows / box / sent (checks).
 type Step =
-  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail", string]
-  | ["ok" | "esc" | "remount" | "created"]
+  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail" | "transcript", string]
+  | ["ok" | "esc" | "remount" | "created" | "made" | "reload"]
   | ["rows", string[]]
   | ["box", string]
   | ["sent", string[]];
@@ -257,9 +259,75 @@ const queueCases: QueueCase[] = [
     sent: ["new:first"], rows: ["failed first: closed", "queued second"],
   },
   {
-    name: "new chat left before it was created: the queued text goes back to its box, unsent",
-    steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["switch", "b"], ["ok"], ["switch", "new"], ["box", "second"]],
-    sent: ["new:first"],
+    name: "new chat left while its first send runs: the rest go to the created chat when it opens, once",
+    steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["made"], ["switch", "b"], ["ok"], ["sent", ["new:first"]], ["switch", "s1"], ["rows", ["sending second"]], ["ok"]],
+    sent: ["new:first", "s1:second"],
+  },
+  // a page load keeps every unsent row, as its own failed row: shown, never sent before the user acts, never merged into the box
+  {
+    name: "send fails, then a reload: the row is back, failed, unsent; retry sends it once",
+    steps: [["enter", "first"], ["fail", "closed"], ["reload"], ["rows", ["failed first: closed"]], ["box", ""], ["sent", ["a:first"]], ["retry", "first"], ["ok"]],
+    sent: ["a:first", "a:first"],
+  },
+  {
+    name: "reload while sending, zeta took it: no row",
+    steps: [["enter", "first"], ["reload"], ["rows", [`failed first: ${MAYBE_SENT}`]], ["transcript", "first"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "reload while sending, zeta did not take it: a failed row says it may not have been sent; the queued row behind it is failed too",
+    steps: [["enter", "first"], ["enter", "second"], ["reload"], ["sent", ["a:first"]]],
+    sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`, `failed second: ${NOT_SENT}`],
+  },
+  {
+    name: "edit, then a reload: the text is in the box once, with no row",
+    steps: [["enter", "first"], ["fail", "closed"], ["edit", "first"], ["reload"], ["box", "first"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "x, then a reload: gone",
+    steps: [["enter", "first"], ["fail", "closed"], ["x", "first"], ["reload"], ["box", ""]],
+    sent: ["a:first"],
+  },
+  {
+    name: "the box holds a longer text that contains the row's text: both stay, nothing merged or lost",
+    steps: [["enter", "hi"], ["fail", "closed"], ["type", "the hi draft"], ["reload"], ["box", "the hi draft"], ["retry", "hi"], ["ok"]],
+    sent: ["a:hi", "a:hi"],
+  },
+  {
+    name: "the row holds a longer text that contains the box text: both stay, nothing merged or lost",
+    steps: [["enter", "the hi draft"], ["fail", "closed"], ["type", "hi"], ["reload"], ["box", "hi"]],
+    sent: ["a:the hi draft"], rows: ["failed the hi draft: closed"],
+  },
+  {
+    name: "the same text twice stays two rows; each goes out once on its own retry",
+    steps: [["enter", "same"], ["enter", "same"], ["fail", "closed"], ["reload"], ["rows", ["failed same: closed", `failed same: ${NOT_SENT}`]], ["retry", "same"], ["ok"], ["rows", [`failed same: ${NOT_SENT}`]], ["sent", ["a:same", "a:same"]], ["retry", "same"], ["ok"]],
+    sent: ["a:same", "a:same", "a:same"],
+  },
+  {
+    name: "two chats with the same text: x in one keeps the other's row",
+    steps: [["switch", "b"], ["enter", "same"], ["fail", "closed"], ["switch", "a"], ["enter", "same"], ["fail", "closed"], ["x", "same"], ["reload"], ["rows", []], ["switch", "b"]],
+    sent: ["b:same", "a:same"], rows: ["failed same: closed"],
+  },
+  {
+    name: "a refused new chat, then a reload: the row waits in the new-chat box; the chat created later takes it and retry sends it there once",
+    steps: [["switch", "new"], ["enter", "first"], ["fail", "another chat is still running"], ["reload"], ["rows", ["failed first: another chat is still running"]], ["created"], ["rows", ["failed first: another chat is still running"]], ["sent", ["new:first"]], ["retry", "first"], ["ok"]],
+    sent: ["new:first", "s1:first"],
+  },
+  {
+    name: "a refused new chat, then a reload that opens another chat: a chat created later takes the row from storage",
+    steps: [["switch", "new"], ["enter", "first"], ["fail", "busy"], ["reload"], ["switch", "b"], ["made"], ["switch", "s1"], ["rows", ["failed first: busy"]], ["sent", ["new:first"]], ["retry", "first"], ["ok"]],
+    sent: ["new:first", "s1:first"],
+  },
+  {
+    name: "a create that opens a chat with rows of its own (a stale create maps the home chat): both sets of rows stay",
+    steps: [["switch", "s1"], ["enter", "older"], ["fail", "closed"], ["switch", "new"], ["enter", "first"], ["fail", "busy"], ["made"], ["reload"], ["rows", ["failed first: busy"]], ["switch", "s1"]],
+    sent: ["s1:older", "new:first"], rows: ["failed older: closed"],
+  },
+  {
+    name: "the first send of a new chat fails after its chat was created, then a reload: the row is in that chat",
+    steps: [["switch", "new"], ["enter", "first"], ["created"], ["fail", "closed"], ["reload"]],
+    sent: ["new:first"], rows: ["failed first: closed"],
   },
   {
     name: "unsent other chat opened while a new chat is created: the new-chat queue does not move",
@@ -269,17 +337,33 @@ const queueCases: QueueCase[] = [
 ];
 
 test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: expectedSent, rows: expectedRows = [] }) => {
-  const sends = heldSends();
+  let sends = heldSends();
   const sent: string[] = [];
-  // chat ids are unique to this case; the owner registry is shared by the module
+  const deliveries = new Map<string, string>();
+  const previousStorage = globalThis.localStorage;
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: {
+    get length() { return values.size; }, key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); },
+  } });
+  // one page load's owners; a reload starts new ones over the same storage
+  let queues = createChatQueues();
+  // chat ids are unique to this case; drafts are kept by the module's draft store, like the browser keeps them
   const key = (chat: string) => chat === "new" ? `new:${name}` : `${name}/${chat}`;
   const mount = (chat: string, fromNewChat?: string) => {
-    const owner = chatQueues.open(key(chat), {
+    const pageSends = sends;
+    const owner = queues.open(key(chat), {
       state: "idle",
       defaultValue: draftStore.get(key(chat)),
       onDraftChange: (text) => draftStore.set(key(chat), text),
       onDraftSubmit: (text) => draftStore.confirm(key(chat), text),
-      onSubmit: (text) => { sent.push(`${chat}:${text}`); return sends.onSubmit(text); },
+      onSubmit: (text, _intent, track) => {
+        sent.push(`${chat}:${text}`);
+        const deliveryId = `delivery ${sent.length}`;
+        deliveries.set(text, deliveryId);
+        track(deliveryId);
+        return pageSends.onSubmit(text);
+      },
     }, fromNewChat && key(fromNewChat));
     return { chat, owner, mounted: () => { const detach = owner.attach(); owner.sync("idle", draftStore.get(key(chat))); return detach; } };
   };
@@ -291,7 +375,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
     detach();
     detach = next.mounted();
     view = next;
-    chatQueues.settle();
+    queues.settle();
   };
   const rowOf = (text: string) => view.owner.getModel().queue.find((item) => item.text === text)!.id;
   const rows = () => {
@@ -312,7 +396,11 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         case "remount": replace(view.chat); break;
         case "switch": replace(step[1]); break;
         case "unsent": replace(step[1], "new"); break;
-        case "created": chatQueues.created(key("new"), key("s1")); replace("s1", "new"); break;
+        case "created": queues.created(key("new"), key("s1")); replace("s1", "new"); break;
+        case "made": queues.created(key("new"), key("s1")); break;
+        // the old page's sends never answer, and its owners are gone
+        case "reload": detach(); sends = heldSends(); queues = createChatQueues(); view = mount(view.chat); detach = view.mounted(); break;
+        case "transcript": view.owner.echo(deliveries.get(step[1])!); break;
         case "rows": expect(rows()).toEqual(step[1]); break;
         case "box": expect(view.owner.getModel().draft).toBe(step[1]); break;
         case "sent": expect(sent).toEqual(step[1]); break;
@@ -323,6 +411,8 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
     expect(rows()).toEqual(expectedRows);
   } finally {
     detach();
-    chatQueues.settle();
+    queues.settle();
+    for (const chat of ["a", "b", "new", "s0", "s1"]) draftStore.set(key(chat), "");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: previousStorage });
   }
 });

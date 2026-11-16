@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { createChatCreationOwner, type ChatCreationInput } from "./chatCreation";
 import { createComposerDelivery } from "./composer/useComposerDelivery";
 import * as queues from "./composer/chatQueues";
-const { chatQueues } = queues;
-import { composerStatus } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { attachPage, confirmSteerDelivery, createAttachmentOwner, createModeToggleOwner, deliverChatMessage, cutTitle, DroppedSteerDeliveryError, pageDeliverySteer, persistChatState, persistFirstMessage, trackQueuedSteer } from "./useActiveChat";
 
@@ -11,6 +9,8 @@ class MemoryStorage {
   readonly values = new Map<string, string>();
   writes = 0;
   failWrite = 0;
+  get length() { return this.values.size; }
+  key(index: number) { return [...this.values.keys()][index] ?? null; }
   getItem(key: string) { return this.values.get(key) ?? null; }
   setItem(key: string, value: string) {
     this.writes += 1;
@@ -671,11 +671,18 @@ describe("chat creation lifecycle", () => {
     const publish = async () => { await step("publish"); publishes += 1; };
     if (reloadAt) {
       const message = `${reloadAt}${pageSwitch ? " page" : ""} first message PINEAPPLE`;
-      draftStore.set("new:home", ""); draftStore.set("owned-session", "");
+      const previousStorage = globalThis.localStorage;
+      // the unsent rows live in the browser storage, the same one each page load sees
+      Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true, writable: true });
       let oldPageAlive = true;
-      // the old page: Enter on the empty page starts the create with the first message, then the page goes away mid-step
-      const oldPage = owner.ensure({ input: input(client, true), current: () => oldPageAlive, attach: async (sessionId) => { await step("attach"); return { sessionId }; }, applyCreateMode: applyMode, publishReady: publish, text: message })!;
-      // each page load has its own owner; the last one is the page the user presses Enter on
+      // the old page: Enter in the new-chat box starts the create with the first message, then the page goes away mid-step
+      const oldBox = queues.createChatQueues().open("new:home", {
+        state: "idle", defaultValue: message, onDraftChange() {}, onDraftSubmit() {},
+        onSubmit: async () => { await owner.ensure({ input: input(client, true), current: () => oldPageAlive, attach: async (sessionId) => { await step("attach"); return { sessionId }; }, applyCreateMode: applyMode, publishReady: publish }); },
+      });
+      oldBox.attach();
+      const oldPage = oldBox.submit();
+      // each page load has its own owners; the last one is the page the user acts on
       let pageOwner = owner;
       const load = async (key: string) => {
         const attachment = createAttachmentOwner();
@@ -684,37 +691,36 @@ describe("chat creation lifecycle", () => {
         finally { attachment.clear(); }
       };
       try {
-        await waitBounded(reached.promise, () => gate.resolve(), () => oldPage.catch(() => {}));
+        await waitBounded(reached.promise, () => gate.resolve(), () => oldPage);
         oldPageAlive = false;
-        if (pageSwitch) {
-          expect((await load("other")).phase).toBe("empty");
-          expect(draftStore.get("new:other")).not.toContain("PINEAPPLE");
-        }
+        if (pageSwitch) expect((await load("other")).phase).toBe("empty");
         const opened = await load("home");
-        // no record before new_session answers: the page opens empty, the message in its new-chat box; else the created chat
+        // no record before new_session answers: the page opens empty, the row in its new-chat box; else the created chat takes it
         const box = reloadAt === "new_session" ? "new:home" : "owned-session";
         expect(opened).toMatchObject(reloadAt === "new_session" ? { phase: "empty" } : { phase: "ready", sessionId: "owned-session" });
-        expect(draftStore.get(box)).toBe(message);
-        expect(deliveries).toBe(0);
-        const delivery = chatQueues.open(box, {
+        const delivery = queues.createChatQueues().open(box, {
           state: "idle", defaultValue: draftStore.get(box),
-          onDraftChange: (text) => draftStore.set(box, text), onDraftSubmit: (text) => draftStore.confirm(box, text),
+          onDraftChange() {}, onDraftSubmit() {},
           onSubmit: async (text, intent, track) => {
-            const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }), text })!;
+            const target = box === "owned-session" ? { sessionId: box } : await pageOwner.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!;
             await deliverChatMessage(client as never, target.sessionId, text, `delivery-${reloadAt}`, pageDeliverySteer("empty", intent), track);
           },
         });
         const detach = delivery.attach();
         try {
-          expect(delivery.getModel().draft).toBe(message);
-          expect(composerStatus(delivery.getModel()).text).toBe(box === "new:home" ? queues.KEPT_NOTE : queues.MOVED_NOTE);
+          // shown as its own failed row, not in the box, and not sent until the user retries it
+          expect(delivery.getModel().queue).toMatchObject([{ text: message, failed: queues.NOT_SENT }]);
+          expect(delivery.getModel().draft).toBe("");
           await new Promise((resolve) => setTimeout(resolve, 20));
           expect(deliveries).toBe(0);
-          await delivery.submit();
+          await delivery.retry(delivery.getModel().queue[0]!.id);
           expect(sent).toEqual([message]);
-          expect(composerStatus(delivery.getModel()).text).toBe("");
-        } finally { detach(); chatQueues.settle(); }
-      } finally { gate.resolve(); await oldPage.catch(() => {}); }
+          expect(delivery.getModel().queue).toEqual([]);
+        } finally { detach(); }
+      } finally {
+        gate.resolve(); await oldPage.catch(() => {});
+        Object.defineProperty(globalThis, "localStorage", { value: previousStorage, configurable: true, writable: true });
+      }
       return;
     }
     const run = () => reopen
