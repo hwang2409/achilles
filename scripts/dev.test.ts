@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -527,8 +527,13 @@ esac
 test("web dependencies reinstall when apps/web changed even if the fulcrum build is unchanged", async () => {
   const cache = resolve(root, ".cache");
   const fulcrumCache = resolve(cache, "fulcrum");
+  const fulcrumBackup = resolve(cache, "fulcrum.achilles-test-backup");
   const stampFiles = ["fulcrum-build.stamp", "web-build.stamp", "web-deps.stamp"].map((name) => resolve(cache, name));
-  if (existsSync(fulcrumCache)) throw new Error(`refusing to clobber ${fulcrumCache}; clear .cache/fulcrum and retry`);
+  await mkdir(cache, { recursive: true });
+  if (existsSync(fulcrumBackup)) throw new Error(`stale ${fulcrumBackup}; remove it and retry`);
+  // CI checks a real fulcrum into .cache/fulcrum; move it aside so this test owns a hermetic one.
+  const hadFulcrum = existsSync(fulcrumCache);
+  if (hadFulcrum) await rename(fulcrumCache, fulcrumBackup);
   const savedStamps = await Promise.all(stampFiles.map(async (path) => (existsSync(path) ? await readFile(path) : null)));
   const temp = await mkdtemp(resolve(tmpdir(), "achilles-web-deps-test-"));
   const bin = resolve(temp, "bin");
@@ -537,7 +542,6 @@ test("web dependencies reinstall when apps/web changed even if the fulcrum build
   const calls1 = resolve(temp, "bun-calls-1");
   const calls2 = resolve(temp, "bun-calls-2");
   await mkdir(bin, { recursive: true });
-  await mkdir(cache, { recursive: true });
   await writeFile(resolve(bin, "uv"), "#!/bin/sh\nexit 0\n");
   await writeFile(resolve(bin, "zeta"), `#!/bin/sh\ncase "$*" in\n  *--help*) echo "add show remove --scope --json --url"; exit 0;;\n  *) exit 0;;\nesac\n`);
   await writeFile(resolve(bin, "git"), `#!/bin/sh
@@ -579,6 +583,7 @@ esac
     expect(second.calls).toContain("scripts/fulcrum.ts --install-web");
   } finally {
     await rm(fulcrumCache, { recursive: true, force: true });
+    if (hadFulcrum) await rename(fulcrumBackup, fulcrumCache);
     await Promise.all(stampFiles.map(async (path, i) => {
       if (savedStamps[i] === null) await rm(path, { force: true });
       else await writeFile(path, savedStamps[i]!);
