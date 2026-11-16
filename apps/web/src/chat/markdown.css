@@ -72,17 +72,22 @@
 }
 .transcript [data-part="md-table"] {
   display: block;
-  width: max-content;
-  min-width: 100%;
+  max-width: 100%;
   margin: 0 0 12px;
   overflow-x: auto;
   border-collapse: collapse;
   font-size: 13px;
   line-height: 20px;
 }
-.transcript [data-part="md-table"] :is(thead, tbody) { display: block; width: 100%; }
-.transcript [data-part="md-table"] tr { display: table; width: 100%; table-layout: fixed; }
-.transcript [data-part="md-table"] :is(th, td) { padding: 6px 12px; border: 1px solid var(--fulcrum-border); text-align: left; vertical-align: top; }
+.transcript [data-part="md-table"] :is(th, td) {
+  min-width: 8ch;
+  padding: 6px 12px;
+  border: 1px solid var(--fulcrum-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
+}
 .transcript [data-part="md-table"] th { background: var(--fulcrum-surface); font-weight: 700; }
 .transcript [data-part="md-table"] :is(th, td)[align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
 
