@@ -1,8 +1,5 @@
-import { inFlight, type QueuedMessage } from "./composer-machine";
+import { inFlight, MAYBE_SENT, type QueuedMessage } from "./composer-machine";
 import { createComposerDelivery, type ComposerDelivery, type DeliveryOptions } from "./useComposerDelivery";
-
-/** a row that was in flight when the page unloaded and had left for zeta: the chat's transcript says if zeta took it */
-export const MAYBE_SENT = "may not have been sent — check before retrying";
 /** a row that had not left for zeta when the page unloaded */
 export const NOT_SENT = "not sent before the page reloaded";
 

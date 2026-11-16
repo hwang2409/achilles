@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { draftStore } from "../draftStore";
 import { deliverChatMessage } from "../useActiveChat";
-import { createChatQueues, MAYBE_SENT, NOT_SENT } from "./chatQueues";
-import { inFlight } from "./composer-machine";
+import { createChatQueues, NOT_SENT } from "./chatQueues";
+import { inFlight, MAYBE_SENT } from "./composer-machine";
 import { createComposerDelivery, type ComposerDelivery, type SendIntent } from "./useComposerDelivery";
 
 type Scenario = {
@@ -105,7 +105,8 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
 
     expect(owner.getModel().draft).toBe("");
     expect(persisted).toBe(scenario.remount ? " plus new" : "");
-    expect(owner.getModel().queue).toEqual(scenario.expectedFailure ? [{ id: 1, text: "keep this exact draft", failed: scenario.expectedFailure, tries: 1 }] : []);
+    // the failed row keeps the id it went out with
+    expect(owner.getModel().queue).toEqual(scenario.expectedFailure ? [{ id: 1, text: "keep this exact draft", failed: scenario.expectedFailure, tries: 1, deliveryId: "delivery-1" }] : []);
     if (scenario.retryDropped) {
       await owner.retry(1);
       expect(deliveryIds).toEqual(["delivery-1", "delivery-2"]);
@@ -162,7 +163,8 @@ test("enter takes the text out of the box at once: the box is always a new messa
 });
 
 // What the user does, and what the test checks, against the chat queue owner (`chatQueues`):
-// enter (type the text, press Enter), ok / fail (zeta answers the oldest send), x / esc / retry / edit (row buttons and keys),
+// enter (type the text, press Enter), ok / fail / refuse (the oldest send: zeta takes it / zeta took it but the socket
+// closed before its answer / zeta refuses it with an error code), x / esc / retry / edit (row buttons and keys),
 // remount (the chat's composer remounts), switch (another chat's composer replaces it), created (the first message of
 // the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), unsent (an older chat of the page
 // that never got its first message opens; App offers it the new-chat owner like any unsent chat), made (that create
@@ -171,7 +173,7 @@ test("enter takes the text out of the box at once: the box is always a new messa
 // refuses every write from now on), old (#155 kept this text as the page's first message under its old key),
 // rows / box / sent (checks; `sent` lists the sends zeta took: a send with a delivery id zeta already has is dropped).
 type Step =
-  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail" | "transcript" | "old", string]
+  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail" | "refuse" | "transcript" | "old", string]
   | ["ok" | "esc" | "remount" | "created" | "made" | "reload" | "full"]
   | ["rows", string[]]
   | ["box", string]
@@ -192,32 +194,32 @@ const queueCases: QueueCase[] = [
   },
   {
     name: "failure: the row stays failed, nothing behind it goes out, and it is never sent again on its own",
-    steps: [["enter", "first"], ["fail", "zeta said no"], ["enter", "second"], ["box", ""]],
+    steps: [["enter", "first"], ["refuse", "zeta said no"], ["enter", "second"], ["box", ""]],
     sent: ["a:first"], rows: ["failed first: zeta said no", "queued second"],
   },
   {
     name: "retry goes out exactly once, also on a double click, then the rest follow",
-    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["retry", "first"], ["retry", "first"], ["rows", ["sending first", "queued second"]], ["fail", "denied again"], ["rows", ["failed first: denied again (2 tries)", "queued second"]], ["retry", "first"], ["ok"], ["ok"]],
+    steps: [["enter", "first"], ["enter", "second"], ["refuse", "denied"], ["retry", "first"], ["retry", "first"], ["rows", ["sending first", "queued second"]], ["refuse", "denied again"], ["rows", ["failed first: denied again (2 tries)", "queued second"]], ["retry", "first"], ["ok"], ["ok"]],
     sent: ["a:first", "a:first", "a:first", "a:second"],
   },
   {
     name: "edit puts a failed message back in the box and removes its row; it is not sent",
-    steps: [["enter", "first"], ["fail", "denied"], ["edit", "first"], ["box", "first"]],
+    steps: [["enter", "first"], ["refuse", "denied"], ["edit", "first"], ["box", "first"]],
     sent: ["a:first"],
   },
   {
     name: "edit of a failed first message holds the rows behind it until the edited text is sent; it goes first",
-    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["rows", ["queued second"]], ["sent", ["a:first"]], ["enter", "first fixed"], ["ok"], ["ok"]],
+    steps: [["enter", "first"], ["enter", "second"], ["refuse", "denied"], ["edit", "first"], ["rows", ["queued second"]], ["sent", ["a:first"]], ["enter", "first fixed"], ["ok"], ["ok"]],
     sent: ["a:first", "a:first fixed", "a:second"],
   },
   {
     name: "clearing the edited text of a failed first message sends nothing; the held rows wait for the next enter",
-    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["type", ""], ["sent", ["a:first"]], ["rows", ["queued second"]], ["enter", "first again"], ["ok"], ["ok"]],
+    steps: [["enter", "first"], ["enter", "second"], ["refuse", "denied"], ["edit", "first"], ["type", ""], ["sent", ["a:first"]], ["rows", ["queued second"]], ["enter", "first again"], ["ok"], ["ok"]],
     sent: ["a:first", "a:first again", "a:second"],
   },
   {
     name: "enter on an empty box after an edit lets the held rows go",
-    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["edit", "first"], ["type", ""], ["enter", ""], ["ok"]],
+    steps: [["enter", "first"], ["enter", "second"], ["refuse", "denied"], ["edit", "first"], ["type", ""], ["enter", ""], ["ok"]],
     sent: ["a:first", "a:second"],
   },
   {
@@ -238,17 +240,17 @@ const queueCases: QueueCase[] = [
   {
     name: "remount with a failed row: the row stays failed and is not sent again",
     steps: [["enter", "first"], ["fail", "closed"], ["remount"]],
-    sent: ["a:first"], rows: ["failed first: closed"],
+    sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`],
   },
   {
     name: "chat switch with a failed row: the row stays failed and is not sent again",
     steps: [["enter", "first"], ["fail", "closed"], ["switch", "b"], ["switch", "a"]],
-    sent: ["a:first"], rows: ["failed first: closed"],
+    sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`],
   },
   {
     name: "a send that fails while away shows as failed on return and is not sent again",
     steps: [["enter", "first"], ["enter", "second"], ["switch", "b"], ["fail", "closed"], ["switch", "a"]],
-    sent: ["a:first"], rows: ["failed first: closed", "queued second"],
+    sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`, "queued second"],
   },
   {
     name: "new chat: the key changes during the first send; the rest goes to the created chat, once, after it",
@@ -258,7 +260,7 @@ const queueCases: QueueCase[] = [
   {
     name: "new chat: the first send fails after the key changed; it shows failed in the created chat",
     steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["created"], ["fail", "closed"]],
-    sent: ["new:first"], rows: ["failed first: closed", "queued second"],
+    sent: ["new:first"], rows: [`failed first: ${MAYBE_SENT}`, "queued second"],
   },
   {
     name: "new chat left while its first send runs: the rest go to the created chat when it opens, once",
@@ -267,9 +269,20 @@ const queueCases: QueueCase[] = [
   },
   // a page load keeps every unsent row, as its own failed row: shown, never sent before the user acts, never merged into the box
   {
-    name: "send fails, then a reload: the row is back, failed, unsent; retry sends it once",
-    steps: [["enter", "first"], ["fail", "closed"], ["reload"], ["rows", ["failed first: closed"]], ["box", ""], ["sent", ["a:first"]], ["retry", "first"], ["ok"]],
-    sent: ["a:first", "a:first"],
+    name: "send fails after zeta took it, then a reload: the row is back as maybe sent; retry reuses its id, so zeta keeps one copy",
+    steps: [["enter", "first"], ["fail", "closed"], ["reload"], ["rows", [`failed first: ${MAYBE_SENT}`]], ["box", ""], ["sent", ["a:first"]], ["retry", "first"], ["ok"]],
+    sent: ["a:first"],
+  },
+  // a send zeta took whose answer never came (the socket closed): the row keeps the delivery id, so a retry cannot make a second copy
+  {
+    name: "zeta took it, then the socket closed before its answer: the row says it may not have been sent; the transcript clears it",
+    steps: [["enter", "first"], ["fail", "closed"], ["rows", [`failed first: ${MAYBE_SENT}`]], ["transcript", "first"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "zeta took it, then the socket closed before its answer, then retry: the retry has the same delivery id, so zeta keeps one copy",
+    steps: [["enter", "first"], ["fail", "closed"], ["retry", "first"], ["ok"]],
+    sent: ["a:first"],
   },
   {
     name: "reload while sending, zeta took it: no row",
@@ -294,7 +307,7 @@ const queueCases: QueueCase[] = [
   {
     name: "storage refuses writes: a failed row stays in memory across a chat switch",
     steps: [["full"], ["enter", "first"], ["fail", "closed"], ["switch", "b"], ["switch", "a"]],
-    sent: ["a:first"], rows: ["failed first: closed"],
+    sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`],
   },
   {
     name: "#155 kept a first message under its old key: a page load shows it once as an unsent row of the new-chat box",
@@ -319,42 +332,42 @@ const queueCases: QueueCase[] = [
   {
     name: "the box holds a longer text that contains the row's text: both stay, nothing merged or lost",
     steps: [["enter", "hi"], ["fail", "closed"], ["type", "the hi draft"], ["reload"], ["box", "the hi draft"], ["retry", "hi"], ["ok"]],
-    sent: ["a:hi", "a:hi"],
+    sent: ["a:hi"],
   },
   {
     name: "the row holds a longer text that contains the box text: both stay, nothing merged or lost",
     steps: [["enter", "the hi draft"], ["fail", "closed"], ["type", "hi"], ["reload"], ["box", "hi"]],
-    sent: ["a:the hi draft"], rows: ["failed the hi draft: closed"],
+    sent: ["a:the hi draft"], rows: [`failed the hi draft: ${MAYBE_SENT}`],
   },
   {
     name: "the same text twice stays two rows; each goes out once on its own retry",
-    steps: [["enter", "same"], ["enter", "same"], ["fail", "closed"], ["reload"], ["rows", ["failed same: closed", `failed same: ${NOT_SENT}`]], ["retry", "same"], ["ok"], ["rows", [`failed same: ${NOT_SENT}`]], ["sent", ["a:same", "a:same"]], ["retry", "same"], ["ok"]],
-    sent: ["a:same", "a:same", "a:same"],
+    steps: [["enter", "same"], ["enter", "same"], ["fail", "closed"], ["reload"], ["rows", [`failed same: ${MAYBE_SENT}`, `failed same: ${NOT_SENT}`]], ["retry", "same"], ["ok"], ["rows", [`failed same: ${NOT_SENT}`]], ["sent", ["a:same"]], ["retry", "same"], ["ok"]],
+    sent: ["a:same", "a:same"],
   },
   {
     name: "two chats with the same text: x in one keeps the other's row",
     steps: [["switch", "b"], ["enter", "same"], ["fail", "closed"], ["switch", "a"], ["enter", "same"], ["fail", "closed"], ["x", "same"], ["reload"], ["rows", []], ["switch", "b"]],
-    sent: ["b:same", "a:same"], rows: ["failed same: closed"],
+    sent: ["b:same", "a:same"], rows: [`failed same: ${MAYBE_SENT}`],
   },
   {
     name: "a refused new chat, then a reload: the row waits in the new-chat box; the chat created later takes it and retry sends it there once",
-    steps: [["switch", "new"], ["enter", "first"], ["fail", "another chat is still running"], ["reload"], ["rows", ["failed first: another chat is still running"]], ["created"], ["rows", ["failed first: another chat is still running"]], ["sent", ["new:first"]], ["retry", "first"], ["ok"]],
+    steps: [["switch", "new"], ["enter", "first"], ["refuse", "another chat is still running"], ["reload"], ["rows", ["failed first: another chat is still running"]], ["created"], ["rows", ["failed first: another chat is still running"]], ["sent", ["new:first"]], ["retry", "first"], ["ok"]],
     sent: ["new:first", "s1:first"],
   },
   {
     name: "a refused new chat, then a reload that opens another chat: a chat created later takes the row from storage",
-    steps: [["switch", "new"], ["enter", "first"], ["fail", "busy"], ["reload"], ["switch", "b"], ["made"], ["switch", "s1"], ["rows", ["failed first: busy"]], ["sent", ["new:first"]], ["retry", "first"], ["ok"]],
+    steps: [["switch", "new"], ["enter", "first"], ["refuse", "busy"], ["reload"], ["switch", "b"], ["made"], ["switch", "s1"], ["rows", ["failed first: busy"]], ["sent", ["new:first"]], ["retry", "first"], ["ok"]],
     sent: ["new:first", "s1:first"],
   },
   {
     name: "a create that opens a chat with rows of its own (a stale create maps the home chat): both sets of rows stay",
-    steps: [["switch", "s1"], ["enter", "older"], ["fail", "closed"], ["switch", "new"], ["enter", "first"], ["fail", "busy"], ["made"], ["reload"], ["rows", ["failed first: busy"]], ["switch", "s1"]],
-    sent: ["s1:older", "new:first"], rows: ["failed older: closed"],
+    steps: [["switch", "s1"], ["enter", "older"], ["fail", "closed"], ["switch", "new"], ["enter", "first"], ["refuse", "busy"], ["made"], ["reload"], ["rows", ["failed first: busy"]], ["switch", "s1"]],
+    sent: ["s1:older", "new:first"], rows: [`failed older: ${MAYBE_SENT}`],
   },
   {
     name: "the first send of a new chat fails after its chat was created, then a reload: the row is in that chat",
     steps: [["switch", "new"], ["enter", "first"], ["created"], ["fail", "closed"], ["reload"]],
-    sent: ["new:first"], rows: ["failed first: closed"],
+    sent: ["new:first"], rows: [`failed first: ${MAYBE_SENT}`],
   },
   {
     name: "unsent other chat opened while a new chat is created: the new-chat queue does not move",
@@ -398,7 +411,8 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
           const duplicate = taken.has(deliveryId);
           if (!duplicate) sent.push(`${chat}:${text}`);
           taken.add(deliveryId);
-          await pageSends.onSubmit(text);
+          // zeta's own error (a refusal) records no delivery, so the id is free again; a closed socket keeps what zeta took
+          await pageSends.onSubmit(text).catch((failure: { code?: unknown }) => { if (typeof failure.code === "number") taken.delete(deliveryId); throw failure; });
           return { accepted: true, ...(duplicate ? { duplicate } : {}) };
         } };
         const track_ = (deliveryId: string) => { deliveries.set(text, deliveryId); track(deliveryId); };
@@ -429,6 +443,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         case "type": view.owner.edit(step[1]); break;
         case "ok": await sends.release(); break;
         case "fail": await sends.release(new Error(step[1])); break;
+        case "refuse": await sends.release(Object.assign(new Error(step[1]), { code: -32003 })); break;
         case "x": view.owner.cancel(rowOf(step[1])); break;
         case "esc": view.owner.cancel(); break;
         case "retry": void view.owner.retry(rowOf(step[1])); break;

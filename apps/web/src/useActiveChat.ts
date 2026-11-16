@@ -5,6 +5,7 @@ import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
+import { MAYBE_SENT } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
@@ -351,15 +352,24 @@ export async function deliverChatMessage(
   track: (id: string) => void,
 ): Promise<"send" | "steer"> {
   try {
-    return await deliverOnce(client, sessionId, text, deliveryId, steer, track);
+    try {
+      return await deliverOnce(client, sessionId, text, deliveryId, steer, track);
+    } catch (error) {
+      // only a reused id (a retry of a row that may have been sent) can come back as zeta's dropped duplicate. a dropped
+      // delivery holds nothing, so one send with a fresh id cannot make a second copy
+      const evicted = errorCode(error) === ID_EVICTED ? (error as { data?: { outcome?: unknown } }).data?.outcome : undefined;
+      // a reused id zeta took and then forgot (-32010): it holds the text unless the delivery was dropped
+      if (evicted === "queued" || evicted === "delivered") return steer ? "steer" : "send";
+      if (!(error instanceof DroppedDuplicateError) && evicted !== "dropped") throw error;
+      return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
+    }
   } catch (error) {
-    // only a reused id (a retry of a row that may have been sent) can come back as zeta's dropped duplicate. a dropped
-    // delivery holds nothing, so one send with a fresh id cannot make a second copy
-    const evicted = errorCode(error) === ID_EVICTED ? (error as { data?: { outcome?: unknown } }).data?.outcome : undefined;
-    // a reused id zeta took and then forgot (-32010): it holds the text unless the delivery was dropped
-    if (evicted === "queued" || evicted === "delivered") return steer ? "steer" : "send";
-    if (!(error instanceof DroppedDuplicateError) && evicted !== "dropped") throw error;
-    return deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
+    // zeta answered (a drop, a refusal, a reply it never sends): it holds nothing new. no answer (a timeout, a closed
+    // socket) or an id zeta forgot without a known outcome: it may hold the text, so the row says so and is never resent
+    if (error instanceof DroppedSteerDeliveryError || error instanceof RefusedError) throw error;
+    const code = errorCode(error);
+    if (typeof code === "number" && code !== ID_EVICTED) throw error;
+    throw new Error(MAYBE_SENT);
   }
 }
 
@@ -390,7 +400,8 @@ async function deliverOnce(
   return used;
 }
 
-class DroppedDuplicateError extends Error {}
+class RefusedError extends Error {}
+class DroppedDuplicateError extends RefusedError {}
 
 // zeta (delivery.py `_duplicate`) answers a new or reused id with `accepted: true` (a reused id it holds, queued or
 // delivered, adds `duplicate: true`), and a reused id it dropped with `{ accepted: false, duplicate: true, status: "dropped" }`
@@ -398,7 +409,7 @@ function accepted(result: unknown) {
   const reply = (result ?? {}) as { accepted?: unknown; duplicate?: unknown; status?: unknown };
   if (reply.accepted === true) return;
   if (reply.accepted === false && reply.duplicate === true && reply.status === "dropped") throw new DroppedDuplicateError("zeta dropped this message before reading it.");
-  throw new Error(`zeta did not accept this message (${JSON.stringify(result) ?? "no reply"}).`);
+  throw new RefusedError(`zeta did not accept this message (${JSON.stringify(result) ?? "no reply"}).`);
 }
 
 // marks a steer as queued from the moment its delivery id is tracked until the send settles (resolve or reject);
