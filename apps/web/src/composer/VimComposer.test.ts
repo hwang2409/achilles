@@ -113,6 +113,42 @@ test("app ctrl+b toggles the sidebar from vim normal mode", async () => {
   }
 });
 
+test("mac ctrl+b stays with vim instead of collapsing the sidebar", async () => {
+  const originalPlatform = navigator.platform;
+  Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ chats: [], pages: [] }), { status: 200 })) as typeof fetch;
+  try {
+    const store = createRunStore();
+    let container!: HTMLElement;
+    await act(async () => {
+      const result = render(
+        React.createElement(AppShell, {
+          page: null, sessionId: null, waiting: 0, hasComposer: true,
+          onNewChat: async () => {}, onToggleCreateMode: async () => {}, onSelectChat: () => {}, onRenameChat: () => {},
+          refreshKey: 0, pageRefreshKey: 0,
+        }, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
+          state: "idle" as const, onSubmit: async () => {}, onDraftChange: () => {}, onDraftSubmit: () => {},
+          chatId: `vim-mac-shell-test-${chatSeq++}`, label: "message",
+        }))),
+      );
+      container = result.container;
+      await Promise.resolve();
+    });
+    const content = container.querySelector(".cm-content") as HTMLElement;
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      content.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    expect(shell.classList.contains("sidebar-collapsed")).toBe(false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
+  }
+});
+
 test("blurred j/k scroll the real transcript scroller, not the .transcript section", async () => {
   const transcript = document.createElement("section");
   transcript.className = "transcript";

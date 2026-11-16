@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { CommandPalette, Highlight, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
-import { firstFocusable, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
+import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
 
@@ -211,8 +211,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   useEffect(() => {
     // capture on window runs before the composer (CodeMirror vim too) sees app shortcuts.
     const key = (event: KeyboardEvent) => {
-      const mod = event.metaKey || event.ctrlKey;
-      if (!mod || event.altKey) return;
+      if (!hasAppModifier(event) || event.altKey) return;
       const key = event.key.toLowerCase();
       if (!event.shiftKey && key === "k") {
         event.preventDefault();

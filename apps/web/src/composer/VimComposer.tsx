@@ -156,7 +156,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint = note || (mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send · esc leave" : "i focus · j/k scroll chat");
+  const hint = note || (mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send" : "i focus · j/k scroll chat");
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
