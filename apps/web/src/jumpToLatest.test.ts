@@ -13,6 +13,7 @@ function scrollBox(fromBottom: number) {
 
 const commit = (id: string, text: string): RunEvent => ({ type: "message_commit", message_id: id, message: { role: "assistant", content: [{ type: "text", text }] } });
 const delta = (id: string, text: string): RunEvent => ({ type: "message_delta", message_id: id, delta: text });
+const steer = (text: string): RunEvent => ({ type: "user_message", text, mode: "steer", delivery_id: "d1" });
 
 type Box = { scrollTo(distance: number): void; grow(pixels: number): void; wheel(deltaY: number): void };
 type Case = { name: string; fromBottom: number; act(store: ReturnType<typeof createRunStore>, box: Box, rewatch: () => void): void; shown: boolean; follows?: number };
@@ -32,6 +33,8 @@ const cases: Case[] = [
   // Chromium: a follow write queued before the wheel lands first (down, at the bottom), then the wheel's own scroll
   { name: "a wheel up after a queued follow write", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { wheel(-3); grow(20); scrollTo(0); scrollTo(3); grow(68); store.dispatch(delta("m1", " more")); }, shown: true, follows: 0 },
   { name: "back at the bottom after a wheel up, the snap re-follows again", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { wheel(-3); scrollTo(3); scrollTo(0); scrollTo(1); grow(68); store.dispatch(delta("m1", " more")); }, shown: false, follows: 1 },
+  // a steer sent at the bottom stays the last row until zeta delivers it; the reply above it keeps streaming
+  { name: "content appended above a queued steer", fromBottom: 0, act: (store, { scrollTo, grow, wheel }) => { store.dispatch(steer("second story")); wheel(-40); scrollTo(400); grow(68); store.dispatch(delta("m1", " more")); }, shown: true },
   { name: "chat switch resets it", fromBottom: 2000, act: (store, _box, rewatch) => { store.dispatch(delta("m1", " more")); rewatch(); }, shown: false },
 ];
 
