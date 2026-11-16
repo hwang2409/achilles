@@ -1,9 +1,9 @@
 import type { Page } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { appShortcut, type GateWait } from "./gate-diagnostics";
 
 const theme = (page: Page) => page.locator("html").getAttribute("data-fulcrum-theme");
 const openSettings = async (page: Page, gateWait: GateWait) => {
-  await page.keyboard.press("Control+Comma");
+  await page.keyboard.press(appShortcut("Comma"));
   await gateWait.playwright(page.getByRole("dialog", { name: "settings" }), "waitFor", { state: "visible" });
 };
 
@@ -43,7 +43,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
-  await page.keyboard.press("Control+Comma");
+  await page.keyboard.press(appShortcut("Comma"));
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const desktopDialog = page.getByRole("dialog", { name: "settings", exact: true });
   const roleDialogs = await desktopDialog.evaluateAll((dialogs) => dialogs.map((dialog) => {

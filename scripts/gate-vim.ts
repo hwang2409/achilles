@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page, Route } from "playwright";
-import { type GateWait, writeControl } from "./gate-diagnostics";
+import { appShortcut, type GateWait, writeControl } from "./gate-diagnostics";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
@@ -140,11 +140,11 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await page.keyboard.press("Escape");
   await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("closing settings with escape changed vim mode");
-  await page.keyboard.press("Control+b");
+  await page.keyboard.press(appShortcut("b"));
   if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: control+B did not collapse the sidebar with vim composer focus");
-  await page.keyboard.press("Control+b");
+  await page.keyboard.press(appShortcut("b"));
   const vimSession = await sessionId();
-  await page.keyboard.press("Control+Shift+o");
+  await page.keyboard.press(appShortcut("Shift+o"));
   await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== vimSession, "control+shift+O from vim composer");
   if (!vimSession) throw new Error("vim composer session id missing before modifier shortcut");
   await switchTo(vimSession);
