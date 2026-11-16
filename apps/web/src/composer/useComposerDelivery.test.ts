@@ -175,6 +175,7 @@ test("enter takes the text out of the box at once: the box is always a new messa
 type Step =
   | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail" | "refuse" | "transcript" | "old", string]
   | ["ok" | "esc" | "remount" | "created" | "made" | "reload" | "full"]
+  | ["turn", "running" | "idle"]
   | ["rows", string[]]
   | ["box", string]
   | ["sent", string[]];
@@ -305,6 +306,11 @@ const queueCases: QueueCase[] = [
     sent: ["a:first (dropped)", "a:first"],
   },
   {
+    name: "maybe sent, retried while a turn runs (it waits, not in flight), then a reload: still maybe sent with its id, no edit, so it goes out once",
+    steps: [["enter", "first"], ["fail", "closed"], ["turn", "running"], ["retry", "first"], ["rows", ["queued first"]], ["reload"], ["rows", [`failed first: ${MAYBE_SENT}`]], ["edit", "first"], ["box", ""], ["turn", "idle"], ["retry", "first"], ["ok"]],
+    sent: ["a:first"],
+  },
+  {
     name: "storage refuses writes: a failed row stays in memory across a chat switch",
     steps: [["full"], ["enter", "first"], ["fail", "closed"], ["switch", "b"], ["switch", "a"]],
     sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`],
@@ -321,7 +327,7 @@ const queueCases: QueueCase[] = [
   },
   {
     name: "edit, then a reload: the text is in the box once, with no row",
-    steps: [["enter", "first"], ["fail", "closed"], ["edit", "first"], ["reload"], ["box", "first"]],
+    steps: [["enter", "first"], ["refuse", "denied"], ["edit", "first"], ["reload"], ["box", "first"]],
     sent: ["a:first"],
   },
   {
@@ -383,6 +389,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
   const previousStorage = globalThis.localStorage;
   const values = new Map<string, string>();
   let full = false;
+  let turn: "running" | "idle" = "idle";
   const refuse = () => { if (full) throw new Error("quota exceeded"); };
   Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: {
     get length() { return values.size; }, key: (index: number) => [...values.keys()][index] ?? null,
@@ -399,7 +406,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
   const mount = (chat: string, fromNewChat?: string) => {
     const pageSends = sends;
     const owner = queues.open(key(chat), {
-      state: "idle",
+      state: turn,
       defaultValue: draftStore.get(key(chat)),
       onDraftChange: (text) => draftStore.set(key(chat), text),
       onDraftSubmit: (text) => draftStore.confirm(key(chat), text),
@@ -419,7 +426,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         await deliverChatMessage(zeta as never, key(chat), text, (intent as SendIntent).deliveryId ?? `delivery ${++nextDelivery}`, false, track_);
       },
     }, fromNewChat && key(fromNewChat));
-    return { chat, owner, mounted: () => { const detach = owner.attach(); owner.sync("idle", draftStore.get(key(chat))); return detach; } };
+    return { chat, owner, mounted: () => { const detach = owner.attach(); owner.sync(turn, draftStore.get(key(chat))); return detach; } };
   };
   // like a React commit: the next composer renders (and opens its owner), the old one detaches, the next attaches, then settle
   let view = mount("a");
@@ -459,6 +466,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         // zeta dropped what it took (a steer at abort): it holds nothing, and a reused id is answered as dropped
         case "drop": { const at = sent.lastIndexOf(`${view.chat}:${step[1]}`); sent[at] += " (dropped)"; dropped.add(deliveries.get(step[1])!); break; }
         case "full": full = true; break;
+        case "turn": turn = step[1]; replace(view.chat); break;
         case "old": values.set("achilles-pending-create-texts", JSON.stringify({ [name]: step[1] })); break;
         case "rows": expect(rows()).toEqual(step[1]); break;
         case "box": expect(view.owner.getModel().draft).toBe(step[1]); break;
