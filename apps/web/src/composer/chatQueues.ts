@@ -13,7 +13,12 @@ const parse = (value: string): StoredRow[] | undefined => {
   try {
     const parsed = JSON.parse(value) as { rows?: unknown };
     if (!Array.isArray(parsed.rows)) return undefined;
-    return parsed.rows.filter((row): row is StoredRow => typeof row?.text === "string" && typeof row.failed === "string");
+    return parsed.rows.flatMap((row: { text?: unknown; failed?: unknown; tries?: unknown; held?: unknown; deliveryId?: unknown } | null): StoredRow[] => {
+      if (typeof row?.text !== "string" || typeof row.failed !== "string") return [];
+      // rows written before `held` kept the id as `deliveryId` (maybe sent, or not sent with an id): zeta may hold them
+      const held = typeof row.held === "string" ? row.held : typeof row.deliveryId === "string" ? row.deliveryId : undefined;
+      return [{ text: row.text, failed: row.failed, ...(typeof row.tries === "number" ? { tries: row.tries } : {}), ...(held ? { held } : {}) }];
+    });
   } catch { return undefined; }
 };
 // shortcut: an entry exists only while a message is unsent, so nothing is swept; a deleted chat's rows stay (a few bytes)
@@ -49,18 +54,16 @@ const migrateOldTexts = () => {
     if (written) storage()?.removeItem(OLD_TEXTS);
   } catch { /* storage is off or the entry is unparsable: nothing to move */ }
 };
-/** what a page load that starts now must show: every row failed, so nothing goes out before the user acts. A row
- * with a delivery id that is not failed now (in flight, or retried and waiting) may be with zeta: it stays maybe sent
- * with that id, so it has no edit and a retry cannot make a second copy. */
+/** what a page load that starts now must show: every row failed, so nothing goes out before the user acts. A held row
+ * that is not failed now (in flight, or retried and waiting) shows as maybe sent and keeps `held`, so it has no edit and a
+ * retry cannot make a second copy. */
 const stored = (owner: ComposerDelivery): StoredRow[] => {
   const model = owner.getModel();
   const sending = inFlight(model);
   return model.queue.flatMap((item): StoredRow[] => {
     if (item === sending && model.send?.echoed) return []; // zeta's transcript shows it: taken
-    // the in-flight id is the one zeta last saw (a resend after a dropped id has a new one); before it is tracked, the row's own
-    const deliveryId = (item === sending ? model.send?.deliveryId : undefined) ?? item.deliveryId;
-    const failed = (item === sending ? undefined : item.failed) ?? (deliveryId ? MAYBE_SENT : NOT_SENT);
-    return [{ text: item.text, failed, ...(item !== sending && item.tries ? { tries: item.tries } : {}), ...(deliveryId ? { deliveryId } : {}) }];
+    const failed = (item === sending ? undefined : item.failed) ?? (item.held ? MAYBE_SENT : NOT_SENT);
+    return [{ text: item.text, failed, ...(item !== sending && item.tries ? { tries: item.tries } : {}), ...(item.held ? { held: item.held } : {}) }];
   });
 };
 

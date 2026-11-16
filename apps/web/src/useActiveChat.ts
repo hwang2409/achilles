@@ -5,7 +5,7 @@ import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
-import { MAYBE_SENT } from "./composer/composer-machine";
+import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
@@ -358,15 +358,18 @@ export async function deliverChatMessage(
   } catch (error) {
     const outcome = classify(error);
     if (outcome === "sent") return steer ? "steer" : "send";
-    if (outcome !== "resend") throw outcome === "maybe" ? new Error(MAYBE_SENT) : error;
+    if (outcome !== "resend") throw outcome === "maybe" ? new Error(MAYBE_SENT) : refusal(error);
   }
   try {
     return await deliverOnce(client, sessionId, text, crypto.randomUUID(), steer, track);
   } catch (error) {
     // the one resend: zeta's answer is shown and nothing goes out again by itself
-    throw classify(error) === "rethrow" || error instanceof DroppedDuplicateError ? error : new Error(MAYBE_SENT);
+    throw classify(error) === "rethrow" || error instanceof DroppedDuplicateError ? refusal(error) : new Error(MAYBE_SENT);
   }
 }
+
+// zeta's answer, so the row's composer knows zeta holds nothing under the refused id
+const refusal = (error: unknown) => new SendRefused(error instanceof Error ? error.message : String(error), { cause: error });
 
 /**
  * What a failed delivery means:
