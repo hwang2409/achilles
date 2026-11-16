@@ -1,0 +1,80 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "off_page"
+      },
+      {
+        "id": "studio",
+        "alias": "on_page"
+      }
+    ],
+    "errors": [],
+    "answers": {
+      "ask-off": "DISABLED",
+      "ask-on": "ENABLED"
+    },
+    "initial": {
+      "records": [
+        {
+          "page_id": "home",
+          "id": "flag-1",
+          "collection": "flags",
+          "data": {
+            "name": "email_digest",
+            "state": "enabled"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "flag-2",
+          "collection": "flags",
+          "data": {
+            "name": "beta_banner",
+            "state": "disabled"
+          }
+        }
+      ]
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "off_page"
+      },
+      {
+        "id": "studio",
+        "alias": "on_page"
+      }
+    ],
+    "errors": [],
+    "answers": {
+      "ask-off": "I do not know whether this chat is in create mode now.",
+      "ask-on": "I am not able to tell whether this chat can edit the page."
+    },
+    "initial": {
+      "records": [
+        {
+          "page_id": "home",
+          "id": "flag-1",
+          "collection": "flags",
+          "data": {
+            "name": "email_digest",
+            "state": "enabled"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "flag-2",
+          "collection": "flags",
+          "data": {
+            "name": "beta_banner",
+            "state": "disabled"
+          }
+        }
+      ]
+    }
+  }
+}
