@@ -220,7 +220,10 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "tools/call",
-                "params": {"name": "update_note", "arguments": {**arguments, "revision": 2}},
+                "params": {
+                    "name": "update_note",
+                    "arguments": {"record_id": "note-1", "revision": 2, "text": "third"},
+                },
             },
         ).json()["result"]
         stale_mcp = client.post(
@@ -233,7 +236,33 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
                 "params": {"name": "update_note", "arguments": arguments},
             },
         ).json()["result"]
-    expected = {"code": "conflict", "path": "/revision", "expected": "current record revision"}
+        stale_mcp_error = json.loads(stale_mcp["content"][0]["text"])
+        current = stale_mcp_error["current"]
+        retry = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "update_note",
+                    # the retry rebuilds its change from the live record, not the stale arguments
+                    "arguments": {
+                        "record_id": current["record_id"],
+                        "revision": current["revision"],
+                        "text": current["text"] + " and second",
+                    },
+                },
+            },
+        ).json()["result"]
+    expected_base = {
+        "code": "conflict",
+        "path": "/revision",
+        "expected": "current record revision",
+        "hint": "the record changed; compare current with your change and retry with "
+        "current.revision only if your change still applies",
+    }
     assert catalog["tools"][0]["input_schema"]["required"] == [
         "record_id",
         "revision",
@@ -241,16 +270,31 @@ def test_stale_revision_is_structured_in_browser_and_mcp(monkeypatch, tmp_path: 
     ]
     assert browser.status_code == 200 and browser.json()["revision"] == 2
     assert stale_browser.status_code == 409
-    assert stale_browser.json()["error"] == expected
+    # the conflict carries the live record, so a caller can retry without a separate read
+    assert stale_browser.json()["error"] == {
+        **expected_base,
+        "current": {"text": "second", "record_id": "note-1", "revision": 2},
+    }
     assert stale_mcp["isError"] is True
-    assert json.loads(stale_mcp["content"][0]["text"]) == expected
+    # the conflict shows the other writer's value, so the agent sees what changed
+    assert stale_mcp_error == {
+        **expected_base,
+        "current": {"text": "third", "record_id": "note-1", "revision": 3},
+    }
     assert not agent.get("isError")
+    assert not retry.get("isError")
+    retried = json.loads(retry["content"][0]["text"])
+    assert (retried["text"], retried["revision"]) == ("third and second", 4)
     # each write is audited with who made it and which record; conflicts write no audit row.
     with store.transaction() as db:
         rows = db.execute(
             "SELECT actor, record_id FROM audit WHERE action='invoke:update_note' ORDER BY id"
         ).fetchall()
-    assert [tuple(row) for row in rows] == [("form", "note-1"), ("agent", "note-1")]
+    assert [tuple(row) for row in rows] == [
+        ("form", "note-1"),
+        ("agent", "note-1"),
+        ("agent", "note-1"),
+    ]
 
 
 def test_browser_and_mcp_share_value_blind_validation_errors(monkeypatch, tmp_path: Path) -> None:

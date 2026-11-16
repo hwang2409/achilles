@@ -430,7 +430,10 @@ def test_update_catalog_tells_callers_to_pass_the_returned_revision(creation_cli
     description = next(
         tool["description"] for tool in catalog["tools"] if tool["name"] == "update_book"
     )
-    assert description == "update books; read or list first, then pass the returned revision"
+    assert description == (
+        "update books; read or list first, then pass the returned revision; "
+        "record_id and revision are for tool calls, not to show the user"
+    )
 
 
 def test_create_tool_rejects_wrong_output_and_derives_usable_result(creation_client):
