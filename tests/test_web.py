@@ -484,6 +484,53 @@ def test_list_tool_filters_by_record_id_through_mcp(monkeypatch, tmp_path: Path)
     assert "title" in error["hint"]
 
 
+def test_inspect_page_description_states_page_and_create_mode(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "achilles"
+    monkeypatch.setenv("ACHILLES_HOME", str(root))
+    store = PageStore(root)
+    token = store.ensure_credential("home")
+    mcp_headers = {
+        "host": "127.0.0.1:5190",
+        "authorization": f"Bearer {token}",
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+
+    def inspect_description(client):
+        listed = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        ).json()["result"]["tools"]
+        return next(tool for tool in listed if tool["name"] == "inspect_page")["description"]
+
+    with TestClient(web.create_app(), client=("127.0.0.1", 1234)) as client:
+        initialized = client.post(
+            "/mcp/",
+            headers=mcp_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+        )
+        mcp_headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+
+        off = inspect_description(client)
+        assert "'/'" in off
+        assert "create mode is currently OFF" in off
+
+        # toggling create mode mid-chat must regenerate the catalog, not leave stale text
+        store.set_create_mode("home", True)
+        on = inspect_description(client)
+        assert "create mode is currently ON" in on
+
+
 def test_approval_mode_validation(monkeypatch) -> None:
     monkeypatch.delenv("ACHILLES_APPROVAL", raising=False)
     assert web.approval_mode() == "allow"
