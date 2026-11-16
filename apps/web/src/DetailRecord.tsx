@@ -20,6 +20,7 @@ type DetailRecordViewProps = Pick<DetailRecordProps, "title" | "collection" | "f
 
 export function DetailRecord({ title, collection, fields, filter, pageId, credential, refreshKey }: DetailRecordProps) {
   const [records, setRecords] = useState<Record<string, unknown>[] | null>(null);
+  const [refreshing, setRefreshing] = useState(true);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
@@ -28,6 +29,7 @@ export function DetailRecord({ title, collection, fields, filter, pageId, creden
     const request = ++requestSequence.current;
     const query = new URLSearchParams({ field: filter.field, equals: JSON.stringify(filter.equals), limit: "1" });
     setError(null);
+    setRefreshing(true);
     void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?${query}`, {
       headers: { Authorization: `Bearer ${credential}` },
       cache: "no-store",
@@ -41,20 +43,22 @@ export function DetailRecord({ title, collection, fields, filter, pageId, creden
       }
     }).catch((caught) => {
       if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught));
+    }).finally(() => {
+      if (live && request === requestSequence.current) setRefreshing(false);
     });
     return () => { live = false; };
   }, [collection, credential, filter.equals, filter.field, pageId, refreshKey]);
-  return <DetailRecordView title={title} collection={collection} fields={fields} filter={filter} records={records} total={total} error={error} />;
+  return <DetailRecordView title={title} collection={collection} fields={fields} filter={filter} records={records} total={total} error={error} refreshing={refreshing} />;
 }
 
-export function DetailRecordView({ title, collection, fields, filter, records, total, error }: DetailRecordViewProps) {
+export function DetailRecordView({ title, collection, fields, filter, records, total, error, refreshing }: DetailRecordViewProps & { refreshing: boolean }) {
   const filterValue = formatValue(filter.equals) || "—";
   return <section className="record-detail">
     <h2>{title}</h2>
     {error ? <p role="alert">{error}</p>
-      : records === null ? <p role="status">loading record…</p>
+      : <>{refreshing && <p role="status">loading record…</p>}{records === null ? null
       : records.length === 0 ? <p>no {collection} with {filter.field} = {filterValue} yet</p>
-      : <><dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{formatValue(records[0][field]) || "—"}</dd></div>)}</dl>{total > 1 && <p className="match-note">{total} records match</p>}</>}
+      : <><dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{formatValue(records[0][field]) || "—"}</dd></div>)}</dl>{total > 1 && <p className="match-note">{total} records match</p>}</>}</>}
   </section>;
 }
 
