@@ -3,7 +3,7 @@ import { chmod, mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -312,7 +312,6 @@ exec /usr/bin/git "$@"
   await chmod(fakeGit, 0o755);
   const cachedZeta = resolve(root, ".cache/zeta/.venv/bin/zeta");
   const cachedZetaBackup = await Bun.file(cachedZeta).exists() ? await readFile(cachedZeta) : null;
-  await rm(resolve(root, ".cache/zeta/dirty-test-file"), { force: true });
   await mkdir(resolve(root, ".cache/zeta/.venv/bin"), { recursive: true });
   await writeFile(cachedZeta, await readFile(fakeZeta));
   await chmod(cachedZeta, 0o755);
@@ -376,10 +375,18 @@ exec /usr/bin/git "$@"
     expect(alive(defaultZetaState.pid)).toBe(true);
     discovered.push(defaultZetaState);
 
-    const dirtyFile = resolve(root, ".cache/zeta/dirty-test-file");
+    const isolatedRoot = resolve(temp, "isolated-root");
+    const isolatedCache = resolve(isolatedRoot, ".cache/zeta");
+    const isolatedExecutable = resolve(isolatedCache, ".venv/bin/zeta");
+    await mkdir(dirname(isolatedExecutable), { recursive: true });
+    expect(Bun.spawnSync(["git", "init", isolatedCache]).exitCode).toBe(0);
+    await writeFile(resolve(isolatedRoot, "zeta.rev"), "test-pin\n");
+    await writeFile(isolatedExecutable, await readFile(fakeZeta));
+    await chmod(isolatedExecutable, 0o755);
+    const dirtyFile = resolve(isolatedCache, "dirty-test-file");
     await writeFile(dirtyFile, "must remain");
     const beforeGitCalls = (await readFile(gitCalls, "utf8")).split("\n").filter(Boolean).length;
-    const dirtyRun = await runDev({ ...baseEnv, ACHILLES_USE_PATH_ZETA: "0" });
+    const dirtyRun = await runDev({ ...baseEnv, ACHILLES_ROOT: isolatedRoot, ACHILLES_USE_PATH_ZETA: "0" });
     expect(dirtyRun.exitCode).not.toBe(0);
     expect(dirtyRun.stderr).toContain(".cache/zeta has local changes; make dev will not change it\n");
     expect(await readFile(dirtyFile, "utf8")).toBe("must remain");

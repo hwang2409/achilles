@@ -4,7 +4,7 @@ import { chmod, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 
-export const root = resolve(new URL("..", import.meta.url).pathname);
+export const root = resolve(process.env.ACHILLES_ROOT ?? new URL("..", import.meta.url).pathname);
 export const port = Number(process.env.PORT ?? 5191);
 const home = resolve(process.env.ZETA_HOME ?? `${process.env.HOME}/.zeta`);
 const achillesHome = resolve(process.env.ACHILLES_HOME ?? `${process.env.HOME}/.local/share/achilles`);
