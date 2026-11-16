@@ -239,11 +239,27 @@ def test_generated_tool_versions_and_page_scope(tmp_path):
     updated, _, _ = store.create_tool("home", version_two)
     assert updated["version"] == 2
     store.rollback_tool("home", "annotate_trace", 1, 2)
-    assert store.page_tools("home")[0]["version"] == 1
+    assert store.page_tools("home")[0]["version"] == 3
     store.set_create_mode("home", False)
     assert (
-        call_record(store, "home", "annotate_trace", {"text": "late"}, 1, "agent")["text"] == "late"
+        call_record(store, "home", "annotate_trace", {"text": "late"}, 3, "agent")["text"] == "late"
     )
+
+
+def test_tool_restore_appends_a_copy_so_it_can_be_undone(tmp_path):
+    store = PageStore(tmp_path)
+    store.set_create_mode("home", True)
+    store.create_tool("home", BUNDLE)
+    store.create_tool("home", BUNDLE | {"description": "annotate v2"})
+    restored = store.rollback_tool("home", "annotate_trace", 1, 2)
+    active = store.page_tools("home")[0]
+    assert (active["version"], active["description"]) == (3, BUNDLE["description"])
+    assert restored == {"name": "annotate_trace", "version": 3, "restored_from": 1}
+    listed = [(row["version"], row["active"]) for row in store.versions("home")["tools"]]
+    assert listed == [(3, True), (2, False), (1, False)]
+    with store._connect() as db:
+        actions = [row[0] for row in db.execute("SELECT action FROM audit ORDER BY id")]
+    assert actions[-1] == "restore_tool"
 
 
 def test_concurrent_record_and_page_writes_are_isolated(tmp_path):
