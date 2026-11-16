@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { formArguments, formErrors, formFields, keepValues, type FormField, type FormValues } from "./formSchema";
+import { fieldError, formArguments, formErrors, formFields, keepValues, type FormField, type FormValues } from "./formSchema";
 
 const rows: [string, unknown, ReturnType<typeof formFields>][] = [
   ["flat scalars with required marks", { type: "object", properties: { title: { type: "string", description: "book title" }, pages: { type: "integer" }, rating: { type: "number" }, done: { type: "boolean" } }, required: ["title", "pages"] }, { fields: [
@@ -67,11 +67,11 @@ const errorRows: [string, FormValues, Record<string, string>][] = [
   ["a fraction for an integer", { ...filled, pages: "1.5" }, { pages: "enter a whole number" }],
   ["text for an integer", { ...filled, pages: "abc" }, { pages: "enter a whole number" }],
   ["spaces for a number", { ...filled, rating: "  " }, { rating: "enter a number" }],
-  ["below the minimum names the limit", { ...filled, pages: "0" }, { pages: "at least 1" }],
-  ["above the maximum names the limit", { ...filled, rating: "9" }, { rating: "at most 5" }],
+  ["below the minimum names the limit", { ...filled, pages: "0" }, { pages: "must be at least 1" }],
+  ["above the maximum names the limit", { ...filled, rating: "9" }, { rating: "must be at most 5" }],
   ["too long a text", { ...filled, title: "a longer title" }, { title: "at most 5 characters" }],
   ["an empty optional number is fine", { ...filled, rating: "" }, {}],
-  ["several problems keep field order", { title: "", status: "", pages: "0", rating: "9" }, { title: "required", status: "pick one", pages: "at least 1", rating: "at most 5" }],
+  ["several problems keep field order", { title: "", status: "", pages: "0", rating: "9" }, { title: "required", status: "pick one", pages: "must be at least 1", rating: "must be at most 5" }],
 ];
 
 test.each(errorRows)("formErrors: %s", (_name, values, expected) => {
@@ -88,4 +88,16 @@ const keepRows: [string, FormValues, FormValues][] = [
 
 test.each(keepRows)("keepValues: %s", (_name, values, expected) => {
   expect(keepValues(books, values)).toEqual(expected);
+});
+
+const cents: FormField = { name: "amount", kind: "number", required: true, minimum: 0, multipleOf: 0.01 };
+const serverErrorRows: [string, FormField, string, string][] = [
+  ["multipleOf names the step", cents, "multipleOf", "use steps of 0.01"],
+  ["minimum names the limit", cents, "minimum", "must be at least 0"],
+  ["a keyword the schema does not state stays as the server said it", { name: "amount", kind: "number", required: true }, "multipleOf", "multipleOf"],
+  ["other server words pass through", cents, "number", "number"],
+];
+
+test.each(serverErrorRows)("fieldError: %s", (_name, field, expected, text) => {
+  expect(fieldError(field, expected)).toBe(text);
 });

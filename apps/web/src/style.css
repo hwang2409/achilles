@@ -344,7 +344,10 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
 /* the page history list reuses the settings dialog frame */
 .history-dialog { width: min(600px, calc(100vw - 32px)); }
+.history-dialog .settings-panel { scroll-padding-top: 60px; }
+.history-dialog .settings-titlebar { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
 .history-note { min-height: 1.5em; margin: 14px 0 0; color: var(--fulcrum-muted); }
+.history-note:focus { outline: none; }
 .history-note:empty { min-height: 0; margin: 0; }
 .history-note.history-error { color: var(--fulcrum-danger); }
 .history-group { padding: 14px 0; border-bottom: 1px solid var(--fulcrum-border); }
