@@ -981,7 +981,7 @@ try {
   await gateWait.playwright(page.getByText("layout updated", { exact: true }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
     const metrics = page.locator(".metric-strip");
-    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list[data-collection="books"]').count() === 1;
+    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
   }, "open page layout after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
