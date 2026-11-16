@@ -84,12 +84,12 @@ function activeLastState(waiting: number, outcome: string, turn: "idle" | "runni
 function authErrorMessage(store: ReturnType<typeof createRunStore> | null): string | null {
   if (!store) return null;
   const state = store.getState();
-  if (state.turn !== "idle" || state.endOutcome !== "failed") return null;
+  if (state.turn !== "idle") return null;
   for (let index = state.outline.length - 1; index >= 0; index -= 1) {
     const item = store.getItem(state.outline[index]!.id);
-    if (item?.type !== "error") continue;
-    const event = item.event;
-    return event.type === "error" && event.error.code === "auth_error" ? event.error.message : null;
+    // the first reply/error/tool/prompt row from the end: a later success ends in a message, so the notice clears
+    if (!item || !["error", "message", "tool", "user"].includes(item.type)) continue;
+    return item.type === "error" && item.event.type === "error" && item.event.error.code === "auth_error" ? item.event.error.message : null;
   }
   return null;
 }
