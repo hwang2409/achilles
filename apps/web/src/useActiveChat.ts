@@ -467,6 +467,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const [state, setState] = useState<State>({ phase: "loading" });
   const [attachSlow, setAttachSlow] = useState(false);
   const [creationPageId, setCreationPageId] = useState<string | null>(null);
+  // "new chat" is creating a chat: the page keeps its header and a read-only composer, and the pane says "creating chat…"
+  const [creatingChat, setCreatingChat] = useState(false);
+  const newChatRun = useRef(0);
+  // "retry creating chat" re-runs the attach: the failed-create screen and its header stay until the retry settles
+  const retryingCreation = useRef(false);
   const [listRefresh, setListRefresh] = useState(0);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
@@ -515,9 +520,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const stale = modeToggle.current.stale();
     const keepStale = stale?.idle && stale.sessionId === selectedId ? stale : null;
     if (!keepStale) { modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false); }
-    setCreationPageId(null);
+    const retrying = retryingCreation.current; retryingCreation.current = false;
+    if (!retrying) setCreationPageId(null);
+    setCreatingChat(false);
     setAttachSlow(false);
-    setState((current) => current.phase === "ready" ? current : { phase: "loading" });
+    setState((current) => current.phase === "ready" || (retrying && current.phase === "empty") ? current : { phase: "loading" });
     const slowTimer = clock.setTimeout(() => { if (owner.current.current(token)) setAttachSlow(true); }, ATTACH_SLOW_MS);
     void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, false, applyPendingCreateMode, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
@@ -555,7 +562,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const target = routeWithChat(route, chat.session_id);
     if (route !== location.pathname) { location.assign(target); return; }
     // the chat named in the url but not shown (a refused new chat shows the new chat's box): open it again
-    if (chat.session_id === selectedId) { if (state.phase !== "ready") setRouteRefresh((value) => value + 1); return; }
+    if (chat.session_id === selectedId) {
+      if (state.phase !== "ready") { if (`${location.pathname}${location.search}` !== target) history.pushState({}, "", target); setRouteRefresh((value) => value + 1); }
+      return;
+    }
     owner.current.begin(`${keyFromPath()}:${chat.session_id}`);
     setState({ phase: "loading" });
     history.pushState({}, "", target);
@@ -587,19 +597,27 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
     const focusClaim = claimComposerFocus();
-    setState({ phase: "loading" });
+    const run = ++newChatRun.current;
+    // the user left the chat whose first turn runs: its turn end must not select it again
+    pendingSelection.current = null;
+    // the page stays (header, new-chat box) while the chat is created; it can wait for an earlier create of the page
+    setState(state.phase !== "ready" && state.phase !== "empty" && state.phase !== "busy" ? { phase: "loading" } : { phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
+    setCreatingChat(true);
     try {
       const next = await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, focusClaim.owns()), true);
       // zeta cannot start a chat while another turn runs: say which chat runs and keep the new chat's box. text typed
       // there was written for a new chat, so it must never go to the running chat.
       if (next.phase === "busy" && owner.current.current(token)) {
         void showBusy(next.busySessionId, "new");
+        // the address names no chat while the new chat's box shows (a reload opens the page's latest chat and its unsent note)
+        if (new URLSearchParams(location.search).has("chat")) { const url = new URL(location.href); url.searchParams.delete("chat"); history.pushState({}, "", `${url.pathname}${url.search}`); }
         setState({ phase: "empty", page: next.page, serverApprovalMode: next.serverApprovalMode, credential: next.credential, newChat: true });
       }
     } catch (caught) {
       if (!creation.current.status(context.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     } finally {
       focusClaim.release();
+      if (newChatRun.current === run) setCreatingChat(false);
     }
   }, [applyPendingCreateMode, client, publishReady, showBusy, state]);
 
@@ -610,7 +628,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setState({ phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
   }, [state]);
 
-  const retrySaving = useCallback(() => { setRouteRefresh((value) => value + 1); }, []);
+  const retrySaving = useCallback(() => { retryingCreation.current = true; setRouteRefresh((value) => value + 1); }, []);
   const retryAttachment = useCallback(() => {
     owner.current.clear();
     setAttachSlow(false);
@@ -782,5 +800,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }

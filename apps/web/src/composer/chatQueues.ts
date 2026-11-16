@@ -103,8 +103,8 @@ export function createChatQueues() {
       keep(owner);
       if (!unsaved.has(owner)) writeRows(newChat, []);
     },
-    /** how many unsent rows `chat` keeps for a later page load (the page shows a notice for its new-chat box's) */
-    unsent: (chat: string) => readRows(chat).length,
+    /** the texts of the unsent rows `chat` keeps for a later page load (the page shows a notice for its new-chat box's) */
+    unsent: (chat: string) => readRows(chat).map((row) => row.text),
     /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
      * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
      * Called during render: a render React throws away still moves it, and the next render finds it under `chat`. */
