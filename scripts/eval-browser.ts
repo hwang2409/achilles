@@ -26,9 +26,10 @@ export function stepFinished(history: any[], prior: number, texts: string[]) {
 }
 // shortcut: compares the answer's longest line with markdown marks and spacing removed against the page text; a reply
 // whose longest line is a table or code block may need a better probe if this ever reports a false miss
+// marks are deleted, not spaced: `**name**:` renders as `name:`, so a space in its place would never match the page
+export const plainText = (text: string) => text.replace(/[*_#`>|[\]()~-]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 export function answerProbe(answer: string) {
-  const plain = (text: string) => text.replace(/[*_#`>|[\]()~-]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-  const line = answer.split("\n").map(plain).sort((a, b) => b.length - a.length)[0] ?? "";
+  const line = answer.split("\n").map(plainText).sort((a, b) => b.length - a.length)[0] ?? "";
   return line.slice(0, 60).trim();
 }
 
@@ -151,7 +152,8 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
       return { sessionId: tab.sessionId, prior, history, check: async (answer: string | undefined) => {
         if (!row?.fired) return;
         const probe = answer ? answerProbe(answer) : "";
-        row.answer_visible = Boolean(probe) && await tab.page.waitForFunction((needle: string) => (document.querySelector(".transcript") as HTMLElement | null)?.innerText.replace(/[*_#`>|[\]()~-]/g, " ").replace(/\s+/g, " ").toLowerCase().includes(needle), probe, { timeout: 10_000 }).then(() => true, () => false);
+        // the page side repeats plainText: a function passed to the page cannot close over this module
+        row.answer_visible = Boolean(probe) && await tab.page.waitForFunction((needle: string) => (document.querySelector(".transcript") as HTMLElement | null)?.innerText.replace(/[*_#`>|[\]()~-]/g, "").replace(/\s+/g, " ").toLowerCase().includes(needle), probe, { timeout: 10_000 }).then(() => true, () => false);
       } };
     },
     // a turn-cap or failure stop: press the page's own stop button, so nothing keeps running for the page

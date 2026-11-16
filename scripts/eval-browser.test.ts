@@ -16,3 +16,9 @@ test("a browser step ends only after a turn end that follows every text it sent"
 test("the answer probe drops markdown marks so the rendered page text can match it", () => {
   expect(answerProbe("Done.\n\n**Added 5 contacts:** Ada, Grace")).toBe("added 5 contacts: ada, grace");
 });
+
+test("the answer probe matches rendered text where a mark sat next to punctuation", () => {
+  // the rendered list item of `- **list_expenses**: lists ...`; a probe with "list expenses : lists" never matched it
+  const rendered = "list_expenses: lists the expenses collection. When I created it, the connection dropped";
+  expect(rendered.replace(/[*_#`>|[\]()~-]/g, "").replace(/\s+/g, " ").toLowerCase()).toContain(answerProbe("- **list_expenses**: lists the `expenses` collection. When I created it, the connection dropped"));
+});
