@@ -77,8 +77,8 @@
           }
         ],
         "shown": {
-          "label": "maybe sent",
-          "error": "may not have been sent \u2014 check before retrying"
+          "label": "maybe not sent",
+          "error": null
         }
       },
       {
@@ -95,8 +95,8 @@
           }
         ],
         "shown": {
-          "label": "maybe sent",
-          "error": "may not have been sent \u2014 check before retrying"
+          "label": "maybe not sent",
+          "error": null
         }
       },
       {
@@ -202,8 +202,8 @@
           }
         ],
         "shown": {
-          "label": "maybe sent",
-          "error": "may not have been sent \u2014 check before retrying"
+          "label": "maybe not sent",
+          "error": null
         }
       },
       {

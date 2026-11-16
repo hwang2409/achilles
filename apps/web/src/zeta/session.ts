@@ -18,7 +18,7 @@ export async function runningSession(client: ZetaClient): Promise<string | null>
 
 /** zeta refuses `resume` and `new_session` (-32004) while a turn runs; sessionId names the running chat. */
 export class ChatBusyError extends Error {
-  constructor(readonly sessionId: string | null) { super(sessionId ? "another chat is still running" : "zeta was busy a moment ago and is ready now"); }
+  constructor(readonly sessionId: string | null) { super(sessionId ? "another chat was running, so zeta could not start a new chat" : "zeta was busy a moment ago and is ready now"); }
 }
 
 type SessionSettings = { model: string; approval_mode?: string | null };

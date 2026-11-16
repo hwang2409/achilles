@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
-import { inFlight, shownQueue, type ComposerModel } from "./composer-machine";
-
-/** why a held row has no edit: Enter would send the text again with a new id */
-const MAYBE_SENT_HINT = "may already be with the agent — retry is safe, edit is off";
+import { inFlight, MAYBE_SENT_HINT, MAYBE_SENT_LABEL, shownQueue, type ComposerModel } from "./composer-machine";
 
 /** `navigator.clipboard` exists only in a secure context (not on plain http from a LAN address): copy through a
  * selected hidden textarea there */
@@ -14,9 +11,11 @@ async function copyText(text: string): Promise<boolean> {
     area.setAttribute("readonly", "");
     area.style.position = "fixed";
     area.style.opacity = "0";
+    // the select takes focus: give it back, so a keyboard user stays on the copy button
+    const focused = document.activeElement as HTMLElement | null;
     document.body.append(area);
     area.select();
-    try { return document.execCommand("copy"); } finally { area.remove(); }
+    try { return document.execCommand("copy"); } finally { area.remove(); focused?.focus({ preventScroll: true }); }
   } catch { return false; }
 }
 
@@ -46,17 +45,19 @@ export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model:
         const sending = item === current;
         const held = Boolean(item.failed && item.held);
         const preview = item.text.length > 40 ? `${item.text.slice(0, 40)}…` : item.text;
-        const label = held ? "maybe sent" : item.failed ? (item.tries ?? 1) > 1 ? `not sent · ${item.tries} tries` : "not sent" : sending ? model.send?.steer ? "next step" : "sending" : "queued";
+        const label = held ? MAYBE_SENT_LABEL : item.failed ? (item.tries ?? 1) > 1 ? `not sent · ${item.tries} tries` : "not sent" : sending ? model.send?.steer ? "next step" : "sending" : "queued";
         return (
           <li key={item.id} data-part="composer-queued" data-failed={item.failed ? "" : undefined} data-sending={sending || undefined}>
             <span data-part="composer-queued-label">{label}</span>
             <span data-part="composer-queued-text" title={item.text}>{item.text}</span>
-            {item.failed ? <button type="button" data-part="composer-queued-retry" aria-label={`retry: ${preview}`} onClick={() => onRetry(item.id)}>retry</button> : null}
-            {item.failed && !held ? <button type="button" data-part="composer-queued-edit" aria-label={`edit: ${preview}`} onClick={() => onRestore(item.id)}>edit</button> : null}
-            {held ? <CopyButton text={item.text} preview={preview} /> : null}
-            {sending ? null : <button type="button" data-part="composer-queued-cancel" aria-label={`cancel message: ${preview}`} title="cancel (esc in an empty box cancels the last)" onClick={() => onCancel(item.id)}>×</button>}
-            {item.failed ? <span data-part="composer-queued-error" role="alert">{item.failed}</span> : null}
-            {held ? <span data-part="composer-queued-hint">{MAYBE_SENT_HINT}</span> : null}
+            <span data-part="composer-queued-actions">
+              {item.failed ? <button type="button" data-part="composer-queued-retry" aria-label={`retry: ${preview}`} onClick={() => onRetry(item.id)}>retry</button> : null}
+              {item.failed && !held ? <button type="button" data-part="composer-queued-edit" aria-label={`edit: ${preview}`} onClick={() => onRestore(item.id)}>edit</button> : null}
+              {held ? <CopyButton text={item.text} preview={preview} /> : null}
+              {sending ? null : <button type="button" data-part="composer-queued-cancel" aria-label={`cancel message: ${preview}`} title="cancel (esc in an empty box cancels the last)" onClick={() => onCancel(item.id)}>×</button>}
+            </span>
+            {/* a held row says one thing: maybe not sent, and why retry is safe; its failure text would contradict it */}
+            {held ? <span data-part="composer-queued-hint" role="alert">{MAYBE_SENT_HINT}</span> : item.failed ? <span data-part="composer-queued-error" role="alert">{item.failed}</span> : null}
           </li>
         );
       })}
