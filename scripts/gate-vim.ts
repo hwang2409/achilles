@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page, Route } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { type GateWait, writeControl } from "./gate-diagnostics";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
@@ -257,7 +257,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     if (fallbackSend?.params?.delivery_id !== delayedSteer.params?.delivery_id) throw new Error("delayed steer fallback did not reuse its delivery id");
     await waitFor(async () => JSON.parse(await Bun.file(control).text()).fallback_send_barrier === "held", "processed fallback send before its response");
     const heldControl = JSON.parse(await Bun.file(control).text());
-    await Bun.write(control, JSON.stringify({ ...heldControl, release_fallback_send_barrier: true }));
+    await writeControl(control, { ...heldControl, release_fallback_send_barrier: true });
     await waitFor(async () => requests().slice(delayedBeforeSteer).some((frame) => frame.id === fallbackSend.id && frame.result), "delayed steer fallback response");
   } else if (delayedSteerResponse?.result) {
     const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");

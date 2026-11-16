@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { controlSnapshot, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -1005,7 +1005,7 @@ try {
   if (lateSteerIndex < 0 || !lateSteer?.params?.delivery_id) throw new Error("late steer did not include a delivery id");
   await waitFor(async () => requests().some((frame) => frame.id === lateSteer.id && frame.result?.accepted === true), "accepted late steer response");
   const lateControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...lateControl, release_late_turn_barrier: true }));
+  await writeControl(control, { ...lateControl, release_late_turn_barrier: true });
   await waitFor(async () => requests().slice(lateSteerIndex + 1).some((frame) => frame.method === "event" && frame.params?.event === "turn_end"), "turn end after accepted late steer");
   // zeta starts the next turn with the steer the finished turn did not read
   const lateStatuses = () => {
@@ -1502,7 +1502,7 @@ try {
   if ((await reloadBooks()).length !== 0) throw new Error("Reload Book existed before the reload case");
   const armControl = JSON.parse(await Bun.file(control).text());
   const suspendsBeforeReload = armControl.bound_suspends ?? 0;
-  await Bun.write(control, JSON.stringify({ ...armControl, hold_reload_tool: true }));
+  await writeControl(control, { ...armControl, hold_reload_tool: true });
   await allowField.fill("add Reload Book across a reload");
   await allowField.press("Enter");
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).reload_tool_barrier === "held", "add_book call held before it reaches the page tools");
@@ -1514,7 +1514,7 @@ try {
   await page.reload({ waitUntil: "commit" });
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).bound_suspends ?? 0) > suspendsBeforeReload, "old page binding detached by the reload");
   const heldToolControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldToolControl, release_reload_tool_barrier: true, hold_reload_history: reloadChat }));
+  await writeControl(control, { ...heldToolControl, release_reload_tool_barrier: true, hold_reload_history: reloadChat });
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).detached_add_book_calls === 1, "add_book called with no page binding");
   await page.unroute(discoveryUrl, holdDiscovery);
   await Promise.all(heldDiscovery.map((route) => route.fallback()));
@@ -1527,10 +1527,10 @@ try {
       && requests().slice(framesBeforeToolReload).some((frame) => frame.method === "event" && frame.params?.event === "assistant_message");
   }, "reply published to the reloaded page while its history read and the reply's row are held");
   const heldHistoryControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldHistoryControl, release_reload_history_barrier: true }));
+  await writeControl(control, { ...heldHistoryControl, release_reload_history_barrier: true });
   await waitFor(async () => (await page.locator(".run-state").innerText()) === "running", "reloaded page shows the kept turn running");
   const heldRowControl = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...heldRowControl, release_reload_row_barrier: true }));
+  await writeControl(control, { ...heldRowControl, release_reload_row_barrier: true });
   await gateWait.playwright(page.getByText("reload book added", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\npage after the reload during add_book: ${redact(await page.locator("body").innerText())}`);
   });
@@ -1580,7 +1580,7 @@ try {
   const wakeChat = await homeSessionId();
   if (!wakeChat) throw new Error("woken-turn chat id missing");
   const wakeArm = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...wakeArm, hold_wake_setup: true }));
+  await writeControl(control, { ...wakeArm, hold_wake_setup: true });
   await Bun.write(join(cwd, "release-wake-task"), "");
   await waitFor(async () => JSON.parse(await Bun.file(control).text()).wake_setup_barrier === "held", "woken turn held in its setup");
   const restartAchilles = async (approval: "allow" | "ask") => {
@@ -1607,7 +1607,7 @@ try {
   if (replyTo("set_settings") && replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
   if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   const wakeHeld = JSON.parse(await Bun.file(control).text());
-  await Bun.write(control, JSON.stringify({ ...wakeHeld, release_wake_setup_barrier: true }));
+  await writeControl(control, { ...wakeHeld, release_wake_setup_barrier: true });
   await gateWait.playwright(page.getByText("woken turn complete", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
     throw new Error(`${error}\npage after the reload in a woken turn's setup: ${redact(await page.locator("body").innerText())}`);
   });

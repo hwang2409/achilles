@@ -63,7 +63,7 @@ class BarrierBackend(FakeBackend):
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
             if event.type.name == "MESSAGE_END":
-                document = json.loads(self.control.read_text())
+                document = read_control(self.control) or {}
                 returned = document.get("returned_tool_calls", [])
                 if any(call.get("id") == "inspect-after-discovery" for call in returned):
                     document["inspect_turn_barrier"] = "held"
@@ -75,15 +75,25 @@ class BarrierBackend(FakeBackend):
 
 
 async def hold(control: Path, barrier: str, seconds: int = 15) -> None:
-    document = json.loads(control.read_text())
-    document[barrier] = "held"
-    write_control(control, document)
+    held = False
     for _ in range(seconds * 20):
-        document = json.loads(control.read_text())
-        if document.get(f"release_{barrier}"):
+        document = read_control(control)
+        if document is not None and not held:
+            document[barrier] = "held"
+            write_control(control, document)
+            held = True
+        elif document is not None and document.get(f"release_{barrier}"):
             return
         await asyncio.sleep(0.05)
     raise RuntimeError(f"{barrier} release timed out after {seconds} seconds")
+
+
+def read_control(path: Path) -> dict | None:
+    """One read of the control file; None while it is missing or not yet a complete document."""
+    try:
+        return json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 
 class RestartBackend:
@@ -190,10 +200,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     home = private_proof_home()
     cwd = Path(os.environ["ZETA_PROOF_CWD"])
     control = Path(os.environ["ZETA_PROOF_CONTROL"])
-    try:
-        restarting_turn = json.loads(control.read_text()).get("request_count", 0) > 0
-    except (FileNotFoundError, json.JSONDecodeError):
-        restarting_turn = False
+    restarting_turn = (read_control(control) or {}).get("request_count", 0) > 0
     home.mkdir(parents=True, exist_ok=True)
     if not (home / "storage-format.json").exists():
         advance(home, expected_epoch=0)
@@ -486,7 +493,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
     ]
 
     def record_request(messages, tool_schemas):
-        document = json.loads(control.read_text())
+        document = read_control(control)
+        if document is None:
+            # a partial control file: skip this record, so the gate's own wait reports it
+            names = [schema["name"] for schema in tool_schemas]
+            return json.dumps({"messages": len(messages), "schemas": names}).encode()
         if opening_prompt := BarrierBackend.opening_prompt(messages):
             marker = (
                 "page_open_request"
@@ -558,25 +569,15 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     original_event = server.control._event
 
     async def held_event(event, *args, **kwargs):
-        document = json.loads(control.read_text())
+        document = read_control(control) or {}
         if (
             event.type.name == "TURN_START"
             and document.get("hold_turn_start")
-            and not document.get("turn_start_released")
+            and "turn_start_barrier" not in document
         ):
             server.control._turn_end_published = False
-            document["turn_start_barrier"] = "held"
-            write_control(control, document)
             # longer than the gate's 30 s wait, so the gate reports its own timeout first
-            for _ in range(700):
-                document = json.loads(control.read_text())
-                if document.get("release_turn_start_barrier"):
-                    document["turn_start_released"] = True
-                    write_control(control, document)
-                    break
-                await asyncio.sleep(0.05)
-            else:
-                raise RuntimeError("turn start barrier release timed out after 35 seconds")
+            await hold(control, "turn_start_barrier", seconds=35)
         await original_event(event, *args, **kwargs)
 
     server.control._event = held_event
@@ -585,34 +586,15 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     async def held_send(instance, params, features):
         outcome = await original_send(instance, params, features)
         if params.get("text") == "steer while running":
-            document = json.loads(control.read_text())
-            document["fallback_send_barrier"] = "held"
-            write_control(control, document)
-            for _ in range(300):
-                document = json.loads(control.read_text())
-                if document.get("release_fallback_send_barrier"):
-                    break
-                await asyncio.sleep(0.05)
-            else:
-                raise RuntimeError("fallback send barrier release timed out after 15 seconds")
+            await hold(control, "fallback_send_barrier")
         return outcome
 
     original_finalize_turn = DeliveryRequests.finalize_turn
 
     async def held_finalize_turn(instance, *args, **kwargs):
-        document = json.loads(control.read_text())
-        if document.get("request_count") == 18 and not document.get("late_turn_released"):
-            document["late_turn_barrier"] = "held"
-            write_control(control, document)
-            for _ in range(300):
-                document = json.loads(control.read_text())
-                if document.get("release_late_turn_barrier"):
-                    document["late_turn_released"] = True
-                    write_control(control, document)
-                    break
-                await asyncio.sleep(0.05)
-            else:
-                raise RuntimeError("late turn barrier release timed out after 15 seconds")
+        document = read_control(control) or {}
+        if document.get("request_count") == 18 and "late_turn_barrier" not in document:
+            await hold(control, "late_turn_barrier")
         await original_finalize_turn(instance, *args, **kwargs)
 
     original_suspend = MCPServerActor.suspend
@@ -620,17 +602,18 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     async def counted_suspend(actor, *args, **kwargs):
         # a page binding left (its client disconnected): the gate waits for this
         await original_suspend(actor, *args, **kwargs)
-        document = json.loads(control.read_text())
-        document["bound_suspends"] = document.get("bound_suspends", 0) + 1
-        write_control(control, document)
+        if (document := read_control(control)) is not None:
+            document["bound_suspends"] = document.get("bound_suspends", 0) + 1
+            write_control(control, document)
 
     original_handle_call = MCPServerActor._handle_call
 
     def recorded_handle_call(actor, request):
         if request.tool_name == "add_book" and actor._binding_detached:
-            document = json.loads(control.read_text())
-            document["detached_add_book_calls"] = document.get("detached_add_book_calls", 0) + 1
-            write_control(control, document)
+            if (document := read_control(control)) is not None:
+                calls = document.get("detached_add_book_calls", 0) + 1
+                document["detached_add_book_calls"] = calls
+                write_control(control, document)
         original_handle_call(actor, request)
 
     original_call_tool = MCPServerActor.call_tool
@@ -638,7 +621,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     async def held_call_tool(actor, tool_name, *args, **kwargs):
         # announced (tool_start sent) but not yet at the MCP server: the gate reloads the page here
         if tool_name == "add_book":
-            document = json.loads(control.read_text())
+            document = read_control(control) or {}
             if document.get("hold_reload_tool") and "reload_tool_barrier" not in document:
                 await hold(control, "reload_tool_barrier")
         return await original_call_tool(actor, tool_name, *args, **kwargs)
@@ -646,7 +629,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     def held_history(original):
         async def handler(client, request_id, params):
             # the reloaded page's first history read waits until the reply is published, rowless
-            document = json.loads(control.read_text())
+            document = read_control(control) or {}
             if (
                 document.get("hold_reload_history") == params.get("session_id")
                 and "reload_history_barrier" not in document
@@ -676,7 +659,7 @@ async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
 
     async def held_notification_turn(*args, **kwargs):
         # a woken turn in its setup, before turn_start: the gate reloads the page here
-        document = json.loads(control.read_text())
+        document = read_control(control) or {}
         if document.get("hold_wake_setup") and "wake_setup_barrier" not in document:
             # the gate restarts achilles while held, so this hold is longer than the others
             await hold(control, "wake_setup_barrier", seconds=60)

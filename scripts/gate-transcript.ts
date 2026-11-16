@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { type GateWait, writeControl } from "./gate-diagnostics";
 
 export async function waitForIdleTurn(
   page: Page,
@@ -76,7 +76,7 @@ export async function gateTranscript(
 
   await waitForIdleTurn(page, waitFor);
   const startControl = JSON.parse(await Bun.file(controlPath).text());
-  await Bun.write(controlPath, JSON.stringify({ ...startControl, hold_turn_start: true }));
+  await writeControl(controlPath, { ...startControl, hold_turn_start: true });
   await field.fill("stream enough lines to overflow");
   await field.press("Enter");
   await waitFor(async () => JSON.parse(await Bun.file(controlPath).text()).turn_start_barrier === "held", "held turn-start event");
@@ -108,7 +108,7 @@ export async function gateTranscript(
   if (startingSend.params.delivery_id !== startingSteer.params.delivery_id)
     throw new Error("turn-start fallback did not reuse its delivery id");
   const heldStartControl = JSON.parse(await Bun.file(controlPath).text());
-  await Bun.write(controlPath, JSON.stringify({ ...heldStartControl, release_turn_start_barrier: true }));
+  await writeControl(controlPath, { ...heldStartControl, release_turn_start_barrier: true });
   const stream = messages.filter({ hasText: "stream line 000" });
   await waitFor(async () => await stream.count() === 1, "streaming reply for this turn");
   // the scroll container only needs scrolling once enough lines have streamed in (one every 60ms,
@@ -169,7 +169,7 @@ export async function gateTranscript(
   const steerFrame = requests().find((frame) => frame.method === "steer" && frame.params?.text === "prompt during denied tool turn ending");
   if (!steerFrame?.params?.delivery_id) throw new Error("held steer frame did not include a delivery id");
   const control = JSON.parse(await Bun.file(controlPath).text());
-  await Bun.write(controlPath, JSON.stringify({ ...control, release_turn_barrier: true }));
+  await writeControl(controlPath, { ...control, release_turn_barrier: true });
   // zeta reads a steer sent during the final reply in the next turn it starts after turn_end
   await gateWait(() => page.getByText("stream tool complete", { exact: true }).waitFor({ timeout: 20_000 }));
   const steerResponse = () => { const frames = requests(); return frames.slice(frames.findIndex((frame) => frame.method === "steer" && frame.id === steerFrame.id) + 1).find((frame) => frame.id === steerFrame.id); };
