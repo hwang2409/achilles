@@ -49,14 +49,18 @@ const migrateOldTexts = () => {
     if (written) storage()?.removeItem(OLD_TEXTS);
   } catch { /* storage is off or the entry is unparsable: nothing to move */ }
 };
-/** what a page load that starts now must show: every row failed, so nothing goes out before the user acts */
+/** what a page load that starts now must show: every row failed, so nothing goes out before the user acts. A row
+ * with a delivery id that is not failed now (in flight, or retried and waiting) may be with zeta: it stays maybe sent
+ * with that id, so it has no edit and a retry cannot make a second copy. */
 const stored = (owner: ComposerDelivery): StoredRow[] => {
   const model = owner.getModel();
   const sending = inFlight(model);
   return model.queue.flatMap((item): StoredRow[] => {
-    if (item !== sending) return [{ text: item.text, failed: item.failed ?? NOT_SENT, ...(item.tries ? { tries: item.tries } : {}), ...(item.deliveryId ? { deliveryId: item.deliveryId } : {}) }];
-    if (model.send?.echoed) return []; // zeta's transcript shows it: taken
-    return [{ text: item.text, failed: model.send?.deliveryId ? MAYBE_SENT : NOT_SENT, ...(model.send?.deliveryId ? { deliveryId: model.send.deliveryId } : {}) }];
+    if (item === sending && model.send?.echoed) return []; // zeta's transcript shows it: taken
+    // the in-flight id is the one zeta last saw (a resend after a dropped id has a new one); before it is tracked, the row's own
+    const deliveryId = (item === sending ? model.send?.deliveryId : undefined) ?? item.deliveryId;
+    const failed = (item === sending ? undefined : item.failed) ?? (deliveryId ? MAYBE_SENT : NOT_SENT);
+    return [{ text: item.text, failed, ...(item !== sending && item.tries ? { tries: item.tries } : {}), ...(deliveryId ? { deliveryId } : {}) }];
   });
 };
 

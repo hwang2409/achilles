@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { QUEUE_LIMIT, composerActivity, createComposerModel, shownQueue, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
+import { MAYBE_SENT, QUEUE_LIMIT, composerActivity, createComposerModel, shownQueue, enterAction, transition, type ComposerEvent, type ComposerModel } from "./composer-machine";
 
 const apply = (model: ComposerModel, ...events: ComposerEvent[]) => events.reduce((current, event) => transition(current, event).model, model);
 
@@ -89,6 +89,18 @@ describe("composer delivery machine", () => {
   ];
 
   for (const [name, check] of cases) test(name, check);
+
+  test("a row that may have been sent is never edited into a new message: enter cannot send its text with another delivery id", () => {
+    const maybe = createComposerModel("", "idle", [{ text: "hello", failed: MAYBE_SENT, deliveryId: "d1" }]);
+    const afterEdit = transition(apply(maybe, { type: "restore", id: 1 }), { type: "submit", turnRunning: false });
+    expect(afterEdit.effect).toBeUndefined();
+    expect(afterEdit.model).toMatchObject({ draft: "", queue: [{ text: "hello", failed: MAYBE_SENT, deliveryId: "d1" }] });
+    // retry is the way out: it goes with the same id, so zeta keeps one copy
+    expect(transition(apply(maybe, { type: "retry", id: 1 }), { type: "next", turnRunning: false }).effect).toEqual({ type: "submit", attempt: 1, text: "hello", steer: false, deliveryId: "d1" });
+    // a row zeta refused holds nothing on zeta's side: edit still puts its text back in the box
+    const refused = createComposerModel("", "idle", [{ text: "hello", failed: "refused", deliveryId: "d2" }]);
+    expect(apply(refused, { type: "restore", id: 1 })).toMatchObject({ draft: "hello", queue: [] });
+  });
 
   test("read-only keeps the exact draft and blocks submit", () => {
     const readOnly = apply(createComposerModel("unsent draft", "idle"), { type: "state", state: "read-only" });

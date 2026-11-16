@@ -200,12 +200,14 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 [data-part="composer-queued-text"] { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* its own line, wrapped, so the reason is readable on a phone (no tooltip-only text) */
 [data-part="composer-queued-error"] { flex: 1 0 100%; color: var(--fulcrum-danger); overflow-wrap: anywhere; }
+[data-part="composer-queued-hint"] { flex: 1 0 100%; color: var(--fulcrum-muted); }
 [data-part="composer"] [data-part="composer-queued-retry"],
 [data-part="composer"] [data-part="composer-queued-edit"],
+[data-part="composer"] [data-part="composer-queued-copy"],
 [data-part="composer"] [data-part="composer-queued-cancel"] { --action: var(--fulcrum-muted); min-width: 0; min-height: 28px; padding: 0 8px; background: transparent; color: var(--fulcrum-fg); border-color: var(--fulcrum-border); font-size: 12px; }
 [data-part="composer"] [data-part="composer-queued-cancel"] { width: 28px; padding: 0; font-size: 16px; }
 @media (pointer: coarse), (max-width: 640px) {
-  [data-part="composer"] [data-part="composer-queued-retry"], [data-part="composer"] [data-part="composer-queued-edit"], [data-part="composer"] [data-part="composer-queued-cancel"] { min-height: 40px; }
+  [data-part="composer"] [data-part="composer-queued-retry"], [data-part="composer"] [data-part="composer-queued-edit"], [data-part="composer"] [data-part="composer-queued-copy"], [data-part="composer"] [data-part="composer-queued-cancel"] { min-height: 40px; }
   [data-part="composer"] [data-part="composer-queued-cancel"] { width: 40px; }
 }
 /* fills the transcript's box exactly (never taller) and scrolls its own content, so a tall
