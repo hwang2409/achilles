@@ -221,9 +221,9 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
     check();
     return store.subscribe(check);
   }, [owner, store, maybeSent]);
-  const { sending, queued, failed } = composerActivity(model);
-  useEffect(() => options.onActivity?.({ sending, queued, failed }), [options.onActivity, sending, queued, failed]);
-  useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false }), [options.onActivity]);
+  const { sending, queued, failed, held } = composerActivity(model);
+  useEffect(() => options.onActivity?.({ sending, queued, failed, held }), [options.onActivity, sending, queued, failed, held]);
+  useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false, held: false }), [options.onActivity]);
 
   const edit = useCallback((draft: string) => owner.edit(draft), [owner]);
   const submit = useCallback(() => void owner.submit(), [owner]);

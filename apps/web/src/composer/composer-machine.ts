@@ -17,8 +17,11 @@ type Send = { attempt: number; id: number; steer: boolean; deliveryId?: string; 
 export class SendRefused extends Error {}
 
 /** a row that left for zeta with no answer (the page unloaded, the socket closed, zeta forgot the id): the chat's
- * transcript says if zeta took it, and a retry reuses its delivery id */
-export const MAYBE_SENT = "may not have been sent — check before retrying";
+ * transcript says if zeta took it, and a retry reuses its delivery id, so zeta keeps one copy. The row, the header, and
+ * the status line all say this one thing. */
+export const MAYBE_SENT_LABEL = "maybe not sent";
+export const MAYBE_SENT_HINT = "retry is safe: it will not send twice";
+export const MAYBE_SENT = `${MAYBE_SENT_LABEL}. ${MAYBE_SENT_HINT}`;
 
 /** shortcut: a fixed cap keeps a stuck chat from collecting messages without end; make it a setting if anyone hits it */
 export const QUEUE_LIMIT = 20;
@@ -92,15 +95,17 @@ export function composerStatus(model: ComposerModel): { text: string; tone?: "da
   if (model.stopping) return { text: "stopping", tone: "busy" };
   if (model.held && model.queue.length) return { text: "the rest wait for your next enter", tone: "busy" };
   if (inFlight(model)) return { text: model.send?.steer ? "next step" : "sending", tone: "busy" };
-  if (model.queue[0]?.failed && model.queue[0].held) return { text: `a message ${MAYBE_SENT}`, tone: "danger" };
+  if (model.queue[0]?.failed && model.queue[0].held) return { text: MAYBE_SENT, tone: "danger" };
   if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
   return { text: "" };
 }
 
-/** What the header shows for this composer: it counts only the rows that are not in flight (an in-flight steer is "next step"). */
-export function composerActivity(model: ComposerModel): { sending: boolean; queued: number; failed: boolean } {
+/** What the header shows for this composer: it counts only the rows that are not in flight (an in-flight steer is "next step").
+ * `held`: the failed head is maybe sent, not "not sent". */
+export function composerActivity(model: ComposerModel): { sending: boolean; queued: number; failed: boolean; held: boolean } {
   const waiting = model.queue.filter((item) => item !== inFlight(model) && !item.failed).length;
-  return { sending: Boolean(inFlight(model)), queued: waiting, failed: Boolean(model.queue[0]?.failed) };
+  const head = model.queue[0];
+  return { sending: Boolean(inFlight(model)), queued: waiting, failed: Boolean(head?.failed), held: Boolean(head?.failed && head.held) };
 }
 
 const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): ComposerTransition => {

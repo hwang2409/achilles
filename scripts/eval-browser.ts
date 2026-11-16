@@ -143,7 +143,9 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
   async function recordFault(step: TaskStep, tab: Tab) {
     const fault = tab.fault!; tab.fault = undefined;
     const row = tab.page.locator('[data-part="composer-queued"]').filter({ has: tab.page.locator('[data-part="composer-queued-text"]', { hasText: fault.text }) }).first();
-    const shown = await row.count() ? { label: await row.locator('[data-part="composer-queued-label"]').innerText(), error: await row.locator('[data-part="composer-queued-error"]').innerText().catch(() => null) } : null;
+    // a maybe-sent row has no error line (only its hint): read it only when it is there, without waiting for it
+    const error = row.locator('[data-part="composer-queued-error"]');
+    const shown = await row.count() ? { label: await row.locator('[data-part="composer-queued-label"]').innerText(), error: await error.count() ? await error.innerText() : null } : null;
     deliveryFaults.push({ step: step.id, page_id: tab.pageId, chat: step.chat, fault: fault.kind, text: fault.text, fired: fault.fired, sent: fault.sent, shown });
     if (shown) await row.locator('[data-part="composer-queued-cancel"]').click();
   }
