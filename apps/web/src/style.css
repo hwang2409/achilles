@@ -108,6 +108,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .approval-mode.mode-allow { color: var(--fulcrum-warn); }
 .approval-mode.mode-allow::before { background: var(--fulcrum-warn); }
 .header-overflow, .header-menu, .fold-indicator { display: none; }
+/* the status wrapper is transparent to layout on desktop; below 40em it becomes a narrow right-aligned
+   column (run state over the mode words), so the mode words never steal the title's horizontal room */
+.header-status { display: contents; }
 /* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
    width): 64em of header leaves the title about 30 characters beside the full actions. em follows the
    ui font size; ch would also follow the font face, and a wide fallback face folded them at 1440. */
@@ -122,15 +125,14 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
      (only rendered when that mode is on) stays beside ••• in the header itself, at every width. the divider
      (rendered only with a mark) keeps the marks from reading as part of the run state word. */
   .fold-indicator { display: flex; gap: 12px; align-items: center; padding-left: 12px; border-left: 1px solid var(--fulcrum-border); }
-  .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
+  .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; box-sizing: border-box; width: 8px; height: 8px; margin-right: 8px; }
   .fold-mark-approve { color: var(--fulcrum-warn); }
   .fold-mark-approve::before { background: var(--fulcrum-warn); }
-  /* a hollow square in the text color, so it never reads as the filled accent "running" mark; the menu repeats
-     both marks in front of their full names, so it works as a legend */
-  .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { box-shadow: inset 0 0 0 1px currentColor; }
-  /* the gap sits on the word, so the square alone (tight header) has no trailing space */
-  .fold-mark-create::before { margin-right: 0; }
-  .fold-mark-create .fold-long { margin-left: 8px; }
+  /* an accent chip + its own word (the app's "on/active" colour, as on the current chat row), so create mode
+     reads as visibly on and named even at 390 where the word stays; hollow fill keeps it from reading as the
+     filled accent "running" dot, and the menu repeats the mark in front of the full name as a legend */
+  .fold-mark-create { color: var(--fulcrum-accent); }
+  .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { border: 1px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 22%, transparent); }
   /* the title keeps a minimum width; the marks get shorter instead of pushing it off-screen */
   .chat-heading { min-width: 6em; }
 }
@@ -138,6 +140,17 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .fold-long { display: none; }
   /* a long state ("maybe not sent", "waiting on you") wraps to two lines (9ch: never one word a line) instead of pushing ••• off-screen */
   .run-state { min-width: 9ch; white-space: normal; }
+  /* stack run state over the named mode words in a narrow column, so the title keeps its full width and
+     no mode is ever a bare square; the divider is dropped since the marks sit under the run state now */
+  .header-status { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; min-width: 0; }
+  .fold-indicator { gap: 6px; padding-left: 0; border-left: none; }
+  .header-status .fold-mark::before { width: 7px; height: 7px; margin-right: 5px; }
+  .chat-actions { gap: 10px; }
+  .chat-heading { min-width: 0; }
+}
+/* on narrow headers, keep the named create marker visible and fold only the less important auto marker. */
+@container (max-width: 25em) {
+  .fold-mark-approve { display: none; }
 }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
