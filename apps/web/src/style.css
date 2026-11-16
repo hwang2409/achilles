@@ -373,3 +373,17 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
   .history-confirm > span { grid-column: 1 / 3; }
   .history-group li.history-confirm > button { grid-column: auto; grid-row: 2; }
 }
+
+/* chat recovery: the auth-error notice and the composer's /accounts output, between the transcript and the composer */
+.chat-auth-error-actions { display: flex; align-items: center; gap: 12px; }
+.chat-auth-error-fix { color: var(--fulcrum-muted); white-space: nowrap; }
+.composer-notice { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); border-top: 1px solid var(--fulcrum-border); }
+.composer-notice[data-tone="danger"] { color: var(--fulcrum-danger); }
+.composer-notice-actions { flex: 0 0 auto; display: flex; gap: 8px; }
+.composer-accounts { flex: 0 0 auto; padding: 10px 24px; background: var(--fulcrum-bg); border-top: 1px solid var(--fulcrum-border); }
+.composer-accounts-title { color: var(--fulcrum-muted); margin-bottom: 8px; }
+.composer-accounts ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.composer-accounts li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; }
+.composer-account-id { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer-account-tags { color: var(--fulcrum-muted); white-space: nowrap; }
+.composer-notice-actions button, .composer-accounts button { min-height: 32px; padding: 6px 10px; }

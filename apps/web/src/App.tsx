@@ -14,6 +14,7 @@ import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listC
 import { usePageTools, type PageTool } from "./page/usePageTools";
 import { HistoryDialog } from "./page/HistoryDialog";
 import { EmptyChat } from "./EmptyChat";
+import { AuthErrorRecovery, CommandOutputView, useComposerCommands } from "./ChatRecovery";
 import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
@@ -42,7 +43,7 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean; held: boolean };
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity, onCommand }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void; onCommand?: (command: { name: string; arg: string }) => boolean }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
     (listener) => {
@@ -59,6 +60,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }:
     defaultValue: draft,
     onDraftChange: (text: string) => draftStore.set(sessionId, text),
     onDraftSubmit: (sent: string) => draftStore.confirm(sessionId, sent),
+    onCommand,
     chatId: sessionId,
     fromNewChat,
     onActivity,
@@ -75,6 +77,21 @@ function VimLoading() {
 
 function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
   return waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+}
+
+// the message of the last turn's auth failure, when the chat is idle and its last turn failed to authenticate; else
+// null. the error reaches the client with code "auth_error" (the account that failed is not in the event).
+function authErrorMessage(store: ReturnType<typeof createRunStore> | null): string | null {
+  if (!store) return null;
+  const state = store.getState();
+  if (state.turn !== "idle" || state.endOutcome !== "failed") return null;
+  for (let index = state.outline.length - 1; index >= 0; index -= 1) {
+    const item = store.getItem(state.outline[index]!.id);
+    if (item?.type !== "error") continue;
+    const event = item.event;
+    return event.type === "error" && event.error.code === "auth_error" ? event.error.message : null;
+  }
+  return null;
 }
 
 // the header shows what the user is waiting on: an approval first, another chat's turn, then their own messages, then
@@ -148,6 +165,8 @@ export function App() {
     return `${state.turn}:${completedTurns}:${completedTools}:${approvals}:${state.endOutcome ?? ""}:${state.outline.length}:${toolStates}`;
   } : () => "idle:0:0:0::0:");
   const [turn, completedTurns, completedTools, approvalCount, outcome, outlineLength] = snapshot.split(":") as ["idle" | "running", string, string, string, string, string];
+  const authError = useSyncExternalStore(store?.subscribe ?? (() => () => {}), () => authErrorMessage(store));
+  const commands = useComposerCommands(client, ready?.sessionId ?? null);
   // a restore from the history list changes the layout or a tool without a chat turn
   const [restores, setRestores] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -279,7 +298,9 @@ export function App() {
           const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
         }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+        {ready && client && authError && <AuthErrorRecovery client={client} sessionId={ready.sessionId} message={authError} canSwitch={commands.canSwitch} onSwitch={commands.switchTo} onNewChat={active.newChat} />}
+        {ready && <CommandOutputView output={commands.output} canSwitch={commands.canSwitch} onSwitch={commands.switchTo} onDismiss={commands.clear} />}
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} onCommand={ready ? commands.run : undefined} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
         </div>
         </div>
       </RunProvider>}

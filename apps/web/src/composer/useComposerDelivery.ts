@@ -18,6 +18,7 @@ import {
   type QueuedMessage,
 } from "./composer-machine";
 import { chatQueues } from "./chatQueues";
+import { parseComposerInput } from "./commands";
 
 const attempt = (action: () => unknown) =>
   new Promise<unknown>((resolve) => resolve(action()));
@@ -28,6 +29,8 @@ export type ComposerAdapterProps = ComposerProps & {
   onDraftChange: (text: string) => void;
   /** Enter took this text out of the box; the stored draft drops it */
   onDraftSubmit: (sent: string) => void;
+  /** Runs a local slash command instead of sending to the model. Returns true when the draft should be cleared. */
+  onCommand?: (command: { name: string; arg: string }) => boolean;
   /** the chat this composer shows; its submitted messages belong to the chat's owner in `chatQueues` */
   chatId: string;
   /** this chat was just created by the page's new-chat composer `fromNewChat`; that composer's owner moves here */
@@ -42,6 +45,8 @@ export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
   onDraftSubmit: (sent: string) => void;
   isTurnRunning?: () => boolean;
+  /** Runs a local slash command instead of sending to the model. Returns true when the draft should be cleared. */
+  onCommand?: (command: { name: string; arg: string }) => boolean;
 };
 
 export type ComposerDelivery = {
@@ -126,6 +131,16 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
     },
     async submit() {
       apply({ type: "state", state: current.state });
+      if (current.onCommand) {
+        const parsed = parseComposerInput(model.draft);
+        if (parsed.kind === "command") {
+          // a slash command never reaches the model; the handler keeps or clears the draft
+          if (current.onCommand({ name: parsed.name, arg: parsed.arg })) apply({ type: "edit", draft: "" });
+          return;
+        }
+        // "//text" sends the literal "/text"
+        if (parsed.text !== model.draft) apply({ type: "edit", draft: parsed.text });
+      }
       const effect = apply({ type: "submit", turnRunning: turnRunning() });
       if (effect?.type === "submit") await deliver(effect);
       await drain();

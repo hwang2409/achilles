@@ -84,6 +84,9 @@ const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
 export const supportsFeature = (client: ZetaClient, feature: string) => client.features.includes(feature);
 
+/** Whether the server advertised this request method in its hello capabilities (per the negotiated protocol version). */
+export const supportsRequest = (client: ZetaClient, request: string) => negotiatedRequests.get(client)?.has(request) ?? false;
+
 async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) {
   const url = new URL(discovery.url);
   for (const key of [...url.searchParams.keys()]) if (key.toLowerCase() === "token") url.searchParams.delete(key);
