@@ -87,8 +87,9 @@ export async function gateShell(
   if (!(await menu.evaluate((button) => button === document.activeElement))) throw new Error("closing the drawer did not restore menu focus");
   const overflow = page.getByRole("button", { name: "chat options" });
   await overflow.click();
-  if (!(await page.locator(".header-menu").getByRole("button").isVisible())) throw new Error("narrow chat menu did not expose create mode");
+  if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
   if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
+  if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
   await capture("09-narrow-chat-menu-review-390x844.png");
   await page.keyboard.press("Escape");
   if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
