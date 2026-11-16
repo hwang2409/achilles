@@ -82,9 +82,9 @@ describe("composer delivery machine", () => {
     }],
     ["the header counts only rows not in flight and shows a failed head", () => {
       const steering = transition(createComposerModel("redirect", "steerable"), { type: "submit", turnRunning: true }).model;
-      expect(composerActivity(steering)).toEqual({ sending: true, queued: 0, failed: false });
+      expect(composerActivity(steering)).toEqual({ sending: true, queued: 0, failed: false, held: false });
       const failed = apply(steering, { type: "edit", draft: "later" }, { type: "submit", turnRunning: true }, { type: "reject", attempt: 1, message: "no", refused: false }, { type: "settle", attempt: 1 });
-      expect(composerActivity(failed)).toEqual({ sending: false, queued: 1, failed: true });
+      expect(composerActivity(failed)).toEqual({ sending: false, queued: 1, failed: true, held: false });
     }],
   ];
 

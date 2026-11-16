@@ -465,13 +465,13 @@ function selectBlockRecords(block: Record<string, unknown>, records: Array<Recor
   return defaultToAll ? { records, selector: "all records" } : undefined;
 }
 // per fault: how many times the page may send the text again with a fresh id (only zeta's dropped answer: zeta holds
-// nothing), how many copies zeta's history ends with, and the row the page shows ("maybe sent" when zeta never answered)
+// nothing), how many copies zeta's history ends with, and the row the page shows ("maybe not sent" when zeta never answered)
 const DELIVERY_FAULTS: Record<DeliveryFault, { resends: number; copies: number; shown: string | null }> = {
   dropped: { resends: 1, copies: 1, shown: null },
   evicted_delivered: { resends: 0, copies: 1, shown: null },
   evicted_queued: { resends: 0, copies: 1, shown: null },
-  evicted_unknown: { resends: 0, copies: 0, shown: "maybe sent" },
-  closed_before_send: { resends: 0, copies: 0, shown: "maybe sent" },
+  evicted_unknown: { resends: 0, copies: 0, shown: "maybe not sent" },
+  closed_before_send: { resends: 0, copies: 0, shown: "maybe not sent" },
   closed_after_send: { resends: 0, copies: 1, shown: null },
 };
 const userCopies = (history: unknown, text: string) => {
