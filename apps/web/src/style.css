@@ -13,9 +13,8 @@ button { background: transparent; border: 1px solid var(--fulcrum-border); curso
 a { color: inherit; text-decoration: none; }
 kbd { color: var(--fulcrum-muted); font: inherit; }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
-.app-shell { height: 100%; display: grid; grid-template-columns: 288px minmax(0, 1fr); background: var(--fulcrum-bg); }
+.app-shell { height: 100%; display: grid; background: var(--fulcrum-bg); }
 .sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border); }
 .brand-row strong { font-size: 16px; letter-spacing: .02em; }
 .brand-row > span:last-of-type { color: var(--fulcrum-muted); font-size: 12px; }
@@ -46,7 +45,6 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
    (36px list head + 36px group head) instead of hidden under them. */
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
-.chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; display: flex; align-items: center; margin: 0; padding: 0 16px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 14px; font-weight: 400; text-transform: lowercase; }
 .chat-row { position: relative; display: block; padding: 10px 48px 10px 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
 .chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.4; font-weight: 500; }
 .chat-row > span { display: flex; gap: 4px; min-width: 0; margin-top: 5px; color: var(--fulcrum-muted); font-size: 14px; }
@@ -58,8 +56,6 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
-.chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.chat-row.current strong { font-weight: 700; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 8%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
@@ -85,10 +81,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .sidebar-skeleton i { display: block; width: 88%; height: 10px; margin: 16px 0; background: var(--fulcrum-surface); }
 .sidebar-skeleton i:nth-child(even) { width: 62%; }
 .waiting-count { display: none; }
-.main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .skip-link { position: fixed; z-index: 20; top: 8px; left: 8px; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-accent); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
-.chat-header { container-type: inline-size; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 12px; min-width: 0; }
 .chat-heading span { flex: 0 1 220px; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
@@ -176,7 +170,6 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* below 1100px (or with no blocks) the page stacks as before: .page-chat adds no box, so blocks,
    transcript and composer share .page-view's column. at 1100px+ (or short and wide) the chat docks right and each side scrolls alone. */
 .page-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.page-chat { display: contents; }
 /* a short landscape viewport (a phone on its side) docks too: stacked, the page got a 77px band. */
 @media (min-width: 1100px), (max-height: 500px) and (min-width: 700px) {
   .page-view.docked { flex-direction: row; }
@@ -202,7 +195,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
-.main-pane [data-part="composer-hint"] { font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
 [data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 [data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
