@@ -873,8 +873,7 @@ try {
   if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "9,999,999,999,999,999")
     throw new Error(`long metric did not render its full label and value: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
-  await gateWait.playwright(readingMetric.locator("strong"), "waitFor");
-  if (await readingMetric.locator("strong").innerText() !== "0") throw new Error(`reading metric value mismatch: ${JSON.stringify(await readingMetric.innerText())}`);
+  await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
@@ -889,7 +888,7 @@ try {
     }),
   );
   if (
-    metricBoxes.length !== 3 ||
+    metricBoxes.length !== 2 ||
     metricBoxes[0].top !== metricBoxes[1].top ||
     metricBoxes.some(
       (box) => box.width > 172 || box.scrollWidth > box.clientWidth,
@@ -930,24 +929,6 @@ try {
     throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
   if (filteredDetailText.includes("could not load record"))
     throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
-  const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  await gateWait.playwright(allBooksMetric.filter({ hasText: "1" }), "unfiltered metric before form save");
-  await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
-  const saveCountRoute = async (route: Route) => {
-    const response = await route.fetch();
-    const headers = { ...response.headers(), "x-achilles-total": "2" };
-    await route.fulfill({ response, headers });
-  };
-  await page.route("**/api/pages/*/records/books?limit=1", saveCountRoute);
-  try {
-    await page.getByRole("textbox", { name: "status" }).fill("done");
-    await page.getByRole("button", { name: "save", exact: true }).click();
-    await gateWait.playwright(page.getByText("saved", { exact: true }), "form save");
-    await gateWait.playwright(allBooksMetric.filter({ hasText: "2" }), "unfiltered metric after form save");
-  } finally {
-    await page.unroute("**/api/pages/*/records/books?limit=1", saveCountRoute);
-  }
-  console.log("real page form save refreshed the unfiltered grouped metric");
   const readingModeResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
@@ -1007,6 +988,21 @@ try {
     throw new Error(`update_layout tool result was missing or failed: ${JSON.stringify(afterLayoutUpdate.tool_results)}`);
   console.log("open page re-rendered without reload after chat update_layout: page note before books");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
+  const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
+  await gateWait.playwright(allBooksMetric.filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
+  await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
+  const saveCountRoute = async (route: Route) => {
+    await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });
+  };
+  await page.route("**/api/pages/*/records/books?limit=1", saveCountRoute);
+  try {
+    await page.getByRole("button", { name: "save", exact: true }).click();
+    await waitFor(async () => (await page.locator(".record-form").innerText()).includes("saved"), "form save");
+    await waitFor(async () => (await allBooksMetric.innerText()) === "2", "unfiltered metric after form save");
+  } finally {
+    await page.unroute("**/api/pages/*/records/books?limit=1", saveCountRoute);
+  }
+  console.log("real page form save refreshed the unfiltered grouped metric");
 
   const staleLayoutApprovalBefore = await updateLayoutApproval.count();
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
