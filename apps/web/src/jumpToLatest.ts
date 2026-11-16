@@ -58,6 +58,8 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
       return;
     }
     if (!atBottom()) return;
+    // keep keyboard focus stable while a reader is using the control; its click handler will follow and hide it.
+    if (document.activeElement === scroll.querySelector('[data-part="jump-to-latest"]')) return;
     bottomTop = scroll.scrollTop;
     setShown(false);
   };
