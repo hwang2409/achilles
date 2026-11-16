@@ -1510,6 +1510,57 @@ try {
   if ((await toolLines()).some((count) => count !== 1) || await page.getByText("reload tool complete", { exact: true }).count() !== 1)
     throw new Error(`after the tool ended, its lines showed ${JSON.stringify(await toolLines())} times and the reply ${await page.getByText("reload tool complete", { exact: true }).count()} times, not once each`);
   console.log("reload during a running tool asserted: output from before the reload showed once while the tool ran, and once after it ended");
+
+  // A reload during a woken turn's setup (a background task ended; zeta has not sent turn_start yet) attaches to
+  // that turn: the page shows the chat, not a busy error, the turn calls a page tool on the re-sent binding, and
+  // the forced ask mode the reloaded page asks for is applied only after the turn ends (zeta refuses it, -32004,
+  // during the setup). The test server holds the woken turn in its setup while achilles restarts in ask mode.
+  await allowField.fill("start a background task");
+  await allowField.press("Enter");
+  await gateWait.playwright(page.getByText("background task started", { exact: true }), "waitFor", { timeout: 20_000 });
+  await waitForIdleTurn(page, waitFor);
+  const wakeChat = await homeSessionId();
+  if (!wakeChat) throw new Error("woken-turn chat id missing");
+  const wakeArm = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...wakeArm, hold_wake_setup: true }));
+  await Bun.write(join(cwd, "release-wake-task"), "");
+  await waitFor(async () => JSON.parse(await Bun.file(control).text()).wake_setup_barrier === "held", "woken turn held in its setup");
+  const restartAchilles = async (approval: "allow" | "ask") => {
+    app.kill("SIGTERM");
+    if (!(await waitForExit(app, 15_000))) throw new Error("achilles did not stop after SIGTERM");
+    app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: approval });
+    await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), `achilles restart in ${approval} mode`);
+  };
+  await restartAchilles("ask");
+  const framesBeforeWakeReload = requests().length;
+  await page.reload();
+  await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
+  const wakeFrames = () => requests().slice(framesBeforeWakeReload);
+  const replyTo = (method: string) => {
+    const frames = wakeFrames();
+    const sent = frames.findLast((frame) => frame.method === method && frame.params?.session_id === wakeChat);
+    return sent && frames.slice(frames.indexOf(sent) + 1).find((frame) => frame.id === sent.id && (frame.result || frame.error));
+  };
+  await waitFor(async () => Boolean(replyTo("resume")), "reloaded page resumed the chat in the woken turn's setup");
+  const wakeAttach = replyTo("resume");
+  if (wakeAttach?.result?.attached !== "live_turn") throw new Error(`reload in a woken turn's setup did not attach to it: ${redact(JSON.stringify(wakeAttach?.error ?? { attached: wakeAttach?.result?.attached ?? null }))}`);
+  await waitFor(async () => Boolean(replyTo("set_settings")), "reloaded page asked for ask mode in the woken turn's setup");
+  if (replyTo("set_settings")?.error?.code !== -32004) throw new Error(`ask mode was applied during the woken turn's setup: ${redact(JSON.stringify(replyTo("set_settings")))}`);
+  await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
+  if (await page.getByRole("alert").count()) throw new Error(`reload in a woken turn's setup showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
+  const wakeHeld = JSON.parse(await Bun.file(control).text());
+  await Bun.write(control, JSON.stringify({ ...wakeHeld, release_wake_setup_barrier: true }));
+  await gateWait.playwright(page.getByText("woken turn complete", { exact: true }), "waitFor", { timeout: 20_000 }).catch(async (error) => {
+    throw new Error(`${error}\npage after the reload in a woken turn's setup: ${redact(await page.locator("body").innerText())}`);
+  });
+  await waitForIdleTurn(page, waitFor);
+  const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
+  if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
+  await gateWait.playwright(page.getByLabel("ask before tools", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
+  if (approvalModeResponse("set_settings", wakeChat) !== "ask") throw new Error("ask mode was not applied after the woken turn ended");
+  if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
+  await restartAchilles("allow");
+  console.log("reload in a woken turn's setup asserted: the page attached, the turn ran a page tool, and ask mode applied after the turn ended");
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
   await gateSettings(page, origin, gateWait);
