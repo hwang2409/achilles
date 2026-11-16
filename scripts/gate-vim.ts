@@ -71,10 +71,10 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await stockField.inputValue() !== reloadDraft) throw new Error(`reload draft row: expected ${JSON.stringify(reloadDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
   await stockField.fill("");
   await stockField.focus();
-  await page.keyboard.press("Meta+b");
+  await page.keyboard.press(appShortcut("b"));
   if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
-  await page.keyboard.press("Meta+b");
-  await page.keyboard.press("Meta+Shift+o");
+  await page.keyboard.press(appShortcut("b"));
+  await page.keyboard.press(appShortcut("Shift+o"));
   await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== originalSession, "command+shift+O from stock composer");
   const stockSession = await sessionId();
   if (!stockSession) throw new Error("modifier row: command+shift+O did not create a chat with stock composer focus");
