@@ -21,7 +21,7 @@
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "make an expense log page, starting empty. each expense has a description, an amount that can have cents, and a category that is food, travel, or other. show a list of expenses and a form to add one."
+      "prompt": "make an expense log page, starting empty. each expense has a description, an amount that can have cents, and a category that is food, travel, or other. for now just show a list of expenses and a form to add one; no editing yet."
     },
     {
       "id": "add-action",
