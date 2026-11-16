@@ -94,6 +94,18 @@
       "fields": [
         "email"
       ]
+    },
+    {
+      "id": "no-false-count",
+      "type": "answer_excludes",
+      "page": "contacts",
+      "collection": "contacts",
+      "step": "resume",
+      "value": [
+        "6",
+        "7",
+        "10"
+      ]
     }
   ]
 }
