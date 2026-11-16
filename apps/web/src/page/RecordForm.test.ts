@@ -166,7 +166,7 @@ test("an agent write while the form has edits keeps them, says so, and discard l
   fireEvent.change(await view().findByLabelText(/status/), { target: { value: done } });
   Object.assign(stored, { status: "to read", title: "Dune Messiah", revision: 4 });
   await act(async () => { mounted?.rerender(editPage("0:1")); });
-  expect(await view().findByText(/this record changed; your edits are kept/)).toBeTruthy();
+  expect(await view().findByText("this record changed (title); your edits are kept — review and save, or discard")).toBeTruthy();
   expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
   fireEvent.click(view().getByRole("button", { name: "discard" }));
   expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(JSON.stringify("to read"));

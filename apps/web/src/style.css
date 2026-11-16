@@ -257,6 +257,9 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .full-state > .primary { min-height: 40px; }
 .full-state-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .full-state-actions > button { min-height: 40px; padding: 0 16px; }
+.kept-message { margin: 0; max-width: min(60ch, 100%); }
+.kept-message figcaption { color: var(--fulcrum-muted); }
+.kept-message blockquote { margin: 4px 0 0; padding: 8px 12px; max-height: 12em; overflow-y: auto; border-left: 2px solid var(--fulcrum-border); white-space: pre-wrap; overflow-wrap: anywhere; }
 .record-list { margin: 1rem 0; overflow-x: auto; }
 .record-list h2 { font-size: 1rem; margin: 0 0 .5rem; }
 table { width: 100%; border-collapse: collapse; }
