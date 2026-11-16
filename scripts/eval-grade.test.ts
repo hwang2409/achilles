@@ -628,8 +628,44 @@ test("a prompt step of an ask task can write or steer during its turn, at the n-
   expect(validateTask({ ...base, steps: [{ ...step, during: write }] }).steps[0].during).toEqual(write);
   expect(validateTask({ ...base, steps: [{ ...step, during: { tool: "achilles__update_task", nth: 2, steer: "use paused" } }] }).steps[0].during?.steer).toBe("use paused");
   expect(() => validateTask({ ...base, approval_mode: "allow", steps: [{ ...step, during: write }] })).toThrow("approval_mode ask");
-  expect(() => validateTask({ ...base, steps: [{ ...step, during: { ...write, steer: "and steer" } }] })).toThrow("exactly one of user_write or steer");
+  expect(() => validateTask({ ...base, steps: [{ ...step, during: { ...write, steer: "and steer" } }] })).toThrow("exactly one of user_write, steer, or restart_zeta");
   expect(() => validateTask({ ...base, steps: [{ ...step, during: { ...write, user_write: { tool: "update_project", arguments: { record_id: "p-4", revision: 1 } } } }] })).toThrow("no revision");
   // the value a scripted user write stores may be graded in the answer, like a seeded value
   expect(() => validateTask({ ...base, steps: [{ ...step, during: write }], checks: [{ id: "told", type: "answer_mentions", page: "p", step: "s1", value: ["180"] }] })).not.toThrow();
+});
+
+test("a restart_zeta step and a provider_error step validate their shapes", () => {
+  const base = { id: "fault-task", approval_mode: "ask", page_plan: [{ alias: "p", source: "fixture", bind_chat: true, create_mode: false }], agent_turns: 4, checks: [{ id: "c", type: "no_error", page: "p" }] };
+  const step = { id: "s1", kind: "prompt", page: "p", chat: "c", prompt: "add the contacts" };
+  expect(validateTask({ ...base, steps: [{ ...step, during: { tool: "achilles__add_contact", nth: 3, restart_zeta: true } }] }).steps[0].during?.restart_zeta).toBe(true);
+  expect(() => validateTask({ ...base, steps: [{ ...step, during: { tool: "achilles__add_contact", restart_zeta: false } }] })).toThrow("restart_zeta must be true");
+  expect(validateTask({ ...base, steps: [{ ...step, provider_error: { status: 529, times: 5 } }] }).steps[0].provider_error).toEqual({ status: 529, times: 5 });
+  expect(() => validateTask({ ...base, steps: [{ ...step, provider_error: { status: 200, times: 1 } }] })).toThrow("HTTP error status");
+});
+
+test("restart_recovery needs the same chat back, every earlier row, a finished turn, and an answer naming what existed", () => {
+  const check = { id: "r", type: "restart_recovery", page: "p", step: "resume", collection: "contacts", fields: ["name"] } as const;
+  const restart = { page_id: "page-1", action: "restart_zeta", ok: true, original_session_id: "s", resumed_session_id: "s", history_continuity: true, records_before: [{ collection: "contacts", id: "r1", data: { name: "Ada Lovelace" } }] };
+  const snapshot = (row: Record<string, unknown>, answer?: string): EvalSnapshot => ({ pages: [{ id: "page-1", alias: "p" }], interjections: [row], answers: answer === undefined ? {} : { resume: answer } });
+  expect(gradeCheck(check, snapshot(restart, "Ada Lovelace was already added before the restart; I added the other four.")).pass).toBe(true);
+  expect(gradeCheck(check, snapshot(restart, "all five contacts are added")).reason).toContain("does not say Ada Lovelace existed");
+  expect(gradeCheck(check, snapshot(restart)).reason).toContain("no turn finished after the restart");
+  expect(gradeCheck(check, snapshot({ ...restart, history_continuity: false }, "Ada Lovelace")).reason).toContain("rows from before the restart are missing");
+  expect(gradeCheck(check, snapshot({ ...restart, resumed_session_id: "other" }, "Ada Lovelace")).reason).toContain("different session");
+});
+
+test("overwrite_disclosed passes a kept user value or a told overwrite, and fails a silent overwrite", () => {
+  const check = { id: "o", type: "overwrite_disclosed", page: "p", step: "set", collection: "tasks", value: { field: "priority", agent_value: "high" } } as const;
+  const snapshot = (priority: string, answer: string): EvalSnapshot => ({ pages: [{ id: "page-1", alias: "p" }], answers: { set: answer }, interjections: [{ step: "set", action: "user_write", page_id: "page-1", arguments: { record_id: "t-2", priority: "low" } }], records: [{ page_id: "page-1", collection: "tasks", id: "t-2", data: { title: "Ship docs", priority } }] });
+  expect(gradeCheck(check, snapshot("low", "someone set it to low first, so I left it")).pass).toBe(true);
+  expect(gradeCheck(check, snapshot("high", "it had just been changed to low; I set it to high as you asked")).pass).toBe(true);
+  expect(gradeCheck(check, snapshot("high", "done, Ship docs is now high")).reason).toContain("without saying so");
+  expect(gradeCheck(check, snapshot("medium", "done")).reason).toContain("neither");
+});
+
+test("error_shown reads the failed turn row a chat renders", () => {
+  const check = { id: "e", type: "error_shown", page: "p", value: 529 } as const;
+  const base: EvalSnapshot = { pages: [{ id: "page-1", alias: "p" }] };
+  expect(gradeCheck(check, { ...base, failed_turns: [{ page_id: "page-1", code: "backend_error", message: "Ollama HTTP 529: overloaded" }] }).pass).toBe(true);
+  expect(gradeCheck(check, base).reason).toContain("no error with 529");
 });
