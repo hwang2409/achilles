@@ -200,7 +200,7 @@ export function App() {
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
     if (!store || !scroll) return;
-    return watchJumpToLatest(store, scroll, setShowJumpToLatest);
+    return watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
   }, [store, transcript]);
   useEffect(() => {
     const previous = previousTurn.current; previousTurn.current = turn;
@@ -286,13 +286,22 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
   const actions = useRef<HTMLDivElement>(null);
   const closeOverflow = () => { setOverflow(false); overflowButton.current?.focus(); };
   useEffect(() => {
-    // the open menu covers the notice below the header, so Escape (from anywhere) and a tap outside close it
+    // the open menu covers the notice below the header, so Escape (from anywhere, even a table row that handles it:
+    // capture runs first), a tap outside, and focus moving outside (Tab) close it
     if (!overflow) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { setOverflow(false); overflowButton.current?.focus(); } };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOverflow(false);
+      if (actions.current?.contains(document.activeElement)) overflowButton.current?.focus();
+    };
     const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    addEventListener("keydown", onKey);
+    // a null relatedTarget is a click (WebKit does not focus clicked buttons), which onDown already judges
+    const onFocusOut = (event: FocusEvent) => { if (event.relatedTarget && !actions.current?.contains(event.relatedTarget as Node)) setOverflow(false); };
+    const box = actions.current;
+    addEventListener("keydown", onKey, true);
     addEventListener("pointerdown", onDown);
-    return () => { removeEventListener("keydown", onKey); removeEventListener("pointerdown", onDown); };
+    box?.addEventListener("focusout", onFocusOut);
+    return () => { removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", onDown); box?.removeEventListener("focusout", onFocusOut); };
   }, [overflow]);
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
@@ -343,7 +352,7 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";
   if (compact) { const seconds = "retryAt" in state ? Math.max(0, Math.ceil((state.retryAt - Date.now()) / 1000)) : null; return <div className="connection-banner" role="alert"><span>{text}{seconds !== null && ` reconnecting in ${seconds}s…`} the transcript below is the last copy; your draft is kept.</span><button onClick={() => connection.retryNow()}>retry now</button></div>; }
-  const command = `zeta serve --ws ${connection.port} --ws-origin ${location.origin}`;
+  const command = connection.startCommand;
   // a short heading, the full sentence as body text; the time of the last try (not a rising attempt
   // count alone, which read as a failure) plus the count itself, so a click has something to confirm it worked.
   const heading = connectionHeadings[state.phase];
