@@ -1,0 +1,611 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "alias": "home"
+      },
+      {
+        "id": "chores",
+        "route": "/chores",
+        "alias": "chores"
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "chores",
+        "name": "add_chore"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "chores",
+        "name": "list_chores"
+      },
+      {
+        "id": "tl-done",
+        "page_id": "chores",
+        "name": "mark_chore_done"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "chores",
+        "tool_id": "tl-add",
+        "name": "add_chore",
+        "version": 1,
+        "operation": "insert",
+        "collection": "chores",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "chores",
+        "tool_id": "tl-list",
+        "name": "list_chores",
+        "version": 1,
+        "operation": "list",
+        "collection": "chores",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "chores",
+        "tool_id": "tl-done",
+        "name": "mark_chore_done",
+        "version": 1,
+        "operation": "update",
+        "collection": "chores",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "revision",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "chores",
+        "id": "chore-1",
+        "collection": "chores",
+        "data": {
+          "name": "Synthetic Dishes",
+          "status": "done"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "chores",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "chores",
+              "collection": "chores"
+            },
+            {
+              "type": "form",
+              "title": "add",
+              "tool": "add_chore"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "call-1",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "arguments": {
+          "route": "/chores"
+        }
+      },
+      {
+        "id": "call-2",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "page": "/chores",
+          "bundle": {
+            "name": "mark_chore_done"
+          }
+        }
+      },
+      {
+        "id": "call-3",
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "tool": "achilles__add_chore",
+        "arguments": {
+          "name": "Synthetic Dishes",
+          "status": "todo"
+        }
+      },
+      {
+        "id": "call-4",
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "tool": "achilles__mark_chore_done",
+        "arguments": {
+          "record_id": "chore-1",
+          "revision": 1,
+          "status": "done"
+        }
+      },
+      {
+        "id": "call-5",
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "tool": "achilles__list_chores",
+        "arguments": {}
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-1",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "chores",
+          "route": "/chores"
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-2",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "mark_chore_done",
+          "page_id": "chores"
+        }
+      },
+      {
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "call_id": "call-3",
+        "tool": "achilles__add_chore",
+        "success": true,
+        "data": {
+          "record_id": "chore-1",
+          "revision": 1,
+          "name": "Synthetic Dishes",
+          "status": "todo"
+        }
+      },
+      {
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "call_id": "call-4",
+        "tool": "achilles__mark_chore_done",
+        "success": true,
+        "data": {
+          "record_id": "chore-1",
+          "revision": 2,
+          "name": "Synthetic Dishes",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "call_id": "call-5",
+        "tool": "achilles__list_chores",
+        "success": true,
+        "data": [
+          {
+            "record_id": "chore-1",
+            "revision": 2,
+            "name": "Synthetic Dishes",
+            "status": "done"
+          }
+        ]
+      }
+    ],
+    "related_page_ids": [
+      "chores",
+      "chores"
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "route": "/",
+        "alias": "home"
+      },
+      {
+        "id": "chores",
+        "route": "/chores",
+        "alias": "chores"
+      }
+    ],
+    "tools": [
+      {
+        "id": "tl-add",
+        "page_id": "chores",
+        "name": "add_chore"
+      },
+      {
+        "id": "tl-list",
+        "page_id": "chores",
+        "name": "list_chores"
+      },
+      {
+        "id": "tl-done",
+        "page_id": "home",
+        "name": "mark_chore_done"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "chores",
+        "tool_id": "tl-add",
+        "name": "add_chore",
+        "version": 1,
+        "operation": "insert",
+        "collection": "chores",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "chores",
+        "tool_id": "tl-list",
+        "name": "list_chores",
+        "version": 1,
+        "operation": "list",
+        "collection": "chores",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tl-done",
+        "name": "mark_chore_done",
+        "version": 1,
+        "operation": "update",
+        "collection": "chores",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "done"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "revision",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "chores",
+        "id": "chore-1",
+        "collection": "chores",
+        "data": {
+          "name": "Synthetic Dishes",
+          "status": "todo"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "chores",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "list",
+              "title": "chores",
+              "collection": "chores"
+            },
+            {
+              "type": "form",
+              "title": "add",
+              "tool": "add_chore"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "call-1",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_page",
+        "arguments": {
+          "route": "/chores"
+        }
+      },
+      {
+        "id": "call-2",
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {
+          "bundle": {
+            "name": "mark_chore_done"
+          }
+        }
+      },
+      {
+        "id": "call-3",
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "tool": "achilles__add_chore",
+        "arguments": {
+          "name": "Synthetic Dishes",
+          "status": "todo"
+        }
+      },
+      {
+        "id": "call-5",
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "tool": "achilles__list_chores",
+        "arguments": {}
+      }
+    ],
+    "results": [
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-1",
+        "tool": "achilles__create_page",
+        "success": true,
+        "data": {
+          "page_id": "chores",
+          "route": "/chores"
+        }
+      },
+      {
+        "page_id": "home",
+        "chat_id": "home-chat",
+        "call_id": "call-2",
+        "tool": "achilles__create_tool",
+        "success": true,
+        "data": {
+          "name": "mark_chore_done",
+          "page_id": "home"
+        }
+      },
+      {
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "call_id": "call-3",
+        "tool": "achilles__add_chore",
+        "success": true,
+        "data": {
+          "record_id": "chore-1",
+          "revision": 1,
+          "name": "Synthetic Dishes",
+          "status": "todo"
+        }
+      },
+      {
+        "page_id": "chores",
+        "chat_id": "chores-chat",
+        "call_id": "call-5",
+        "tool": "achilles__list_chores",
+        "success": true,
+        "data": [
+          {
+            "record_id": "chore-1",
+            "revision": 1,
+            "name": "Synthetic Dishes",
+            "status": "todo"
+          }
+        ]
+      }
+    ],
+    "related_page_ids": [
+      "chores",
+      "chores"
+    ]
+  }
+}

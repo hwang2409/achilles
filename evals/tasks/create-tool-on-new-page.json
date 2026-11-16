@@ -1,0 +1,114 @@
+{
+  "id": "create-tool-on-new-page",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "chores",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 14,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "make a chores page, starting empty. each chore has a name and a status that is todo or done. for now just show a list of chores and a form to add one."
+    },
+    {
+      "id": "add-action",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "i also want to be able to mark a chore as done from the chores page."
+    },
+    {
+      "id": "use-action",
+      "kind": "prompt",
+      "page": "chores",
+      "chat": "chores-chat",
+      "prompt": "use this page's tools to add a chore called Synthetic Dishes with status todo, mark it done, then list the chores"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "chores"
+    },
+    {
+      "id": "home-created-tool",
+      "type": "successful_result",
+      "page": "home",
+      "chat": "home-chat",
+      "tool": "achilles__create_tool"
+    },
+    {
+      "id": "no-home-tool",
+      "type": "count",
+      "page": "home",
+      "name": "tool_versions",
+      "count": 0
+    },
+    {
+      "id": "update-on-new-page",
+      "type": "operations",
+      "page": "chores",
+      "value": [
+        "insert",
+        "update"
+      ]
+    },
+    {
+      "id": "update-works",
+      "type": "updated_record",
+      "page": "chores",
+      "chat": "chores-chat",
+      "value": "Synthetic Dishes",
+      "transition": {
+        "before": [
+          "todo",
+          "to_do",
+          "to-do",
+          "pending",
+          "open"
+        ],
+        "after": [
+          "done",
+          "completed",
+          "complete",
+          "finished"
+        ]
+      }
+    },
+    {
+      "id": "one-record",
+      "type": "count",
+      "page": "chores",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "page-tools-only",
+      "type": "assigned_tools_only",
+      "page": "chores"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "chores"
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools",
+    "create_tool_on_created_page"
+  ]
+}
