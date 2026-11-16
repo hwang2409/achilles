@@ -192,7 +192,7 @@ async function refreshFailureHarness(failures: number) {
         await lastRefresh.promise;
         return { session_id: "fresh", servers: ["achilles"] };
       }
-      if (method === "send") return {};
+      if (method === "send") return { accepted: true };
       throw new Error(`unexpected ${method}`);
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
@@ -575,7 +575,7 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
       if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
       if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
       if (method === "status") return { session: { session_id: attached }, state: "idle" };
-      if (method === "send") return {};
+      if (method === "send") return { accepted: true };
       throw new Error(`unexpected ${method}`);
     },
     replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },

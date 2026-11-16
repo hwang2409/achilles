@@ -287,6 +287,11 @@ const queueCases: QueueCase[] = [
     sent: ["a:first"],
   },
   {
+    name: "reload while sending, zeta took it, then dropped it (abort), retry: zeta answers the old id as dropped, so it goes out once more with a new id",
+    steps: [["enter", "first"], ["reload"], ["drop", "first"], ["retry", "first"], ["sent", ["a:first (dropped)", "a:first"]], ["rows", ["sending first"]], ["ok"]],
+    sent: ["a:first (dropped)", "a:first"],
+  },
+  {
     name: "storage refuses writes: a failed row stays in memory across a chat switch",
     steps: [["full"], ["enter", "first"], ["fail", "closed"], ["switch", "b"], ["switch", "a"]],
     sent: ["a:first"], rows: ["failed first: closed"],
@@ -372,6 +377,7 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
     setItem: (key: string, value: string) => { refuse(); values.set(key, value); }, removeItem: (key: string) => { refuse(); values.delete(key); },
   } });
   const taken = new Set<string>();
+  const dropped = new Set<string>();
   let nextDelivery = 0;
   // one page load's owners; a reload starts new ones over the same storage
   let queues = createChatQueues();
@@ -384,13 +390,19 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
       defaultValue: draftStore.get(key(chat)),
       onDraftChange: (text) => draftStore.set(key(chat), text),
       onDraftSubmit: (text) => draftStore.confirm(key(chat), text),
-      onSubmit: (text, intent, track) => {
-        const deliveryId = (intent as SendIntent).deliveryId ?? `delivery ${++nextDelivery}`;
-        if (!taken.has(deliveryId)) sent.push(`${chat}:${text}`);
-        taken.add(deliveryId);
-        deliveries.set(text, deliveryId);
-        track(deliveryId);
-        return pageSends.onSubmit(text);
+      // the real delivery code over a fake zeta that answers a reused id like delivery.py `_duplicate`
+      onSubmit: async (text, intent, track) => {
+        const zeta = { request: async (_method: string, params: { delivery_id: string }) => {
+          const deliveryId = params.delivery_id;
+          if (dropped.has(deliveryId)) return { accepted: false, duplicate: true, status: "dropped" };
+          const duplicate = taken.has(deliveryId);
+          if (!duplicate) sent.push(`${chat}:${text}`);
+          taken.add(deliveryId);
+          await pageSends.onSubmit(text);
+          return { accepted: true, ...(duplicate ? { duplicate } : {}) };
+        } };
+        const track_ = (deliveryId: string) => { deliveries.set(text, deliveryId); track(deliveryId); };
+        await deliverChatMessage(zeta as never, key(chat), text, (intent as SendIntent).deliveryId ?? `delivery ${++nextDelivery}`, false, track_);
       },
     }, fromNewChat && key(fromNewChat));
     return { chat, owner, mounted: () => { const detach = owner.attach(); owner.sync("idle", draftStore.get(key(chat))); return detach; } };
@@ -429,6 +441,8 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         // the old page's sends never answer, and its owners are gone
         case "reload": detach(); sends = heldSends(); queues = createChatQueues(); view = mount(view.chat); detach = view.mounted(); break;
         case "transcript": view.owner.echo(deliveries.get(step[1])!); break;
+        // zeta dropped what it took (a steer at abort): it holds nothing, and a reused id is answered as dropped
+        case "drop": { const at = sent.lastIndexOf(`${view.chat}:${step[1]}`); sent[at] += " (dropped)"; dropped.add(deliveries.get(step[1])!); break; }
         case "full": full = true; break;
         case "old": values.set("achilles-pending-create-texts", JSON.stringify({ [name]: step[1] })); break;
         case "rows": expect(rows()).toEqual(step[1]); break;

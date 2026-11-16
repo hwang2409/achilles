@@ -200,25 +200,35 @@ describe("steer delivery confirmation", () => {
   });
 });
 
+const ok = { accepted: true };
+const droppedCopy = { accepted: false, duplicate: true, status: "dropped" };
+const evicted = (outcome: string) => Object.assign(new Error("delivery id already used"), { code: -32010, data: { outcome } });
 const refused = (code: number) => Object.assign(new Error(`refused ${code}`), { code });
 
 describe("message delivery tracking", () => {
   test.each([
-    { name: "send", steer: false, replies: [{}], log: ["track:d1", "send:d1"] },
-    { name: "steer", steer: true, replies: [{}, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
-    { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), {}, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
-    { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), {}], log: ["track:d1", "steer:d1", "send:d1"] },
+    { name: "send", steer: false, replies: [ok], log: ["track:d1", "send:d1"] },
+    { name: "steer", steer: true, replies: [ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "send refused while a turn runs, retried as steer", steer: false, replies: [refused(-32004), ok, { status: "delivered" }], log: ["track:d1", "send:d1", "steer:d1", "delivery_status:d1"] },
+    { name: "steer refused with no turn, retried as send", steer: true, replies: [refused(-32005), ok], log: ["track:d1", "steer:d1", "send:d1"] },
     { name: "network error on the first request", steer: false, replies: [new Error("socket closed")], log: ["track:d1", "send:d1"], error: "socket closed" },
     { name: "second refusal", steer: false, replies: [refused(-32004), refused(-32005)], log: ["track:d1", "send:d1", "steer:d1"], error: "refused -32005" },
+    { name: "reused id zeta still holds", steer: false, replies: [{ accepted: true, duplicate: true }], log: ["track:d1", "send:d1"] },
+    { name: "reused id zeta dropped: one send with a fresh id", steer: false, replies: [droppedCopy, ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
+    { name: "reused steer id zeta dropped: one steer with a fresh id", steer: true, replies: [droppedCopy, ok, { status: "delivered" }], log: ["track:d1", "steer:d1", "track:fresh", "steer:fresh", "delivery_status:fresh"] },
+    { name: "fresh id answered as dropped too: shown, not retried again", steer: false, replies: [droppedCopy, droppedCopy], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"], error: "zeta dropped this message" },
+    { name: "reused id zeta took, then forgot (-32010, delivered)", steer: false, replies: [evicted("delivered")], log: ["track:d1", "send:d1"] },
+    { name: "reused id zeta dropped, then forgot (-32010, dropped): one send with a fresh id", steer: false, replies: [evicted("dropped"), ok], log: ["track:d1", "send:d1", "track:fresh", "send:fresh"] },
+    { name: "a reply zeta never sends: shown, never a confirm", steer: false, replies: [{ accepted: false, status: "later" }], log: ["track:d1", "send:d1"], error: "zeta did not accept this message" },
   ])("tracks the id once, before the first request: $name", async ({ steer, replies, log: expected, error }) => {
     const log: string[] = [];
     const client = { request: async (method: string, params: { delivery_id: string }) => {
-      log.push(`${method}:${params.delivery_id}`);
+      log.push(`${method}:${params.delivery_id === "d1" ? "d1" : "fresh"}`);
       const reply = replies.shift();
       if (reply instanceof Error) throw reply;
       return reply;
     }};
-    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id}`));
+    const delivery = deliverChatMessage(client as never, "s1", "hi", "d1", steer, (id) => log.push(`track:${id === "d1" ? "d1" : "fresh"}`));
     if (error) await expect(delivery).rejects.toThrow(error);
     else await delivery;
     expect(log).toEqual(expected);
@@ -635,7 +645,7 @@ describe("chat creation lifecycle", () => {
         if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "idle", pending_approvals: [] } };
         if (method === "status") return { session: { session_id: "owned-session" }, state: "idle" };
         if (method === "set_settings") { approval = "allow"; return { model: "offline", approval_mode: approval }; }
-        if (method === "send") { deliveries += 1; sent.push((params as { text?: string })?.text ?? ""); return {}; }
+        if (method === "send") { deliveries += 1; sent.push((params as { text?: string })?.text ?? ""); return { accepted: true }; }
         throw new Error(`unexpected ${method}`);
       },
       replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
