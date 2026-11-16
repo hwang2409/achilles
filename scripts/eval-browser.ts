@@ -98,7 +98,8 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     await ready(tab); await type(tab, text); row.new_chat_typed = true;
     // the page answers an Enter at once: a send, a steer, or a failed row; zeta answers a request within this wait
     await tab.page.waitForTimeout(2_000);
-    row.new_chat_sent = tab.frames.slice(before).filter(frame => frame.direction === "sent" && ["send", "steer"].includes(frame.value.method) && frame.value.params?.text === text).map(frame => ({ method: frame.value.method, session_id: frame.value.params.session_id }));
+    // read when the record is graded, so a send of the text that comes later (at the turn's end) counts too
+    Object.defineProperty(row, "new_chat_sent", { enumerable: true, get: () => tab.frames.slice(before).filter(frame => frame.direction === "sent" && ["send", "steer"].includes(frame.value.method) && frame.value.params?.text === text).map(frame => ({ method: frame.value.method, session_id: frame.value.params.session_id })) });
     row.new_chat_visible = (await tab.page.locator("#message-composer").innerText()).includes(text) || (await tab.page.getByRole("textbox", { name: "message", exact: true }).inputValue()).includes(text);
     const open = tab.page.locator(".create-mode-alert").getByRole("button", { name: "open it" });
     if (await open.count()) { await open.click(); await ready(tab); }
