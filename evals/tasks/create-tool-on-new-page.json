@@ -8,41 +8,41 @@
       "create_mode": true
     },
     {
-      "alias": "chores",
+      "alias": "expenses",
       "source": "created",
       "bind_chat": false,
       "create_mode": false
     }
   ],
-  "agent_turns": 14,
+  "agent_turns": 16,
   "steps": [
     {
       "id": "build",
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "make a chores page, starting empty. each chore has a name and a status that is todo or done. for now just show a list of chores and a form to add one."
+      "prompt": "make an expense log page, starting empty. each expense has a description, an amount that can have cents, and a category that is food, travel, or other. show a list of expenses and a form to add one."
     },
     {
       "id": "add-action",
       "kind": "prompt",
       "page": "home",
       "chat": "home-chat",
-      "prompt": "i also want to be able to mark a chore as done from the chores page."
+      "prompt": "i'd also like to fix mistakes later: let the expenses page's chat change an expense that is already there."
     },
     {
       "id": "use-action",
       "kind": "prompt",
-      "page": "chores",
-      "chat": "chores-chat",
-      "prompt": "use this page's tools to add a chore called Synthetic Dishes with status todo, mark it done, then list the chores"
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "prompt": "use this page's tools to add an expense Synthetic Taxi, amount 20, category food, then change its category to travel, then list the expenses"
     }
   ],
   "checks": [
     {
       "id": "page",
       "type": "page_exists",
-      "page": "chores"
+      "page": "expenses"
     },
     {
       "id": "home-created-tool",
@@ -61,7 +61,7 @@
     {
       "id": "update-on-new-page",
       "type": "operations",
-      "page": "chores",
+      "page": "expenses",
       "value": [
         "insert",
         "update"
@@ -70,41 +70,34 @@
     {
       "id": "update-works",
       "type": "updated_record",
-      "page": "chores",
-      "chat": "chores-chat",
-      "value": "Synthetic Dishes",
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "value": "Synthetic Taxi",
       "transition": {
         "before": [
-          "todo",
-          "to_do",
-          "to-do",
-          "pending",
-          "open"
+          "food"
         ],
         "after": [
-          "done",
-          "completed",
-          "complete",
-          "finished"
+          "travel"
         ]
       }
     },
     {
       "id": "one-record",
       "type": "count",
-      "page": "chores",
+      "page": "expenses",
       "name": "records",
       "count": 1
     },
     {
       "id": "page-tools-only",
       "type": "assigned_tools_only",
-      "page": "chores"
+      "page": "expenses"
     },
     {
       "id": "same-page",
       "type": "same_page",
-      "page": "chores"
+      "page": "expenses"
     }
   ],
   "goal_capabilities": [

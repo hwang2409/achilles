@@ -7,101 +7,116 @@
         "alias": "home"
       },
       {
-        "id": "chores",
-        "route": "/chores",
-        "alias": "chores"
+        "id": "expenses",
+        "route": "/expenses",
+        "alias": "expenses"
       }
     ],
     "tools": [
       {
         "id": "tl-add",
-        "page_id": "chores",
-        "name": "add_chore"
+        "page_id": "expenses",
+        "name": "add_expense"
       },
       {
         "id": "tl-list",
-        "page_id": "chores",
-        "name": "list_chores"
+        "page_id": "expenses",
+        "name": "list_expenses"
       },
       {
-        "id": "tl-done",
-        "page_id": "chores",
-        "name": "mark_chore_done"
+        "id": "tl-upd",
+        "page_id": "expenses",
+        "name": "update_expense"
       }
     ],
     "tool_versions": [
       {
-        "page_id": "chores",
+        "page_id": "expenses",
         "tool_id": "tl-add",
-        "name": "add_chore",
+        "name": "add_expense",
         "version": 1,
         "operation": "insert",
-        "collection": "chores",
+        "collection": "expenses",
         "data_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         },
         "input_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         }
       },
       {
-        "page_id": "chores",
+        "page_id": "expenses",
         "tool_id": "tl-list",
-        "name": "list_chores",
+        "name": "list_expenses",
         "version": 1,
         "operation": "list",
-        "collection": "chores",
+        "collection": "expenses",
         "data_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         },
@@ -112,29 +127,34 @@
         }
       },
       {
-        "page_id": "chores",
-        "tool_id": "tl-done",
-        "name": "mark_chore_done",
+        "page_id": "expenses",
+        "tool_id": "tl-upd",
+        "name": "update_expense",
         "version": 1,
         "operation": "update",
-        "collection": "chores",
+        "collection": "expenses",
         "data_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         },
@@ -147,18 +167,18 @@
             "revision": {
               "type": "integer"
             },
-            "status": {
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
             "record_id",
-            "revision",
-            "status"
+            "revision"
           ],
           "additionalProperties": false
         }
@@ -166,30 +186,31 @@
     ],
     "records": [
       {
-        "page_id": "chores",
-        "id": "chore-1",
-        "collection": "chores",
+        "page_id": "expenses",
+        "id": "exp-1",
+        "collection": "expenses",
         "data": {
-          "name": "Synthetic Dishes",
-          "status": "done"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "travel"
         }
       }
     ],
     "layouts": [
       {
-        "page_id": "chores",
+        "page_id": "expenses",
         "version": 1,
         "document": {
           "blocks": [
             {
               "type": "list",
-              "title": "chores",
-              "collection": "chores"
+              "title": "expenses",
+              "collection": "expenses"
             },
             {
               "type": "form",
               "title": "add",
-              "tool": "add_chore"
+              "tool": "add_expense"
             }
           ]
         }
@@ -202,7 +223,7 @@
         "chat_id": "home-chat",
         "tool": "achilles__create_page",
         "arguments": {
-          "route": "/chores"
+          "route": "/expenses"
         }
       },
       {
@@ -211,38 +232,39 @@
         "chat_id": "home-chat",
         "tool": "achilles__create_tool",
         "arguments": {
-          "page": "/chores",
+          "page": "/expenses",
           "bundle": {
-            "name": "mark_chore_done"
+            "name": "update_expense"
           }
         }
       },
       {
         "id": "call-3",
-        "page_id": "chores",
-        "chat_id": "chores-chat",
-        "tool": "achilles__add_chore",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__add_expense",
         "arguments": {
-          "name": "Synthetic Dishes",
-          "status": "todo"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
         }
       },
       {
         "id": "call-4",
-        "page_id": "chores",
-        "chat_id": "chores-chat",
-        "tool": "achilles__mark_chore_done",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__update_expense",
         "arguments": {
-          "record_id": "chore-1",
+          "record_id": "exp-1",
           "revision": 1,
-          "status": "done"
+          "category": "travel"
         }
       },
       {
         "id": "call-5",
-        "page_id": "chores",
-        "chat_id": "chores-chat",
-        "tool": "achilles__list_chores",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__list_expenses",
         "arguments": {}
       }
     ],
@@ -254,8 +276,8 @@
         "tool": "achilles__create_page",
         "success": true,
         "data": {
-          "page_id": "chores",
-          "route": "/chores"
+          "page_id": "expenses",
+          "route": "/expenses"
         }
       },
       {
@@ -265,55 +287,58 @@
         "tool": "achilles__create_tool",
         "success": true,
         "data": {
-          "name": "mark_chore_done",
-          "page_id": "chores"
+          "name": "update_expense",
+          "page_id": "expenses"
         }
       },
       {
-        "page_id": "chores",
-        "chat_id": "chores-chat",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
         "call_id": "call-3",
-        "tool": "achilles__add_chore",
+        "tool": "achilles__add_expense",
         "success": true,
         "data": {
-          "record_id": "chore-1",
+          "record_id": "exp-1",
           "revision": 1,
-          "name": "Synthetic Dishes",
-          "status": "todo"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
         }
       },
       {
-        "page_id": "chores",
-        "chat_id": "chores-chat",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
         "call_id": "call-4",
-        "tool": "achilles__mark_chore_done",
+        "tool": "achilles__update_expense",
         "success": true,
         "data": {
-          "record_id": "chore-1",
+          "record_id": "exp-1",
           "revision": 2,
-          "name": "Synthetic Dishes",
-          "status": "done"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "travel"
         }
       },
       {
-        "page_id": "chores",
-        "chat_id": "chores-chat",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
         "call_id": "call-5",
-        "tool": "achilles__list_chores",
+        "tool": "achilles__list_expenses",
         "success": true,
         "data": [
           {
-            "record_id": "chore-1",
+            "record_id": "exp-1",
             "revision": 2,
-            "name": "Synthetic Dishes",
-            "status": "done"
+            "description": "Synthetic Taxi",
+            "amount": 20,
+            "category": "travel"
           }
         ]
       }
     ],
     "related_page_ids": [
-      "chores",
-      "chores"
+      "expenses",
+      "expenses"
     ]
   },
   "bad": {
@@ -324,101 +349,116 @@
         "alias": "home"
       },
       {
-        "id": "chores",
-        "route": "/chores",
-        "alias": "chores"
+        "id": "expenses",
+        "route": "/expenses",
+        "alias": "expenses"
       }
     ],
     "tools": [
       {
         "id": "tl-add",
-        "page_id": "chores",
-        "name": "add_chore"
+        "page_id": "expenses",
+        "name": "add_expense"
       },
       {
         "id": "tl-list",
-        "page_id": "chores",
-        "name": "list_chores"
+        "page_id": "expenses",
+        "name": "list_expenses"
       },
       {
-        "id": "tl-done",
+        "id": "tl-upd",
         "page_id": "home",
-        "name": "mark_chore_done"
+        "name": "update_expense"
       }
     ],
     "tool_versions": [
       {
-        "page_id": "chores",
+        "page_id": "expenses",
         "tool_id": "tl-add",
-        "name": "add_chore",
+        "name": "add_expense",
         "version": 1,
         "operation": "insert",
-        "collection": "chores",
+        "collection": "expenses",
         "data_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         },
         "input_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         }
       },
       {
-        "page_id": "chores",
+        "page_id": "expenses",
         "tool_id": "tl-list",
-        "name": "list_chores",
+        "name": "list_expenses",
         "version": 1,
         "operation": "list",
-        "collection": "chores",
+        "collection": "expenses",
         "data_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         },
@@ -430,28 +470,33 @@
       },
       {
         "page_id": "home",
-        "tool_id": "tl-done",
-        "name": "mark_chore_done",
+        "tool_id": "tl-upd",
+        "name": "update_expense",
         "version": 1,
         "operation": "update",
-        "collection": "chores",
+        "collection": "expenses",
         "data_schema": {
           "type": "object",
           "properties": {
-            "name": {
+            "description": {
               "type": "string"
             },
-            "status": {
+            "amount": {
+              "type": "number"
+            },
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
-            "name",
-            "status"
+            "description",
+            "amount",
+            "category"
           ],
           "additionalProperties": false
         },
@@ -464,18 +509,18 @@
             "revision": {
               "type": "integer"
             },
-            "status": {
+            "category": {
               "type": "string",
               "enum": [
-                "todo",
-                "done"
+                "food",
+                "travel",
+                "other"
               ]
             }
           },
           "required": [
             "record_id",
-            "revision",
-            "status"
+            "revision"
           ],
           "additionalProperties": false
         }
@@ -483,30 +528,31 @@
     ],
     "records": [
       {
-        "page_id": "chores",
-        "id": "chore-1",
-        "collection": "chores",
+        "page_id": "expenses",
+        "id": "exp-1",
+        "collection": "expenses",
         "data": {
-          "name": "Synthetic Dishes",
-          "status": "todo"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
         }
       }
     ],
     "layouts": [
       {
-        "page_id": "chores",
+        "page_id": "expenses",
         "version": 1,
         "document": {
           "blocks": [
             {
               "type": "list",
-              "title": "chores",
-              "collection": "chores"
+              "title": "expenses",
+              "collection": "expenses"
             },
             {
               "type": "form",
               "title": "add",
-              "tool": "add_chore"
+              "tool": "add_expense"
             }
           ]
         }
@@ -519,7 +565,7 @@
         "chat_id": "home-chat",
         "tool": "achilles__create_page",
         "arguments": {
-          "route": "/chores"
+          "route": "/expenses"
         }
       },
       {
@@ -529,25 +575,26 @@
         "tool": "achilles__create_tool",
         "arguments": {
           "bundle": {
-            "name": "mark_chore_done"
+            "name": "update_expense"
           }
         }
       },
       {
         "id": "call-3",
-        "page_id": "chores",
-        "chat_id": "chores-chat",
-        "tool": "achilles__add_chore",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__add_expense",
         "arguments": {
-          "name": "Synthetic Dishes",
-          "status": "todo"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
         }
       },
       {
         "id": "call-5",
-        "page_id": "chores",
-        "chat_id": "chores-chat",
-        "tool": "achilles__list_chores",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
+        "tool": "achilles__list_expenses",
         "arguments": {}
       }
     ],
@@ -559,8 +606,8 @@
         "tool": "achilles__create_page",
         "success": true,
         "data": {
-          "page_id": "chores",
-          "route": "/chores"
+          "page_id": "expenses",
+          "route": "/expenses"
         }
       },
       {
@@ -570,42 +617,44 @@
         "tool": "achilles__create_tool",
         "success": true,
         "data": {
-          "name": "mark_chore_done",
+          "name": "update_expense",
           "page_id": "home"
         }
       },
       {
-        "page_id": "chores",
-        "chat_id": "chores-chat",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
         "call_id": "call-3",
-        "tool": "achilles__add_chore",
+        "tool": "achilles__add_expense",
         "success": true,
         "data": {
-          "record_id": "chore-1",
+          "record_id": "exp-1",
           "revision": 1,
-          "name": "Synthetic Dishes",
-          "status": "todo"
+          "description": "Synthetic Taxi",
+          "amount": 20,
+          "category": "food"
         }
       },
       {
-        "page_id": "chores",
-        "chat_id": "chores-chat",
+        "page_id": "expenses",
+        "chat_id": "expenses-chat",
         "call_id": "call-5",
-        "tool": "achilles__list_chores",
+        "tool": "achilles__list_expenses",
         "success": true,
         "data": [
           {
-            "record_id": "chore-1",
+            "record_id": "exp-1",
             "revision": 1,
-            "name": "Synthetic Dishes",
-            "status": "todo"
+            "description": "Synthetic Taxi",
+            "amount": 20,
+            "category": "food"
           }
         ]
       }
     ],
     "related_page_ids": [
-      "chores",
-      "chores"
+      "expenses",
+      "expenses"
     ]
   }
 }
