@@ -514,13 +514,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, []);
 
   useEffect(() => {
+    // read before the offline return: a retry clicked while offline must not stay set for a later, unrelated attach
+    const retrying = retryingCreation.current; retryingCreation.current = false;
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     // Selecting a chat whose tool refresh failed re-attaches it; its retry notice stays until a refresh succeeds.
     const stale = modeToggle.current.stale();
     const keepStale = stale?.idle && stale.sessionId === selectedId ? stale : null;
     if (!keepStale) { modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false); }
-    const retrying = retryingCreation.current; retryingCreation.current = false;
     if (!retrying) setCreationPageId(null);
     setCreatingChat(false);
     setAttachSlow(false);
@@ -598,8 +599,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const token = owner.current.begin(`new:${key}`, true);
     const focusClaim = claimComposerFocus();
     const run = ++newChatRun.current;
-    // the user left the chat whose first turn runs: its turn end must not select it again
-    pendingSelection.current = null;
     // the page stays (header, new-chat box) while the chat is created; it can wait for an earlier create of the page
     setState(state.phase !== "ready" && state.phase !== "empty" && state.phase !== "busy" ? { phase: "loading" } : { phase: "empty", page: state.page, serverApprovalMode: state.serverApprovalMode, credential: state.credential, newChat: true });
     setCreatingChat(true);
@@ -789,10 +788,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   }, [busy, client, openSessionId, retryAttachment]);
 
   const recordLastState = useCallback((lastState: string) => {
-    if (lastState === "running" && pendingSelection.current) pendingSelection.current.sawRunning = true;
-    if (lastState === "idle" && pendingSelection.current?.sawRunning) {
-      setSelectedId(pendingSelection.current.sessionId);
-      pendingSelection.current = null;
+    // the one owner of the pending selection: a state counts only while its chat is the shown chat. a user who moved
+    // away (new chat, another chat, back/forward) shows another view, so that chat's turn end cannot take the view back.
+    const pending = pendingSelection.current;
+    if (pending && state.phase === "ready" && state.sessionId === pending.sessionId) {
+      if (lastState === "running") pending.sawRunning = true;
+      if (lastState === "idle" && pending.sawRunning) { setSelectedId(pending.sessionId); pendingSelection.current = null; }
     }
     if (state.phase !== "ready") return;
     const token = owner.current.token();
