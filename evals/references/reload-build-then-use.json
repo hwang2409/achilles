@@ -172,6 +172,17 @@
         "attached": "live_turn",
         "turn_ended_before_attach": false,
         "answer_visible": true
+      },
+      {
+        "step": "use",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
       }
     ],
     "approvals": [],
@@ -366,6 +377,17 @@
         "attached": null,
         "turn_ended_before_attach": false,
         "answer_visible": false
+      },
+      {
+        "step": "use",
+        "page_id": "home",
+        "chat_id": "c",
+        "fired": true,
+        "session_before": "s1",
+        "session_after": "s1",
+        "attached": "live_turn",
+        "turn_ended_before_attach": false,
+        "answer_visible": true
       }
     ],
     "approvals": [],

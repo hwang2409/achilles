@@ -487,7 +487,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const usage = await readTranscriptUsage(join(stack.root, "zeta-home"), [...sessions.values()].map(session => session.id));
     await browser?.close(); await protocol.close(signal);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
-    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
+    const snapshot: EvalSnapshot = { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, chats, bundle_validations: await validateReservedBundles(stack, tools.calls, tools.results), browser: await browserRows(stack, task, pages, after, signal), form_submits: await formSubmits(stack, task, pages, after, signal), related_page_ids: relatedPages(initial, after, tools.calls), turns, wall_ms: Date.now() - started, usage: usage === "unavailable" ? undefined : usage, session_history: durable.flatMap(history => history.rows), answers };
     return { result: gradeTask(task, snapshot), snapshot };
   } catch (error) {
     for (const [chat, session] of sessions) if (!histories.has(chat)) { const history = await protocol.sessionHistory(session.id).catch(() => []); if (history.length) histories.set(chat, history); }
@@ -495,7 +495,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const bundle_validations = await validateReservedBundles(stack, tools.calls, tools.results).catch(() => []);
     const schemaValidations = task.checks.some(check => check.type === "tool_evolution") ? await validateToolVersionSchemas(stack, after, tools.calls) : {};
     for (const delivery of deliveries.values()) if (signal.aborted) { try { Object.assign(delivery, await protocol.deliveryStatus(delivery.delivery_id, 2_000)); } catch {} }
-    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], user_writes: userWrites, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
+    throw new TaskRunFailure(unresolvedDeliveryError([...deliveries.values()], signal.aborted) ?? error, { ...after, initial, ...tools, ...schemaValidations, approvals, reconnects, reloads: browser?.reloads ?? [], browser_frames: browser?.frames(), user_writes: userWrites, bundle_validations, turns, wall_ms: Date.now() - started, session_history: durable.flatMap(history => history.rows), answers });
   } finally { clearTimeout(timer); if (fatal || signal.aborted) await abortAll(); await browser?.close(); await protocol.close(); }
 }
 

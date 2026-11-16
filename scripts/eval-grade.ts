@@ -32,7 +32,7 @@ export type EvalSnapshot = {
   reconnects?: Array<Record<string, unknown>>; form_submits?: Array<Record<string, unknown>>; user_writes?: Array<Record<string, unknown>>; bundle_validations?: Array<Record<string, unknown>>; related_page_ids?: string[];
   tool_schema_validations?: Array<Record<string, unknown>>; tool_schema_validation_error?: string;
   turns?: number; wall_ms?: number; usage?: Record<string, unknown>; tool_policy?: string; observed_catalog?: string[]; session_history?: unknown[];
-  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>;
+  answers?: Record<string, string>; reloads?: Array<Record<string, unknown>>; browser_frames?: Record<string, unknown>;
   initial?: EvalSnapshot;
 };
 export type CheckResult = { id: string; pass: boolean; expected: unknown; actual: unknown; evidence: unknown; reason?: string };

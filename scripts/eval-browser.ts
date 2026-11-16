@@ -1,5 +1,6 @@
 import type { ReloadTrigger, TaskStep } from "./eval-grade";
 import type { EvalProtocol } from "./eval-protocol";
+import { createFrameRing } from "./gate-diagnostics";
 
 // Drives browser_prompt steps through the real web page: the page is zeta's controller, so its own composer sends the
 // prompt, its own approval card takes the decision, and a reload is a real page reload. The harness only watches,
@@ -7,11 +8,12 @@ import type { EvalProtocol } from "./eval-protocol";
 // queues a click. Every page action runs in order on one chain, so a reload queued before a click happens first.
 
 type Frame = { socket: number; direction: "sent" | "received"; value: Record<string, any> };
-type Tab = { page: any; frames: Frame[]; sockets: number; sessionId: string; chat: string; pageId: string; ends: number; onFrame: Set<() => void> };
+type Tab = { page: any; frames: Frame[]; sockets: number; sessionId: string; chat: string; pageId: string; ends: number; onFrame: Set<() => void>; ring: ReturnType<typeof createFrameRing> };
 type Armed = { step: TaskStep; tab: Tab; count: number; row: Record<string, unknown> };
 export type BrowserDriver = ReturnType<typeof createBrowserDriver>;
 
 const READY_MS = 20_000;
+const log = (line: string) => process.stderr.write(`eval browser: ${line}\n`);
 const SETTINGS_KEY = "achilles-settings";
 const toolName = (event: Record<string, any>) => event.data?.tool_call?.name ?? event.tool_call?.name ?? event.data?.name;
 const userText = (row: any) => row.role === "user" ? JSON.stringify(row.content ?? "") : "";
@@ -45,12 +47,12 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
   async function open(step: TaskStep, pageId: string, route: string) {
     const existing = tabs.get(step.chat); if (existing) return existing;
     browser ??= await options.chromium.launch({ headless: true });
-    const context = await browser.newContext();
+    const context = await browser.newContext(); context.setDefaultTimeout(READY_MS);
     if (options.ask) await context.addInitScript(([key]: string[]) => localStorage.setItem(key, JSON.stringify({ autoApproveDefault: false })), [SETTINGS_KEY]);
-    const page = await context.newPage(); const tab: Tab = { page, frames: [], sockets: 0, sessionId: "", chat: step.chat, pageId, ends: 0, onFrame: new Set() };
+    const page = await context.newPage(); const tab: Tab = { page, frames: [], sockets: 0, sessionId: "", chat: step.chat, pageId, ends: 0, onFrame: new Set(), ring: createFrameRing(60) };
     page.on("websocket", (socket: any) => {
       const id = ++tab.sockets;
-      const record = (direction: Frame["direction"]) => (event: { payload: unknown }) => { try { tab.frames.push({ socket: id, direction, value: JSON.parse(String(event.payload)) }); } catch { return; } for (const listener of tab.onFrame) listener(); };
+      const record = (direction: Frame["direction"]) => (event: { payload: unknown }) => { tab.ring.record(id, direction, String(event.payload)); try { tab.frames.push({ socket: id, direction, value: JSON.parse(String(event.payload)) }); } catch { return; } for (const listener of tab.onFrame) listener(); };
       socket.on("framesent", record("sent")); socket.on("framereceived", record("received"));
     });
     await page.goto(`${options.origin}${route}`, { waitUntil: "domcontentloaded", timeout: READY_MS });
@@ -63,7 +65,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     return request && frames.find(frame => frame.socket === request.socket && frame.direction === "received" && frame.value.id === request.value.id && (frame.value.result || frame.value.error));
   }
   async function reload(step: TaskStep, tab: Tab, row: Record<string, unknown>) {
-    const before = tab.frames.length; const ends = tab.ends; row.fired = true; row.session_before = tab.sessionId;
+    const before = tab.frames.length; const ends = tab.ends; row.fired = true; row.session_before = tab.sessionId; log(`${step.id}: reload at ${JSON.stringify(step.reload)}`);
     await tab.page.reload({ waitUntil: "domcontentloaded", timeout: READY_MS });
     await ready(tab); row.session_after = await shownSession(tab);
     const answer = await waitFrame(tab, () => resumeAnswer(tab, before));
@@ -85,6 +87,8 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
 
   return {
     reloads,
+    // the page's last websocket frames per chat, as safe summaries (method, event, ids, error codes), for diagnosis
+    frames: () => Object.fromEntries([...tabs].map(([chat, tab]) => [chat, tab.ring.snapshot()])),
     sessionOf: (chat: string) => tabs.get(chat)?.sessionId,
     // fed every observer event, before the harness answers approvals
     onEvent(event: Record<string, any>) {
@@ -107,7 +111,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     wake: () => wake(),
     // `register` names the page's chat before the observer joins it, so its approval requests find their chat
     async prompt(step: TaskStep, pageId: string, route: string, register: (sessionId: string) => void) {
-      const tab = await open(step, pageId, route); const observer = options.observer();
+      const tab = await open(step, pageId, route); const observer = options.observer(); log(`${step.id}: sending the prompt through the page`);
       const prior = tab.sessionId ? (await observer.sessionHistory(tab.sessionId)).filter((row: any) => row.event === "served_turn_end").length : 0;
       if (step.reload) {
         const trigger: ReloadTrigger = step.reload; const row: Record<string, unknown> = { step: step.id, page_id: pageId, chat_id: step.chat, trigger, fired: false };
@@ -134,7 +138,7 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
         if (stepFinished(history, prior, texts) && !(row?.fired && step.follow_up && !row.follow_up_sent) && (status.state === "idle" || status.session?.session_id !== tab.sessionId)) break;
         await Promise.race([woken, aborted]);
       }
-      armed = undefined; await chain; if (chainError) throw chainError;
+      armed = undefined; await chain; if (chainError) throw chainError; log(`${step.id}: turn ended`);
       const row = reloads.find(item => item.step === step.id);
       return { sessionId: tab.sessionId, prior, history, check: async (answer: string | undefined) => {
         if (!row?.fired) return;
@@ -144,6 +148,12 @@ export function createBrowserDriver(options: { chromium: any; origin: string; as
     },
     // a turn-cap or failure stop: press the page's own stop button, so nothing keeps running for the page
     async stop() { for (const tab of tabs.values()) await tab.page.locator('[data-part="composer-stop"]').click({ timeout: 2_000 }).catch(() => undefined); },
-    async close() { await browser?.close(); browser = undefined; },
+    // a browser that does not close in time is killed with its process, so a stuck page never holds the run
+    async close() {
+      const closing = browser; browser = undefined; if (!closing) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const closed = await Promise.race([closing.close().then(() => true), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), READY_MS); })]).finally(() => clearTimeout(timer));
+      if (!closed) closing.process?.()?.kill("SIGKILL");
+    },
   };
 }

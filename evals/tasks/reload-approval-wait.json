@@ -21,8 +21,9 @@
       "reload": {
         "on": "approval_request",
         "tool": "achilles__update_ticket",
-        "nth": 1
-      }
+        "nth": 2
+      },
+      "follow_up": "also close the ticket Login page times out"
     }
   ],
   "setup": {
@@ -85,7 +86,7 @@
       "type": "approval",
       "page": "tickets",
       "tool": "achilles__update_ticket",
-      "count": 2
+      "count": 3
     },
     {
       "id": "outcomes",
@@ -95,6 +96,7 @@
       "collection": "tickets",
       "value": {
         "records": [
+          "t-1",
           "t-2",
           "t-4"
         ],
