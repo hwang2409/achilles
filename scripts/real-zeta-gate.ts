@@ -889,7 +889,7 @@ try {
     }),
   );
   if (
-    metricBoxes.length !== 2 ||
+    metricBoxes.length !== 3 ||
     metricBoxes[0].top !== metricBoxes[1].top ||
     metricBoxes.some(
       (box) => box.width > 172 || box.scrollWidth > box.clientWidth,
@@ -930,6 +930,24 @@ try {
     throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
   if (filteredDetailText.includes("could not load record"))
     throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
+  const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
+  await gateWait.playwright(allBooksMetric.filter({ hasText: "1" }), "unfiltered metric before form save");
+  await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
+  const saveCountRoute = async (route: Route) => {
+    const response = await route.fetch();
+    const headers = { ...response.headers(), "x-achilles-total": "2" };
+    await route.fulfill({ response, headers });
+  };
+  await page.route("**/api/pages/*/records/books?limit=1", saveCountRoute);
+  try {
+    await page.getByRole("textbox", { name: "status" }).fill("done");
+    await page.getByRole("button", { name: "save", exact: true }).click();
+    await gateWait.playwright(page.getByText("saved", { exact: true }), "form save");
+    await gateWait.playwright(allBooksMetric.filter({ hasText: "2" }), "unfiltered metric after form save");
+  } finally {
+    await page.unroute("**/api/pages/*/records/books?limit=1", saveCountRoute);
+  }
+  console.log("real page form save refreshed the unfiltered grouped metric");
   const readingModeResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
@@ -981,7 +999,7 @@ try {
   await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
     const metrics = page.locator(".metric-strip");
-    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
+    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("all books", { exact: true }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
   }, "open page layout after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");

@@ -51,10 +51,6 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const tool = shown === null ? undefined : shown.find((item) => item.name === toolName) ?? null;
   const selected = useSelectedRow(pageId);
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
-  const section = useRef<HTMLElement>(null);
-  // a row picked far below the form (or at 390 px) would change a form the user cannot see
-  const picked = tool?.operation === "update" && row ? selected?.opener : undefined;
-  useEffect(() => { if (picked) section.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [picked]);
   const onReloadTool = () => setReload((value) => value + 1);
   // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
@@ -68,7 +64,7 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
     : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
-  return <section ref={section} className="record-form"><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+  return <section className="record-form"><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // Names which record a form edits by its first listed field, in the form heading.

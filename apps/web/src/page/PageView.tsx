@@ -19,30 +19,75 @@ function groupBlocks(blocks: Array<Record<string, unknown>>): Array<Array<Record
   return groups;
 }
 
+type CountEntry = { value: string; generation: string; request: number };
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+
+function metricQueryKey(block: Record<string, unknown>, pageId: string, credential: string): string | null {
+  if (!block.count || typeof block.collection !== "string") return null;
+  return `${pageId}\0${credential}\0${block.collection}\0${canonical(block.where ?? null)}`;
+}
+
+function useMetricCounts(blocks: Array<Record<string, unknown>>, pageId: string, credential: string, chatRefreshKey: string): Map<string, string> {
+  const writes = useRecordWrites(pageId);
+  const generation = `${chatRefreshKey}:${writes}`;
+  const entries = useRef(new Map<string, CountEntry>());
+  const [, redraw] = useState(0);
+  const queries = blocks.filter((block) => metricQueryKey(block, pageId, credential)).map((block) => ({ block, key: metricQueryKey(block, pageId, credential)! }));
+  const queryShape = queries.map(({ key }) => key).join("\n");
+  useEffect(() => {
+    const current = new Set(queries.map(({ key }) => key));
+    for (const key of entries.current.keys()) if (!current.has(key)) entries.current.delete(key);
+    for (const { block, key } of queries) {
+      const previous = entries.current.get(key);
+      if (previous?.generation === generation) continue;
+      const request = (previous?.request ?? 0) + 1;
+      entries.current.set(key, { value: "…", generation, request });
+      const query = new URLSearchParams({ limit: "1" });
+      if (block.where && typeof block.where === "object") {
+        const where = block.where as Record<string, unknown>;
+        query.set("field", String(where.field));
+        query.set("equals", JSON.stringify(where.equals));
+      }
+      void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(String(block.collection))}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then((response) => {
+        const entry = entries.current.get(key);
+        if (!entry || entry.request !== request) return;
+        entry.value = response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—";
+        redraw((value) => value + 1);
+      }).catch(() => {
+        const entry = entries.current.get(key);
+        if (entry?.request === request) { entry.value = "—"; redraw((value) => value + 1); }
+      });
+    }
+    redraw((value) => value + 1);
+    // queryShape changes only when the current metric requests change; settled and in-flight entries are reused.
+  }, [credential, generation, pageId, queryShape]);
+  return new Map(queries.map(({ key }) => [key, entries.current.get(key)?.value ?? "…"]));
+}
+
 export function PageView({ page, pageId, credential, refreshKey }: PageViewProps) {
   const blocks = page.layout.blocks;
   const leadIndex = blocks.findIndex((block) => block.type === "text");
   const lead = leadIndex >= 0 ? String(blocks[leadIndex].text ?? "") : "";
   const content = blocks.filter((_, index) => index !== leadIndex);
+  const counts = useMetricCounts(content, pageId, credential, refreshKey);
   return <main className="page-content">
     <header className="page-head">
       <div><h1>{page.title}</h1>{lead && <p className="page-lead">{lead}</p>}</div>
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>
     </header>
-    <div className="page-blocks">{groupBlocks(content).map((group) => {
-      const key = group.length === 1 ? blockIdentity(group[0], content) : metricStripIdentity(group[0], content);
-      return group.length === 1 ? <LayoutBlock key={key} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} /> : <div className="metric-strip" key={key}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />)}</div>;
+    <div className="page-blocks">{groupBlocks(content).map((group, index) => {
+      if (group[0].type === "metric") return <div className="metric-strip" key={`metric-strip:${index}`}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} value={counts.get(metricQueryKey(block, pageId, credential) ?? "")} />)}</div>;
+      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
     })}</div>
   </main>;
 }
 
-function metricStripIdentity(block: Record<string, unknown>, blocks: Array<Record<string, unknown>>): string {
-  if (typeof block.id === "string" && block.id) return `metric-strip:${block.id}`;
-  return `metric-strip:${blockIdentity(block, blocks).split(":")[0]}:${String(block.label ?? block.title ?? "metrics")}`;
-}
-
 function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<string, unknown>>): string {
-  if (typeof block.id === "string" && block.id) return `id:${block.id}`;
   const type = String(block.type);
   const signature = JSON.stringify([type, block.title, block.label, block.collection, block.tool, block.text, block.filter, block.where]);
   const ordinal = blocks.slice(0, blocks.indexOf(block) + 1).filter((candidate) => JSON.stringify([candidate.type, candidate.title, candidate.label, candidate.collection, candidate.tool, candidate.text, candidate.filter, candidate.where]) === signature).length;
@@ -53,7 +98,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
-  if (block.type === "metric") return <MetricBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
+  if (block.type === "metric") return <MetricBlock block={block} value={block.count ? "…" : undefined} />;
   if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
@@ -65,26 +110,11 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
-function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
-  const [countValue, setCountValue] = useState(block.count ? "…" : "");
-  useEffect(() => {
-    if (!block.count || typeof block.collection !== "string") return;
-    let live = true;
-    const query = new URLSearchParams({ limit: "1" });
-    if (block.where && typeof block.where === "object") {
-      const where = block.where as Record<string, unknown>;
-      query.set("field", String(where.field));
-      query.set("equals", JSON.stringify(where.equals));
-    }
-    void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(block.collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then((response) => {
-      if (live) setCountValue(response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—");
-    }).catch(() => { if (live) setCountValue("—"); });
-    return () => { live = false; };
-  }, [block.collection, block.count, block.where, credential, pageId, refreshKey]);
-  const value = block.count ? countValue : block.value == null ? "0" : String(block.value);
+function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
+  const displayValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${String(value).length > 10 ? " metric-value-long" : ""}`}>{value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${String(displayValue).length > 10 ? " metric-value-long" : ""}`}>{displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
@@ -118,13 +148,23 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const tabStop = has(focusedId) ? focusedId : has(selectedId) ? selectedId : loadedRecords[0]?.record_id;
   const columns = !chosen?.length ? recordColumns(loadedRecords) : extendColumns ? extendWithRecordKeys(chosen, loadedRecords) : chosen;
   const loading = (records === null || chosen === null) && !error;
-  const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => { const row = event.currentTarget; if (event.key === "Enter" || event.key === " ") onSelect?.(record, row); else if (event.key === "Escape") onSelect?.(null, row); else if (event.key === "ArrowDown") (row.nextElementSibling as HTMLElement | null)?.focus(); else if (event.key === "ArrowUp") (row.previousElementSibling as HTMLElement | null)?.focus(); else return; event.preventDefault(); };
+  const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => handleRecordKeyDown(event, record, onSelect);
   const visible = expanded ? loadedRecords : loadedRecords.slice(0, 5);
   return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{total.toLocaleString()}</span></h2><span>sorted by updated</span></header>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><LoadedRecordTable columns={columns} records={visible} collection={collection} title={title} selectedId={selectedId} tabStop={tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{total > 5 && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${total - 5} more`}</button><small>{expanded ? `${loadedRecords.length} of ${total}` : `5 of ${total}`}</small></div>}</>}</section>;
 }
 
+function handleRecordKeyDown(event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>, onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void) {
+  const row = event.currentTarget;
+  if (event.key === "Enter" || event.key === " ") onSelect?.(record, row);
+  else if (event.key === "Escape") onSelect?.(null, row);
+  else if (event.key === "ArrowDown") (row.nextElementSibling as HTMLElement | null)?.focus();
+  else if (event.key === "ArrowUp") (row.previousElementSibling as HTMLElement | null)?.focus();
+  else return;
+  event.preventDefault();
+}
+
 function LoadedRecordTable({ columns, records, collection, title, selectedId, tabStop, onSelect, onFocus, onKeyDown }: { columns: string[]; records: Record<string, unknown>[]; collection?: string; title: string; selectedId?: unknown; tabStop?: unknown; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void; onFocus: (id: unknown) => void; onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => void }) {
-  return <table role={onSelect ? "grid" : undefined} aria-label={title} data-collection={collection}><thead><tr>{columns.map((column) => <th key={column} data-column={column}>{column}</th>)}</tr></thead><tbody>{records.map((record, index) => <tr key={String(record.record_id ?? index)} data-record-id={record.record_id == null ? undefined : String(record.record_id)} {...onSelect && { tabIndex: record.record_id === tabStop ? 0 : -1, "aria-selected": record.record_id === selectedId, onFocus: () => onFocus(record.record_id), onClick: (event: MouseEvent<HTMLTableRowElement>) => onSelect(record, event.currentTarget), onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column} data-column={column} className={column === "status" ? "record-status-cell" : column === "updated" ? "record-updated-cell" : undefined}>{column === "status" ? <span className="record-status"><RecordMark status={String(record[column] ?? "")} />{formatRecordValue(record[column]) || "—"}</span> : formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>;
+  return <table role={onSelect ? "grid" : undefined} aria-label={title} data-collection={collection}><thead><tr>{columns.map((column) => <th key={column} data-column={column}>{column}</th>)}</tr></thead><tbody>{records.map((record, index) => <tr key={String(record.record_id ?? index)} data-record-id={record.record_id == null ? undefined : String(record.record_id)} {...onSelect && { tabIndex: record.record_id === tabStop ? 0 : -1, "aria-selected": record.record_id === selectedId, onFocus: () => onFocus(record.record_id), onClick: (event: MouseEvent<HTMLTableRowElement>) => onSelect(record, event.currentTarget), onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => onKeyDown(event, record) }}>{columns.map((column) => <td key={column} data-column={column} className={column === "updated" ? "record-updated-cell" : undefined}>{column === "status" ? <span className="record-status"><RecordMark status={String(record[column] ?? "")} />{formatRecordValue(record[column]) || "—"}</span> : formatRecordValue(record[column])}</td>)}</tr>)}</tbody></table>;
 }
 
 function formatRecordValue(value: unknown): string { return value !== null && typeof value === "object" ? JSON.stringify(value) : String(value ?? ""); }

@@ -43,7 +43,6 @@
 .record-list tr[aria-selected="true"] td:first-child { color: var(--fulcrum-fg); font-weight: 600; }
 .record-list tr:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 .record-reveal { display: flex; justify-content: space-between; margin: 12px 0 0; font-size: 12px; }
-.record-reveal span { color: var(--fulcrum-accent); }
 .record-reveal small { color: var(--fulcrum-muted); font-size: inherit; font-variant-numeric: tabular-nums; }
 .record-detail dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 0 16px; margin: 0; }
 .record-detail dl > div { display: contents; }
@@ -67,7 +66,7 @@
 .record-count { font-weight: 400; }
 .record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
 .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
-.record-detail dd .record-mark { margin-right: 6px; }
+.record-detail dd .record-mark { margin-right: 8px; }
 .selected-note, .form-note { color: var(--fulcrum-muted); font-size: 12px; font-weight: 400; }
 @media (max-width: 640px) {
   .record-list table { table-layout: fixed; }

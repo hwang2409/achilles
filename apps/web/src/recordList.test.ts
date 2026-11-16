@@ -185,11 +185,32 @@ describe("list columns", () => {
 
 
 test("page metrics render a live static layout value", () => {
-  const page = { title: "page", route: "/page", layout: { blocks: [{ id: "score", type: "metric", label: "score", value: 1 }] } };
+  const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "score", value: "1" }] } };
   const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
   expect(result.getByText("1")).toBeTruthy();
-  result.rerender(React.createElement(PageView, { page: { ...page, active_layout_version: 2, layout: { blocks: [{ id: "score", type: "metric", label: "score", value: 2 }] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  result.rerender(React.createElement(PageView, { page: { ...page, active_layout_version: 2, layout: { blocks: [{ type: "metric", label: "score", value: "2" }] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
   expect(result.getByText("2")).toBeTruthy();
+});
+
+test("page-owned metric counts survive layout edits and refresh after writes", async () => {
+  holdFetches();
+  const metric = (label: string) => ({ type: "metric", label, count: true, collection: `books-${label}` });
+  const page = { title: "page", route: "/page", layout: { blocks: [metric("one"), metric("two")] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(calls).toHaveLength(2);
+  await settle(calls[0], []);
+  await settle(calls[1], [{ record_id: "book-1" }]);
+  expect(text(result)).toContain("0");
+  expect(text(result)).toContain("1");
+  result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: [metric("new"), metric("one"), metric("two")] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(calls).toHaveLength(3);
+  await settle(calls[2], [{ record_id: "book-2" }, { record_id: "book-3" }]);
+  expect(text(result)).toContain("2");
+  result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: [metric("one"), metric("two")] } }, pageId: "metric-page", credential: "secret", refreshKey: "0:1" }));
+  expect(calls).toHaveLength(5);
+  await settle(calls[3], [{ record_id: "book-4" }]);
+  await settle(calls[4], [{ record_id: "book-5" }]);
+  expect(text(result)).toContain("1");
 });
 
 test("keyboard and click selection update the row and detail", async () => {
