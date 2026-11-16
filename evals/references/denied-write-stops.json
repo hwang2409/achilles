@@ -40,6 +40,9 @@
         }
       ],
       "records": []
+    },
+    "answers": {
+      "write": "I couldn't add the note: the request was denied, so nothing was saved. If you approve it, I can try again."
     }
   },
   "bad": {
@@ -134,6 +137,9 @@
         }
       ],
       "records": []
+    },
+    "answers": {
+      "write": "Done, I added 1 note saying hi."
     }
   }
 }
