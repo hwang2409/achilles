@@ -137,6 +137,19 @@ test("suite selection validates every task and sums one command budget", async (
   expect(hard.every(task => task.suite === "hard")).toBe(true);
   // the hard suite fits one command at N=1; N=3 runs take a TASK= subset
   expect(() => assertTurnBudget(reserveTurns(hard, 1))).not.toThrow();
+  // LOOP budget: a full run of core or hard is at most 12 tasks; the loader refuses a 13th
+  expect(tasks.length).toBeLessThanOrEqual(12); expect(hard.length).toBeLessThanOrEqual(12);
+  const root = await mkdtemp(join(tmpdir(), "achilles-suite-budget-"));
+  try {
+    const task = JSON.parse(await readFile(new URL("../evals/tasks/harness-smoke.json", import.meta.url), "utf8"));
+    for (let index = 0; index < 13; index++) await Bun.write(join(root, `budget-${index}.json`), JSON.stringify({ ...task, id: `budget-${index}`, suite: "hard" }));
+    await expect(selectTasks(undefined, root, "hard")).rejects.toThrow("the hard suite has 13 tasks; a full run allows at most 12");
+    expect((await selectTasks("budget-0,budget-1", root, "hard")).length).toBe(2);
+  } finally { await rm(root, { recursive: true, force: true }); }
+  // a fault the real provider cannot take needs the scripted marker, so a real run reports it unsupported instead of spending turns
+  const faulted = JSON.parse(await readFile(new URL("../evals/tasks/provider-error-retried.json", import.meta.url), "utf8"));
+  expect(validateTask(faulted).backend).toBe("scripted");
+  expect(() => validateTask({ ...faulted, backend: undefined })).toThrow('set backend: "scripted"');
 });
 
 test("turn reservation is command-wide", () => {

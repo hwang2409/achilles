@@ -639,7 +639,7 @@ test("a restart_zeta step and a provider_error step validate their shapes", () =
   const step = { id: "s1", kind: "prompt", page: "p", chat: "c", prompt: "add the contacts" };
   expect(validateTask({ ...base, steps: [{ ...step, during: { tool: "achilles__add_contact", nth: 3, restart_zeta: true } }] }).steps[0].during?.restart_zeta).toBe(true);
   expect(() => validateTask({ ...base, steps: [{ ...step, during: { tool: "achilles__add_contact", restart_zeta: false } }] })).toThrow("restart_zeta must be true");
-  expect(validateTask({ ...base, steps: [{ ...step, provider_error: { status: 529, times: 5 } }] }).steps[0].provider_error).toEqual({ status: 529, times: 5 });
+  expect(validateTask({ ...base, backend: "scripted", steps: [{ ...step, provider_error: { status: 529, times: 5 } }] }).steps[0].provider_error).toEqual({ status: 529, times: 5 });
   expect(() => validateTask({ ...base, steps: [{ ...step, provider_error: { status: 200, times: 1 } }] })).toThrow("HTTP error status");
 });
 

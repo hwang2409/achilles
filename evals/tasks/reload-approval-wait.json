@@ -1,6 +1,6 @@
 {
   "id": "reload-approval-wait",
-  "suite": "hard",
+  "suite": "focused",
   "page_plan": [
     {
       "alias": "tickets",

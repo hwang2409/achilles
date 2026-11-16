@@ -1,6 +1,7 @@
 {
   "id": "restart-zeta-batch-scripted",
   "suite": "hard",
+  "backend": "scripted",
   "page_plan": [
     {
       "alias": "tasks",
