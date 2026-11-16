@@ -18,8 +18,9 @@ type AttachedChat = { sessionId: string };
  * every step (new_session, register, settings, mapping, attach, create mode) and stops a stale create for good.
  * `create: false` only finishes the page's pending create. The page's new-chat queue (`new:<page>`) moves to the chat
  * that the page opens afterwards: the created chat, or the chat a stale create already mapped as home.
- * `text`: the first message. It stays in storage until the create ends; a later page load that finishes or drops the
- * create (the old page's send died) puts it, unsent, into the box of the chat the page opens.
+ * `text`: the first message. It stays in storage until zeta takes it (`sent`); a later page load that finishes or drops
+ * the create, or opens the created chat before zeta took it (the old page's send died), puts it, unsent, into the box of
+ * the chat the page opens.
  */
 export type CreateRequest<T extends AttachedChat> = {
   input: ChatCreationInput;
