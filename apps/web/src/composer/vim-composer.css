@@ -42,7 +42,8 @@
   gap: 8px;
   min-width: 0;
 }
-.vim-guidance [data-part="composer-status"] { flex: 1; }
+.vim-guidance [data-part="composer-status"] { flex: 1; min-width: 0; }
+.vim-guidance [data-part="composer-hint"] { display: block; white-space: nowrap; }
 
 .vim-mode-chip {
   flex: none;
