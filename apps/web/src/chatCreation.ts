@@ -1,11 +1,13 @@
 import type { ZetaClient } from "@fulcrum/zeta";
 import { chatQueues } from "./composer/chatQueues";
-import { applyApprovalMode, pageBinding, runningSession } from "./zeta/session";
+import { applyApprovalMode, ChatBusyError, pageBinding, runningSession } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
 const MODE_STORAGE_KEY = "achilles-pending-create-modes";
 /** page -> the first message whose create is running: a page load that ends the old page's send puts it in a box again */
 const TEXT_STORAGE_KEY = "achilles-pending-create-texts";
+/** page -> the chat that the create of its kept first message made: only that chat's box may take the message */
+const TEXT_CHAT_STORAGE_KEY = "achilles-pending-create-text-chats";
 const stages = ["created", "registered", "approvalApplied", "mapped", "attached", "modeApplied"] as const;
 type Stage = typeof stages[number];
 
@@ -108,9 +110,10 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
 
   const forget = (pageId: string) => { clearDurable(pageId); complete(pageId); };
   const dropText = (pageId: string) => {
-    const texts = readMap(storage, TEXT_STORAGE_KEY, "string");
-    if (!Object.hasOwn(texts, pageId)) return;
-    delete texts[pageId]; writeMap(storage, TEXT_STORAGE_KEY, texts);
+    for (const key of [TEXT_STORAGE_KEY, TEXT_CHAT_STORAGE_KEY]) {
+      const map = readMap(storage, key, "string");
+      if (Object.hasOwn(map, pageId)) { delete map[pageId]; writeMap(storage, key, map); }
+    }
   };
   /** pages whose kept first message this page load sent into its create: it still holds that message (a queue row or a starter send) */
   const started = new Set<string>();
@@ -145,10 +148,12 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     const operation = (async () => {
       let record = existing;
       if (!record) {
+        // kept before anything can fail, so a page load during the status read or new_session still finds it (it opens no chat yet)
+        if (text) { writeMap(storage, TEXT_STORAGE_KEY, { ...readMap(storage, TEXT_STORAGE_KEY, "string"), [input.pageId]: text }); started.add(input.pageId); }
         // zeta refuses new_session while any turn runs, and the client repeats a refused one 3 times (fulcrum retryBusy):
         // read status first, so a click during a turn sends no new_session and its refusal is never repeated
-        if (await step(() => runningSession(input.client))) throw Object.assign(new Error("a turn is already running"), { code: -32004 });
-        if (text) { writeMap(storage, TEXT_STORAGE_KEY, { ...readMap(storage, TEXT_STORAGE_KEY, "string"), [input.pageId]: text }); started.add(input.pageId); }
+        const busy = await step(() => runningSession(input.client));
+        if (busy) throw new ChatBusyError(busy);
         const result = await step(() => input.client.request("new_session", pageBinding(input.credential, input.cwd))) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
@@ -191,6 +196,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         const modes = readModes(storage); delete modes[input.pageId]; writeModes(storage, modes);
       }
       clearDurable(input.pageId);
+      if (started.has(input.pageId)) writeMap(storage, TEXT_CHAT_STORAGE_KEY, { ...readMap(storage, TEXT_CHAT_STORAGE_KEY, "string"), [input.pageId]: attached.sessionId });
       chatQueues.created(`new:${input.pageId}`, attached.sessionId); // before the chat renders, so its composer takes the new-chat queue
       handOff(input.pageId, attached.sessionId, true);
       await publishReady(attached);
@@ -223,11 +229,19 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     /** Drop the page's failed create, so the page opens on its empty state with the new-chat draft. */
     discard(pageId: string) { if (!running.has(pageId)) { handOff(pageId, `new:${pageId}`, false); forget(pageId); } },
     /** The page opens `chat` (default: its new-chat box) with no create pending. A first message kept by an earlier page
-     * load (it loaded again during new_session, or after the create but before zeta took the send) goes into that box,
-     * unsent; `delivered`: the chat's transcript already has a user message, so zeta took it and it is dropped. */
-    restoreUnsent(pageId: string, chat = `new:${pageId}`, delivered = false) {
+     * load goes into that box, unsent, only when `chat` is the chat its create made (the page loaded again after the create
+     * but before zeta took the send); `took(text)`: the chat's transcript holds this text, so zeta took it and it is dropped.
+     * Else (a refused create, a load during new_session, another chat opened) it goes into the new-chat box, never another chat's. */
+    restoreUnsent(pageId: string, chat = `new:${pageId}`, took: (text: string) => boolean = () => false) {
       if (running.has(pageId) || pending(pageId)) return;
-      if (delivered) dropText(pageId); else handOff(pageId, chat, true);
+      const text = readMap(storage, TEXT_STORAGE_KEY, "string")[pageId];
+      if (text === undefined) return;
+      const own = readMap(storage, TEXT_CHAT_STORAGE_KEY, "string")[pageId] === chat;
+      if (own && took(text)) dropText(pageId); else handOff(pageId, own ? chat : `new:${pageId}`, true);
+    },
+    /** the user cancelled (x) the unsent message `text`: a kept first message with that text must not come back */
+    cancelled(pageId: string, text: string) {
+      if (readMap(storage, TEXT_STORAGE_KEY, "string")[pageId]?.trim() === text.trim()) { started.delete(pageId); dropText(pageId); }
     },
     /** zeta took a message of this page's chat: a kept first message is sent */
     sent(pageId: string) { started.delete(pageId); dropText(pageId); },

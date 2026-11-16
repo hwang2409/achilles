@@ -64,6 +64,10 @@ export function firstUserText(store: SessionLease["store"]): string {
   return "";
 }
 
+/** the transcript holds a user message with exactly `text` (after trim) */
+const hasUserText = (store: SessionLease["store"], text: string) =>
+  store.getState().outline.some(({ id }) => { const item = store.getItem(id); return item?.type === "user" && item.event.type === "user_message" && item.event.text.trim() === text.trim(); });
+
 // marks the chat sent (it joins the chat list) and stores its first-message title once
 export function persistFirstMessage(sessionId: string, firstMessage: string, onSuccess: () => void): void {
   void fetch(`/api/chats/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ first_message: firstMessage }) })
@@ -185,7 +189,7 @@ export async function attachPage(
     for (const sessionId of candidates) {
       try {
         const ready = await attachSession(sessionId);
-        creation.restoreUnsent(page.id, ready.sessionId, Boolean(firstUserText(ready.lease.store)));
+        creation.restoreUnsent(page.id, ready.sessionId, (text) => hasUserText(ready.lease.store, text));
         return ready;
       }
       catch (caught) {
@@ -651,6 +655,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     });
   }, [client, createFirstChat, state, updateReady]);
 
+  const cancelled = useCallback((text: string) => {
+    if (state.phase === "ready" || state.phase === "empty" || state.phase === "busy") creation.current.cancelled(state.page.id, text);
+  }, [state]);
+
   const setPendingCreateMode = useCallback((current: EmptyState, enabled: boolean) => {
     creation.current.setCreateMode(current.page.id, enabled);
     setCreationPageId(current.page.id);
@@ -718,5 +726,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, send, cancelled, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }

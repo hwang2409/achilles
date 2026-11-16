@@ -43,7 +43,8 @@ export const chatQueues = {
     const box = draftStore.get(newChat);
     // the old page may have put the message back into the new-chat box as it unloaded
     const texts = box.includes(text) ? [box] : [text, box];
-    if (chat === newChat) draftStore.set(chat, texts.filter((item) => item.trim()).join("\n\n"));
+    // in the new-chat box it goes on to the chat that the page creates next (`created`), unless the box shows first
+    if (chat === newChat) { draftStore.set(chat, texts.filter((item) => item.trim()).join("\n\n")); returned.set(chat, draftStore.get(chat)); }
     else { appendDraft(chat, texts); draftStore.set(newChat, ""); }
     noteBox(chat, newChat);
   },

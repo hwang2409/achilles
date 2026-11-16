@@ -35,6 +35,8 @@ export type ComposerAdapterProps = ComposerProps & {
 export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
   onDraftSubmit: (sent: string) => void;
+  /** the user cancelled (x) a submitted message that zeta never took */
+  onCancel?: (text: string) => void;
   isTurnRunning?: () => boolean;
 };
 
@@ -139,7 +141,9 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       void drain();
     },
     cancel(id) {
+      const before = model.queue;
       apply(id === undefined ? { type: "cancel-last" } : { type: "cancel", id });
+      for (const item of before) if (!model.queue.includes(item)) current.onCancel?.(item.text);
       void drain();
     },
     attach() {
