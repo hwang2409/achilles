@@ -2,10 +2,27 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from fractions import Fraction
 from typing import Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaError
+from jsonschema.validators import extend
+
+
+def _multiple_of(validator, divisor, instance, schema):
+    # exact decimal check: float math says 19.99 is not a multiple of 0.01
+    if not validator.is_type(instance, "number"):
+        return
+    try:
+        exact = (Fraction(str(instance)) / Fraction(str(divisor))).denominator == 1
+    except (ValueError, OverflowError):
+        exact = False
+    if not exact:
+        yield JsonSchemaError(f"{instance!r} is not a multiple of {divisor}")
+
+
+_Validator = extend(Draft202012Validator, {"multipleOf": _multiple_of})
 
 _SAFE_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -114,7 +131,7 @@ def _expected(error: JsonSchemaError, required_name: str | None = None) -> str:
 
 
 def validate_schema(instance: Any, schema: Mapping[str, Any], prefix: str = "") -> None:
-    error = next(iter(Draft202012Validator(schema).iter_errors(instance)), None)
+    error = next(iter(_Validator(schema).iter_errors(instance)), None)
     if error is not None:
         required_name = _required_name(error) if error.validator == "required" else None
         pointer_parts = tuple(error.absolute_path)
