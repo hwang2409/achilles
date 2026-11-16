@@ -255,7 +255,10 @@ export function zetaRevisionDecision(pin: string, checkout: string | null, headK
   if (!checkout) return { kind: "unknown", reason: "zeta is not installed from a git checkout" };
   if (!headKnown) return { kind: "unknown", reason: `the installed zeta at ${checkout} is not a git checkout` };
   if (pinIsAncestor) return { kind: "ok" };
-  return { kind: "behind", command: `git -C ${shellQuote(checkout)} fetch && git -C ${shellQuote(checkout)} checkout --detach ${pin} && uv tool install --editable ${shellQuote(checkout)}` };
+  return {
+    kind: "behind",
+    command: `create a separate pinned checkout at .cache/zeta (leave ${shellQuote(checkout)} unchanged):\ngit clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${pin} && uv tool install --editable .cache/zeta\nPATH="$(uv tool dir --bin):$PATH" make dev`,
+  };
 }
 async function checkZetaRevision() {
   const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();

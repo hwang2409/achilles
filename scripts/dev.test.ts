@@ -122,7 +122,7 @@ test("make dev refuses an installed zeta older than the pin", () => {
   expect(zetaRevisionDecision(pin, checkout, true, true)).toEqual({ kind: "ok" });
   expect(zetaRevisionDecision(pin, checkout, true, false)).toEqual({
     kind: "behind",
-    command: `git -C '${checkout}' fetch && git -C '${checkout}' checkout --detach ${pin} && uv tool install --editable '${checkout}'`,
+    command: `create a separate pinned checkout at .cache/zeta (leave '${checkout}' unchanged):\ngit clone https://github.com/hwang2409/zeta .cache/zeta && git -C .cache/zeta checkout --detach ${pin} && uv tool install --editable .cache/zeta\nPATH="$(uv tool dir --bin):$PATH" make dev`,
   });
   expect(zetaRevisionDecision(pin, null, false, false).kind).toBe("unknown");
   expect(zetaRevisionDecision(pin, checkout, false, false).kind).toBe("unknown");
@@ -516,8 +516,12 @@ esac
     const stderr = await new Response(child.stderr).text();
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain(`installed zeta is older than the pin ${pin}`);
-    expect(stderr).toContain(`git -C '${checkout}' fetch`);
-    expect(stderr).toContain(`checkout --detach ${pin}`);
+    expect(stderr).toContain("create a separate pinned checkout at .cache/zeta");
+    expect(stderr).toContain("git -C .cache/zeta checkout --detach");
+    expect(stderr).toContain("PATH=\"$(uv tool dir --bin):$PATH\" make dev");
+    expect(stderr).not.toContain(`git -C '${checkout}' fetch`);
+    expect(stderr).not.toContain(`git -C '${checkout}' checkout`);
+    expect(stderr).not.toContain(`git -C '${checkout}' reset`);
     expect(existsSync(started)).toBe(false);
   } finally {
     await rm(temp, { recursive: true, force: true });
