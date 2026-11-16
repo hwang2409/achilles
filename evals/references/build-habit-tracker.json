@@ -1,0 +1,403 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      },
+      {
+        "id": "habits",
+        "alias": "habits"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "habits",
+        "tool_id": "tl-add_habit",
+        "name": "add_habit",
+        "version": 1,
+        "operation": "insert",
+        "collection": "habits",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "skipped"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "skipped"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "habits",
+        "tool_id": "tl-list_habits",
+        "name": "list_habits",
+        "version": 1,
+        "operation": "list",
+        "collection": "habits",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "skipped"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "habits",
+        "id": "rec-1",
+        "collection": "habits",
+        "data": {
+          "name": "Synthetic Stretch",
+          "status": "done"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "habits",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Done",
+              "collection": "habits",
+              "count": true,
+              "where": {
+                "field": "status",
+                "equals": "done"
+              }
+            },
+            {
+              "type": "list",
+              "title": "habits",
+              "collection": "habits"
+            },
+            {
+              "type": "form",
+              "title": "add",
+              "tool": "add_habit"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "call-1",
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "tool": "achilles__add_habit",
+        "arguments": {
+          "name": "Synthetic Stretch",
+          "status": "done"
+        }
+      },
+      {
+        "id": "call-2",
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "tool": "achilles__inspect_page",
+        "arguments": {}
+      }
+    ],
+    "results": [
+      {
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "call_id": "call-1",
+        "tool": "achilles__add_habit",
+        "success": true,
+        "data": {
+          "record_id": "rec-1",
+          "name": "Synthetic Stretch",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "call_id": "call-2",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "layout_version": 1,
+          "metric_values": [
+            {
+              "block": 0,
+              "value": 1
+            }
+          ]
+        }
+      }
+    ],
+    "form_submits": [
+      {
+        "page_id": "habits",
+        "tool": "add_habit",
+        "collection": "habits",
+        "status": 200,
+        "new_records": 1
+      }
+    ],
+    "related_page_ids": [
+      "habits"
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "home"
+      },
+      {
+        "id": "habits",
+        "alias": "habits"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "habits",
+        "tool_id": "tl-add_habit",
+        "name": "add_habit",
+        "version": 1,
+        "operation": "insert",
+        "collection": "habits",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "skipped"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "skipped"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "page_id": "habits",
+        "tool_id": "tl-list_habits",
+        "name": "list_habits",
+        "version": 1,
+        "operation": "list",
+        "collection": "habits",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "skipped"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    ],
+    "records": [
+      {
+        "page_id": "habits",
+        "id": "rec-1",
+        "collection": "habits",
+        "data": {
+          "name": "Synthetic Stretch",
+          "status": "done"
+        }
+      }
+    ],
+    "layouts": [
+      {
+        "page_id": "habits",
+        "version": 1,
+        "document": {
+          "blocks": [
+            {
+              "type": "metric",
+              "label": "Done",
+              "collection": "habits",
+              "count": true,
+              "where": {
+                "field": "status",
+                "equals": "skipped"
+              }
+            },
+            {
+              "type": "list",
+              "title": "habits",
+              "collection": "habits"
+            },
+            {
+              "type": "form",
+              "title": "add",
+              "tool": "add_habit"
+            }
+          ]
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "call-1",
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "tool": "achilles__add_habit",
+        "arguments": {
+          "name": "Synthetic Stretch",
+          "status": "done"
+        }
+      },
+      {
+        "id": "call-2",
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "tool": "achilles__inspect_page",
+        "arguments": {}
+      },
+      {
+        "id": "call-3",
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "tool": "achilles__create_tool",
+        "arguments": {}
+      }
+    ],
+    "results": [
+      {
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "call_id": "call-1",
+        "tool": "achilles__add_habit",
+        "success": true,
+        "data": {
+          "record_id": "rec-1",
+          "name": "Synthetic Stretch",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "habits",
+        "chat_id": "habits-chat",
+        "call_id": "call-2",
+        "tool": "achilles__inspect_page",
+        "success": true,
+        "data": {
+          "layout_version": 1,
+          "metric_values": [
+            {
+              "block": 0,
+              "value": 1
+            }
+          ]
+        }
+      }
+    ],
+    "form_submits": [
+      {
+        "page_id": "habits",
+        "tool": "add_habit",
+        "collection": "habits",
+        "status": 200,
+        "new_records": 1
+      }
+    ],
+    "related_page_ids": [
+      "habits"
+    ]
+  }
+}

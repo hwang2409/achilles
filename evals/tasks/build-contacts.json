@@ -1,0 +1,103 @@
+{
+  "id": "build-contacts",
+  "prompt": "make a contacts page, starting empty. each contact has a name and an email, both required, and a group that is work or personal. show a list filtered to only the contacts whose group field equals work, and a form to add a contact.",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "contacts",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat"
+    },
+    {
+      "id": "add-one",
+      "kind": "prompt",
+      "page": "contacts",
+      "chat": "contacts-chat",
+      "prompt": "use this page's tools to add a contact named Synthetic Ada with email ada@example.test in the work group"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "contacts"
+    },
+    {
+      "id": "one-record",
+      "type": "count",
+      "page": "contacts",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "record",
+      "type": "schema_roundtrip",
+      "page": "contacts",
+      "value": [
+        "Synthetic Ada",
+        "ada@example.test",
+        "work"
+      ]
+    },
+    {
+      "id": "list",
+      "type": "list_shows",
+      "page": "contacts",
+      "value": "Synthetic Ada"
+    },
+    {
+      "id": "list-filter",
+      "type": "layout_contains",
+      "page": "contacts",
+      "value": {
+        "blocks": [
+          {
+            "type": "list",
+            "filter": {
+              "field": "group",
+              "equals": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "form-submit",
+      "type": "form_submit",
+      "page": "contacts",
+      "value": {
+        "string": "Form Contact",
+        "integer": "1",
+        "number": "1"
+      }
+    },
+    {
+      "id": "page-tools-only",
+      "type": "assigned_tools_only",
+      "page": "contacts"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "contacts"
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
+  ]
+}

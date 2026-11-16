@@ -1,0 +1,94 @@
+{
+  "id": "build-expense-log",
+  "prompt": "make an expense log page, starting empty. each expense has a description, an amount that can have cents, and a category that is food, travel, or other. show a list of expenses and a form to add one.",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    },
+    {
+      "alias": "expenses",
+      "source": "created",
+      "bind_chat": false,
+      "create_mode": false
+    }
+  ],
+  "agent_turns": 12,
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat"
+    },
+    {
+      "id": "add-one",
+      "kind": "prompt",
+      "page": "expenses",
+      "chat": "expenses-chat",
+      "prompt": "use this page's tools to add one expense: Synthetic Lunch, amount 12.50, category food"
+    }
+  ],
+  "checks": [
+    {
+      "id": "page",
+      "type": "page_exists",
+      "page": "expenses"
+    },
+    {
+      "id": "one-record",
+      "type": "count",
+      "page": "expenses",
+      "name": "records",
+      "count": 1
+    },
+    {
+      "id": "record",
+      "type": "schema_roundtrip",
+      "page": "expenses",
+      "value": [
+        "Synthetic Lunch",
+        "food"
+      ]
+    },
+    {
+      "id": "number-stored",
+      "type": "record",
+      "page": "expenses",
+      "value": {
+        "amount": 12.5
+      }
+    },
+    {
+      "id": "list",
+      "type": "list_shows",
+      "page": "expenses",
+      "value": "Synthetic Lunch"
+    },
+    {
+      "id": "form-submit",
+      "type": "form_submit",
+      "page": "expenses",
+      "value": {
+        "string": "Form Expense",
+        "integer": "3",
+        "number": "3.25"
+      }
+    },
+    {
+      "id": "page-tools-only",
+      "type": "assigned_tools_only",
+      "page": "expenses"
+    },
+    {
+      "id": "same-page",
+      "type": "same_page",
+      "page": "expenses"
+    }
+  ],
+  "goal_capabilities": [
+    "create_page_with_tools"
+  ]
+}
