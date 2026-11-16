@@ -1,6 +1,20 @@
+import { randomUUID } from "node:crypto";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
+
+// the python server polls control.json while it holds zeta's turn: a reader must never see a partial file
+export async function writeControl(path: string, document: unknown): Promise<void> {
+  const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, JSON.stringify(document), { flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
 
 type FrameSummary = { direction: "received" | "sent"; method?: string; event?: string; delivery_id?: string; status?: string; error_code?: number | string; count?: number };
 
