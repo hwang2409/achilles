@@ -49,6 +49,7 @@ _LAYOUT_BLOCK_SCHEMA = {
                         "to show required fields first, then the rest sorted."
                     ),
                 },
+                "filter": {**_EQUALITY_FILTER_SCHEMA, "description": "Show only matching records."},
             },
             "required": ["type", "title", "collection"],
             "additionalProperties": False,
@@ -375,7 +376,7 @@ def _validate_layout_filter(
     collection_fields: dict[str, set[str]] | None,
     suggest_field: Callable[[str, str, Any, set[str]], str | None] | None,
 ) -> None:
-    if block["type"] == "detail" and "filter" in block:
+    if block["type"] in {"list", "detail"} and "filter" in block:
         filter_name = "filter"
     elif block["type"] == "metric" and "where" in block:
         filter_name = "where"
@@ -951,6 +952,7 @@ class PageStore:
         page_id: str,
         collection: str,
         field_filter: dict[str, Any],
+        limit: int,
     ) -> tuple[list[dict[str, Any]], int]:
         field_filter = validate_record_filter(field_filter)
         predicate, parameters = _json_scalar_match(field_filter["field"], field_filter["equals"])
@@ -961,8 +963,8 @@ class PageStore:
             rows = db.execute(
                 "SELECT record_id, document, revision "
                 + base
-                + " ORDER BY created_at DESC, record_id DESC LIMIT 1",
-                query_parameters,
+                + " ORDER BY created_at DESC, record_id DESC LIMIT ?",
+                (*query_parameters, limit),
             ).fetchall()
         return (
             [{**json.loads(row[1]), "record_id": row[0], "revision": row[2]} for row in rows],
