@@ -1204,6 +1204,7 @@ def test_layout_restore_is_page_bound_guarded_and_audited(tmp_path: Path) -> Non
     store.set_create_mode(page_id, False)
     off = client.post(restore, headers=own, json={"version": 2, "expected_version": 3})
     assert off.status_code == 403
+    assert off.json()["error"]["code"] == "forbidden"
     assert store.layout(page_id)["blocks"][0]["text"] == "one"
 
 
@@ -1232,8 +1233,10 @@ def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> Non
         json={"version": 1, "expected_version": 2},
     )
     assert rollback.status_code == 200
+    assert (rollback.json()["version"], rollback.json()["restored_from"]) == (3, 1)
     tools = client.get("/api/pages/home/versions", headers=own).json()["tools"]
     assert [(row["name"], row["version"], row["active"]) for row in tools] == [
+        ("annotate_trace", 3, True),
         ("annotate_trace", 2, False),
-        ("annotate_trace", 1, True),
+        ("annotate_trace", 1, False),
     ]

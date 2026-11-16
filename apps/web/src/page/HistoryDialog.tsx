@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { wrapTab } from "../keyboard";
 import "../settings-dialog.css";
 
@@ -10,23 +10,31 @@ const actions: Record<string, string> = { create_page: "created", update_layout:
 const when = (stamp: string) => new Date(stamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // the page's layout and tool versions; restore goes through the same guarded store paths as the agent's restore_version
-export function HistoryDialog({ pageId, credential, createMode, onClose, onRestored }: { pageId: string; credential: string; createMode: boolean; onClose(): void; onRestored(): void }) {
+export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onRestored }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onRestored(): void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loads, setLoads] = useState(0);
+  // the one row waiting for "confirm"; restore asks once before it writes
+  const [pending, setPending] = useState<string | null>(null);
+  const refocus = useRef<string | null>(null);
   const auth = { Authorization: `Bearer ${credential}` };
   useLayoutEffect(() => {
     const node = dialog.current;
     node?.showModal();
     return () => {
       node?.close(); // a still-open modal makes the rest of the page inert, so focus() below would do nothing
-      // back to the header control that opened it: the visible "history" button, or ••• when it is folded into the menu
-      // (the menu item is gone by then, and webkit does not focus a clicked button, so the focused element says nothing)
-      [...document.querySelectorAll<HTMLElement>(".chat-actions > button")].find((button) => button.offsetParent !== null && (button.textContent === "history" || button.classList.contains("header-overflow")))?.focus();
+      opener.current?.focus();
     };
   }, []);
+  useEffect(() => {
+    // focus the row's confirm button when it opens, and its restore button again when it closes
+    const key = pending ?? refocus.current;
+    refocus.current = null;
+    if (key) dialog.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(key)}"] button`)?.focus();
+  }, [pending]);
+  const cancelPending = () => { refocus.current = pending; setPending(null); };
   useEffect(() => {
     let current = true;
     void fetch(`/api/pages/${pageId}/versions`, { headers: auth, cache: "no-store" })
@@ -37,14 +45,15 @@ export function HistoryDialog({ pageId, credential, createMode, onClose, onResto
   }, [pageId, credential, loads]);
 
   const restore = async (label: string, url: string, version: number, expected: number) => {
+    setPending(null);
     setBusy(true);
     try {
       const response = await fetch(url, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ version, expected_version: expected }) });
-      if (response.ok) { setNote({ text: `restored ${label} v${version}`, error: false }); onRestored(); }
+      if (response.ok) { const body = await response.json() as { version: number }; setNote({ text: `restored ${label} v${version} as v${body.version}`, error: false }); onRestored(); }
       else if (response.status === 409) setNote({ text: `${label} changed since this list loaded. the list is updated; try again.`, error: true });
       else {
-        const body = await response.json().catch(() => ({})) as { detail?: string; error?: { message?: string } };
-        setNote({ text: body.detail ?? body.error?.message ?? `could not restore (${response.status})`, error: true });
+        const body = await response.json().catch(() => ({})) as { error?: { hint?: string } };
+        setNote({ text: body.error?.hint ?? `could not restore (${response.status})`, error: true });
       }
     } catch { setNote({ text: "could not restore: achilles is not reachable", error: true }); }
     finally { setBusy(false); setLoads((value) => value + 1); }
@@ -52,14 +61,20 @@ export function HistoryDialog({ pageId, credential, createMode, onClose, onResto
 
   const activeLayout = versions?.layout.find((row) => row.active)?.version;
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
-  const button = (row: { active: boolean }, run: () => void, blocked = false) => row.active
+  const button = (key: string, row: { active: boolean }, blocked = false) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" disabled={busy || blocked} onClick={run}>restore</button>;
+    : <button type="button" disabled={busy || blocked} onClick={() => setPending(key)}>restore</button>;
+  // the row in its confirm state; only "confirm" sends the restore
+  const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
+    <span id={`${key}-ask`}>restore v{version}? the current {kind} stays in history</span>
+    <button type="button" aria-describedby={`${key}-ask`} onClick={run}>confirm</button>
+    <button type="button" onClick={cancelPending}>cancel</button>
+  </li>;
   return <dialog
     ref={dialog}
     className="settings-dialog history-dialog"
     aria-labelledby="history-title"
-    onCancel={(event) => { event.preventDefault(); onClose(); }}
+    onCancel={(event) => { event.preventDefault(); if (pending) cancelPending(); else onClose(); }}
     onClick={(event) => { if (event.target === dialog.current) onClose(); }}
     onKeyDown={(event) => wrapTab(event, event.currentTarget)}
   >
@@ -72,24 +87,32 @@ export function HistoryDialog({ pageId, credential, createMode, onClose, onResto
             <h3 id="history-layout">layout</h3>
             {!createMode && versions.layout.length > 1 && <p className="history-hint">turn on create mode to restore a layout.</p>}
             {versions.layout.length === 0 ? <p className="history-hint">this page has no saved layout yet.</p>
-              : <ol>{versions.layout.map((row) => <li key={row.version}>
-                <span className="history-version">v{row.version}</span>
-                <span className="history-detail">{row.action ? `${actions[row.action] ?? row.action} · ` : ""}{row.block_types.join(", ") || "no blocks"}</span>
-                <time dateTime={row.created_at}>{when(row.created_at)}</time>
-                {button(row, () => void restore("layout", `/api/pages/${pageId}/layout/restore`, row.version, activeLayout!), !createMode)}
-              </li>)}</ol>}
+              : <ol>{versions.layout.map((row) => {
+                const key = `layout-${row.version}`;
+                if (pending === key) return confirmRow(key, row.version, "layout", () => void restore("layout", `/api/pages/${pageId}/layout/restore`, row.version, activeLayout!));
+                return <li key={row.version} data-row={key}>
+                  <span className="history-version">v{row.version}</span>
+                  <span className="history-detail">{row.action ? `${actions[row.action] ?? row.action} · ` : ""}{row.block_types.join(", ") || "no blocks"}</span>
+                  <time dateTime={row.created_at}>{when(row.created_at)}</time>
+                  {button(key, row, !createMode)}
+                </li>;
+              })}</ol>}
           </section>
           {toolNames.map((name) => {
             const rows = versions.tools.filter((row) => row.name === name);
             const active = rows.find((row) => row.active)?.version;
             return <section key={name} className="history-group" aria-label={`tool ${name}`}>
               <h3>tool <code>{name}</code></h3>
-              <ol>{rows.map((row) => <li key={row.version}>
-                <span className="history-version">v{row.version}</span>
-                <span className="history-detail" />
-                <time dateTime={row.created_at}>{when(row.created_at)}</time>
-                {button(row, () => void restore(name, `/api/pages/${pageId}/tools/${encodeURIComponent(name)}/rollback`, row.version, active!))}
-              </li>)}</ol>
+              <ol>{rows.map((row) => {
+                const key = `tool-${name}-${row.version}`;
+                if (pending === key) return confirmRow(key, row.version, "version", () => void restore(name, `/api/pages/${pageId}/tools/${encodeURIComponent(name)}/rollback`, row.version, active!));
+                return <li key={row.version} data-row={key}>
+                  <span className="history-version">v{row.version}</span>
+                  <span className="history-detail" />
+                  <time dateTime={row.created_at}>{when(row.created_at)}</time>
+                  {button(key, row)}
+                </li>;
+              })}</ol>
             </section>;
           })}
         </>}

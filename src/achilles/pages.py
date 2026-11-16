@@ -603,6 +603,7 @@ class PageStore:
         );
         CREATE INDEX IF NOT EXISTS chat_updated_at ON chat(updated_at DESC);
         CREATE INDEX IF NOT EXISTS chat_page_updated_at ON chat(page_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS audit_page_digest ON audit(page_id, version_digest);
         """)
         columns = {row[1] for row in db.execute("PRAGMA table_info(page)")}
         if "create_mode" not in columns:
@@ -890,7 +891,7 @@ class PageStore:
     def versions(self, page_id: str) -> dict[str, Any]:
         """The page's layout and tool versions, newest first, for the user's history list."""
         with self._connect() as db:
-            # shortcut: the newest 100 of each kind, page the list when a page outgrows it.
+            # shortcut: the newest 100 layouts and 100 per tool; page the list if a page outgrows it
             layouts = db.execute(
                 "SELECT lv.version, lv.created_at, lv.document, "
                 "lv.version=COALESCE(p.active_layout_version, 1), "
@@ -905,7 +906,9 @@ class PageStore:
                 "SELECT t.name, v.version, v.created_at, v.version=pt.active_version "
                 "FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
                 "JOIN tool_version v ON v.tool_id=t.id WHERE pt.page_id=? "
-                "ORDER BY t.name, v.version DESC LIMIT 100",
+                "AND (v.version=pt.active_version "
+                "OR v.version > (SELECT MAX(version) FROM tool_version WHERE tool_id=t.id) - 100) "
+                "ORDER BY t.name, v.version DESC",
                 (page_id,),
             ).fetchall()
         return {
@@ -1477,13 +1480,16 @@ class PageStore:
     def rollback_tool(
         self, page_id: str, name: str, version: Any, expected_version: Any
     ) -> dict[str, Any]:
-        """Make an earlier tool version active if the active one is still expected_version."""
+        """Append a copy of an earlier tool version and make it active, if the active one
+        is still expected_version; the replaced version stays listed, so a restore can be undone."""
         validate_schema(
             {"version": version, "expected_version": expected_version}, _RESTORE_ARGS_SCHEMA
         )
         with self.transaction() as db:
             row = db.execute(
-                """SELECT pt.tool_id, pt.active_version, v.digest FROM page_tool pt
+                """SELECT pt.tool_id, pt.active_version, v.digest, v.bundle,
+                (SELECT MAX(version) FROM tool_version WHERE tool_id=pt.tool_id)
+                FROM page_tool pt
                 JOIN tool t ON t.id=pt.tool_id
                 JOIN tool_version v ON v.tool_id=pt.tool_id AND v.version=?
                 WHERE pt.page_id=? AND t.name=?""",
@@ -1503,16 +1509,21 @@ class PageStore:
                     "conflict",
                     "Call inspect_page, set expected_version to the tool's version, and retry.",
                 )
+            restored = row[4] + 1
             stamp = now()
             db.execute(
-                "UPDATE page_tool SET active_version=? WHERE page_id=? AND tool_id=?",
-                (version, page_id, row["tool_id"]),
+                "INSERT INTO tool_version VALUES(?,?,?,?,?)",
+                (row["tool_id"], restored, row["digest"], row["bundle"], stamp),
+            )
+            db.execute(
+                "UPDATE page_tool SET active_version=?,assigned_at=? WHERE page_id=? AND tool_id=?",
+                (restored, stamp, page_id, row["tool_id"]),
             )
             db.execute(
                 "INSERT INTO audit(page_id,action,version_digest,created_at) VALUES(?,?,?,?)",
                 (page_id, "restore_tool", row["digest"], stamp),
             )
-        return {"name": name, "version": version}
+        return {"name": name, "version": restored, "restored_from": version}
 
     def tool_bundle(self, page_id: str, name: str) -> dict[str, Any] | None:
         with self._connect() as db:

@@ -415,38 +415,6 @@ def create_app() -> Starlette:
         records, total = await anyio.to_thread.run_sync(store.records, page_id, collection, limit)
         return JSONResponse(records, headers={"x-achilles-total": str(total)})
 
-    async def rollback_tool(request):
-        if not _same_origin(request):
-            raise HTTPException(403, "same-origin request required")
-        page_id = request.path_params["id"]
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(401, "missing bearer")
-        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
-        if principal is None or principal["id"] != page_id:
-            raise HTTPException(403, "forbidden")
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            error = ValidationError("", "valid JSON object")
-            return JSONResponse({"error": error_document(error)}, status_code=400)
-        if not isinstance(body, dict):
-            error = ValidationError("", "JSON object")
-            return JSONResponse({"error": error_document(error)}, status_code=400)
-        try:
-            await anyio.to_thread.run_sync(
-                store.rollback_tool,
-                page_id,
-                request.path_params["name"],
-                body.get("version"),
-                body.get("expected_version"),
-            )
-        except ValidationError as exc:
-            status = 409 if exc.code == "conflict" else 400
-            return JSONResponse({"error": error_document(exc)}, status_code=status)
-        await notify_tools_changed(page_id)
-        return JSONResponse({"ok": True})
-
     async def require_page_bearer(request) -> str:
         """Same-origin request carrying this page's own credential; returns the page id."""
         if not _same_origin(request):
@@ -459,6 +427,30 @@ def create_app() -> Starlette:
         if principal is None or principal["id"] != page_id:
             raise HTTPException(403, "forbidden")
         return page_id
+
+    async def rollback_tool(request):
+        page_id = await require_page_bearer(request)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            error = ValidationError("", "valid JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        if not isinstance(body, dict):
+            error = ValidationError("", "JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        try:
+            restored = await anyio.to_thread.run_sync(
+                store.rollback_tool,
+                page_id,
+                request.path_params["name"],
+                body.get("version"),
+                body.get("expected_version"),
+            )
+        except ValidationError as exc:
+            status = 409 if exc.code == "conflict" else 400
+            return JSONResponse({"error": error_document(exc)}, status_code=status)
+        await notify_tools_changed(page_id)
+        return JSONResponse({"ok": True, **restored})
 
     async def versions(request):
         page_id = await require_page_bearer(request)
@@ -484,8 +476,11 @@ def create_app() -> Starlette:
         except ValidationError as exc:
             status = 409 if exc.code == "conflict" else 400
             return JSONResponse({"error": error_document(exc)}, status_code=status)
-        except PermissionError as exc:
-            raise HTTPException(403, "turn on create mode to restore a layout") from exc
+        except PermissionError:
+            error = ValidationError(
+                "", "create mode on", "forbidden", "turn on create mode to restore a layout."
+            )
+            return JSONResponse({"error": error_document(error)}, status_code=403)
         return JSONResponse({"version": version, "restored_from": body["version"]})
 
     async def create_mode(request):

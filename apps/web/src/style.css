@@ -356,8 +356,12 @@ th { color: var(--fulcrum-muted); font-weight: 600; }
 .history-group li button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 .history-group li button:disabled { color: var(--fulcrum-muted); border-style: dashed; cursor: not-allowed; }
 .history-current { justify-self: center; color: var(--fulcrum-accent); }
+.history-group li.history-confirm { grid-template-columns: minmax(0, 1fr) auto auto; }
 @media (max-width: 480px) {
   .history-group li { grid-template-columns: 3em minmax(0, 1fr) 6.5em; padding: 6px 0; }
   .history-group time { grid-column: 2; grid-row: 2; font-size: 12px; }
   .history-group li > button, .history-current { grid-column: 3; grid-row: 1 / 3; }
+  .history-group li.history-confirm { grid-template-columns: 1fr 1fr; }
+  .history-confirm > span { grid-column: 1 / 3; }
+  .history-group li.history-confirm > button { grid-column: auto; grid-row: 2; }
 }
