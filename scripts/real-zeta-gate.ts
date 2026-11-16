@@ -51,6 +51,7 @@ const writeArtifacts = async () => {
   console.error(`gate artifacts written to ${artifactDir}`);
 };
 // every token field of a discovery file the gate reads goes into the artifact redaction list at once.
+// the gate reads the scripted server's file before each SIGTERM, so every restarted server's tokens are listed.
 const readDiscovery = async (path: string) => {
   const document = JSON.parse(await Bun.file(path).text());
   for (const [key, value] of Object.entries(document)) if (/token/i.test(key) && typeof value === "string") artifactSecrets.push(value);
@@ -228,7 +229,6 @@ try {
       return false;
     }
   }, "restarted zeta");
-  await readDiscovery(ownDiscovery);
   const field = page.getByRole("textbox", { name: "message" });
   await gateWait.playwright(field, "waitFor", { timeout: 20000 }).catch(async () => {
     throw new Error(
@@ -1628,6 +1628,7 @@ try {
     const previousPid = JSON.parse(await Bun.file(control).text()).pid;
     try {
       await expectBrowserErrors(page, [], async () => {
+        await readDiscovery(ownDiscovery);
         zetaProcess.kill("SIGTERM");
         if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta shutdown timeout during vim read-only gate");
         await check();
@@ -1635,7 +1636,6 @@ try {
     } finally {
       zetaProcess = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/real-zeta-server.py")], env);
       await waitFor(async () => JSON.parse(await Bun.file(control).text()).pid !== previousPid, "zeta restart after vim read-only gate");
-      await readDiscovery(ownDiscovery);
     }
   }, requests, gateWait);
 
@@ -1701,6 +1701,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
     const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
+    await readDiscovery(ownDiscovery);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for dropped-connection gate");
     await gateWait.playwright(page.getByRole("alert").filter({ hasText: "the connection to zeta was lost" }), "waitFor", { timeout: 20_000 });
@@ -1720,7 +1721,6 @@ try {
     try { return JSON.parse(await Bun.file(control).text()).pid !== droppedPid; }
     catch { return false; }
   }, "zeta reconnect after dropped connection");
-  await readDiscovery(ownDiscovery);
   await page.getByRole("button", { name: "retry now" }).click();
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
@@ -1728,6 +1728,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-recovered-review-1440x900.png"), fullPage: true });
 
   if (screenshotDir) {
+    await readDiscovery(ownDiscovery);
     zetaProcess.kill("SIGTERM");
     if (!(await waitForExit(zetaProcess, 15_000))) throw new Error("zeta did not stop for first-paint screenshot");
     const heldRequests: Route[] = [];
@@ -1754,7 +1755,7 @@ try {
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 
 } finally {
-  // the live servers' tokens, read while their discovery files still exist (a failed restart wait skips the read above).
+  // the last live server's tokens, read before shutdown and rm(temp) remove its discovery file.
   for (const path of [ownDiscovery, sharedDiscovery]) await readDiscovery(path).catch(() => {});
   try {
     await browser?.close().catch(() => {});
