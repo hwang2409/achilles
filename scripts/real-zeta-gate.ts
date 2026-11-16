@@ -7,7 +7,7 @@ import type { Locator, Route } from "../apps/web/node_modules/playwright";
 import { controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
-import { assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
+import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 
@@ -257,19 +257,7 @@ try {
   // `/` or a page route with no chat named opens that page's most recent chat in the sidebar's order
   const newestChatId = async (pageId: string) => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: { session_id: string; page_id: string }[] }).chats.find((chat) => chat.page_id === pageId)?.session_id;
   const chatCount = async () => ((await (await fetch(`${origin}/api/chats?limit=200`, { signal: AbortSignal.timeout(10_000) })).json()) as { chats: unknown[] }).chats.length;
-  const approvalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => {
-    const messages = requests();
-    let requestIndex = messages.length - 1;
-    while (
-      requestIndex >= 0 &&
-      !(messages[requestIndex].method === method && messages[requestIndex].params?.session_id === sessionId)
-    ) requestIndex--;
-    if (requestIndex < 0) return undefined;
-    const response = messages
-      .slice(requestIndex + 1)
-      .find((frame) => frame.id === messages[requestIndex].id && frame.result);
-    return response?.result?.approval_mode;
-  };
+  const awaitApprovalMode = approvalModeWaiter(requests, waitFor);
   if (
     requests().filter(
       (frame) =>
@@ -280,7 +268,7 @@ try {
     throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
-  await assertServerAskWins(page, first, requests, approvalModeResponse, waitFor);
+  await assertServerAskWins(page, first, requests, awaitApprovalMode);
   await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
     await page.goto(`${origin}/not-a-real-page`);
   await gateWait.playwright(page.getByRole("alert").filter({ hasText: "page not found" }), "waitFor", { timeout: 20_000 });
@@ -666,7 +654,7 @@ try {
   await gateReloadMidTurn(page, waitFor, requests, gateWait);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
-  await assertServerAskWins(page, second, requests, approvalModeResponse, waitFor);
+  await assertServerAskWins(page, second, requests, awaitApprovalMode);
   const firstSetSettingsAfterReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterReopen !== firstSetSettingsBeforeReopen)
     throw new Error("reopening an ask chat under an ask server sent set_settings");
@@ -1391,7 +1379,7 @@ try {
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
   if (await homeSessionId() !== homeOpened) throw new Error("achilles restart changed the open home chat");
-  if (approvalModeResponse("session_settings", homeOpened) !== "ask") throw new Error("ask-mode session did not report ask settings after achilles restart");
+  await awaitApprovalMode("session_settings", homeOpened, "ask", "ask-mode session after achilles restart");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("ask-mode session showed the auto-approve marker after achilles restart");
   const refreshCountBeforeRestartToggle = requests().filter((frame) => frame.method === "mcp_refresh_tools").length;
   const restartedToggleResponse = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "POST" && requestPath(response.url()) === "/api/pages/home/create-mode");
@@ -1458,13 +1446,11 @@ try {
   const allowSession = await homeSessionId();
   if (!allowSession) throw new Error("allow-mode page session id missing");
   await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
-  if (approvalModeResponse("set_settings", allowSession) !== "allow")
-    throw new Error("allow-mode session settings were not applied");
+  await awaitApprovalMode("set_settings", allowSession, "allow", "allow-mode session settings");
   const allowSetSettingsBeforeReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   await page.reload();
   await gateWait.playwright(allowField, "waitFor", { timeout: 20000 });
-  if (approvalModeResponse("session_settings", allowSession) !== "allow")
-    throw new Error("reloaded allow-mode session did not report allow settings");
+  await awaitApprovalMode("session_settings", allowSession, "allow", "reloaded allow-mode session");
   const allowSetSettingsAfterReload = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === allowSession).length;
   if (allowSetSettingsAfterReload !== allowSetSettingsBeforeReload)
     throw new Error("reloading an allow-mode session sent a no-op set_settings frame");
@@ -1615,14 +1601,14 @@ try {
   const wakeTool = JSON.parse(await Bun.file(control).text()).tool_results?.find((result: { call_id: string }) => result.call_id === "wake-inspect");
   if (!wakeTool || wakeTool.is_error) throw new Error(`the woken turn's page tool did not run on the re-sent binding: ${JSON.stringify(wakeTool ?? null)}`);
   await gateWait.playwright(page.getByLabel("ask before tools", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
-  if (approvalModeResponse("set_settings", wakeChat) !== "ask") throw new Error("ask mode was not applied after the woken turn ended");
+  await awaitApprovalMode("set_settings", wakeChat, "ask", "ask mode after the woken turn ended");
   if (await page.getByRole("alert").count()) throw new Error(`the woken turn's end showed an error: ${redact(await page.getByRole("alert").first().innerText())}`);
   await restartAchilles("allow");
   console.log("reload in a woken turn's setup asserted: the page attached, the turn ran a page tool, and ask mode applied after the turn ended");
   await page.goto(`${origin}/allow?chat=${allowSession}`);
   await gateWait.playwright(allowField, "waitFor", { timeout: 20_000 });
   await gateSettings(page, origin, gateWait);
-  await gateCreationApprovalDefaults(page, requests, approvalModeResponse, gateWait);
+  await gateCreationApprovalDefaults(page, requests, awaitApprovalMode, gateWait);
 
   await gateVim(page, control, waitFor, async (check) => {
     try {

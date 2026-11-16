@@ -1,39 +1,50 @@
 import { expect, test } from "bun:test";
-import type { Page } from "playwright";
-import { assertServerAskWins } from "./gate-settings";
+import { approvalModeWaiter } from "./gate-settings";
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };
 
-const id = "ask-session";
-const page = { getByLabel: () => ({ count: async () => 0 }) } as unknown as Page;
+const id = "settings-session";
+const request = (frameId: number): Frame => ({ id: frameId, method: "session_settings", params: { session_id: id } });
+const reply = (frameId: number, mode: string): Frame => ({ id: frameId, result: { approval_mode: mode } });
 
-// the frame order from run 43881659122: a resume re-fetched session_settings (id 11) before its reply arrived
-async function check(lateMode: string) {
-  const frames: Frame[] = [
-    { id: 5, method: "session_settings", params: { session_id: id } },
-    { id: 5, result: { approval_mode: "ask" } },
-    { id: 11, method: "session_settings", params: { session_id: id } },
-  ];
-  const inFlight: Frame[] = [{ id: 11, result: { approval_mode: lateMode } }];
-  const approvalModeResponse = (method: string, sessionId: string) => {
-    const request = frames.findLast((frame) => frame.method === method && frame.params?.session_id === sessionId);
-    return frames.slice(frames.indexOf(request!) + 1).find((frame) => frame.id === request?.id && frame.result)?.result?.approval_mode;
-  };
-  // each failed check delivers the next in-flight frame, so arrival order is explicit and nothing sleeps
-  const waitFor = async (ready: () => Promise<boolean>, label: string) => {
-    while (!(await ready())) {
-      const next = inFlight.shift();
-      if (!next) throw new Error(`timed out waiting for ${label}`);
-      frames.push(next);
-    }
-  };
-  await assertServerAskWins(page, id, () => frames, approvalModeResponse, waitFor);
-}
+// each unmet check delivers the next in-flight reply, so arrival order is explicit and nothing sleeps
+const deliveringWaitFor = (frames: Frame[], inFlight: Frame[]) => async (ready: () => Promise<boolean>, label: string) => {
+  while (!(await ready())) {
+    const next = inFlight.shift();
+    if (!next) throw new Error(`timed out waiting for ${label}`);
+    frames.push(next);
+  }
+};
 
-test("server-forced ask check waits for the in-flight session_settings reply", async () => {
-  await check("ask");
+const run = (frames: Frame[], inFlight: Frame[], expected: string) =>
+  approvalModeWaiter(() => frames, deliveringWaitFor(frames, inFlight))("session_settings", id, expected, "settings reply");
+
+test("reply already present: resolves against it", async () => {
+  await run([request(11), reply(11, "ask")], [], "ask");
 });
 
-test("server-forced ask check still fails at once on a non-ask reply", async () => {
-  await expect(check("auto")).rejects.toThrow("server-forced ask session did not report ask settings");
+test("reply arrives late: waits for the newest reply instead of reading once", async () => {
+  // the call-site one-shot read (base) returns undefined here; the owner waits for the in-flight reply
+  const frames = [request(11)];
+  await run(frames, [reply(11, "ask")], "ask");
+  expect(frames.at(-1)?.result?.approval_mode).toBe("ask");
+});
+
+test("wrong mode: fails at once without waiting", async () => {
+  const inFlight = [reply(11, "ask")]; // a later correct reply must never be consumed
+  await expect(run([request(11), reply(11, "allow")], inFlight, "ask")).rejects.toThrow(
+    'settings reply: expected session_settings approval_mode "ask", got "allow"',
+  );
+  expect(inFlight.length).toBe(1);
+});
+
+test("no reply: fails with the caller's label at the bound", async () => {
+  await expect(run([request(11)], [], "ask")).rejects.toThrow("settings reply (session_settings reply)");
+});
+
+test("stale older reply + newer request: waits for the newer reply", async () => {
+  // id 5 already answered "allow"; a newer id 11 request is still in flight and must win
+  const frames = [request(5), reply(5, "allow"), request(11)];
+  await run(frames, [reply(11, "ask")], "ask");
+  expect(frames.at(-1)?.result?.approval_mode).toBe("ask");
 });
