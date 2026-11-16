@@ -1,17 +1,20 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useSyncExternalStore,
 } from "react";
 import { useRunStore, type ComposerProps } from "@fulcrum/react";
-import { DroppedSteerDeliveryError } from "../useActiveChat";
 import {
+  composerActivity,
   createComposerModel,
   transition,
+  type ComposerEffect,
   type ComposerEvent,
   type ComposerModel,
 } from "./composer-machine";
+import { chatQueues } from "./chatQueues";
 
 const attempt = (action: () => unknown) =>
   new Promise<unknown>((resolve) => resolve(action()));
@@ -20,10 +23,18 @@ const errorText = (error: unknown) =>
 
 export type ComposerAdapterProps = ComposerProps & {
   onDraftChange: (text: string) => void;
-  onDeliveryConfirm: (sent: string) => void;
+  /** Enter took this text out of the box; the stored draft drops it */
+  onDraftSubmit: (sent: string) => void;
+  /** the chat this composer shows; its submitted messages belong to the chat's owner in `chatQueues` */
+  chatId: string;
+  /** this chat was just created by the page's new-chat composer `fromNewChat`; that composer's owner moves here */
+  fromNewChat?: string;
+  onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
 };
 
-type DeliveryOptions = ComposerAdapterProps & {
+export type DeliveryOptions = ComposerProps & {
+  onDraftChange: (text: string) => void;
+  onDraftSubmit: (sent: string) => void;
   isTurnRunning?: () => boolean;
 };
 
@@ -33,8 +44,14 @@ export type ComposerDelivery = {
   update(options: DeliveryOptions): void;
   sync(state: ComposerProps["state"], defaultValue?: string): void;
   edit(draft: string): void;
-  dismissError(): void;
   submit(): Promise<void>;
+  retry(id: number): Promise<void>;
+  /** Edit a failed message: its text goes back into the box. */
+  restore(id: number): void;
+  cancel(id?: number): void;
+  /** A composer mounts. The owner starts sends only while at least one composer is attached; the returned function detaches it. */
+  attach(): () => void;
+  attached(): boolean;
   stop(): Promise<void>;
 };
 
@@ -44,20 +61,42 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
   const listeners = new Set<() => void>();
 
   const apply = (event: ComposerEvent) => {
-    const confirmedText = event.type === "confirm" && model.send?.attempt === event.attempt
-      ? model.send.sent
-      : undefined;
+    const draft = model.draft;
     const result = transition(model, event);
     if (result.model !== model) {
       model = result.model;
       for (const listener of listeners) listener();
     }
-    if (event.type === "edit") current.onDraftChange(model.draft);
-    if (confirmedText !== undefined) current.onDeliveryConfirm(confirmedText);
+    if (event.type === "submit" && model.draft !== draft) current.onDraftSubmit(draft);
+    else if (model.draft !== draft || event.type === "edit") current.onDraftChange(model.draft);
     return result.effect;
   };
 
-  return {
+  let mounts = 0;
+  const turnRunning = () => current.isTurnRunning?.() ?? current.state === "steerable";
+
+  const deliver = async ({ attempt: sendAttempt, text, steer }: Extract<ComposerEffect, { type: "submit" }>) => {
+    try {
+      await attempt(() => current.onSubmit(text, { steer }, () => {}));
+      apply({ type: "confirm", attempt: sendAttempt });
+    } catch (failure) {
+      apply({ type: "reject", attempt: sendAttempt, message: errorText(failure) });
+    } finally {
+      apply({ type: "settle", attempt: sendAttempt });
+    }
+  };
+
+  // one message at a time, in order, each through the current props; with no composer attached, nothing new goes out
+  const drain = async () => {
+    while (mounts > 0) {
+      apply({ type: "state", state: current.state });
+      const effect = apply({ type: "next", turnRunning: turnRunning() });
+      if (effect?.type !== "submit") return;
+      await deliver(effect);
+    }
+  };
+
+  const delivery: ComposerDelivery = {
     getModel: () => model,
     subscribe(listener) {
       listeners.add(listener);
@@ -70,35 +109,39 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       apply({ type: "state", state });
       if (defaultValue !== undefined && defaultValue !== model.draft)
         apply({ type: "edit", draft: defaultValue });
+      void drain();
     },
     edit(draft) {
       apply({ type: "edit", draft });
     },
-    dismissError() {
-      apply({ type: "dismiss-error" });
-    },
     async submit() {
       apply({ type: "state", state: current.state });
-      const effect = apply({
-        type: "submit",
-        turnRunning: current.isTurnRunning?.() ?? current.state === "steerable",
-      });
-      if (effect?.type !== "submit") return;
-      const { attempt: sendAttempt, text, steer } = effect;
-      try {
-        await attempt(() => current.onSubmit(text, { steer }, () => {}));
-        apply({ type: "confirm", attempt: sendAttempt });
-      } catch (failure) {
-        apply({
-          type: "reject",
-          attempt: sendAttempt,
-          message: errorText(failure),
-          dropped: failure instanceof DroppedSteerDeliveryError,
-        });
-      } finally {
-        apply({ type: "settle", attempt: sendAttempt });
-      }
+      const effect = apply({ type: "submit", turnRunning: turnRunning() });
+      if (effect?.type === "submit") await deliver(effect);
+      await drain();
     },
+    async retry(id) {
+      apply({ type: "retry", id });
+      await drain();
+    },
+    restore(id) {
+      apply({ type: "restore", id });
+      void drain();
+    },
+    cancel(id) {
+      apply(id === undefined ? { type: "cancel-last" } : { type: "cancel", id });
+      void drain();
+    },
+    attach() {
+      mounts += 1;
+      void drain();
+      let attachedNow = true;
+      return () => {
+        if (attachedNow) mounts -= 1;
+        attachedNow = false;
+      };
+    },
+    attached: () => mounts > 0,
     async stop() {
       const effect = apply({ type: "stop" });
       if (effect?.type !== "stop" || !current.onStop) return;
@@ -111,6 +154,7 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       }
     },
   };
+  return delivery;
 }
 
 export function useComposerDelivery(options: ComposerAdapterProps) {
@@ -120,18 +164,25 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
     isTurnRunning: () => store.getState().turn === "running",
   };
   const delivery = useRef<ComposerDelivery | null>(null);
-  if (!delivery.current) delivery.current = createComposerDelivery(deliveryOptions);
+  delivery.current ??= chatQueues.open(options.chatId, deliveryOptions, options.fromNewChat);
   delivery.current.update(deliveryOptions);
   const owner = delivery.current;
   const model = useSyncExternalStore(owner.subscribe, owner.getModel, owner.getModel);
 
+  // a layout effect, so the chat's owner counts this composer before `chatQueues.settle` runs in the same commit
+  useLayoutEffect(() => owner.attach(), [owner]);
   useLayoutEffect(() => {
     owner.sync(options.state, options.defaultValue);
   }, [owner, options.defaultValue, options.state]);
+  const { sending, queued, failed } = composerActivity(model);
+  useEffect(() => options.onActivity?.({ sending, queued, failed }), [options.onActivity, sending, queued, failed]);
+  useEffect(() => () => options.onActivity?.({ sending: false, queued: 0, failed: false }), [options.onActivity]);
 
   const edit = useCallback((draft: string) => owner.edit(draft), [owner]);
-  const dismissError = useCallback(() => owner.dismissError(), [owner]);
   const submit = useCallback(() => void owner.submit(), [owner]);
   const stop = useCallback(() => void owner.stop(), [owner]);
-  return { model, edit, dismissError, submit, stop };
+  const retry = useCallback((id: number) => void owner.retry(id), [owner]);
+  const restore = useCallback((id: number) => owner.restore(id), [owner]);
+  const cancel = useCallback((id?: number) => owner.cancel(id), [owner]);
+  return { model, edit, submit, stop, retry, restore, cancel, getModel: owner.getModel };
 }

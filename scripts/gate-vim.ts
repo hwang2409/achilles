@@ -222,7 +222,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     const current = JSON.parse(await Bun.file(control).text());
     return current.request_count === (beforeStockSend.request_count ?? 0) + 1 && current.last_message.includes("stock confirmed once");
   }, "stock message on this backend turn");
-  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed stock send to clear its draft");
+  await waitFor(async () => await confirmedStock.inputValue() === "" && await page.locator('[data-part="composer-queued"]').count() === 0, "confirmed stock send to leave the list");
   await switchTo(originalSession);
   await switchTo(stockSession);
   confirmedStock = page.getByRole("textbox", { name: "message", exact: true });
@@ -251,7 +251,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const delayedSteerResponse = requests().slice(delayedBeforeSteer).find((frame) => frame.id === delayedSteer.id && (frame.result || frame.error));
   const delayedDraft = await confirmedStock.inputValue();
   if (delayedSteerResponse?.error) {
-    if (delayedDraft !== "steer while running") throw new Error(`rejected delayed steer changed its draft: ${JSON.stringify(delayedDraft)}`);
+    if (delayedDraft !== "") throw new Error(`enter did not take the delayed steer out of the box: ${JSON.stringify(delayedDraft)}`);
     await waitFor(async () => requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running"), "delayed steer fallback send");
     const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
     if (fallbackSend?.params?.delivery_id !== delayedSteer.params?.delivery_id) throw new Error("delayed steer fallback did not reuse its delivery id");
@@ -262,11 +262,12 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   } else if (delayedSteerResponse?.result) {
     const fallbackSend = requests().slice(delayedBeforeSteer).find((request) => request.method === "send" && request.params?.text === "steer while running");
     if (fallbackSend) throw new Error(`successful delayed steer also sent a fallback: ${JSON.stringify(fallbackSend)}`);
-    if (delayedDraft !== "" && delayedDraft !== "steer while running") throw new Error(`successful delayed steer changed its draft: ${JSON.stringify(delayedDraft)}`);
+    if (delayedDraft !== "") throw new Error(`enter did not take the delayed steer out of the box: ${JSON.stringify(delayedDraft)}`);
   } else {
     throw new Error(`delayed steer had no response: ${JSON.stringify(delayedSteerResponse)}`);
   }
-  await waitFor(async () => await confirmedStock.inputValue() === "", "confirmed delayed message to clear its draft");
+  // enter already emptied the box; wait until the message itself settles (its row leaves the list)
+  await waitFor(async () => await page.locator('[data-part="composer-queued"]').count() === 0 && await page.locator('[data-part="composer"]').last().getAttribute("data-pending") === null, "confirmed delayed message to leave the list");
   if (delayedSteerResponse.result && requests().slice(delayedBeforeSteer).some((request) => request.method === "send" && request.params?.text === "steer while running")) throw new Error("successful delayed steer sent a fallback before clearing its draft");
   await confirmedStock.fill("kept draft");
   if (await stopButton.isVisible().catch(() => false)) await stopButton.focus();

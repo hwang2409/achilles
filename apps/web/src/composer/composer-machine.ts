@@ -1,16 +1,25 @@
 import type { ComposerState } from "@fulcrum/react";
 
-export type ComposerError = { kind: "submit" | "stop" | "dropped"; text: string };
-type Send = { attempt: number; sent: string; steer: boolean };
+export type ComposerError = { kind: "submit" | "stop"; text: string };
+/** A submitted message. It left the box on Enter and goes out in order; `tries` counts failed sends. */
+export type QueuedMessage = { id: number; text: string; failed?: string; tries?: number };
+type Send = { attempt: number; id: number; steer: boolean };
+
+/** shortcut: a fixed cap keeps a stuck chat from collecting messages without end; make it a setting if anyone hits it */
+export const QUEUE_LIMIT = 20;
 
 export type ComposerModel = {
   state: ComposerState;
+  /** always the next new message; a submitted message never comes back here unless the user asks (edit) */
   draft: string;
   sending: boolean;
   stopping: boolean;
+  /** first in, first out; the head is in flight when `send.id` names it */
+  queue: QueuedMessage[];
   error?: ComposerError;
   send?: Send;
   nextAttempt: number;
+  nextQueueId: number;
 };
 
 export type ComposerEffect =
@@ -21,10 +30,14 @@ export type ComposerEvent =
   | { type: "state"; state: ComposerState }
   | { type: "edit"; draft: string }
   | { type: "submit"; turnRunning: boolean }
+  | { type: "next"; turnRunning: boolean }
   | { type: "confirm"; attempt: number }
-  | { type: "reject"; attempt: number; message: string; dropped?: boolean }
-  | { type: "dismiss-error" }
+  | { type: "reject"; attempt: number; message: string }
   | { type: "settle"; attempt: number }
+  | { type: "retry"; id: number }
+  | { type: "restore"; id: number }
+  | { type: "cancel"; id: number }
+  | { type: "cancel-last" }
   | { type: "stop" }
   | { type: "stop-reject"; message: string }
   | { type: "stop-settle" };
@@ -32,43 +45,92 @@ export type ComposerEvent =
 export type ComposerTransition = { model: ComposerModel; effect?: ComposerEffect };
 
 export function createComposerModel(draft: string, state: ComposerState): ComposerModel {
-  return { state, draft, sending: false, stopping: false, nextAttempt: 1 };
+  return { state, draft, sending: false, stopping: false, queue: [], nextAttempt: 1, nextQueueId: 1 };
 }
 
-const unsentDraft = (current: string, sent: string) => current.startsWith(sent) ? current.slice(sent.length) : current;
+const canSend = (state: ComposerState) => state !== "running" && state !== "read-only";
+const busy = (model: ComposerModel) => model.sending || model.queue.length > 0;
+
+/** What Enter does now: send the box, queue it behind other messages, or nothing. */
+export function submitAction(model: ComposerModel): "send" | "queue" | null {
+  if (!canSend(model.state) || !model.draft.trim()) return null;
+  return busy(model) ? "queue" : "send";
+}
+
+/** The in-flight message, if any. */
+export const inFlight = (model: ComposerModel) => model.sending ? model.queue.find((item) => item.id === model.send?.id) : undefined;
+
+/** The one status line both composers show, and its tone. */
+export function composerStatus(model: ComposerModel): { text: string; tone?: "danger" | "busy" } {
+  if (model.error) return { text: model.error.text, tone: "danger" };
+  if (model.stopping) return { text: "stopping", tone: "busy" };
+  if (inFlight(model)) return { text: model.send?.steer ? "queued for the next step" : "sending", tone: "busy" };
+  if (model.queue[0]?.failed) return { text: "a message was not sent. retry, edit, or cancel it", tone: "danger" };
+  return { text: "" };
+}
+
+/** What the header shows for this composer. A steer waits for the next step, so it counts as queued. */
+export function composerActivity(model: ComposerModel): { sending: boolean; queued: number; failed: boolean } {
+  const steering = Boolean(inFlight(model) && model.send?.steer);
+  const waiting = model.queue.filter((item) => item !== inFlight(model) && !item.failed).length;
+  return { sending: Boolean(inFlight(model)) && !steering, queued: waiting + (steering ? 1 : 0), failed: Boolean(model.queue[0]?.failed) };
+}
+
+const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): ComposerTransition => {
+  const attempt = model.nextAttempt;
+  return {
+    model: { ...model, sending: true, send: { attempt, id: item.id, steer }, nextAttempt: attempt + 1 },
+    effect: { type: "submit", attempt, text: item.text, steer },
+  };
+};
+
+const next = (model: ComposerModel, turnRunning: boolean): ComposerTransition => {
+  const head = model.queue[0];
+  if (!head || head.failed || model.sending || !canSend(model.state)) return { model };
+  return start(model, head, turnRunning);
+};
 
 export function transition(model: ComposerModel, event: ComposerEvent): ComposerTransition {
   switch (event.type) {
     case "state":
       return { model: { ...model, state: event.state, error: event.state !== "running" && event.state !== "steerable" && model.error?.kind === "stop" ? undefined : model.error } };
     case "edit":
-      return { model: {
-        ...model,
-        draft: event.draft,
-        send: model.sending ? model.send : undefined,
-        error: model.error?.kind === "submit" && !model.sending ? undefined : model.error,
-      } };
+      return { model: { ...model, draft: event.draft, error: model.error?.kind === "submit" ? undefined : model.error } };
     case "submit": {
-      if (model.sending || !model.draft.trim() || model.state === "running" || model.state === "read-only") return { model };
-      const attempt = model.nextAttempt;
-      const steer = event.turnRunning;
-      return {
-        model: { ...model, sending: true, error: model.error?.kind === "dropped" ? model.error : undefined, send: { attempt, sent: model.draft, steer }, nextAttempt: attempt + 1 },
-        effect: { type: "submit", attempt, text: model.draft, steer },
-      };
+      if (!submitAction(model)) return { model };
+      if (model.queue.length >= QUEUE_LIMIT) return { model: { ...model, error: { kind: "submit", text: `at most ${QUEUE_LIMIT} messages can wait. cancel one or wait for a reply.` } } };
+      const queued = { ...model, draft: "", error: undefined, queue: [...model.queue, { id: model.nextQueueId, text: model.draft }], nextQueueId: model.nextQueueId + 1 };
+      return next(queued, event.turnRunning);
     }
+    case "next":
+      return next(model, event.turnRunning);
     case "confirm":
       if (model.send?.attempt !== event.attempt) return { model };
-      return { model: { ...model, draft: unsentDraft(model.draft, model.send.sent), send: undefined, error: model.error?.kind === "submit" || model.error?.kind === "dropped" ? undefined : model.error } };
+      return { model: { ...model, queue: model.queue.filter((item) => item.id !== model.send!.id), send: undefined } };
     case "reject": {
       if (model.send?.attempt !== event.attempt) return { model };
-      return { model: { ...model, error: { kind: event.dropped ? "dropped" : "submit", text: event.message } } };
+      // a failed message stays first in the list with its error; nothing after it goes out until retry, edit, or cancel
+      const { id } = model.send;
+      return { model: { ...model, queue: model.queue.map((item) => item.id === id ? { ...item, failed: event.message, tries: (item.tries ?? 0) + 1 } : item) } };
     }
-    case "dismiss-error":
-      return { model: { ...model, error: undefined } };
     case "settle":
       if (model.send?.attempt !== event.attempt) return { model: { ...model, sending: false } };
       return { model: { ...model, sending: false, send: undefined } };
+    case "retry":
+      return { model: { ...model, queue: model.queue.map((item) => item.id === event.id ? { ...item, failed: undefined } : item) } };
+    case "restore": {
+      // edit a failed message: its text goes back to the front of the box, and its row goes away
+      const item = model.queue.find((queued) => queued.id === event.id && queued.failed);
+      if (!item) return { model };
+      return { model: { ...model, draft: [item.text, model.draft].filter(Boolean).join("\n"), queue: model.queue.filter((queued) => queued !== item) } };
+    }
+    case "cancel":
+      if (inFlight(model)?.id === event.id) return { model };
+      return { model: { ...model, queue: model.queue.filter((item) => item.id !== event.id) } };
+    case "cancel-last": {
+      const last = model.queue.at(-1);
+      return last ? transition(model, { type: "cancel", id: last.id }) : { model };
+    }
     case "stop":
       if (model.stopping) return { model };
       return { model: { ...model, stopping: true, error: undefined }, effect: { type: "stop" } };

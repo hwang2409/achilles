@@ -80,6 +80,10 @@ export async function gateTranscript(
   await field.fill("stream enough lines to overflow");
   await field.press("Enter");
   await waitFor(async () => JSON.parse(await Bun.file(controlPath).text()).turn_start_barrier === "held", "held turn-start event");
+  // the server holds turn_start before the page may have handled the send reply; wait for the page too,
+  // so this step tests the send-to-steer fallback and not an Enter during a pending send
+  const composer = page.locator('[data-part="composer"]');
+  await waitFor(async () => await composer.getAttribute("data-pending") === null && await field.inputValue() === "", "settled stream send");
   await field.fill("prompt during turn starting");
   await field.press("Enter");
   await waitFor(async () => {
@@ -88,7 +92,15 @@ export async function gateTranscript(
     const sentIndex = sent ? frames.indexOf(sent) : -1;
     return frames.some((frame) => frame.method === "steer" && frame.params?.text === "prompt during turn starting") ||
       Boolean(sent && frames.slice(sentIndex + 1).some((frame) => frame.id === sent.id));
-  }, "turn-start delivery decision");
+  }, "turn-start delivery decision").catch(async (error) => {
+    throw new Error(`${error}\ncomposer: ${JSON.stringify({
+      pending: await composer.getAttribute("data-pending"),
+      queued: await composer.getAttribute("data-queued"),
+      error: await composer.getAttribute("data-error"),
+      message: await composer.locator('[data-part="composer-message"]').innerText().catch(() => null),
+      draft: await field.inputValue().catch(() => null),
+    })}`);
+  });
   const startingSend = requests().find((frame) => frame.method === "send" && frame.params?.text === "prompt during turn starting");
   const startingSteer = requests().find((frame) => frame.method === "steer" && frame.params?.text === "prompt during turn starting");
   if (!startingSend?.params?.delivery_id || !startingSteer?.params?.delivery_id)

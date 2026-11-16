@@ -172,9 +172,9 @@ describe("steer delivery confirmation", () => {
   test.each([
     { name: "dropped", status: { status: "dropped" } },
     { name: "evicted dropped", status: { status: "evicted", outcome: "dropped" } },
-  ])("keeps the draft when $name", async ({ status }) => {
+  ])("reports a dropped steer when $name", async ({ status }) => {
     const client = { request: async () => status };
-    await expect(confirmSteerDelivery(client as never, "initial")).rejects.toThrow("message was not sent");
+    await expect(confirmSteerDelivery(client as never, "initial")).rejects.toThrow("dropped this message");
   });
 
   test.each([
@@ -684,7 +684,7 @@ describe("chat creation lifecycle", () => {
         state: "idle",
         defaultValue: "first draft",
         onDraftChange() {},
-        onDeliveryConfirm() {},
+        onDraftSubmit() {},
         onSubmit: async (text, intent, track) => {
           const attached = await run();
           await deliverChatMessage(client, attached.sessionId, text, "one-delivery-id", pageDeliverySteer("empty", intent), track);
