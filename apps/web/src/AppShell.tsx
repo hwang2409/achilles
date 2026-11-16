@@ -105,6 +105,7 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
 export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+  const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
   const [query, setQuery] = useState("");
@@ -220,6 +221,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
   }, [paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); if (!narrow) setCollapsed((value) => !value); }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
         const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
@@ -319,7 +321,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     });
   };
 
-  return <div className={`app-shell ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
+  return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
