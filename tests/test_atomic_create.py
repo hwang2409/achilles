@@ -1812,8 +1812,8 @@ def test_restore_version_guards_over_public_interfaces(creation_client, monkeypa
             {"kind": "tool", "name": "add_book", "version": 1, "expected_version": 2},
         )
         assert not error, value
-        assert value == {"kind": "tool", "name": "add_book", "version": 1}
-        assert _active_tool_version(store) == 1
+        assert value == {"kind": "tool", "name": "add_book", "version": 3, "restored_from": 1}
+        assert _active_tool_version(store) == 3
         assert notified, "tools/list_changed was not sent"
         assert state(root)[0]["audit"] == before[0]["audit"] + 1
         return
