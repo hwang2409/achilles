@@ -125,14 +125,11 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; box-sizing: border-box; width: 8px; height: 8px; margin-right: 8px; }
   .fold-mark-approve { color: var(--fulcrum-warn); }
   .fold-mark-approve::before { background: var(--fulcrum-warn); }
-  /* an accent-outlined chip (the app's "on/active" language, as on the current chat row), so create mode reads as
-     visibly on at a glance even at 390 where the word drops; hollow fill keeps it from reading as the filled accent
-     "running" dot, and the menu repeats the mark in front of the full name, so it works as a legend */
+  /* an accent chip + its own word (the app's "on/active" colour, as on the current chat row), so create mode
+     reads as visibly on and named even at 390 where the word stays; hollow fill keeps it from reading as the
+     filled accent "running" dot, and the menu repeats the mark in front of the full name as a legend */
   .fold-mark-create { color: var(--fulcrum-accent); }
   .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { border: 1px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 22%, transparent); }
-  /* the gap sits on the word, so the chip alone (tight header) has no trailing space */
-  .fold-mark-create::before { margin-right: 0; }
-  .fold-mark-create .fold-long { margin-left: 8px; }
   /* the title keeps a minimum width; the marks get shorter instead of pushing it off-screen */
   .chat-heading { min-width: 6em; }
 }
@@ -140,6 +137,14 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .fold-long { display: none; }
   /* a long state ("maybe not sent", "waiting on you") wraps to two lines (9ch: never one word a line) instead of pushing ••• off-screen */
   .run-state { min-width: 9ch; white-space: normal; }
+  /* make room for the create word beside the icons: tighten the indicator and let the title ellipsize to a lower floor */
+  .fold-indicator { gap: 8px; padding-left: 8px; }
+  .chat-heading { min-width: 3em; }
+}
+/* the narrowest phones (~320) cannot fit the create word and a readable title together, so the word drops to its
+   accent chip alone there; the word returns at 390, and the full name stays in the aria-label and the ••• menu */
+@container (max-width: 20em) {
+  .fold-mid { display: none; }
 }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
