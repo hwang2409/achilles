@@ -59,8 +59,8 @@ def _chat_cursor(updated_at: str, session_id: str) -> str:
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _page_cursor(updated_at: str, page_id: str) -> str:
-    payload = json.dumps([updated_at, page_id], separators=(",", ":")).encode()
+def _page_cursor(created_at: str, page_id: str) -> str:
+    payload = json.dumps([created_at, page_id], separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
