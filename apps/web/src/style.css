@@ -148,8 +148,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .chat-actions { gap: 10px; }
   .chat-heading { min-width: 0; }
 }
-/* at the narrowest width, keep the named create marker visible and fold only the less important auto marker. */
-@container (max-width: 20em) {
+/* on narrow headers, keep the named create marker visible and fold only the less important auto marker. */
+@container (max-width: 25em) {
   .fold-mark-approve { display: none; }
 }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
