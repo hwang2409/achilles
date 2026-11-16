@@ -1039,6 +1039,37 @@ def test_discovery_rejects_invalid_port(monkeypatch, tmp_path: Path, port: objec
     assert response.status_code == 503
 
 
+@pytest.mark.parametrize(
+    ("discovery", "port", "start"),
+    [
+        (None, 5191, None),
+        ("home", 5191, "make dev"),
+        ("home", 5297, "make dev PORT=5297"),
+        (
+            "attached",
+            5190,
+            "zeta serve --ws 0 --ws-discovery {path} --ws-origin http://127.0.0.1:5190",
+        ),
+    ],
+)
+def test_stopped_zeta_names_the_command_for_this_achilles(
+    monkeypatch, tmp_path: Path, discovery: str | None, port: int, start: str | None
+) -> None:
+    monkeypatch.setenv("ACHILLES_HOME", str(tmp_path / "achilles"))
+    monkeypatch.setenv("ZETA_HOME", str(tmp_path / "zeta"))
+    path = tmp_path / "achilles/run/serve.json" if discovery == "home" else tmp_path / "serve.json"
+    if discovery:
+        monkeypatch.setenv("ACHILLES_ZETA_DISCOVERY", str(path))
+    else:
+        monkeypatch.delenv("ACHILLES_ZETA_DISCOVERY", raising=False)
+    origin = f"http://127.0.0.1:{port}"
+    response = TestClient(web.create_app(), client=("127.0.0.1", 1234)).get(
+        "/api/zeta/discovery", headers={"origin": origin, "host": f"127.0.0.1:{port}"}
+    )
+    assert response.status_code == 503
+    assert response.json()["start"] == (start and start.format(path=path))
+
+
 def test_chat_list_shows_a_chat_only_after_its_first_message(tmp_path: Path) -> None:
     client = chat_client()
     client.post("/api/pages/home/chats", json={"session_id": "sent"})

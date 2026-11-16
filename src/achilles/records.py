@@ -59,13 +59,27 @@ def _get(db, page_id, collection, arguments):
     return {**json.loads(found[1]), "record_id": found[0], "revision": found[2]}
 
 
+# a list filter may also match record_id (layout block filters cannot); say so, so the agent
+# does not guess `id`
+_LIST_WHERE_SCHEMA = {
+    **_EQUALITY_FILTER_SCHEMA,
+    "properties": {
+        **_EQUALITY_FILTER_SCHEMA["properties"],
+        "field": {
+            **_EQUALITY_FILTER_SCHEMA["properties"]["field"],
+            "description": "A field of the collection, or record_id.",
+        },
+    },
+}
+
+
 def list_input_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
     """Every list tool accepts where and limit on top of its own input schema."""
     return {
         **input_schema,
         "properties": {
             **input_schema.get("properties", {}),
-            "where": _EQUALITY_FILTER_SCHEMA,
+            "where": _LIST_WHERE_SCHEMA,
             "limit": {
                 "type": "integer",
                 "minimum": 1,
