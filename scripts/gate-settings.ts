@@ -137,9 +137,13 @@ type ApprovalModeResponse = (method: "session_settings" | "set_settings", sessio
 const sessionId = (page: Page) => page.locator("[data-session-id]").getAttribute("data-session-id");
 const settingsWrites = (frames: Frame[], id: string) => frames.filter((frame) => frame.method === "set_settings" && frame.params?.session_id === id).length;
 
-export async function assertServerAskWins(page: Page, id: string, frames: Frame[], approvalModeResponse: ApprovalModeResponse): Promise<void> {
+type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
+
+export async function assertServerAskWins(page: Page, id: string, frames: () => Frame[], approvalModeResponse: ApprovalModeResponse, waitFor: WaitFor): Promise<void> {
+  // the client re-fetches session_settings on each resume, so the latest request can still be in flight
+  await waitFor(async () => approvalModeResponse("session_settings", id) !== undefined, "server-forced ask session_settings response");
   if (approvalModeResponse("session_settings", id) !== "ask") throw new Error("server-forced ask session did not report ask settings");
-  if (settingsWrites(frames, id)) throw new Error("server-forced ask session sent a no-op set_settings frame");
+  if (settingsWrites(frames(), id)) throw new Error("server-forced ask session sent a no-op set_settings frame");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("server-forced ask session showed the auto-approve marker");
 }
 

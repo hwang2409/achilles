@@ -280,7 +280,7 @@ try {
     throw new Error("stale session was not resumed once before and once after setup recovery");
   if (requests().filter((frame) => frame.method === "new_session").length !== 1)
     throw new Error("stale session did not fall back to exactly one replacement");
-  await assertServerAskWins(page, first, requests(), approvalModeResponse);
+  await assertServerAskWins(page, first, requests, approvalModeResponse, waitFor);
   await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
     await page.goto(`${origin}/not-a-real-page`);
   await gateWait.playwright(page.getByRole("alert").filter({ hasText: "page not found" }), "waitFor", { timeout: 20_000 });
@@ -666,7 +666,7 @@ try {
   await gateReloadMidTurn(page, waitFor, requests, gateWait);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
-  await assertServerAskWins(page, second, requests(), approvalModeResponse);
+  await assertServerAskWins(page, second, requests, approvalModeResponse, waitFor);
   const firstSetSettingsAfterReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   if (firstSetSettingsAfterReopen !== firstSetSettingsBeforeReopen)
     throw new Error("reopening an ask chat under an ask server sent set_settings");
