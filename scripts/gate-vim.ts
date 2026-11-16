@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page, Route } from "playwright";
-import { type GateWait, writeControl } from "./gate-diagnostics";
+import { appShortcut, type GateWait, writeControl } from "./gate-diagnostics";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 type WhileDisconnected = (check: () => Promise<void>) => Promise<void>;
@@ -31,6 +31,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await settingsDialog.getByRole("group", { name: "UI font" }).getByRole("button", { name: "IBM Plex Sans" }).click();
     await settingsDialog.getByRole("group", { name: "code font" }).getByRole("button", { name: "IBM Plex Mono" }).click();
     await settingsDialog.getByRole("group", { name: "font size" }).getByRole("button", { name: "16" }).click();
+    await settingsDialog.getByRole("option", { name: "gruvbox-dark" }).click();
     await settingsDialog.getByRole("button", { name: "esc" }).click();
     await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
   };
@@ -70,10 +71,10 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await stockField.inputValue() !== reloadDraft) throw new Error(`reload draft row: expected ${JSON.stringify(reloadDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
   await stockField.fill("");
   await stockField.focus();
-  await page.keyboard.press("Meta+b");
+  await page.keyboard.press(appShortcut("b"));
   if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: command+B did not collapse the sidebar with stock composer focus");
-  await page.keyboard.press("Meta+b");
-  await page.keyboard.press("Meta+Shift+o");
+  await page.keyboard.press(appShortcut("b"));
+  await page.keyboard.press(appShortcut("Shift+o"));
   await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== originalSession, "command+shift+O from stock composer");
   const stockSession = await sessionId();
   if (!stockSession) throw new Error("modifier row: command+shift+O did not create a chat with stock composer focus");
@@ -140,12 +141,12 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await page.keyboard.press("Escape");
   await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
   if (await composer.getAttribute("data-mode") !== "insert") throw new Error("closing settings with escape changed vim mode");
-  await page.keyboard.press("Control+b");
-  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: control+B did not collapse the sidebar with vim composer focus");
-  await page.keyboard.press("Control+b");
+  await page.keyboard.press(appShortcut("b"));
+  if (!(await page.locator(".app-shell").getAttribute("class"))?.includes("sidebar-collapsed")) throw new Error("modifier row: the platform app modifier+B did not collapse the sidebar with vim composer focus");
+  await page.keyboard.press(appShortcut("b"));
   const vimSession = await sessionId();
-  await page.keyboard.press("Control+Shift+o");
-  await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== vimSession, "control+shift+O from vim composer");
+  await page.keyboard.press(appShortcut("Shift+o"));
+  await waitFor(async () => Boolean(await sessionId()) && await sessionId() !== vimSession, "the platform app modifier+shift+O from vim composer");
   if (!vimSession) throw new Error("vim composer session id missing before modifier shortcut");
   await switchTo(vimSession);
   if (await vimDraft() !== "first\n\n  third") throw new Error("modifier chat creation changed the vim draft");
@@ -154,6 +155,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await vimDraft() !== "path/") throw new Error(`vim insert slash was stolen by a global shortcut: ${JSON.stringify(await vimDraft())}`);
   if (await page.locator(".chat-search input").evaluate((element) => element === document.activeElement)) throw new Error("vim insert slash opened chat search");
   await field.fill("helo");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await screenshot("insert-1280");
+  await page.setViewportSize({ width: 1440, height: 900 });
   await screenshot("insert");
   await field.press("Escape");
   if (await composer.getAttribute("data-mode") !== "normal") throw new Error("escape in vim INSERT did not enter NORMAL");
@@ -163,6 +167,9 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   await field.press("l");
   await field.press("Escape");
   if (await vimDraft() !== "hello") throw new Error(`vim edit produced ${JSON.stringify(await vimDraft())}, not "hello"`);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await screenshot("normal-1280");
+  await page.setViewportSize({ width: 1440, height: 900 });
   await screenshot("normal");
   await field.press("v");
   await field.press("l");
