@@ -6,6 +6,7 @@ import { getCM, Vim, vim } from "@replit/codemirror-vim";
 import { isEditableTarget } from "../keyboard";
 import { composerStatus, enterAction, submitAction, type ComposerModel } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
+import { ComposerHint } from "./hint";
 import { useComposerDelivery, type ComposerAdapterProps } from "./useComposerDelivery";
 import "./vim-composer.css";
 
@@ -22,7 +23,7 @@ export function VimComposer(props: ComposerAdapterProps) {
 }
 
 function InteractiveVimComposer(props: ComposerAdapterProps) {
-  const { state, reason, label = "message", placeholder, defaultValue = "", className, onStop } = props;
+  const { state, reason, label = "message", placeholder, defaultValue = "", className, onStop, questionWaiting } = props;
   const id = useId();
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -156,7 +157,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint = note || (mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send" : "i focus · j/k scroll chat");
+  const hint = note || undefined;
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
@@ -170,7 +171,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       <div className="vim-guidance">
         <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
-          <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
+          <ComposerHint id={`${id}-hint`} state={state} mode={mode} queues={queues} focused={focused} questionWaiting={questionWaiting} override={note || undefined} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
         </p>
       </div>

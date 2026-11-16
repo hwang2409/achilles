@@ -43,6 +43,9 @@ export async function gateTranscript(
   await waitFor(async () => await messages.count() > beforeMarkdown, "markdown reply for this turn");
   const markdown = messages.nth(beforeMarkdown);
   await waitFor(async () => await markdown.locator("pre > code span").count() > 0, "highlighted code for this markdown reply");
+  if (await markdown.locator('[data-part="code-fence-head"] span', { hasText: "python" }).count() !== 1 ||
+    await markdown.locator('[data-part="code-fence-head"] button', { hasText: "code" }).count() !== 1)
+    throw new Error("ordinary fenced code did not render its language head and copy button");
   if (await markdown.locator("h3", { hasText: "Rendered markdown" }).count() !== 1)
     throw new Error("markdown # heading did not render as the message h3");
   if (await markdown.locator("h4", { hasText: "Structured reply" }).count() !== 1)

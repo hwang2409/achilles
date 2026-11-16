@@ -33,6 +33,7 @@ export type ComposerAdapterProps = ComposerProps & {
   /** this chat was just created by the page's new-chat composer `fromNewChat`; that composer's owner moves here */
   fromNewChat?: string;
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
+  questionWaiting?: boolean;
 };
 
 /** `deliveryId`: send with this id (a retry of a held row), not a new one */
