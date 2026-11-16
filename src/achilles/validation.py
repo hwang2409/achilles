@@ -12,12 +12,18 @@ _SAFE_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 class ValidationError(ValueError):
     def __init__(
-        self, path: str, expected: str, code: str = "invalid_input", hint: str | None = None
+        self,
+        path: str,
+        expected: str,
+        code: str = "invalid_input",
+        hint: str | None = None,
+        current: dict[str, Any] | None = None,
     ):
         self.code = code
         self.path = path
         self.expected = expected
         self.hint = hint
+        self.current = current
         super().__init__(expected)
 
 
@@ -25,9 +31,8 @@ def error_document(exc: ValidationError) -> dict[str, Any]:
     document: dict[str, Any] = {"code": exc.code, "path": exc.path, "expected": exc.expected}
     if exc.hint is not None:
         document["hint"] = exc.hint
-    current = getattr(exc, "current", None)
-    if current is not None:
-        document["current"] = current
+    if exc.current is not None:
+        document["current"] = exc.current
     return document
 
 

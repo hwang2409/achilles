@@ -125,43 +125,44 @@ def _list(db, page_id, collection, arguments):
 def _update(db, page_id, collection, version, schema, arguments):
     record_id = arguments.get("record_id")
     found = db.execute(
-        "SELECT document FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
+        "SELECT document, revision FROM page_record "
+        "WHERE page_id=? AND collection=? AND record_id=?",
         (page_id, collection, record_id),
     ).fetchone()
     if found is None:
         raise ValueError("record not found")
     revision = arguments.get("revision")
     document = json.loads(found[0])
+    if found[1] != revision:
+        # call_record holds the write lock, so this row is the live record; it has the
+        # list/get row shape so the caller can rebuild its change without a separate read
+        current = {**document, "record_id": record_id, "revision": found[1]}
+        raise VersionConflict(
+            "/revision",
+            "current record revision",
+            "the record changed; compare current with your change and retry with "
+            "current.revision only if your change still applies",
+            current,
+        )
     document.update({k: v for k, v in arguments.items() if k not in {"record_id", "revision"}})
     _check(schema, document)
-    updated = db.execute(
+    db.execute(
         "UPDATE page_record SET version=?, revision=revision+1, document=?, updated_at=? "
-        "WHERE page_id=? AND collection=? AND record_id=? AND revision=?",
-        (
-            version,
-            json.dumps(document, sort_keys=True),
-            now(),
-            page_id,
-            collection,
-            record_id,
-            revision,
-        ),
+        "WHERE page_id=? AND collection=? AND record_id=?",
+        (version, json.dumps(document, sort_keys=True), now(), page_id, collection, record_id),
     )
-    if updated.rowcount != 1:
-        # record the live revision so a caller can retry without a separate read
-        live = db.execute(
-            "SELECT revision FROM page_record WHERE page_id=? AND collection=? AND record_id=?",
-            (page_id, collection, record_id),
-        ).fetchone()
-        current = {"record_id": record_id, "revision": live[0]} if live else None
-        raise VersionConflict("/revision", "current record revision", current)
     return {**document, "record_id": record_id, "revision": revision + 1}
 
 
 class VersionConflict(ValidationError):
-    def __init__(self, path: str, expected: str, current: dict[str, Any] | None = None):
-        super().__init__(path, expected, "conflict")
-        self.current = current
+    def __init__(
+        self,
+        path: str,
+        expected: str,
+        hint: str | None = None,
+        current: dict[str, Any] | None = None,
+    ):
+        super().__init__(path, expected, "conflict", hint, current)
 
 
 def call_record(
