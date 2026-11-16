@@ -66,6 +66,10 @@
 .transcript [data-part="code-fence"] [data-part="md-code-block"][data-size="large"] {
   padding: 0;
 }
+.transcript [data-part="code-fence"] [data-part="md-code-block"]:not([data-size="large"])::before {
+  display: none;
+  content: none;
+}
 .transcript [data-part="md-table"] {
   display: block;
   max-width: 100%;
