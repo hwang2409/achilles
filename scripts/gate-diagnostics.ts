@@ -105,6 +105,7 @@ export const controlSnapshot = (text: string, secrets: readonly string[] = []): 
 // covers `"token": "x"`, escaped `\"token\":\"x\"`, `'Authorization': 'Basic x'`, `x-api-key: x`, and `credential=x` in log lines that are not JSON.
 // a quoted value keeps its quotes, and an unquoted value stops at a quote, so a redacted JSON line stays valid.
 // a key starts only at the start of a `[\w-]` run, and its parts are bounded to 64 characters, so a long run cannot backtrack for minutes.
+// shortcut: a key with more than 64 characters on one side of the keyword is not matched; widen the bound if such a key appears.
 const FIELD_KEY = String.raw`(?<![\w-])[\w-]{0,64}(?:token|authorization|credential|mcp_bindings|cookie|api[_-]?key|secret|password)[\w-]{0,64}`;
 const SECRET_FIELD = new RegExp(String.raw`((?:\\*["'])?${FIELD_KEY}(?:\\*["'])?\s*[:=]\s*)(?:(\\*["'])(?:(?!\2).)*?\2|(?:basic|bearer|digest)\s+[^\s,}&"'\\]+|[^\s,}&"'\\]+)`, "gi");
 // a python header tuple `(b'x-api-key', b'x')`.
