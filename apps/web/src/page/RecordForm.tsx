@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
-import { formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
+import { fieldError, formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
 
@@ -143,7 +143,8 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
       if (!response.ok) {
         const path = body?.error?.path ?? "";
         const name = path.split("/")[1];
-        if (body?.error && fields.some((field) => field.name === name)) { setFieldErrors({ [name]: body.error.expected }); focusField(name); }
+        const field = fields.find((candidate) => candidate.name === name);
+        if (body?.error && field) { setFieldErrors({ [name]: fieldError(field, body.error.expected) }); focusField(name); }
         else setMessage({ kind: "alert", text: body?.error ? `${path || "input"}: ${body.error.expected}` : body?.detail ?? `could not ${row ? "save" : "add"} (${response.status})` });
         return;
       }
@@ -200,7 +201,9 @@ function Field({ id, field, value, error, onChange }: { id: string; field: FormF
   const common = { id, name: field.name, "aria-required": field.required, "aria-invalid": error ? true : undefined, "aria-describedby": described };
   const control = field.kind === "boolean" ? <input {...common} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
     : field.kind === "enum" ? <select {...common} value={String(value)} onChange={(event) => onChange(event.target.value)}><option value="">{field.required ? "choose…" : "none"}</option>{field.options.map((option, index) => <option key={index} value={JSON.stringify(option)}>{String(option)}</option>)}</select>
-    : <input {...common} type={field.kind === "string" ? "text" : "number"} step={field.kind === "integer" ? 1 : "any"} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
+    : field.kind === "string" ? <input {...common} type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} />
+    // a phone keypad without a minus key only when the schema rules out negatives
+    : <input {...common} type="number" step={field.multipleOf ?? (field.kind === "integer" ? 1 : "any")} min={field.minimum} inputMode={field.minimum !== undefined && field.minimum >= 0 ? (field.kind === "integer" ? "numeric" : "decimal") : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
   return <div className={`record-field${field.kind === "boolean" ? " record-field-check" : ""}`}>
     <label htmlFor={id}>{field.name}{field.required && <span className="required-mark" aria-hidden="true"> *</span>}</label>
     {control}

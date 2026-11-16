@@ -1192,10 +1192,14 @@ def test_layout_restore_is_page_bound_guarded_and_audited(tmp_path: Path) -> Non
     assert restored.json() == {"version": 3, "restored_from": 1}
     assert store.layout(page_id)["blocks"][0]["text"] == "one"
     history = client.get(f"/api/pages/{page_id}/versions", headers=own).json()
-    assert [(row["version"], row["active"], row["action"]) for row in history["layout"]] == [
-        (3, True, "restore_layout"),
-        (2, False, "update_layout"),
-        (1, False, "create_page"),
+    rows = [
+        (row["version"], row["active"], row["action"], row["restored_from"])
+        for row in history["layout"]
+    ]
+    assert rows == [
+        (3, True, "restore_layout", 1),
+        (2, False, "update_layout", None),
+        (1, False, "create_page", None),
     ]
     with store._connect() as db:
         actions = [
@@ -1237,8 +1241,9 @@ def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> Non
     assert rollback.status_code == 200
     assert (rollback.json()["version"], rollback.json()["restored_from"]) == (3, 1)
     tools = client.get("/api/pages/home/versions", headers=own).json()["tools"]
-    assert [(row["name"], row["version"], row["active"]) for row in tools] == [
-        ("annotate_trace", 3, True),
-        ("annotate_trace", 2, False),
-        ("annotate_trace", 1, False),
+    listed = [(row["name"], row["version"], row["active"], row["restored_from"]) for row in tools]
+    assert listed == [
+        ("annotate_trace", 3, True, 1),
+        ("annotate_trace", 2, False, None),
+        ("annotate_trace", 1, False, None),
     ]

@@ -898,13 +898,21 @@ class PageStore:
                 "lv.version=COALESCE(p.active_layout_version, 1), "
                 "(SELECT a.action FROM audit a WHERE a.page_id=lv.page_id "
                 "AND a.version_digest=lv.digest AND a.created_at=lv.created_at "
-                "AND a.action IN ('create_page','update_layout','restore_layout') LIMIT 1) "
+                "AND a.action IN ('create_page','update_layout','restore_layout') LIMIT 1), "
+                # a restore copies the document, so its source is the newest earlier version
+                # with the same digest (any equal version holds the same layout)
+                "(SELECT MAX(o.version) FROM layout_version o WHERE o.page_id=lv.page_id "
+                "AND o.digest=lv.digest AND o.version<lv.version) "
                 "FROM layout_version lv JOIN page p ON p.id=lv.page_id WHERE lv.page_id=? "
                 "ORDER BY lv.version DESC LIMIT 100",
                 (page_id,),
             ).fetchall()
             tools = db.execute(
-                "SELECT t.name, v.version, v.created_at, v.version=pt.active_version "
+                "SELECT t.name, v.version, v.created_at, v.version=pt.active_version, "
+                "CASE WHEN EXISTS(SELECT 1 FROM audit a WHERE a.action='restore_tool' "
+                "AND a.version_digest=v.digest AND a.created_at=v.created_at) "
+                "THEN (SELECT MAX(o.version) FROM tool_version o WHERE o.tool_id=v.tool_id "
+                "AND o.digest=v.digest AND o.version<v.version) END "
                 "FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
                 "JOIN tool_version v ON v.tool_id=t.id WHERE pt.page_id=? "
                 "AND (v.version=pt.active_version "
@@ -920,11 +928,18 @@ class PageStore:
                     "block_types": [block["type"] for block in json.loads(row[2])["blocks"]],
                     "active": bool(row[3]),
                     "action": row[4],
+                    "restored_from": row[5] if row[4] == "restore_layout" else None,
                 }
                 for row in layouts
             ],
             "tools": [
-                {"name": row[0], "version": row[1], "created_at": row[2], "active": bool(row[3])}
+                {
+                    "name": row[0],
+                    "version": row[1],
+                    "created_at": row[2],
+                    "active": bool(row[3]),
+                    "restored_from": row[4],
+                }
                 for row in tools
             ],
         }

@@ -1,4 +1,4 @@
-type Limits = { minimum?: number; maximum?: number; minLength?: number; maxLength?: number };
+type Limits = { minimum?: number; maximum?: number; multipleOf?: number; minLength?: number; maxLength?: number };
 export type FormField =
   | { name: string; kind: "string" | "number" | "integer" | "boolean"; required: boolean; description?: string } & Limits
   | { name: string; kind: "enum"; required: boolean; description?: string; options: unknown[] };
@@ -6,7 +6,7 @@ export type FormField =
 export type FormValues = Record<string, string | boolean>;
 
 const SCALARS = new Set(["string", "number", "integer", "boolean"]);
-const LIMITS = ["minimum", "maximum", "minLength", "maxLength"] as const;
+const LIMITS = ["minimum", "maximum", "multipleOf", "minLength", "maxLength"] as const;
 
 // The schema is written by an agent, so anything other than a flat object of scalars or enums is refused, not guessed.
 export function formFields(schema: unknown, order: string[] = []): { fields: FormField[] } | { unsupported: string } {
@@ -69,10 +69,20 @@ export function formErrors(fields: FormField[], values: FormValues): Record<stri
     const number = value.trim() === "" ? NaN : Number(value);
     if (!Number.isFinite(number)) errors[field.name] = field.kind === "integer" ? "enter a whole number" : "enter a number";
     else if (field.kind === "integer" && !Number.isInteger(number)) errors[field.name] = "enter a whole number";
-    else if (field.minimum !== undefined && number < field.minimum) errors[field.name] = `at least ${field.minimum}`;
-    else if (field.maximum !== undefined && number > field.maximum) errors[field.name] = `at most ${field.maximum}`;
+    else if (field.minimum !== undefined && number < field.minimum) errors[field.name] = fieldError(field, "minimum");
+    else if (field.maximum !== undefined && number > field.maximum) errors[field.name] = fieldError(field, "maximum");
   }
   return errors;
+}
+
+// The server names a failed schema keyword (expected: "multipleOf"); the user reads the limit in plain words.
+// multipleOf is checked only by the server, which does exact decimal math.
+export function fieldError(field: FormField, expected: string): string {
+  if (field.kind === "enum" || field.kind === "boolean") return expected;
+  if (expected === "multipleOf" && field.multipleOf !== undefined) return `use steps of ${field.multipleOf}`;
+  if (expected === "minimum" && field.minimum !== undefined) return `must be at least ${field.minimum}`;
+  if (expected === "maximum" && field.maximum !== undefined) return `must be at most ${field.maximum}`;
+  return expected;
 }
 
 // Empty inputs are left out so the server names a missing required field; text that is not a number is sent as is so the server names the type.
