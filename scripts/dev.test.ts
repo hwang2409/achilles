@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
+import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaCacheError, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
@@ -100,11 +100,23 @@ test("serve discovery requires a live zeta process and allows either local origi
   expect(serveDecision({ pid: 123, port: 43003, origins: [requested] }, requested, "python unrelated.py").kind).toBe("start");
 });
 
-test("an existing different MCP entry is left unchanged with an exact fix command", () => {
-  expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/")).toEqual({
-    kind: "different",
-    command: "zeta mcp remove achilles --scope user && zeta mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles",
-  });
+test("zeta invocations use one selected executable", () => {
+  const pin = "d6776edb3a60e7207eabcd1055e01a3aab092a83";
+  const cases = [
+    ["default", "/repo/.cache/zeta/.venv/bin/zeta", "'/repo/.cache/zeta/.venv/bin/zeta' mcp remove achilles --scope user && '/repo/.cache/zeta/.venv/bin/zeta' mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles", "ok"],
+    ["path", "zeta", "'zeta' mcp remove achilles --scope user && 'zeta' mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles", "ok"],
+    ["path mismatch", "zeta", zetaRemediationMessage(pin), "behind"],
+    ["dirty cache", "/repo/.cache/zeta/.venv/bin/zeta", ".cache/zeta has local changes; make dev will not change it", "dirty"],
+  ] as const;
+  for (const [name, executable, command, kind] of cases) {
+    if (kind === "behind") {
+      const decision = zetaRevisionDecision(pin, "/home/u/zeta", true, false);
+      expect(decision.kind, name).toBe("behind");
+      expect(decision.kind === "behind" ? decision.message : "", name).toBe(command);
+    }
+    else if (kind === "dirty") expect(zetaCacheError(" M src/zeta.ts"), name).toBe(command);
+    else expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/", executable), name).toMatchObject({ kind: "different", command });
+  }
 });
 
 test("web dependencies install only when the web-deps stamp changed", () => {
@@ -212,7 +224,7 @@ exit 0
   try {
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    expect(owned.stderr).toContain("zeta too old: your zeta is older than zeta.rev ");
+    expect(owned.stderr).toBe(zetaRemediationMessage("3ab68a2d670eeb49ee8925d52b1d741e48a5fc1f") + "\n");
     expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
     expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);

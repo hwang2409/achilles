@@ -37,10 +37,11 @@ export function mcpUrl(port: number): string {
   return `http://127.0.0.1:${port}/mcp/`;
 }
 
-export function mcpDecision(current: McpConfig | null, url: string): McpDecision {
+export function mcpDecision(current: McpConfig | null, url: string, executable = "zeta"): McpDecision {
   if (current === null) return { kind: "add" };
   if (current.transport === "streamable-http" && current.url === url) return { kind: "unchanged" };
-  return { kind: "different", command: `zeta mcp remove achilles --scope user && zeta mcp add --scope user --url ${shellQuote(url)} achilles` };
+  const command = shellQuote(executable);
+  return { kind: "different", command: `${command} mcp remove achilles --scope user && ${command} mcp add --scope user --url ${shellQuote(url)} achilles` };
 }
 
 export function ownedProcessMatches(saved: ProcessIdentity, current: ProcessIdentity | null): boolean {
@@ -131,21 +132,24 @@ async function backupOnce(file: string) {
 export function zetaExecutable(): string {
   return process.env.ACHILLES_USE_PATH_ZETA === "1" ? "zeta" : resolve(root, ".cache/zeta/.venv/bin/zeta");
 }
+export function zetaCacheError(status: string): string | null {
+  return status ? ".cache/zeta has local changes; make dev will not change it" : null;
+}
 
-async function ensureMcp(url: string) {
+async function ensureMcp(url: string, executable: string) {
   const file = resolve(home, "mcp.json");
   let current: McpConfig | null = null;
-  const shown = Bun.spawnSync([zetaExecutable(), "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: { ...process.env, PWD: home } });
+  const shown = Bun.spawnSync([executable, "mcp", "show", "achilles", "--scope", "user", "--json"], { cwd: home, env: { ...process.env, PWD: home } });
   if (shown.exitCode === 0) {
     try { current = JSON.parse(shown.stdout.toString()).config; } catch { throw new Error("zeta mcp show returned invalid JSON"); }
   } else if (!`${shown.stdout.toString()}${shown.stderr.toString()}`.includes("unknown MCP server: achilles")) {
     throw new Error(`zeta mcp show failed: ${shown.stdout.toString().trim() || shown.stderr.toString().trim()}`);
   }
-  const decision = mcpDecision(current, url);
+  const decision = mcpDecision(current, url, executable);
   if (decision.kind === "unchanged") { console.log("mcp.json: unchanged"); return; }
   if (decision.kind === "different") throw new Error(`mcp.json: achilles differs; fix it with: ${decision.command}`);
   await mkdir(dirname(file), { recursive: true }); await backupOnce(file);
-  run([zetaExecutable(), "mcp", "add", "--scope", "user", "--url", url, "achilles"], home);
+  run([executable, "mcp", "add", "--scope", "user", "--url", url, "achilles"], home);
   console.log("mcp.json: changed");
 }
 async function tail(path: string) {
@@ -167,7 +171,7 @@ async function attachServe(discovery: string, requestedOrigin: string): Promise<
   if (decision.kind === "origin-missing") throw new Error(`attached zeta serve does not allow ${requestedOrigin}; restart it with: ${decision.command}`);
   throw new Error(`ACHILLES_ZETA_DISCOVERY does not name a live zeta serve: ${discovery}`);
 }
-async function chooseOwnedServe(discovery: string, requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
+async function chooseOwnedServe(discovery: string, requestedOrigin: string, executable: string): Promise<{ origin: string; discovery: string }> {
   let saved: ProcessIdentity | null = null;
   try { saved = JSON.parse(await readFile(resolve(cache, "zeta-serve.json"), "utf8")); } catch {}
   const savedIdentity = saved ? await processIdentity(saved.pid) : null;
@@ -185,7 +189,7 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string): Pro
   const runDir = dirname(discovery); await mkdir(runDir, { recursive: true, mode: 0o700 }); await chmod(runDir, 0o700);
   const logPath = resolve(cache, "zeta-serve.log"); const log = Bun.file(logPath);
   const alternate = requestedOrigin.replace("127.0.0.1", "localhost");
-  const args = [zetaExecutable(), "serve", "--port", String(control), "--ws", String(ws), "--ws-discovery", discovery, "--ws-origin", requestedOrigin, "--ws-origin", alternate];
+  const args = [executable, "serve", "--port", String(control), "--ws", String(ws), "--ws-discovery", discovery, "--ws-origin", requestedOrigin, "--ws-origin", alternate];
   const child = Bun.spawn(args, { cwd: home, stdout: log, stderr: log, env: { ...process.env, PWD: home }, detached: true });
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
@@ -195,10 +199,10 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string): Pro
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify(identityAfter)); child.unref();
   console.log(`started achilles zeta serve on port ${ws}`); return { origin: alternate, discovery };
 }
-async function chooseServe(requestedOrigin: string): Promise<{ origin: string; discovery: string }> {
+async function chooseServe(requestedOrigin: string, executable: string): Promise<{ origin: string; discovery: string }> {
   const attached = process.env.ACHILLES_ZETA_DISCOVERY;
   if (attached) return await attachServe(resolve(attached), requestedOrigin);
-  return await chooseOwnedServe(resolve(achillesHome, "run/serve.json"), requestedOrigin);
+  return await chooseOwnedServe(resolve(achillesHome, "run/serve.json"), requestedOrigin, executable);
 }
 async function portPid(): Promise<number | null> {
   const result = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
@@ -244,7 +248,11 @@ async function ensurePinnedZeta() {
   if (fresh) {
     await mkdir(dirname(checkout), { recursive: true });
     run(["git", "clone", "https://github.com/hwang2409/zeta", checkout]);
-  } else run(["git", "-C", checkout, "fetch", "--all", "--tags", "--prune"]);
+  } else {
+    const dirty = zetaCacheError(run(["git", "-C", checkout, "status", "--porcelain"], root, true));
+    if (dirty) throw new Error(dirty);
+    run(["git", "-C", checkout, "fetch", "--all", "--tags", "--prune"]);
+  }
   run(["git", "-C", checkout, "checkout", "--detach", pin]);
   run(["uv", "sync", "--project", checkout, "--frozen"]);
 }
@@ -276,7 +284,7 @@ async function checkZetaRevision() {
   if (decision.kind === "behind") throw new Error(decision.message);
   if (decision.kind === "unknown") console.error(`warning: cannot verify the installed zeta is at least the pin ${pin}: ${decision.reason}; continuing`);
 }
-async function prerequisites() {
+async function prerequisites(): Promise<string> {
   const fixes: Record<string, string> = {
     bun: "curl -fsSL https://bun.sh/install | bash",
     uv: "curl -LsSf https://astral.sh/uv/install.sh | sh",
@@ -286,7 +294,7 @@ async function prerequisites() {
     if (Bun.spawnSync(["sh", "-c", `command -v ${command}`]).exitCode) throw new Error(`missing ${command}: ${fixes[command]}`);
   }
   if (process.env.ACHILLES_USE_PATH_ZETA !== "1") await ensurePinnedZeta();
-  else if (Bun.spawnSync(["sh", "-c", "command -v zeta"]).exitCode) throw new Error("missing zeta: install zeta or unset ACHILLES_USE_PATH_ZETA");
+  else if (!Bun.which("zeta")) throw new Error("missing zeta: install zeta or unset ACHILLES_USE_PATH_ZETA");
   const zeta = zetaExecutable();
   const checks: [string[], string[], "serve" | "mcp"][] = [
     [[zeta, "mcp", "--help"], ["add", "show", "remove"], "mcp"],
@@ -302,14 +310,16 @@ async function prerequisites() {
     const message = process.env.ACHILLES_USE_PATH_ZETA === "1"
       ? zetaRemediationMessage((await readFile(resolve(root, "zeta.rev"), "utf8")).trim())
       : "the pinned zeta does not provide the required command";
+    if (process.env.ACHILLES_USE_PATH_ZETA === "1") throw new Error(message);
     if (kind === "serve") throw new Error(`zeta too old: ${message}`);
     throw new Error(`missing zeta mcp: ${message}`);
   }
   if (!process.env.ACHILLES_ZETA_DISCOVERY && process.env.ACHILLES_USE_PATH_ZETA === "1") await checkZetaRevision();
   await mkdir(home, { recursive: true });
+  return zeta;
 }
 async function dev() {
-  await prerequisites();
+  const zeta = await prerequisites();
   const webStamp = resolve(root, ".cache/web-build.stamp");
   // Test hook: skip dependency and web builds while exercising the real dev entry.
   if (process.env.ACHILLES_DEV_SKIP_BUILD !== "1") {
@@ -319,10 +329,10 @@ async function dev() {
     let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
     if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");
   }
-  const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin);
+  const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin, zeta);
   const achillesStamp = await digest([webStamp, ...(await filesUnder(resolve(root, "src/achilles"))), resolve(root, "pyproject.toml"), resolve(root, "uv.lock")]);
   process.env.ACHILLES_ZETA_DISCOVERY = selected.discovery;
-  await ensureMcp(mcpUrl(port)); await startAchilles(selected.origin, achillesStamp);
+  await ensureMcp(mcpUrl(port), zeta); await startAchilles(selected.origin, achillesStamp);
   const opener = process.platform === "darwin" ? "open" : "xdg-open";
   if (Bun.spawnSync(["sh", "-c", `command -v ${opener}`]).exitCode === 0) Bun.spawn([opener, selected.origin]); else console.log(`open ${selected.origin} in your browser`);
 }
