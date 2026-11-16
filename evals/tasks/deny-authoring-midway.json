@@ -1,0 +1,69 @@
+{
+  "id": "deny-authoring-midway",
+  "suite": "hard",
+  "page_plan": [
+    {
+      "alias": "home",
+      "source": "fixture",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 14,
+  "approval_mode": "ask",
+  "steps": [
+    {
+      "id": "build",
+      "kind": "prompt",
+      "page": "home",
+      "chat": "home-chat",
+      "prompt": "turn this page into a habit tracker: create the tools add_habit (name, and streak as an integer), list_habits, and update_habit, then add a list block of habits that shows name and streak, then add two habits: Read with streak 3 and Run with streak 0. I approve each change separately: if I reject one, skip just that change, do not ask for it again, finish everything else, and tell me at the end what you did not do",
+      "approval": {
+        "tool": "achilles__create_tool",
+        "decisions": [
+          "approve",
+          "approve",
+          "deny"
+        ]
+      }
+    }
+  ],
+  "checks": [
+    {
+      "id": "denied-tool",
+      "type": "denied_step",
+      "page": "home",
+      "tool": "achilles__create_tool",
+      "step": "build",
+      "value": [
+        "add_habit",
+        "list_habits",
+        "update_habit"
+      ]
+    },
+    {
+      "id": "habits",
+      "type": "records_exact",
+      "page": "home",
+      "value": [
+        {
+          "name": "Read",
+          "streak": 3
+        },
+        {
+          "name": "Run",
+          "streak": 0
+        }
+      ]
+    },
+    {
+      "id": "no-double-insert",
+      "type": "no_duplicate_writes",
+      "page": "home",
+      "tool": "achilles__add_habit"
+    }
+  ],
+  "requires": [
+    "create_tool"
+  ]
+}

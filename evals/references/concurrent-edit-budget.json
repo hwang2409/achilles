@@ -1,0 +1,706 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "projects"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_projects",
+        "name": "list_projects",
+        "version": 1,
+        "operation": "list",
+        "collection": "projects"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_project",
+        "name": "update_project",
+        "version": 1,
+        "operation": "update",
+        "collection": "projects"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "p-1",
+        "collection": "projects",
+        "data": {
+          "name": "Atlas",
+          "status": "active",
+          "budget": 250
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-2",
+        "collection": "projects",
+        "data": {
+          "name": "Beacon",
+          "status": "archived",
+          "budget": 150
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-3",
+        "collection": "projects",
+        "data": {
+          "name": "Cobalt",
+          "status": "active",
+          "budget": 450
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-4",
+        "collection": "projects",
+        "data": {
+          "name": "Delta",
+          "status": "active",
+          "budget": 230
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-5",
+        "collection": "projects",
+        "data": {
+          "name": "Ember",
+          "status": "active",
+          "budget": 300
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-6",
+        "collection": "projects",
+        "data": {
+          "name": "Fjord",
+          "status": "archived",
+          "budget": 90
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "list-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__list_projects",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "u-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-1",
+          "revision": 1,
+          "budget": 250
+        }
+      },
+      {
+        "id": "u-1",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-3",
+          "revision": 1,
+          "budget": 450
+        }
+      },
+      {
+        "id": "u-2",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": false,
+        "arguments": {
+          "record_id": "p-4",
+          "revision": 1,
+          "budget": 170
+        }
+      },
+      {
+        "id": "u-3",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-4",
+          "revision": 2,
+          "budget": 230
+        }
+      },
+      {
+        "id": "u-4",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-5",
+          "revision": 1,
+          "budget": 300
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "list-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__list_projects",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-1",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-2",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": false,
+        "data": {
+          "code": "conflict"
+        }
+      },
+      {
+        "call_id": "u-3",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-4",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "u-0",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-1",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-2",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-3",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-4",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "projects"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_projects",
+          "name": "list_projects",
+          "version": 1,
+          "operation": "list",
+          "collection": "projects"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_project",
+          "name": "update_project",
+          "version": 1,
+          "operation": "update",
+          "collection": "projects"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "p-1",
+          "collection": "projects",
+          "data": {
+            "name": "Atlas",
+            "status": "active",
+            "budget": 200
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-2",
+          "collection": "projects",
+          "data": {
+            "name": "Beacon",
+            "status": "archived",
+            "budget": 150
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-3",
+          "collection": "projects",
+          "data": {
+            "name": "Cobalt",
+            "status": "active",
+            "budget": 400
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-4",
+          "collection": "projects",
+          "data": {
+            "name": "Delta",
+            "status": "active",
+            "budget": 120
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-5",
+          "collection": "projects",
+          "data": {
+            "name": "Ember",
+            "status": "active",
+            "budget": 250
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-6",
+          "collection": "projects",
+          "data": {
+            "name": "Fjord",
+            "status": "archived",
+            "budget": 90
+          }
+        }
+      ]
+    },
+    "turns": 6,
+    "interjections": [
+      {
+        "step": "raise",
+        "page_id": "home",
+        "tool": "update_project",
+        "action": "user_write",
+        "ok": true,
+        "status": 200,
+        "revision_before": 1,
+        "revision_after": 2,
+        "request_id": "u-0"
+      }
+    ],
+    "answers": {
+      "raise": "Done. Delta's budget was changed to 180 while I worked, so I added 50 to that: it is now 230."
+    }
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "projects"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_projects",
+        "name": "list_projects",
+        "version": 1,
+        "operation": "list",
+        "collection": "projects"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_project",
+        "name": "update_project",
+        "version": 1,
+        "operation": "update",
+        "collection": "projects"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "p-1",
+        "collection": "projects",
+        "data": {
+          "name": "Atlas",
+          "status": "active",
+          "budget": 250
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-2",
+        "collection": "projects",
+        "data": {
+          "name": "Beacon",
+          "status": "archived",
+          "budget": 150
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-3",
+        "collection": "projects",
+        "data": {
+          "name": "Cobalt",
+          "status": "active",
+          "budget": 450
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-4",
+        "collection": "projects",
+        "data": {
+          "name": "Delta",
+          "status": "active",
+          "budget": 170
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-5",
+        "collection": "projects",
+        "data": {
+          "name": "Ember",
+          "status": "active",
+          "budget": 300
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "p-6",
+        "collection": "projects",
+        "data": {
+          "name": "Fjord",
+          "status": "archived",
+          "budget": 90
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "list-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__list_projects",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "u-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-1",
+          "revision": 1,
+          "budget": 250
+        }
+      },
+      {
+        "id": "u-1",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-3",
+          "revision": 1,
+          "budget": 450
+        }
+      },
+      {
+        "id": "u-2",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": false,
+        "arguments": {
+          "record_id": "p-4",
+          "revision": 1,
+          "budget": 170
+        }
+      },
+      {
+        "id": "u-3",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-4",
+          "revision": 2,
+          "budget": 170
+        }
+      },
+      {
+        "id": "u-4",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "arguments": {
+          "record_id": "p-5",
+          "revision": 1,
+          "budget": 300
+        }
+      }
+    ],
+    "results": [
+      {
+        "call_id": "list-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__list_projects",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-0",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-1",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-2",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": false,
+        "data": {
+          "code": "conflict"
+        }
+      },
+      {
+        "call_id": "u-3",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      },
+      {
+        "call_id": "u-4",
+        "page_id": "home",
+        "chat_id": "projects-chat",
+        "tool": "achilles__update_project",
+        "success": true,
+        "data": {}
+      }
+    ],
+    "approvals": [
+      {
+        "request_id": "u-0",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-1",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-2",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-3",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-4",
+        "chat_id": "projects-chat",
+        "page_id": "home",
+        "tool": "achilles__update_project",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "projects"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_projects",
+          "name": "list_projects",
+          "version": 1,
+          "operation": "list",
+          "collection": "projects"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_project",
+          "name": "update_project",
+          "version": 1,
+          "operation": "update",
+          "collection": "projects"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "p-1",
+          "collection": "projects",
+          "data": {
+            "name": "Atlas",
+            "status": "active",
+            "budget": 200
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-2",
+          "collection": "projects",
+          "data": {
+            "name": "Beacon",
+            "status": "archived",
+            "budget": 150
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-3",
+          "collection": "projects",
+          "data": {
+            "name": "Cobalt",
+            "status": "active",
+            "budget": 400
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-4",
+          "collection": "projects",
+          "data": {
+            "name": "Delta",
+            "status": "active",
+            "budget": 120
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-5",
+          "collection": "projects",
+          "data": {
+            "name": "Ember",
+            "status": "active",
+            "budget": 250
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "p-6",
+          "collection": "projects",
+          "data": {
+            "name": "Fjord",
+            "status": "archived",
+            "budget": 90
+          }
+        }
+      ]
+    },
+    "turns": 6,
+    "interjections": [
+      {
+        "step": "raise",
+        "page_id": "home",
+        "tool": "update_project",
+        "action": "user_write",
+        "ok": true,
+        "status": 200,
+        "revision_before": 1,
+        "revision_after": 2,
+        "request_id": "u-0"
+      }
+    ],
+    "answers": {
+      "raise": "Done: Atlas 250, Cobalt 450, Delta 170, Ember 300."
+    }
+  }
+}

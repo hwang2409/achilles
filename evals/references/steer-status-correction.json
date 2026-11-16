@@ -1,0 +1,630 @@
+{
+  "good": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_tasks",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_task",
+        "name": "update_task",
+        "version": 1,
+        "operation": "update",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "k-1",
+        "collection": "tasks",
+        "data": {
+          "title": "Draft launch plan",
+          "project": "Apollo",
+          "status": "paused"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-2",
+        "collection": "tasks",
+        "data": {
+          "title": "Book venue",
+          "project": "Hermes",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-3",
+        "collection": "tasks",
+        "data": {
+          "title": "Review budget",
+          "project": "Apollo",
+          "status": "paused"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-4",
+        "collection": "tasks",
+        "data": {
+          "title": "Write press note",
+          "project": "Apollo",
+          "status": "paused"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-5",
+        "collection": "tasks",
+        "data": {
+          "title": "Order badges",
+          "project": "Hermes",
+          "status": "blocked"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-6",
+        "collection": "tasks",
+        "data": {
+          "title": "Test signup flow",
+          "project": "Apollo",
+          "status": "paused"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-7",
+        "collection": "tasks",
+        "data": {
+          "title": "Send invites",
+          "project": "Hermes",
+          "status": "open"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "list-0",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__list_tasks",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "u-0",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-1",
+          "revision": 1,
+          "status": "done"
+        }
+      },
+      {
+        "id": "u-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-3",
+          "revision": 1,
+          "status": "done"
+        }
+      },
+      {
+        "id": "u-2",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-4",
+          "revision": 1,
+          "status": "paused"
+        }
+      },
+      {
+        "id": "u-3",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-6",
+          "revision": 1,
+          "status": "paused"
+        }
+      },
+      {
+        "id": "u-4",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-1",
+          "revision": 2,
+          "status": "paused"
+        }
+      },
+      {
+        "id": "u-5",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-3",
+          "revision": 2,
+          "status": "paused"
+        }
+      }
+    ],
+    "results": [],
+    "approvals": [
+      {
+        "request_id": "u-0",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-1",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-2",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-3",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-4",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-5",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_tasks",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_task",
+          "name": "update_task",
+          "version": 1,
+          "operation": "update",
+          "collection": "tasks"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "k-1",
+          "collection": "tasks",
+          "data": {
+            "title": "Draft launch plan",
+            "project": "Apollo",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-2",
+          "collection": "tasks",
+          "data": {
+            "title": "Book venue",
+            "project": "Hermes",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-3",
+          "collection": "tasks",
+          "data": {
+            "title": "Review budget",
+            "project": "Apollo",
+            "status": "blocked"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-4",
+          "collection": "tasks",
+          "data": {
+            "title": "Write press note",
+            "project": "Apollo",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-5",
+          "collection": "tasks",
+          "data": {
+            "title": "Order badges",
+            "project": "Hermes",
+            "status": "blocked"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-6",
+          "collection": "tasks",
+          "data": {
+            "title": "Test signup flow",
+            "project": "Apollo",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-7",
+          "collection": "tasks",
+          "data": {
+            "title": "Send invites",
+            "project": "Hermes",
+            "status": "open"
+          }
+        }
+      ]
+    },
+    "turns": 6,
+    "interjections": [
+      {
+        "step": "close",
+        "page_id": "home",
+        "action": "steer",
+        "ok": true,
+        "request_id": "u-1"
+      }
+    ]
+  },
+  "bad": {
+    "pages": [
+      {
+        "id": "home",
+        "alias": "tasks"
+      }
+    ],
+    "tool_versions": [
+      {
+        "page_id": "home",
+        "tool_id": "tool-list_tasks",
+        "name": "list_tasks",
+        "version": 1,
+        "operation": "list",
+        "collection": "tasks"
+      },
+      {
+        "page_id": "home",
+        "tool_id": "tool-update_task",
+        "name": "update_task",
+        "version": 1,
+        "operation": "update",
+        "collection": "tasks"
+      }
+    ],
+    "records": [
+      {
+        "page_id": "home",
+        "id": "k-1",
+        "collection": "tasks",
+        "data": {
+          "title": "Draft launch plan",
+          "project": "Apollo",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-2",
+        "collection": "tasks",
+        "data": {
+          "title": "Book venue",
+          "project": "Hermes",
+          "status": "open"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-3",
+        "collection": "tasks",
+        "data": {
+          "title": "Review budget",
+          "project": "Apollo",
+          "status": "done"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-4",
+        "collection": "tasks",
+        "data": {
+          "title": "Write press note",
+          "project": "Apollo",
+          "status": "paused"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-5",
+        "collection": "tasks",
+        "data": {
+          "title": "Order badges",
+          "project": "Hermes",
+          "status": "blocked"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-6",
+        "collection": "tasks",
+        "data": {
+          "title": "Test signup flow",
+          "project": "Apollo",
+          "status": "paused"
+        }
+      },
+      {
+        "page_id": "home",
+        "id": "k-7",
+        "collection": "tasks",
+        "data": {
+          "title": "Send invites",
+          "project": "Hermes",
+          "status": "open"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "id": "list-0",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__list_tasks",
+        "success": true,
+        "arguments": {}
+      },
+      {
+        "id": "u-0",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-1",
+          "revision": 1,
+          "status": "done"
+        }
+      },
+      {
+        "id": "u-1",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-3",
+          "revision": 1,
+          "status": "done"
+        }
+      },
+      {
+        "id": "u-2",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-4",
+          "revision": 1,
+          "status": "paused"
+        }
+      },
+      {
+        "id": "u-3",
+        "page_id": "home",
+        "chat_id": "tasks-chat",
+        "tool": "achilles__update_task",
+        "success": true,
+        "arguments": {
+          "record_id": "k-6",
+          "revision": 1,
+          "status": "paused"
+        }
+      }
+    ],
+    "results": [],
+    "approvals": [
+      {
+        "request_id": "u-0",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-1",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-2",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      },
+      {
+        "request_id": "u-3",
+        "chat_id": "tasks-chat",
+        "page_id": "home",
+        "tool": "achilles__update_task",
+        "decision": "approve"
+      }
+    ],
+    "initial": {
+      "pages": [
+        {
+          "id": "home",
+          "alias": "tasks"
+        }
+      ],
+      "tool_versions": [
+        {
+          "page_id": "home",
+          "tool_id": "tool-list_tasks",
+          "name": "list_tasks",
+          "version": 1,
+          "operation": "list",
+          "collection": "tasks"
+        },
+        {
+          "page_id": "home",
+          "tool_id": "tool-update_task",
+          "name": "update_task",
+          "version": 1,
+          "operation": "update",
+          "collection": "tasks"
+        }
+      ],
+      "records": [
+        {
+          "page_id": "home",
+          "id": "k-1",
+          "collection": "tasks",
+          "data": {
+            "title": "Draft launch plan",
+            "project": "Apollo",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-2",
+          "collection": "tasks",
+          "data": {
+            "title": "Book venue",
+            "project": "Hermes",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-3",
+          "collection": "tasks",
+          "data": {
+            "title": "Review budget",
+            "project": "Apollo",
+            "status": "blocked"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-4",
+          "collection": "tasks",
+          "data": {
+            "title": "Write press note",
+            "project": "Apollo",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-5",
+          "collection": "tasks",
+          "data": {
+            "title": "Order badges",
+            "project": "Hermes",
+            "status": "blocked"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-6",
+          "collection": "tasks",
+          "data": {
+            "title": "Test signup flow",
+            "project": "Apollo",
+            "status": "open"
+          }
+        },
+        {
+          "page_id": "home",
+          "id": "k-7",
+          "collection": "tasks",
+          "data": {
+            "title": "Send invites",
+            "project": "Hermes",
+            "status": "open"
+          }
+        }
+      ]
+    },
+    "turns": 6,
+    "interjections": [
+      {
+        "step": "close",
+        "page_id": "home",
+        "action": "steer",
+        "ok": true,
+        "request_id": "u-1"
+      }
+    ]
+  }
+}

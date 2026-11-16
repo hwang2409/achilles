@@ -44,6 +44,7 @@ class Client implements EvalProtocol {
   subscribe(sessionId: string) { return this.request("session_history_and_subscribe", { session_id: sessionId }); }
   newSession(params: Record<string, unknown>) { return this.request("new_session", params); }
   async send(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { const accepted = await this.request("send", { session_id: sessionId, text, delivery_id: deliveryId }); return { delivery_id: deliveryId, ...(accepted ?? {}) }; }
+  async steer(sessionId: string, text: string, deliveryId = crypto.randomUUID()) { await this.request("steer", { session_id: sessionId, text, delivery_id: deliveryId }); }
   deliveryStatus(deliveryId: string, timeoutMs = RPC_TIMEOUT_MS) { return this.request("delivery_status", { delivery_id: deliveryId }, timeoutMs); }
   async decide(sessionId: string, requestId: string, decision: "approve" | "deny") { await this.request(decision, { session_id: sessionId, request_id: requestId, scope: "once" }); }
   async abort(sessionId: string) { await this.request("abort", { session_id: sessionId }); }
@@ -68,6 +69,8 @@ class Client implements EvalProtocol {
 export type EvalProtocol = {
   newSession(params: Record<string, unknown>): Promise<Record<string, any>>;
   send(sessionId: string, text: string, deliveryId?: string): Promise<{ delivery_id: string; status?: string }>;
+  // adds the text to the session's running turn; zeta refuses it when no turn runs
+  steer(sessionId: string, text: string, deliveryId?: string): Promise<void>;
   deliveryStatus(deliveryId: string, timeoutMs?: number): Promise<{ delivery_id?: string; status?: string }>;
   decide(sessionId: string, requestId: string, decision: "approve" | "deny"): Promise<void>;
   abort(sessionId: string): Promise<void>;
