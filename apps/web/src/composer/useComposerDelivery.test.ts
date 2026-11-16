@@ -3,7 +3,7 @@ import { draftStore } from "../draftStore";
 import { deliverChatMessage } from "../useActiveChat";
 import { createChatQueues, MAYBE_SENT, NOT_SENT } from "./chatQueues";
 import { inFlight } from "./composer-machine";
-import { createComposerDelivery, type ComposerDelivery } from "./useComposerDelivery";
+import { createComposerDelivery, type ComposerDelivery, type SendIntent } from "./useComposerDelivery";
 
 type Scenario = {
   name: string;
@@ -167,10 +167,12 @@ test("enter takes the text out of the box at once: the box is always a new messa
 // the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), unsent (an older chat of the page
 // that never got its first message opens; App offers it the new-chat owner like any unsent chat), made (that create
 // happens while another chat shows), reload (the page loads again: memory and sends in flight are gone, browser storage
-// stays), transcript (zeta's transcript shows the user message sent with that text's delivery id), rows / box / sent (checks).
+// stays), transcript (zeta's transcript shows the user message sent with that text's delivery id), full (browser storage
+// refuses every write from now on), old (#155 kept this text as the page's first message under its old key),
+// rows / box / sent (checks; `sent` lists the sends zeta took: a send with a delivery id zeta already has is dropped).
 type Step =
-  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail" | "transcript", string]
-  | ["ok" | "esc" | "remount" | "created" | "made" | "reload"]
+  | ["enter" | "type" | "x" | "retry" | "edit" | "switch" | "unsent" | "fail" | "transcript" | "old", string]
+  | ["ok" | "esc" | "remount" | "created" | "made" | "reload" | "full"]
   | ["rows", string[]]
   | ["box", string]
   | ["sent", string[]];
@@ -275,6 +277,26 @@ const queueCases: QueueCase[] = [
     sent: ["a:first"],
   },
   {
+    name: "reload while sending, zeta took it, a second reload before the transcript shows it: the row still clears",
+    steps: [["enter", "first"], ["reload"], ["type", "x"], ["reload"], ["rows", [`failed first: ${MAYBE_SENT}`]], ["transcript", "first"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "reload while sending, zeta took it, then retry: the retry has the same delivery id, so zeta drops the copy",
+    steps: [["enter", "first"], ["reload"], ["retry", "first"], ["ok"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "storage refuses writes: a failed row stays in memory across a chat switch",
+    steps: [["full"], ["enter", "first"], ["fail", "closed"], ["switch", "b"], ["switch", "a"]],
+    sent: ["a:first"], rows: ["failed first: closed"],
+  },
+  {
+    name: "#155 kept a first message under its old key: a page load shows it once as an unsent row of the new-chat box",
+    steps: [["old", "first"], ["reload"], ["reload"], ["switch", "new"], ["rows", [`failed first: ${NOT_SENT}`]]],
+    sent: [], rows: [`failed first: ${NOT_SENT}`],
+  },
+  {
     name: "reload while sending, zeta did not take it: a failed row says it may not have been sent; the queued row behind it is failed too",
     steps: [["enter", "first"], ["enter", "second"], ["reload"], ["sent", ["a:first"]]],
     sent: ["a:first"], rows: [`failed first: ${MAYBE_SENT}`, `failed second: ${NOT_SENT}`],
@@ -342,10 +364,15 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
   const deliveries = new Map<string, string>();
   const previousStorage = globalThis.localStorage;
   const values = new Map<string, string>();
+  let full = false;
+  const refuse = () => { if (full) throw new Error("quota exceeded"); };
   Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: {
     get length() { return values.size; }, key: (index: number) => [...values.keys()][index] ?? null,
-    getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); },
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { refuse(); values.set(key, value); }, removeItem: (key: string) => { refuse(); values.delete(key); },
   } });
+  const taken = new Set<string>();
+  let nextDelivery = 0;
   // one page load's owners; a reload starts new ones over the same storage
   let queues = createChatQueues();
   // chat ids are unique to this case; drafts are kept by the module's draft store, like the browser keeps them
@@ -357,9 +384,10 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
       defaultValue: draftStore.get(key(chat)),
       onDraftChange: (text) => draftStore.set(key(chat), text),
       onDraftSubmit: (text) => draftStore.confirm(key(chat), text),
-      onSubmit: (text, _intent, track) => {
-        sent.push(`${chat}:${text}`);
-        const deliveryId = `delivery ${sent.length}`;
+      onSubmit: (text, intent, track) => {
+        const deliveryId = (intent as SendIntent).deliveryId ?? `delivery ${++nextDelivery}`;
+        if (!taken.has(deliveryId)) sent.push(`${chat}:${text}`);
+        taken.add(deliveryId);
         deliveries.set(text, deliveryId);
         track(deliveryId);
         return pageSends.onSubmit(text);
@@ -401,6 +429,8 @@ test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: exp
         // the old page's sends never answer, and its owners are gone
         case "reload": detach(); sends = heldSends(); queues = createChatQueues(); view = mount(view.chat); detach = view.mounted(); break;
         case "transcript": view.owner.echo(deliveries.get(step[1])!); break;
+        case "full": full = true; break;
+        case "old": values.set("achilles-pending-create-texts", JSON.stringify({ [name]: step[1] })); break;
         case "rows": expect(rows()).toEqual(step[1]); break;
         case "box": expect(view.owner.getModel().draft).toBe(step[1]); break;
         case "sent": expect(sent).toEqual(step[1]); break;

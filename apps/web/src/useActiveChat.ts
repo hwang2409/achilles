@@ -4,6 +4,7 @@ import type { Chat } from "./AppShell";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
+import type { SendIntent } from "./composer/useComposerDelivery";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
 import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
@@ -615,7 +616,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     return () => { turn.dispose(); if (turnEnd.current === turn) turnEnd.current = null; };
   }, [client, workSessionId, ready?.lease, ready?.rebind, ready?.pendingApprovalMode]); // a new attach (lease) gets a new owner and token
 
-  const send = useCallback(async (text: string, intent: { steer: boolean }, track: (id: string) => void) => {
+  const send = useCallback(async (text: string, intent: SendIntent, track: (id: string) => void) => {
     if (!client || (state.phase !== "ready" && state.phase !== "empty")) throw new Error("zeta is not connected");
     await modeToggle.current.beforeSend();
     const token = owner.current.token();
@@ -623,7 +624,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (state.phase === "ready") await turnEnd.current?.settle();
     const current = state.phase === "ready" ? state : await createFirstChat(state, token, text);
     if (state.phase === "empty") await modeToggle.current.beforeSend();
-    const delivery_id = crypto.randomUUID();
+    const delivery_id = intent.deliveryId ?? crypto.randomUUID();
     if (state.phase === "empty") pendingSelection.current = { sessionId: current.sessionId, sawRunning: false };
     try {
       await deliverChatMessage(client, current.sessionId, text, delivery_id, steer, track);

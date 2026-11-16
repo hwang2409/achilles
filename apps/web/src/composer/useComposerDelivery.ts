@@ -5,7 +5,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { useRunStore, type ComposerProps } from "@fulcrum/react";
+import { useRunStore, type ComposerIntent, type ComposerProps } from "@fulcrum/react";
 import {
   composerActivity,
   createComposerModel,
@@ -32,6 +32,9 @@ export type ComposerAdapterProps = ComposerProps & {
   fromNewChat?: string;
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
 };
+
+/** `deliveryId`: send with this id (a retry of a row that may have been sent), not a new one */
+export type SendIntent = ComposerIntent & { deliveryId?: string };
 
 export type DeliveryOptions = ComposerProps & {
   onDraftChange: (text: string) => void;
@@ -79,9 +82,10 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
   let mounts = 0;
   const turnRunning = () => current.isTurnRunning?.() ?? current.state === "steerable";
 
-  const deliver = async ({ attempt: sendAttempt, text, steer }: Extract<ComposerEffect, { type: "submit" }>) => {
+  const deliver = async ({ attempt: sendAttempt, text, steer, deliveryId: reused }: Extract<ComposerEffect, { type: "submit" }>) => {
+    const intent: SendIntent = reused ? { steer, deliveryId: reused } : { steer };
     try {
-      await attempt(() => current.onSubmit(text, { steer }, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
+      await attempt(() => current.onSubmit(text, intent, (deliveryId) => apply({ type: "track", attempt: sendAttempt, deliveryId })));
       apply({ type: "confirm", attempt: sendAttempt });
     } catch (failure) {
       apply({ type: "reject", attempt: sendAttempt, message: errorText(failure) });

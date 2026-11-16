@@ -785,3 +785,48 @@ describe("chat creation lifecycle", () => {
     expect(owner.status("home")).toMatchObject({ pending: null, error: null, createMode: undefined });
   }, CONTROLLED_TIMEOUT_MS + 5_000);
 });
+
+// another tab mapped its own home chat first (409): the page opens that chat, which nobody wrote these rows for
+test("a 409 home mapping keeps the new-chat rows in the new-chat box: none are written into the other tab's chat or sent there", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousStorage = globalThis.localStorage;
+  const storage = new MemoryStorage();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: storage });
+  globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+    const url = String(resource);
+    if (url === "/api/pages/home/chats") return new Response(null, { status: 201 });
+    if (url === "/api/pages/home/session" && init?.method === "PUT") return Response.json({ session_id: "other-tab" }, { status: 409 });
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+  const held = deferred<void>();
+  const sentToOther: string[] = [];
+  const options = (onSubmit: (text: string) => Promise<unknown>) => ({ state: "idle" as const, onDraftChange() {}, onDraftSubmit() {}, onSubmit });
+  const newChat = queues.chatQueues.open("new:home", options(() => held.promise));
+  const detachNew = newChat.attach();
+  let detachOther = () => {};
+  try {
+    newChat.edit("first"); void newChat.submit();
+    newChat.edit("second"); void newChat.submit();
+    const creation = createChatCreationOwner(new MemoryStorage());
+    const attached = await creation.ensure({ input: input(attachmentClient(), true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!;
+    expect(attached.sessionId).toBe("other-tab");
+    // App opens the mapped chat, already sent, so not as the new-chat composer's chat
+    detachNew();
+    const other = queues.chatQueues.open("other-tab", options(async (text) => { sentToOther.push(text); }));
+    detachOther = other.attach();
+    queues.chatQueues.settle();
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+    expect(other.getModel().queue.map((item) => item.text), "new-chat rows shown in another tab's chat").toEqual([]);
+    expect(storage.getItem("achilles:unsent:other-tab")).toBeNull();
+    expect(sentToOther).toEqual([]);
+    expect(newChat.getModel().queue.map((item) => item.text)).toEqual(["first", "second"]);
+  } finally {
+    held.resolve();
+    detachNew(); detachOther();
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+    newChat.cancel(); newChat.cancel();
+    queues.chatQueues.settle();
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: previousStorage });
+  }
+});

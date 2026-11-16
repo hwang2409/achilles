@@ -109,9 +109,10 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     // zeta serves one attached session, so a create whose page moved on must not touch zeta or the page again
     const live = () => {
       if (current()) return;
-      // the home mapping already names this chat, so the page opens it now: its unsent first message goes there
-      const opens = pending(input.pageId)?.mappedSessionId;
-      if (opens) chatQueues.created(`new:${input.pageId}`, opens);
+      // the home mapping names this create's own chat, so the page opens it now: its new-chat rows go there. a chat
+      // another tab mapped (409) was not written for: they stay in the new-chat box
+      const stale = pending(input.pageId);
+      if (stale?.mappedSessionId && stale.mappedSessionId === stale.sessionId) chatQueues.created(`new:${input.pageId}`, stale.sessionId);
       forget(input.pageId);
       throw new StaleCreation();
     };
@@ -165,7 +166,8 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         const modes = readModes(storage); delete modes[input.pageId]; writeModes(storage, modes);
       }
       clearDurable(input.pageId);
-      chatQueues.created(`new:${input.pageId}`, attached.sessionId); // before the chat renders, so its composer takes the new-chat queue
+      // before the chat renders, so its composer takes the new-chat queue; only into this create's own chat (not a 409 one)
+      if (attached.sessionId === record.sessionId) chatQueues.created(`new:${input.pageId}`, attached.sessionId);
       await publishReady(attached);
       complete(input.pageId);
       return attached;

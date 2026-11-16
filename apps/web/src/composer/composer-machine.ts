@@ -26,7 +26,8 @@ export type ComposerModel = {
 };
 
 export type ComposerEffect =
-  | { type: "submit"; attempt: number; text: string; steer: boolean }
+  /** `deliveryId`: a retried row that may have been sent goes out with its old id, so zeta drops a copy it already took */
+  | { type: "submit"; attempt: number; text: string; steer: boolean; deliveryId?: string }
   | { type: "stop" };
 
 export type ComposerEvent =
@@ -90,7 +91,7 @@ const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): Compo
   const attempt = model.nextAttempt;
   return {
     model: { ...model, sending: true, send: { attempt, id: item.id, steer }, nextAttempt: attempt + 1 },
-    effect: { type: "submit", attempt, text: item.text, steer },
+    effect: { type: "submit", attempt, text: item.text, steer, ...(item.deliveryId ? { deliveryId: item.deliveryId } : {}) },
   };
 };
 

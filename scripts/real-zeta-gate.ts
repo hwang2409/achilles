@@ -280,6 +280,22 @@ try {
   const busyNotice = page.getByRole("alert").filter({ hasText: "is still running, so zeta cannot start a new chat yet" });
   await gateWait.playwright(busyNotice, "waitFor", { timeout: 20_000 });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "busy-new-chat-1440x900.png") });
+  // Enter there is refused and keeps a failed row. A reload opens the waiting chat (the newest), so a notice says the
+  // row waits for a new chat; "open" shows it in the new-chat box again. It is never sent.
+  const unsentText = "unsent while the other chat waits";
+  await field.fill(unsentText);
+  await field.press("Enter");
+  const unsentRow = page.locator('[data-part="composer-queued"][data-failed]').filter({ hasText: unsentText });
+  await gateWait.playwright(unsentRow, "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page, "reload");
+  const unsentNotice = page.getByRole("status").filter({ hasText: "1 unsent message for a new chat" });
+  await gateWait.playwright(unsentNotice, "waitFor", { timeout: 20_000 }).catch(async (error) => { throw new Error(`${error}\nno unsent notice after reload body=${redact(await page.locator("body").innerText())}`); });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "unsent-new-chat-notice-1440x900.png") });
+  await unsentNotice.getByRole("button", { name: "open", exact: true }).click();
+  await gateWait.playwright(unsentRow, "waitFor", { timeout: 20_000 });
+  if (requests().some((frame) => (frame.method === "send" || frame.method === "steer") && frame.params?.text === unsentText)) throw new Error("text written for a new chat was sent");
+  await unsentRow.getByRole("button", { name: /^cancel message/ }).click();
+  await gateWait.playwright(unsentRow, "waitFor", { state: "detached", timeout: 20_000 });
   await busyNotice.getByRole("button", { name: "open it" }).click();
   await waitFor(async () => (await approval.count()) > approvalBefore && await homeSessionId() === first, "pending approval after a busy new chat");
   const approvalComplete = page.getByText("approval complete", { exact: true });

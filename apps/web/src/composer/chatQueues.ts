@@ -7,45 +7,57 @@ export const MAYBE_SENT = "may not have been sent — check before retrying";
 export const NOT_SENT = "not sent before the page reloaded";
 
 type StoredRow = Omit<QueuedMessage, "id">;
-type StoredRows = { rows: StoredRow[]; updatedAt: number };
 const PREFIX = "achilles:unsent:";
-// shortcut: the oldest chats past this bound lose their unsent rows; raise it if anyone keeps more chats unsent
-const MAX_CHATS = 20;
-const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/** #155 kept a page's first message here (page id -> text) while its create ran */
+const OLD_TEXTS = "achilles-pending-create-texts";
 
 const storage = () => { try { return globalThis.localStorage; } catch { return undefined; } };
-const parse = (value: string | null): StoredRows | undefined => {
+const parse = (value: string): StoredRow[] | undefined => {
   try {
-    const parsed = JSON.parse(value ?? "null") as Partial<StoredRows>;
-    if (!Array.isArray(parsed.rows) || typeof parsed.updatedAt !== "number" || parsed.updatedAt < Date.now() - MAX_AGE_MS) return undefined;
-    return { updatedAt: parsed.updatedAt, rows: parsed.rows.filter((row): row is StoredRow => typeof row?.text === "string" && typeof row.failed === "string") };
+    const parsed = JSON.parse(value) as { rows?: unknown };
+    if (!Array.isArray(parsed.rows)) return undefined;
+    return parsed.rows.filter((row): row is StoredRow => typeof row?.text === "string" && typeof row.failed === "string");
   } catch { return undefined; }
 };
-const readRows = (chat: string): StoredRow[] => { try { return parse(storage()?.getItem(PREFIX + chat) ?? null)?.rows ?? []; } catch { return []; } };
-/** Keep `rows` as `chat`'s unsent messages for the next page load. A failed write keeps the rows in memory only. */
-const writeRows = (chat: string, rows: StoredRow[]) => {
-  const target = storage();
-  if (!target) return;
+// shortcut: an entry exists only while a message is unsent, so nothing is swept; a deleted chat's rows stay (a few bytes)
+const readRows = (chat: string): StoredRow[] => {
   try {
-    if (!rows.length) { target.removeItem(PREFIX + chat); return; }
-    target.setItem(PREFIX + chat, JSON.stringify({ rows, updatedAt: Date.now() }));
-    const stored: [string, number][] = [];
-    for (let index = 0; index < target.length; index += 1) {
-      const key = target.key(index);
-      if (!key?.startsWith(PREFIX)) continue;
-      const value = parse(target.getItem(key));
-      if (value) stored.push([key, value.updatedAt]); else target.removeItem(key);
+    const value = storage()?.getItem(PREFIX + chat);
+    if (value == null) return [];
+    const rows = parse(value);
+    if (!rows) storage()?.removeItem(PREFIX + chat);
+    return rows ?? [];
+  } catch { return []; }
+};
+/** Keep `rows` as `chat`'s unsent messages for the next page load. False: the write failed, the rows are in memory only. */
+const writeRows = (chat: string, rows: StoredRow[]): boolean => {
+  const target = storage();
+  if (!target) return false;
+  try {
+    if (rows.length) target.setItem(PREFIX + chat, JSON.stringify({ rows }));
+    else target.removeItem(PREFIX + chat);
+    return true;
+  } catch { return false; }
+};
+/** once per page load: #155's kept first messages become unsent rows of their page's new-chat box */
+const migrateOldTexts = () => {
+  try {
+    const raw = storage()?.getItem(OLD_TEXTS);
+    if (raw == null) return;
+    const texts = JSON.parse(raw) as Record<string, unknown>;
+    let written = true;
+    for (const [page, text] of Object.entries(texts ?? {})) {
+      if (typeof text === "string" && text) written = writeRows(`new:${page}`, [...readRows(`new:${page}`), { text, failed: NOT_SENT }]) && written;
     }
-    stored.sort((a, b) => b[1] - a[1]);
-    for (const [key] of stored.slice(MAX_CHATS)) target.removeItem(key);
-  } catch { /* keep the rows in memory */ }
+    if (written) storage()?.removeItem(OLD_TEXTS);
+  } catch { /* storage is off or the entry is unparsable: nothing to move */ }
 };
 /** what a page load that starts now must show: every row failed, so nothing goes out before the user acts */
 const stored = (owner: ComposerDelivery): StoredRow[] => {
   const model = owner.getModel();
   const sending = inFlight(model);
   return model.queue.flatMap((item): StoredRow[] => {
-    if (item !== sending) return [{ text: item.text, failed: item.failed ?? NOT_SENT, ...(item.tries ? { tries: item.tries } : {}) }];
+    if (item !== sending) return [{ text: item.text, failed: item.failed ?? NOT_SENT, ...(item.tries ? { tries: item.tries } : {}), ...(item.deliveryId ? { deliveryId: item.deliveryId } : {}) }];
     if (model.send?.echoed) return []; // zeta's transcript shows it: taken
     return [{ text: item.text, failed: model.send?.deliveryId ? MAYBE_SENT : NOT_SENT, ...(model.send?.deliveryId ? { deliveryId: model.send.deliveryId } : {}) }];
   });
@@ -60,12 +72,19 @@ const stored = (owner: ComposerDelivery): StoredRow[] => {
  * of its chat is attached.
  */
 export function createChatQueues() {
+  migrateOldTexts();
   const owners = new Map<string, ComposerDelivery>();
   /** owner -> the chat its rows are kept under (a new-chat owner's created chat, once known) */
   const keys = new Map<ComposerDelivery, string>();
   /** new-chat owner key -> the chat that its first send created */
   const createdChats = new Map<string, string>();
-  const keep = (owner: ComposerDelivery) => { const key = keys.get(owner); if (key) writeRows(key, stored(owner)); };
+  /** owners whose last write failed: only memory holds their rows, so `settle` keeps them */
+  const unsaved = new Set<ComposerDelivery>();
+  const keep = (owner: ComposerDelivery) => {
+    const key = keys.get(owner);
+    if (!key) return;
+    if (writeRows(key, stored(owner))) unsaved.delete(owner); else unsaved.add(owner);
+  };
 
   const queues = {
     /** The page now opens `chat` in place of its new-chat composer `newChat`: the rows `newChat` holds go with it (its owner
@@ -74,12 +93,14 @@ export function createChatQueues() {
       // a chat that holds rows already (a stale create opens the mapped home chat) keeps its own; these stay in the new-chat box
       if (owners.has(chat) || readRows(chat).length) return;
       const owner = owners.get(newChat);
-      writeRows(chat, owner ? stored(owner) : readRows(newChat));
-      writeRows(newChat, []);
-      if (!owner) return;
+      if (!owner) { if (writeRows(chat, readRows(newChat))) writeRows(newChat, []); return; }
       createdChats.set(newChat, chat);
       keys.set(owner, chat);
+      keep(owner);
+      writeRows(newChat, []);
     },
+    /** how many unsent rows `chat` keeps for a later page load (the page shows a notice for its new-chat box's) */
+    unsent: (chat: string) => readRows(chat).length,
     /** The owner of `chat`. `fromNewChat`: the page's new-chat composer, offered to an unsent chat. Its owner (with
      * the first send still in flight) moves only to the chat that its own send created, never to another unsent chat.
      * Called during render: a render React throws away still moves it, and the next render finds it under `chat`. */
@@ -120,7 +141,7 @@ export function createChatQueues() {
           keys.set(owner, chat); keep(owner); keep(owners.get(target)!);
           continue;
         }
-        if (queue.some((item) => !item.failed)) continue;
+        if (queue.some((item) => !item.failed) || unsaved.has(owner)) continue;
         owners.delete(chat); keys.delete(owner);
       }
     },
