@@ -84,7 +84,7 @@ test("turn cap report preserves the seeded initial snapshot", async () => {
     const revision = (await readFile(join(target, "zeta.rev"), "utf8")).trim(); const warmZeta = join(target, ".cache/zeta"); const runnerZeta = join(target, ".cache", `zeta-${revision}`);
     if (await Bun.file(join(warmZeta, ".git/HEAD")).exists() && !await Bun.file(join(runnerZeta, ".git/HEAD")).exists()) await symlink(warmZeta, runnerZeta, "dir").catch(error => { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; });
     if (!await Bun.file(join(target, ".venv/bin/achilles")).exists()) { const synced = await targetRun(target)("uv", ["sync", "--project", target, "--frozen"], target); expect(synced.exitCode, synced.stderr).toBe(0); }
-    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
+    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", taskId], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root, BASE: "none" }, stdout: "pipe", stderr: "pipe" });
     const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
     const exitCode = await waitForProcess(child, "scripted turn-cap eval", 90_000);
     expect(exitCode, `${await stdout}\n${await stderr}`).toBe(1);
@@ -110,7 +110,7 @@ test("scripted faults: a zeta restart mid-approval resumes the same chat, and a 
     await Bun.write(join(tasks, "provider-error-try-again.json"), await readFile(join(target, "evals/tasks/provider-error-try-again.json"), "utf8"));
     const revision = (await readFile(join(target, "zeta.rev"), "utf8")).trim(); const warmZeta = join(target, ".cache/zeta"); const runnerZeta = join(target, ".cache", `zeta-${revision}`);
     if (await Bun.file(join(warmZeta, ".git/HEAD")).exists() && !await Bun.file(join(runnerZeta, ".git/HEAD")).exists()) await symlink(warmZeta, runnerZeta, "dir").catch(error => { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; });
-    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", "restart-scripted,provider-error-try-again"], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_SKIP_BROWSER_INSTALL: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root }, stdout: "pipe", stderr: "pipe" });
+    child = Bun.spawn(["bun", "scripts/eval.ts", "--suite", "restart-scripted,provider-error-try-again"], { cwd: target, detached: true, env: { ...Bun.env, EVAL_BACKEND: "scripted", EVAL_SKIP_EXPLICIT_EXIT: "1", EVAL_SKIP_BROWSER_INSTALL: "1", EVAL_TASKS_DIR: tasks, REPORT_DIR: root, BASE: "none" }, stdout: "pipe", stderr: "pipe" });
     const stdout = new Response(child.stdout).text(); const stderr = new Response(child.stderr).text();
     const exitCode = await waitForProcess(child, "scripted fault eval", 150_000);
     expect(exitCode, `${await stdout}\n${await stderr}`).toBe(0);
