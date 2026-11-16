@@ -26,7 +26,7 @@ export function DetailRecord({ title, collection, fields, filter, pageId, creden
   useEffect(() => {
     let live = true;
     const request = ++requestSequence.current;
-    const query = new URLSearchParams({ field: filter.field, equals: JSON.stringify(filter.equals) });
+    const query = new URLSearchParams({ field: filter.field, equals: JSON.stringify(filter.equals), limit: "1" });
     setRecords(null);
     setError(null);
     void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?${query}`, {

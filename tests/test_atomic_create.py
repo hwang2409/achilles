@@ -1101,29 +1101,29 @@ def test_home_layout_can_be_inspected_and_updated_over_public_mcp(creation_clien
 
 
 @pytest.mark.parametrize("writer", ["create_page", "update_layout"])
-@pytest.mark.parametrize("block_type", ["detail", "metric"])
+@pytest.mark.parametrize("block_type", ["detail", "metric", "list"])
 def test_unknown_filter_field_is_actionable_through_public_tools(
     creation_client, writer, block_type
 ):
     _, store, client, home_headers = creation_client
     field_filter = {"field": "missing", "equals": "the book"}
-    block = (
-        {
+    block = {
+        "detail": {
             "type": "detail",
             "title": "book",
             "collection": "books",
             "fields": ["title"],
             "filter": field_filter,
-        }
-        if block_type == "detail"
-        else {
+        },
+        "metric": {
             "type": "metric",
             "label": "books",
             "collection": "books",
             "count": True,
             "where": field_filter,
-        }
-    )
+        },
+        "list": {"type": "list", "title": "books", "collection": "books", "filter": field_filter},
+    }[block_type]
     layout = {"blocks": [block]}
     created = mcp(
         client,
@@ -1166,10 +1166,30 @@ def test_unknown_filter_field_is_actionable_through_public_tools(
         hint += " Did you mean title?"
     assert json.loads(result["content"][0]["text"]) == {
         "code": "invalid_input",
-        "path": f"/layout/blocks/0/{'filter' if block_type == 'detail' else 'where'}/field",
+        "path": f"/layout/blocks/0/{'where' if block_type == 'metric' else 'filter'}/field",
         "expected": "field in collection schema",
         "hint": hint,
     }
+
+
+def test_list_filter_is_stored_through_create_page(creation_client):
+    _, store, client, home_headers = creation_client
+    block = {
+        "type": "list",
+        "title": "the book",
+        "collection": "books",
+        "filter": {"field": "title", "equals": "the book"},
+    }
+    created = mcp(
+        client,
+        home_headers,
+        2,
+        "tools/call",
+        {"name": "create_page", "arguments": request(layout={"blocks": [block]})},
+    )
+    assert created.get("isError") is not True, created
+    page_id = json.loads(created["content"][0]["text"])["page_id"]
+    assert store.layout(page_id)["blocks"] == [block]
 
 
 @pytest.mark.parametrize(

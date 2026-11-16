@@ -833,21 +833,23 @@ def test_records_limit_order_and_total_header(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "equals", "expected_ids", "expected_total"),
+    ("field", "equals", "limit", "expected_ids", "expected_total"),
     [
-        ("kind", "one", ["one"], 1),
-        ("kind", "none", [], 0),
-        ("kind", "shared", ["shared-z"], 3),
-        ("value", 1, ["number"], 1),
-        ("value", "1", ["string"], 1),
-        ("value", True, ["boolean"], 1),
-        ("nullable", None, ["null-missing"], 2),
+        ("kind", "one", 100, ["one"], 1),
+        ("kind", "none", 100, [], 0),
+        ("kind", "shared", 1, ["shared-z"], 3),
+        ("kind", "shared", 100, ["shared-z", "shared-a", "shared-old"], 3),
+        ("value", 1, 100, ["number"], 1),
+        ("value", "1", 100, ["string"], 1),
+        ("value", True, 100, ["boolean"], 1),
+        ("nullable", None, 100, ["null-missing", "null-explicit"], 2),
     ],
 )
 def test_filtered_records_observer_endpoint(
     tmp_path: Path,
     field: str,
     equals: object,
+    limit: int,
     expected_ids: list[str],
     expected_total: int,
 ) -> None:
@@ -877,7 +879,7 @@ def test_filtered_records_observer_endpoint(
 
     response = TestClient(web.create_app(), raise_server_exceptions=False).get(
         "/api/pages/home/records/items",
-        params={"field": field, "equals": json.dumps(equals)},
+        params={"field": field, "equals": json.dumps(equals), "limit": limit},
         headers={"authorization": f"Bearer {token}"},
     )
 

@@ -107,6 +107,20 @@ describe("RecordList", () => {
     expect(text(result)).toContain("A Wizard of Earthsea");
     expect(text(result)).not.toContain("Old row");
   });
+
+  test("a list block with a filter asks the server for matching records only", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      urls.push(String(url));
+      return response([{ record_id: "c-1", name: "Synthetic Ada", group: "work" }]);
+    }) as typeof fetch;
+    const block = { type: "list", title: "work", collection: "contacts", fields: ["name", "group"], filter: { field: "group", equals: "work" } };
+    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-filter", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    const query = new URL(urls[0], "http://x").searchParams;
+    expect([query.get("field"), query.get("equals"), query.get("limit")]).toEqual(["group", '"work"', "100"]);
+    expect(text(result)).toContain("Synthetic Ada");
+  });
 });
 
 function headers(result: RenderResult) {
