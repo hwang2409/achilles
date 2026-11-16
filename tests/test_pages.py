@@ -553,3 +553,17 @@ def test_stored_layout_without_fields_still_reads_and_updates(tmp_path):
     assert store.layout(page_id) == old
     assert store.inspect_page(page_id)["layout"] == old
     assert store.update_layout(page_id, old, 1)[0] == 2
+
+
+def test_page_list_order_survives_setting_toggles(tmp_path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    reading = _update_page(store)
+    order = [page["route"] for page in store.pages()[0]]
+    assert order == ["/", "/reading"]
+    store.set_create_mode(reading, False)
+    store.set_create_mode("home", False)
+    store.set_create_mode(reading, True)
+    assert [page["route"] for page in store.pages()[0]] == order
+    first, cursor = store.pages(limit=1)
+    assert [page["route"] for page in first] == ["/"]
+    assert [page["route"] for page in store.pages(limit=1, before=cursor)[0]] == ["/reading"]

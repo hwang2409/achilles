@@ -943,24 +943,27 @@ class PageStore:
         self, limit: int = 200, before: tuple[str, str] | None = None
     ) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:
         with self._connect() as db:
+            # a stable order (home, then newest created first): a setting toggle or a new chat never moves navigation
             where = ""
             parameters: list[Any] = []
             if before is not None:
-                updated_at, page_id = before
-                where = "WHERE (p.updated_at < ? OR (p.updated_at = ? AND p.id < ?))"
-                parameters.extend((updated_at, updated_at, page_id))
+                created_at, page_id = before
+                where = "WHERE p.id<>'home'"
+                if page_id != "home":
+                    where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
+                    parameters.extend((created_at, created_at, page_id))
             rows = db.execute(
                 "SELECT p.id,p.route,p.title,p.created_at,p.updated_at,p.create_mode,"
                 "creator.route AS created_by_route,COUNT(c.session_id) AS chat_count "
                 "FROM page p LEFT JOIN page creator ON creator.id=p.created_by_page_id "
                 "LEFT JOIN chat c ON c.page_id=p.id "
-                f"{where} GROUP BY p.id ORDER BY p.updated_at DESC,p.id DESC LIMIT ?",
+                f"{where} GROUP BY p.id ORDER BY p.id<>'home',p.created_at DESC,p.id DESC LIMIT ?",
                 (*parameters, limit + 1),
             ).fetchall()
         page_rows = rows[:limit]
         next_cursor = None
         if len(rows) > limit:
-            next_cursor = (page_rows[-1]["updated_at"], page_rows[-1]["id"])
+            next_cursor = (page_rows[-1]["created_at"], page_rows[-1]["id"])
         return [
             {
                 "id": row["id"],

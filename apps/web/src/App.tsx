@@ -289,13 +289,12 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
       if (actions.current?.contains(document.activeElement)) overflowButton.current?.focus();
     };
     const onDown = (event: PointerEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
-    // a null relatedTarget is a click (WebKit does not focus clicked buttons), which onDown already judges
-    const onFocusOut = (event: FocusEvent) => { if (event.relatedTarget && !actions.current?.contains(event.relatedTarget as Node)) setOverflow(false); };
-    const box = actions.current;
+    // focus landing anywhere outside, not focus leaving the box: WebKit does not focus a clicked •••, so focus may never enter it
+    const onFocusIn = (event: FocusEvent) => { if (!actions.current?.contains(event.target as Node)) setOverflow(false); };
     addEventListener("keydown", onKey, true);
     addEventListener("pointerdown", onDown);
-    box?.addEventListener("focusout", onFocusOut);
-    return () => { removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", onDown); box?.removeEventListener("focusout", onFocusOut); };
+    addEventListener("focusin", onFocusIn);
+    return () => { removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", onDown); removeEventListener("focusin", onFocusIn); };
   }, [overflow]);
   const rename = useInlineRename();
   const titleControl = useRef<HTMLElement>(null);
