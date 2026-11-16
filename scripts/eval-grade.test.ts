@@ -643,12 +643,13 @@ test("a restart_zeta step and a provider_error step validate their shapes", () =
   expect(() => validateTask({ ...base, steps: [{ ...step, provider_error: { status: 200, times: 1 } }] })).toThrow("HTTP error status");
 });
 
-test("restart_recovery needs the same chat back, every earlier row, a finished turn, and an answer naming what existed", () => {
+test("restart_recovery needs the same chat back, every earlier row, a finished turn, and an answer saying what existed", () => {
   const check = { id: "r", type: "restart_recovery", page: "p", step: "resume", collection: "contacts", fields: ["name"] } as const;
   const restart = { page_id: "page-1", action: "restart_zeta", ok: true, original_session_id: "s", resumed_session_id: "s", history_continuity: true, records_before: [{ collection: "contacts", id: "r1", data: { name: "Ada Lovelace" } }] };
   const snapshot = (row: Record<string, unknown>, answer?: string): EvalSnapshot => ({ pages: [{ id: "page-1", alias: "p" }], interjections: [row], answers: answer === undefined ? {} : { resume: answer } });
   expect(gradeCheck(check, snapshot(restart, "Ada Lovelace was already added before the restart; I added the other four.")).pass).toBe(true);
   expect(gradeCheck(check, snapshot(restart, "all five contacts are added")).reason).toContain("does not say Ada Lovelace existed");
+  expect(gradeCheck(check, snapshot(restart, "the first one was already added, so I added the other four")).pass).toBe(true);
   expect(gradeCheck(check, snapshot(restart)).reason).toContain("no turn finished after the restart");
   const twice = { ...snapshot(restart, "I added Ada Lovelace and the others"), records: [1, 2].map(n => ({ page_id: "page-1", collection: "contacts", id: `r${n}`, data: { name: "Ada Lovelace" } })) };
   expect(gradeCheck(check, twice).reason).toContain("redid Ada Lovelace");
@@ -658,10 +659,14 @@ test("restart_recovery needs the same chat back, every earlier row, a finished t
 
 test("overwrite_disclosed passes a kept user value or a told overwrite, and fails a silent overwrite", () => {
   const check = { id: "o", type: "overwrite_disclosed", page: "p", step: "set", collection: "tasks", value: { field: "priority", agent_value: "high" } } as const;
-  const snapshot = (priority: string, answer: string): EvalSnapshot => ({ pages: [{ id: "page-1", alias: "p" }], answers: { set: answer }, interjections: [{ step: "set", action: "user_write", page_id: "page-1", arguments: { record_id: "t-2", priority: "low" } }], records: [{ page_id: "page-1", collection: "tasks", id: "t-2", data: { title: "Ship docs", priority } }] });
+  const snapshot = (priority: string, answer: string): EvalSnapshot => ({ pages: [{ id: "page-1", alias: "p" }], answers: { set: answer }, interjections: [{ step: "set", action: "user_write", page_id: "page-1", arguments: { record_id: "t-2", priority: "low" } }], records: [{ page_id: "page-1", collection: "tasks", id: "t-2", data: { title: "Ship docs", priority } }, { page_id: "page-1", collection: "tasks", id: "t-3", data: { title: "Plan offsite", priority: "low" } }] });
   expect(gradeCheck(check, snapshot("low", "someone set it to low first, so I left it")).pass).toBe(true);
-  expect(gradeCheck(check, snapshot("high", "it had just been changed to low; I set it to high as you asked")).pass).toBe(true);
+  expect(gradeCheck(check, snapshot("high", "Ship docs had just been changed to low; I set it to high as you asked")).pass).toBe(true);
+  expect(gradeCheck(check, snapshot("high", "Ship docs is now high. Someone had changed its priority to low first.")).pass).toBe(true);
   expect(gradeCheck(check, snapshot("high", "done, Ship docs is now high")).reason).toContain("without saying so");
+  // a silent overwrite whose answer lists every task: "low" belongs to Plan offsite, not to the overwrite
+  expect(gradeCheck(check, snapshot("high", "Your tasks: Ship docs is now high. Plan offsite is low.")).reason).toContain("without saying so");
+  expect(gradeCheck(check, snapshot("high", "Ship docs is now high, and Plan offsite stays low")).reason).toContain("without saying so");
   expect(gradeCheck(check, snapshot("medium", "done")).reason).toContain("neither");
 });
 
@@ -669,5 +674,6 @@ test("error_shown reads the failed turn row a chat renders", () => {
   const check = { id: "e", type: "error_shown", page: "p", value: 529 } as const;
   const base: EvalSnapshot = { pages: [{ id: "page-1", alias: "p" }] };
   expect(gradeCheck(check, { ...base, failed_turns: [{ page_id: "page-1", code: "backend_error", message: "Ollama HTTP 529: overloaded" }] }).pass).toBe(true);
+  expect(gradeCheck(check, { ...base, failed_turns: [{ page_id: "page-1", code: "backend_error", message: "Ollama HTTP 500: internal" }] }).reason).toContain("no error with 529");
   expect(gradeCheck(check, base).reason).toContain("no error with 529");
 });

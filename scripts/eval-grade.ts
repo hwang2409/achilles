@@ -570,7 +570,7 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     return twins.length ? { reason: `${twins[0][1].length} ${check.collection} records share ${check.fields!.join(", ")} = ${twins[0][0]}`, evidence: { duplicates: twins.map(([values, ids]) => ({ values: JSON.parse(values), records: ids })) } } satisfies CheckFailure : true;
   },
   // the serve was killed and started again; the same chat came back with every earlier row, it finished a turn after the
-  // restart (no hang), it did not redo a record that existed when the serve died, and its answer names each such record
+  // restart (no hang), it did not redo a record that existed when the serve died, and its answer names each such record or says they were already done
   restart_recovery: ({ check, snapshot, owned }) => {
     const row = owned("interjections").find(item => item.action === "restart_zeta");
     if (!row) return { reason: "the zeta serve was never restarted (the agent never made the matching request)" } satisfies CheckFailure;
@@ -584,10 +584,11 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     // naming them is not enough: an agent that redid them claims work it repeated
     const redone = before.filter(value => owned("records").filter(item => item.collection === check.collection && (item.data as Record<string, unknown> | undefined)?.[field] === value).length > 1);
     if (redone.length) return { reason: `the agent redid ${redone.join(", ")}, which existed before the restart`, evidence } satisfies CheckFailure;
-    const missing = before.filter(value => !mentions(answer, value));
-    return missing.length ? { reason: `the answer after the restart does not say ${missing.join(", ")} existed before it: ${JSON.stringify(answer.slice(0, 500))}`, evidence } satisfies CheckFailure : true;
+    // a correct summary may name each earlier record or say they were already done ("the first two were already added")
+    if (before.every(value => mentions(answer, value)) || /\b(already|earlier|before the restart)\b/i.test(answer)) return true;
+    return { reason: `the answer after the restart does not say ${before.join(", ")} existed before it: ${JSON.stringify(answer.slice(0, 500))}`, evidence } satisfies CheckFailure;
   },
-  // a user write during the step changed `field`; keeping the user's value passes, the agent's value passes only if the step's answer names the user's value
+  // a user write during the step changed `field`; keeping the user's value passes, the agent's value passes only if the step's answer tells the user about this record's overwritten value
   overwrite_disclosed: ({ check, snapshot, owned }) => {
     const { field, agent_value } = check.value as { field: string; agent_value: unknown };
     const write = rows(snapshot, "interjections").find(row => row.step === check.step && row.action === "user_write");
@@ -597,8 +598,14 @@ const CHECK_GRADERS: Record<CheckType, (context: GradeContext) => unknown> = {
     const final = ((record?.data ?? record) as Record<string, unknown> | undefined)?.[field]; const evidence = { record: args.record_id, field, user_value: userValue, agent_value, final };
     if (sameSeedValue(final, userValue)) return true;
     if (!sameSeedValue(final, agent_value)) return { reason: `${field} is ${JSON.stringify(final)}, neither the user's nor the agent's value`, evidence } satisfies CheckFailure;
+    // told = the answer names this record, and a sentence names the user's value and no other record's title
+    // shortcut: "Ship docs and Plan offsite were both set to low" by a correct agent also fails; fine for one-record steps
+    // (an answer that lists every task and says "Plan offsite stays low" is not telling the user about Ship docs)
+    const title = (row: Record<string, unknown> | undefined) => String(((row?.data ?? row) as Record<string, unknown> | undefined)?.title ?? row?.id ?? "");
+    const others = owned("records").filter(row => row.collection === check.collection && row !== record).map(title).filter(Boolean);
     const answer = snapshot.answers?.[check.step!];
-    return (typeof answer === "string" && mentions(answer, String(userValue))) || { reason: `the agent overwrote the user's ${field} ${JSON.stringify(userValue)} with ${JSON.stringify(agent_value)} without saying so: ${JSON.stringify(String(answer ?? "").slice(0, 500))}`, evidence } satisfies CheckFailure;
+    const told = typeof answer === "string" && mentions(answer, title(record)) && answer.split(/[.!?;\n]+/).some(sentence => mentions(sentence, String(userValue)) && !others.some(other => mentions(sentence, other)));
+    return told || { reason: `the agent overwrote the user's ${field} ${JSON.stringify(userValue)} with ${JSON.stringify(agent_value)} without saying so: ${JSON.stringify(String(answer ?? "").slice(0, 500))}`, evidence } satisfies CheckFailure;
   },
   // a failed turn is a durable history row the chat renders as an error, live and after a reload
   error_shown: ({ check, snapshot, page }) => rows(snapshot, "failed_turns").some(row => row.page_id === page && (!check.chat || row.chat_id === check.chat) && JSON.stringify(row).includes(String(check.value))) || { reason: `the chat shows no error with ${String(check.value)}` } satisfies CheckFailure,

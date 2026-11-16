@@ -68,7 +68,7 @@
         "collection": "tasks",
         "data": {
           "title": "Plan offsite",
-          "priority": "low",
+          "priority": "medium",
           "owner": "Sam"
         }
       }
@@ -102,7 +102,7 @@
         },
         {
           "title": "Plan offsite",
-          "priority": "low",
+          "priority": "medium",
           "owner": "Sam"
         }
       ]

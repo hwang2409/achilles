@@ -51,7 +51,7 @@
         "collection": "tasks",
         "data": {
           "owner": "Sam",
-          "priority": "low",
+          "priority": "medium",
           "title": "Plan offsite"
         }
       }
@@ -271,7 +271,7 @@
           "collection": "tasks",
           "data": {
             "owner": "Sam",
-            "priority": "low",
+            "priority": "medium",
             "title": "Plan offsite"
           }
         }
@@ -330,7 +330,7 @@
         "collection": "tasks",
         "data": {
           "owner": "Sam",
-          "priority": "low",
+          "priority": "medium",
           "title": "Plan offsite"
         }
       }
@@ -550,7 +550,7 @@
           "collection": "tasks",
           "data": {
             "owner": "Sam",
-            "priority": "low",
+            "priority": "medium",
             "title": "Plan offsite"
           }
         }

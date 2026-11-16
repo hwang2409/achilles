@@ -239,11 +239,11 @@ export function finalAnswer(history: any[], prior: number) {
 }
 // a steer the turn did not read starts one more turn, so a steered step ends only after a turn end that follows the steer;
 // a zeta restart loses the turn, so a restarted step ends once the chat is resumed on the new serve
-async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal, steered: () => string | undefined = () => undefined, restart: () => Promise<void> | undefined = () => undefined) {
+async function waitForTerminal(protocol: () => EvalProtocol, sessionId: string, prior: number, failure: () => Error | undefined, signal: AbortSignal, steered: () => string | undefined = () => undefined, restart: () => Promise<Error | undefined> | undefined = () => undefined) {
   for (;;) {
     signal.throwIfAborted(); let error = failure(); if (error) throw error;
     const restarting = restart();
-    if (restarting) { await restarting; error = failure(); if (error) throw error; const history = await protocol().sessionHistory(sessionId); return { count: history.filter((row: any) => row.event === "served_turn_end").length, history }; }
+    if (restarting) { error = await restarting ?? failure(); if (error) throw error; const history = await protocol().sessionHistory(sessionId); return { count: history.filter((row: any) => row.event === "served_turn_end").length, history }; }
     let history: any[];
     try { history = await protocol().sessionHistory(sessionId); } catch (failed) { if (restart()) continue; throw failed; }
     const count = history.filter((row: any) => row.event === "served_turn_end").length;
@@ -449,7 +449,7 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
   const events: Record<string, any>[] = []; const sessions = new Map<string, { id: string; alias: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }>(); const terminals = new Map<string, number>(); const histories = new Map<string, any[]>();
   const reconnects: Array<Record<string, any>> = []; const userWrites: Array<Record<string, unknown>> = []; const answers: Record<string, string> = {}; const deliveries = new Map<string, { delivery_id: string; status?: string }>();
   let turns = 0; let fatal: Error | undefined; let protocol: EvalProtocol; let approvalRule: TaskStep["approval"]; let ruleRequests = 0;
-  let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; let restarting: Promise<void> | undefined; const interjections: Array<Record<string, unknown>> = [];
+  let currentStep: TaskStep | undefined; let duringRequests = 0; let steered: string | undefined; let restarting: Promise<Error | undefined> | undefined; const interjections: Array<Record<string, unknown>> = [];
   // a browser task: the real page is zeta's controller and the harness watches as an observer
   let browser: BrowserDriver | undefined;
   if (task.steps.some(step => step.kind === "browser_prompt")) {
@@ -457,6 +457,20 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     browser = createBrowserDriver({ chromium, origin: stack.achillesOrigin, ask, signal, observer: () => protocol, failure: () => fatal });
   }
   const approvals: Record<string, unknown>[] = []; const enqueueDecision = createDecisionQueue(error => { fatal ??= error instanceof Error ? error : new Error(String(error)); void abortAll(); }); const abortAll = async () => { browser?.wake(); if (browser) return browser.stop(); await Promise.all([...sessions.values()].map(session => protocol.abort(session.id).catch(() => undefined))); };
+  // kill and restart the zeta serve while the turn waits on an approval, then resume the chat on the new serve
+  const restartAndResume = async (step: TaskStep, chat: string, session: { id: string; page_id: string; binding?: { cwd: string; mcp_bindings: Array<{ server: string; headers: { Authorization: string } }> } }, requestId: unknown) => {
+    const row: Record<string, any> = { step: step.id, page_id: session.page_id, chat, action: "restart_zeta", request_id: requestId, original_session_id: session.id, ok: false }; interjections.push(row);
+    try {
+      row.pre_history_ids = (await protocol.sessionHistory(session.id)).map((item: any) => item.id).filter(Boolean);
+      row.records_before = ((await databaseSnapshot(stack)).records ?? []).filter(item => item.page_id === session.page_id).map(item => ({ collection: item.collection, id: item.id, data: item.data }));
+      const old = protocol; Object.assign(row, await stack.restartZeta()); await old.close().catch(() => undefined);
+      const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
+      discovery = await fresh.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
+      protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal });
+      const resumed = await protocol.resume(session.id, session.binding!); row.resumed_session_id = String(resumed.session?.session_id ?? resumed.session_id ?? "");
+      const pre = new Set(row.pre_history_ids); row.after_restart = (await protocol.sessionHistory(session.id)).filter((item: any) => !pre.has(item.id)).map((item: any) => item.event ?? item.role); row.ok = true;
+    } catch (error) { row.error = error instanceof Error ? error.message : String(error); throw error; }
+  };
   const onEvent = (event: Record<string, any>) => {
     events.push(event); browser?.onEvent(event);
     const eventFailure = new Error(JSON.stringify(event)); if (!fatal && stopsSuite(eventFailure)) { fatal = eventFailure; void abortAll(); return; }
@@ -469,24 +483,9 @@ async function driveTask(stack: EvalStack, task: EvalTask, hidden: string[], out
     const request = event.data ?? event; const decision = approvalDecision(approvalRule, request.tool_call?.name, () => ruleRequests++); approvals.push({ request_id: requestId, chat_id: session[0], page_id: session[1].page_id, tool: request.tool_call?.name, decision });
     if (browser) { browser.decide(session[1].id, String(requestId), decision); return; }
     const step = currentStep; const during = step?.during; const fires = during !== undefined && request.tool_call?.name === during.tool && ++duringRequests === (during.nth ?? 1);
-    let finishRestart = () => {}; if (fires && during.restart_zeta) restarting = new Promise<void>(resolve => { finishRestart = resolve; });
+    let finishRestart = (_error?: Error) => {}; if (fires && during.restart_zeta) restarting = new Promise<Error | undefined>(resolve => { finishRestart = resolve; });
     const interject = fires ? async () => {
-      if (during.restart_zeta) {
-        const chat = [...sessions].find(([, value]) => value.id === session[1].id)![0]; const sessionId = session[1].id;
-        const row: Record<string, any> = { step: step!.id, page_id: session[1].page_id, chat, action: "restart_zeta", request_id: requestId, original_session_id: sessionId, ok: false }; interjections.push(row);
-        try {
-          row.pre_history_ids = (await protocol.sessionHistory(sessionId)).map((item: any) => item.id).filter(Boolean);
-          row.records_before = ((await databaseSnapshot(stack)).records ?? []).filter(item => item.page_id === session[1].page_id).map(item => ({ collection: item.collection, id: item.id, data: item.data }));
-          const old = protocol; Object.assign(row, await stack.restartZeta()); await old.close().catch(() => undefined);
-          const fresh = await fetchDeadline(`${stack.achillesOrigin}/api/zeta/discovery`, {}, signal); if (!fresh.ok) throw new Error(`zeta discovery after restart failed (${fresh.status})`);
-          discovery = await fresh.json() as { url: string; controller_token: string }; hidden.push(discovery.controller_token, `zeta.bearer.${discovery.controller_token}`);
-          protocol = await connectEvalProtocol(discovery, onEvent, { retryCapacity: true, signal });
-          const resumed = await protocol.resume(sessionId, session[1].binding!); row.resumed_session_id = String(resumed.session?.session_id ?? resumed.session_id ?? "");
-          const pre = new Set(row.pre_history_ids); row.after_restart = (await protocol.sessionHistory(sessionId)).filter((item: any) => !pre.has(item.id)).map((item: any) => item.event ?? item.role); row.ok = true;
-        } catch (error) { row.error = error instanceof Error ? error.message : String(error); throw error; }
-        finally { finishRestart(); }
-        return;
-      }
+      if (during.restart_zeta) return restartAndResume(step!, session[0], session[1], requestId).then(() => finishRestart(), (error: Error) => { finishRestart(error); throw error; });
       if (during.steer) { await protocol.steer(session[1].id, during.steer, crypto.randomUUID()); steered = during.steer; interjections.push({ step: step!.id, page_id: session[1].page_id, action: "steer", request_id: requestId, ok: true }); return; }
       const write = await userWrite(stack, { ...step!, tool: during.user_write!.tool, arguments: during.user_write!.arguments }, session[1].page_id, hidden, signal);
       interjections.push({ ...write, action: "user_write", request_id: requestId });
