@@ -260,10 +260,12 @@ export function App() {
   return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
-function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {
+function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {
   const here = busy.sessionId !== null && busy.sessionId === openSessionId;
   const open = !here && busy.chat;
-  const text = here ? "this chat is still running. approve or stop it, then try again."
+  const running = open ? `"${titleOf(busy.chat!)}"` : "another chat";
+  const text = busy.retry === "new" && busy.sessionId ? `${running} is still running, so zeta cannot start a new chat yet. a message sent here stays unsent; retry it when that chat ends.`
+    : here ? "this chat is still running. approve or stop it, then try again."
     : open ? `"${titleOf(busy.chat!)}" is still running. open it to approve or stop it, then try again.`
     : busy.sessionId ? "another chat is still running. approve or stop it, then try again."
     : "zeta was busy a moment ago and is ready now. try again.";

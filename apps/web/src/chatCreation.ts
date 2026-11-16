@@ -1,6 +1,6 @@
 import type { ZetaClient } from "@fulcrum/zeta";
 import { chatQueues } from "./composer/chatQueues";
-import { applyApprovalMode, pageBinding } from "./zeta/session";
+import { applyApprovalMode, pageBinding, runningSession } from "./zeta/session";
 
 const STORAGE_KEY = "achilles-pending-chats";
 const MODE_STORAGE_KEY = "achilles-pending-create-modes";
@@ -119,6 +119,9 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
     const operation = (async () => {
       let record = existing;
       if (!record) {
+        // zeta refuses new_session while any turn runs, and the client repeats a refused one 3 times (fulcrum retryBusy):
+        // read status first, so a click during a turn sends no new_session and its refusal is never repeated
+        if (await step(() => runningSession(input.client))) throw Object.assign(new Error("a turn is already running"), { code: -32004 });
         const result = await step(() => input.client.request("new_session", pageBinding(input.credential, input.cwd))) as { session?: { session_id?: string } };
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");

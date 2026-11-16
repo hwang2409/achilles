@@ -670,3 +670,64 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
     chatQueues.settle();
   }
 });
+
+// zeta refuses new_session (-32004) while another chat's turn runs. the text typed after "new chat" was written for a new
+// chat: it must never reach the running chat, whatever zeta allows.
+test("new chat while another chat's turn runs keeps the new chat and never sends its text to the running chat", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const delivered: { method: string; session: unknown }[] = [];
+  const requests: string[] = [];
+  setGlobals({
+    localStorage: new MemoryStorage(),
+    location: { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    fetch: async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, last_state: "running" }], next: null });
+      if (url.startsWith("/api/chats/")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const zeta = {
+    features: ["session_mcp_bindings", "session_replay_seq", "resume_attach", "turn_reconnect"],
+    request: async (method: string, params?: { session_id?: string }) => {
+      requests.push(method);
+      if (method === "new_session") throw TURN_RUNNING_ERROR();
+      if (method === "resume") return { session: { name: null } };
+      if (method === "session_settings") return { model: "offline", approval_mode: "allow" };
+      if (method === "session_history_and_subscribe") return { messages: [], next_before: null, status: { state: "running", pending_approvals: [] } };
+      if (method === "status") return { session: { session_id: "chat" }, state: "running" };
+      if (method === "send" || method === "steer") { delivered.push({ method, session: params?.session_id }); return { accepted: true }; }
+      if (method === "delivery_status") return { status: "delivered" };
+      throw new Error(`unexpected ${method}`);
+    },
+    replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() {} }; },
+    replayRevision: () => 1,
+    finishReplay: () => true,
+  };
+  const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
+  const clock = new ManualClock();
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
+  await act(async () => { mounted = render(createElement(Harness)); });
+  await flushUntil(() => harness.active.state.phase === "ready");
+  await act(async () => { await harness.active.newChat(); });
+  await flushUntil(() => harness.active.busy !== null && harness.active.state.phase !== "loading");
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  clock.advance(5_000);
+  for (let flush = 0; flush < 5; flush += 1) await act(async () => {});
+  // zeta refuses it during a turn and the client repeats a refused one, so achilles asks status first and sends none
+  expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+  // the composer steers when the shown chat runs (App: `turn === "running"`), so send the way it would
+  const steer = harness.active.state.phase === "ready";
+  let sent: Promise<void> | null = null;
+  await act(async () => { sent = harness.active.send("second story", { steer }, () => {}); await sent.catch(() => {}); });
+  expect(delivered, "text written for the new chat reached the running chat").toEqual([]);
+  expect(requests.filter((method) => method === "new_session"), "new_session sent while a turn runs").toHaveLength(0);
+  await expect(sent!).rejects.toThrow("another chat is still running");
+  expect(harness.active.state.phase).toBe("empty");
+  expect(harness.active.busy).toMatchObject({ sessionId: "chat", retry: "new" });
+});

@@ -10,7 +10,8 @@ import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; layout: { blocks: Array<Record<string, unknown>> } };
 type PageAttachment = { page: Page; serverApprovalMode: string | null; credential: string };
-type EmptyState = PageAttachment & { phase: "empty" };
+// newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
+type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
 type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean };
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null };
@@ -489,13 +490,14 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const route = chat.page_route === "/" ? "/" : chat.page_route;
     const target = routeWithChat(route, chat.session_id);
     if (route !== location.pathname) { location.assign(target); return; }
-    if (chat.session_id === selectedId) return;
+    // the chat named in the url but not shown (a refused new chat shows the new chat's box): open it again
+    if (chat.session_id === selectedId) { if (state.phase !== "ready") setRouteRefresh((value) => value + 1); return; }
     owner.current.begin(`${keyFromPath()}:${chat.session_id}`);
     setState({ phase: "loading" });
     history.pushState({}, "", target);
     setFocusSessionId(null);
     setSelectedId(chat.session_id);
-  }, [selectedId]);
+  }, [selectedId, state.phase]);
 
   const continueWaitingChat = useCallback(async () => {
     const waiting = await findNewestChat((chat) => chat.last_state === "approval");
@@ -524,8 +526,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setState({ phase: "loading" });
     try {
       const next = await attachPage(client, key, null, owner.current, creation.current, token, true, applyPendingCreateMode, (ready) => publishReady(ready, token, false, focusClaim.owns()), true);
-      // zeta cannot start a chat while another turn runs: say which chat runs and re-attach the one that was open.
-      if (next.phase === "busy" && owner.current.current(token)) { void showBusy(next.busySessionId, "new"); setRouteRefresh((value) => value + 1); }
+      // zeta cannot start a chat while another turn runs: say which chat runs and keep the new chat's box. text typed
+      // there was written for a new chat, so it must never go to the running chat.
+      if (next.phase === "busy" && owner.current.current(token)) {
+        void showBusy(next.busySessionId, "new");
+        setState({ phase: "empty", page: next.page, serverApprovalMode: next.serverApprovalMode, credential: next.credential, newChat: true });
+      }
     } catch (caught) {
       if (!creation.current.status(context.pageId).pending && owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught, "creation") });
     } finally {
@@ -577,8 +583,9 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         true,
         applyPendingCreateMode,
         async (ready) => { handedOff = ready; },
+        empty.newChat,
       );
-      if (attached.phase === "busy") { void showBusy(attached.busySessionId, "attach"); throw new ChatBusyError(attached.busySessionId); }
+      if (attached.phase === "busy") { void showBusy(attached.busySessionId, empty.newChat ? "new" : "attach"); throw new ChatBusyError(attached.busySessionId); }
       if (attached.phase !== "ready" || handedOff !== attached) throw new Error("created chat did not attach");
       if (modeToggle.current.stale()?.sessionId === attached.sessionId) { // clear the composer draft only when it was the sent text; a starter button must not erase typed text
         draftStore.set(attached.sessionId, text); if (draftStore.get(`new:${empty.page.id}`) === text) draftStore.set(`new:${empty.page.id}`, ""); }
