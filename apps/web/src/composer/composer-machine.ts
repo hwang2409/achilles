@@ -16,8 +16,6 @@ export type ComposerModel = {
   stopping: boolean;
   /** first in, first out; the head is in flight when `send.id` names it */
   queue: QueuedMessage[];
-  /** the queue came from the composer this one replaced; it waits for that composer's send */
-  waiting: boolean;
   error?: ComposerError;
   send?: Send;
   nextAttempt: number;
@@ -40,24 +38,18 @@ export type ComposerEvent =
   | { type: "restore"; id: number }
   | { type: "cancel"; id: number }
   | { type: "cancel-last" }
-  | { type: "adopt"; texts: string[] }
-  | { type: "adopted"; outcome: SendOutcome }
-  | { type: "detach" }
   | { type: "stop" }
   | { type: "stop-reject"; message: string }
   | { type: "stop-settle" };
 
-/** How a send ended: nothing on success; the error and the text on failure. */
-export type SendOutcome = { failed?: string; text?: string };
-
 export type ComposerTransition = { model: ComposerModel; effect?: ComposerEffect };
 
 export function createComposerModel(draft: string, state: ComposerState): ComposerModel {
-  return { state, draft, sending: false, stopping: false, queue: [], waiting: false, nextAttempt: 1, nextQueueId: 1 };
+  return { state, draft, sending: false, stopping: false, queue: [], nextAttempt: 1, nextQueueId: 1 };
 }
 
 const canSend = (state: ComposerState) => state !== "running" && state !== "read-only";
-const busy = (model: ComposerModel) => model.sending || model.waiting || model.queue.length > 0;
+const busy = (model: ComposerModel) => model.sending || model.queue.length > 0;
 
 /** What Enter does now: send the box, queue it behind other messages, or nothing. */
 export function submitAction(model: ComposerModel): "send" | "queue" | null {
@@ -94,7 +86,7 @@ const start = (model: ComposerModel, item: QueuedMessage, steer: boolean): Compo
 
 const next = (model: ComposerModel, turnRunning: boolean): ComposerTransition => {
   const head = model.queue[0];
-  if (!head || head.failed || model.sending || model.waiting || !canSend(model.state)) return { model };
+  if (!head || head.failed || model.sending || !canSend(model.state)) return { model };
   return start(model, head, turnRunning);
 };
 
@@ -139,24 +131,6 @@ export function transition(model: ComposerModel, event: ComposerEvent): Composer
       const last = model.queue.at(-1);
       return last ? transition(model, { type: "cancel", id: last.id }) : { model };
     }
-    case "adopt":
-      return { model: {
-        ...model,
-        waiting: true,
-        queue: [...event.texts.map((text, index) => ({ id: model.nextQueueId + index, text })), ...model.queue],
-        nextQueueId: model.nextQueueId + event.texts.length,
-      } };
-    case "adopted": {
-      if (!model.waiting) return { model };
-      const { failed, text } = event.outcome;
-      const [head, ...rest] = model.queue;
-      const queue = !failed ? model.queue
-        : text !== undefined ? [{ id: model.nextQueueId, text, failed, tries: 1 }, ...model.queue]
-        : head ? [{ ...head, failed: `the message before this one was not sent: ${failed}` }, ...rest] : model.queue;
-      return { model: { ...model, waiting: false, queue, nextQueueId: model.nextQueueId + 1 } };
-    }
-    case "detach":
-      return { model: { ...model, waiting: false, queue: model.queue.filter((item) => item === inFlight(model)) } };
     case "stop":
       if (model.stopping) return { model };
       return { model: { ...model, stopping: true, error: undefined }, effect: { type: "stop" } };

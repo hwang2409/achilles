@@ -39,7 +39,7 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean };
 
-// `fromNewChat`: this chat was just created from the page's new-chat composer, so it takes that composer's queue
+// `fromNewChat`: this chat was just created from the page's new-chat composer, so it takes that composer's queue owner
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
@@ -57,8 +57,8 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }:
     defaultValue: draft,
     onDraftChange: (text: string) => draftStore.set(sessionId, text),
     onDraftSubmit: (sent: string) => draftStore.confirm(sessionId, sent),
-    parkQueue: (queue: Parameters<typeof chatQueues.park>[1]) => chatQueues.park(sessionId, queue),
-    takeQueue: () => chatQueues.take(fromNewChat ? [fromNewChat, sessionId] : [sessionId]),
+    chatId: sessionId,
+    fromNewChat,
     onActivity,
   };
   const composer = vim
@@ -153,8 +153,8 @@ export function App() {
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
   const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0, failed: false });
-  // after every slot has parked or taken its queue in this commit
-  useLayoutEffect(() => chatQueues.settleNewChats());
+  // after every composer of this commit has attached to its chat's queue owner
+  useLayoutEffect(() => chatQueues.settle());
   const send: typeof active.send = (text, intent, track) => {
     setFollowRequest((value) => value + 1);
     return trackQueuedSteer(

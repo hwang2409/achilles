@@ -142,7 +142,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const action = submitAction(model);
-  const queues = model.sending || model.waiting || model.queue.length > 0;
+  const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
   const hint = mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send · esc leave" : "i focus · j/k scroll chat · ? shortcuts";
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };

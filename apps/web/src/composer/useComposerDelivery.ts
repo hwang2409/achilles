@@ -13,28 +13,28 @@ import {
   type ComposerEffect,
   type ComposerEvent,
   type ComposerModel,
-  type SendOutcome,
 } from "./composer-machine";
+import { chatQueues } from "./chatQueues";
 
 const attempt = (action: () => unknown) =>
   new Promise<unknown>((resolve) => resolve(action()));
 const errorText = (error: unknown) =>
   (error instanceof Error ? error.message : String(error)) || "unknown error";
 
-/** Queued messages a composer left behind when it unmounted, and the send they must wait for. */
-export type ParkedQueue = { texts: string[]; after: Promise<SendOutcome> };
-
 export type ComposerAdapterProps = ComposerProps & {
   onDraftChange: (text: string) => void;
   /** Enter took this text out of the box; the stored draft drops it */
   onDraftSubmit: (sent: string) => void;
-  /** keeps this chat's queue when the composer unmounts; the next composer of the chat takes it */
-  parkQueue?: (parked: ParkedQueue) => void;
-  takeQueue?: () => ParkedQueue | undefined;
+  /** the chat this composer shows; its submitted messages belong to the chat's owner in `chatQueues` */
+  chatId: string;
+  /** this chat was just created by the page's new-chat composer `fromNewChat`; that composer's owner moves here */
+  fromNewChat?: string;
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
 };
 
-type DeliveryOptions = ComposerAdapterProps & {
+export type DeliveryOptions = ComposerProps & {
+  onDraftChange: (text: string) => void;
+  onDraftSubmit: (sent: string) => void;
   isTurnRunning?: () => boolean;
 };
 
@@ -49,8 +49,9 @@ export type ComposerDelivery = {
   /** Edit a failed message: its text goes back into the box. */
   restore(id: number): void;
   cancel(id?: number): void;
-  /** Mount: take the chat's parked queue. The returned detach parks it again; a detached owner never starts a send. */
+  /** A composer mounts. The owner starts sends only while at least one composer is attached; the returned function detaches it. */
   attach(): () => void;
+  attached(): boolean;
   stop(): Promise<void>;
 };
 
@@ -71,31 +72,23 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
     return result.effect;
   };
 
-  let detached = false;
-  let sending: Promise<SendOutcome> | undefined;
+  let mounts = 0;
   const turnRunning = () => current.isTurnRunning?.() ?? current.state === "steerable";
 
   const deliver = async ({ attempt: sendAttempt, text, steer }: Extract<ComposerEffect, { type: "submit" }>) => {
-    let done!: (outcome: SendOutcome) => void;
-    sending = new Promise((resolve) => { done = resolve; });
-    let outcome: SendOutcome = {};
     try {
       await attempt(() => current.onSubmit(text, { steer }, () => {}));
       apply({ type: "confirm", attempt: sendAttempt });
     } catch (failure) {
-      const failed = errorText(failure);
-      outcome = { failed, text };
-      apply({ type: "reject", attempt: sendAttempt, message: failed });
+      apply({ type: "reject", attempt: sendAttempt, message: errorText(failure) });
     } finally {
       apply({ type: "settle", attempt: sendAttempt });
-      sending = undefined;
-      done(outcome);
     }
   };
 
-  // one message at a time, in order, each through the current props; a detached owner stops here
+  // one message at a time, in order, each through the current props; with no composer attached, nothing new goes out
   const drain = async () => {
-    while (!detached) {
+    while (mounts > 0) {
       apply({ type: "state", state: current.state });
       const effect = apply({ type: "next", turnRunning: turnRunning() });
       if (effect?.type !== "submit") return;
@@ -140,22 +133,15 @@ export function createComposerDelivery(options: DeliveryOptions): ComposerDelive
       void drain();
     },
     attach() {
-      detached = false;
-      const parked = current.takeQueue?.();
-      if (parked) {
-        apply({ type: "adopt", texts: parked.texts });
-        void parked.after.then((outcome) => { apply({ type: "adopted", outcome }); return drain(); });
-      }
+      mounts += 1;
+      void drain();
+      let attachedNow = true;
       return () => {
-        detached = true;
-        const sendingNow = model.sending;
-        const waiting = model.waiting;
-        const texts = model.queue.filter((item) => !sendingNow || item.id !== model.send?.id).map((item) => item.text);
-        apply({ type: "detach" });
-        if (texts.length || sendingNow || waiting)
-          current.parkQueue?.({ texts, after: sending ?? parked?.after ?? Promise.resolve({}) });
+        if (attachedNow) mounts -= 1;
+        attachedNow = false;
       };
     },
+    attached: () => mounts > 0,
     async stop() {
       const effect = apply({ type: "stop" });
       if (effect?.type !== "stop" || !current.onStop) return;
@@ -178,12 +164,12 @@ export function useComposerDelivery(options: ComposerAdapterProps) {
     isTurnRunning: () => store.getState().turn === "running",
   };
   const delivery = useRef<ComposerDelivery | null>(null);
-  if (!delivery.current) delivery.current = createComposerDelivery(deliveryOptions);
+  delivery.current ??= chatQueues.open(options.chatId, deliveryOptions, options.fromNewChat);
   delivery.current.update(deliveryOptions);
   const owner = delivery.current;
   const model = useSyncExternalStore(owner.subscribe, owner.getModel, owner.getModel);
 
-  // a layout effect, so the old composer parks its queue before the next one (same commit) takes it
+  // a layout effect, so the chat's owner counts this composer before `chatQueues.settle` runs in the same commit
   useLayoutEffect(() => owner.attach(), [owner]);
   useLayoutEffect(() => {
     owner.sync(options.state, options.defaultValue);

@@ -33,7 +33,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const running = state === "running" || state === "steerable";
   const steer = state === "steerable";
   const action = submitAction(model);
-  const queues = model.sending || model.waiting || model.queue.length > 0;
+  const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
   const hint =
     state === "running"

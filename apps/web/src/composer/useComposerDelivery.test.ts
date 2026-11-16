@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import { draftStore } from "../draftStore";
 import { deliverChatMessage } from "../useActiveChat";
 import { chatQueues } from "./chatQueues";
+import { inFlight } from "./composer-machine";
 import { createComposerDelivery, type ComposerDelivery } from "./useComposerDelivery";
 
 type Scenario = {
@@ -87,6 +89,7 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
     },
   };
   const owner = createComposerDelivery(options);
+  const detach = owner.attach();
 
   try {
     const pending = owner.submit();
@@ -119,6 +122,7 @@ test.each(scenarios)("delivery owner: $name", async (scenario) => {
       expect(new Set(methods.map(({ deliveryId }) => deliveryId)).size).toBe(1);
     }
   } finally {
+    detach();
     releaseSend?.();
   }
 });
@@ -131,38 +135,19 @@ function heldSends() {
     sent.push(text);
     return new Promise<void>((resolve, reject) => { releases.push((failure) => failure ? reject(failure) : resolve()); });
   };
-  const release = async (failure?: Error) => { releases.shift()!(failure); for (let tick = 0; tick < 5; tick += 1) await Promise.resolve(); };
+  const release = async (failure?: Error) => { releases.shift()!(failure); await ticks(); };
   return { sent, onSubmit, release };
 }
+const ticks = async () => { for (let tick = 0; tick < 5; tick += 1) await Promise.resolve(); };
 
 const owner = (onSubmit: (text: string) => Promise<void>, extra: Partial<Parameters<typeof createComposerDelivery>[0]> = {}) => createComposerDelivery({
   state: "idle", defaultValue: "first", onDraftChange: () => {}, onDraftSubmit: () => {}, onSubmit, ...extra,
 });
 
-test("enter during a pending send delivers the next draft once, in order, after the first settles", async () => {
-  const sent: string[] = [];
-  let release!: (failure?: Error) => void;
-  const first = new Promise<void>((resolve, reject) => { release = (failure) => failure ? reject(failure) : resolve(); });
-  const owner = createComposerDelivery({
-    state: "idle",
-    defaultValue: "first",
-    onDraftChange: () => {},
-    onDraftSubmit: () => {},
-    onSubmit: async (text: string) => { sent.push(text); if (sent.length === 1) await first; },
-  });
-  const pending = owner.submit();
-  owner.edit("second");
-  const second = owner.submit();
-  expect(sent).toEqual(["first"]);
-  release();
-  await Promise.all([pending, second]);
-  expect(sent).toEqual(["first", "second"]);
-  expect(owner.getModel()).toMatchObject({ draft: "", sending: false, queue: [] });
-});
-
 test("enter takes the text out of the box at once: the box is always a new message, and a submitted message goes out once", async () => {
   const sends = heldSends();
   const composer = owner(sends.onSubmit, { state: "steerable" });
+  composer.attach();
   void composer.submit();
   expect(sends.sent).toEqual(["first"]);
   expect(composer.getModel().draft).toBe("");
@@ -176,107 +161,145 @@ test("enter takes the text out of the box at once: the box is always a new messa
   expect(composer.getModel()).toMatchObject({ draft: "", queue: [] });
 });
 
-test("two enters in a row while a send is pending: both go out once, in order, each as its own send", async () => {
+// What the user does, and what the test checks, against the chat queue owner (`chatQueues`):
+// enter (type the text, press Enter), ok / fail (zeta answers the oldest send), x / esc / retry / edit (row buttons and keys),
+// remount (the chat's composer remounts), switch (another chat's composer replaces it), created (the first message of
+// the page's new chat created chat `s1`: the composer key changes from new:<page> to s1), rows / box / sent (checks).
+type Step =
+  | ["enter" | "x" | "retry" | "edit" | "switch" | "fail", string]
+  | ["ok" | "esc" | "remount" | "created"]
+  | ["rows", string[]]
+  | ["box", string]
+  | ["sent", string[]];
+type QueueCase = { name: string; steps: Step[]; sent: string[]; rows?: string[] };
+
+const queueCases: QueueCase[] = [
+  { name: "success", steps: [["enter", "first"], ["rows", ["sending first"]], ["ok"]], sent: ["a:first"] },
+  {
+    name: "two enters in a row: both queue in order, none lost, each goes out once",
+    steps: [["enter", "first"], ["enter", "second"], ["enter", "third"], ["box", ""], ["rows", ["sending first", "queued second", "queued third"]], ["ok"], ["sent", ["a:first", "a:second"]], ["ok"], ["ok"]],
+    sent: ["a:first", "a:second", "a:third"],
+  },
+  {
+    name: "cancel with x and with esc (the last queued): never sent; esc never cancels the message in flight",
+    steps: [["enter", "first"], ["enter", "second"], ["enter", "third"], ["enter", "fourth"], ["x", "third"], ["esc"], ["rows", ["sending first", "queued second"]], ["esc"], ["esc"], ["rows", ["sending first"]], ["ok"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "failure: the row stays failed, nothing behind it goes out, and it is never sent again on its own",
+    steps: [["enter", "first"], ["fail", "zeta said no"], ["enter", "second"], ["box", ""]],
+    sent: ["a:first"], rows: ["failed first: zeta said no", "queued second"],
+  },
+  {
+    name: "retry goes out exactly once, also on a double click, then the rest follow",
+    steps: [["enter", "first"], ["enter", "second"], ["fail", "denied"], ["retry", "first"], ["retry", "first"], ["rows", ["sending first", "queued second"]], ["fail", "denied again"], ["rows", ["failed first: denied again (2 tries)", "queued second"]], ["retry", "first"], ["ok"], ["ok"]],
+    sent: ["a:first", "a:first", "a:first", "a:second"],
+  },
+  {
+    name: "edit puts a failed message back in the box and removes its row; it is not sent",
+    steps: [["enter", "first"], ["fail", "denied"], ["edit", "first"], ["box", "first"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "remount while sending: the send settles once, the row goes away",
+    steps: [["enter", "first"], ["remount"], ["rows", ["sending first"]], ["ok"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "chat switch while sending: the send settles while away, nothing more goes out",
+    steps: [["enter", "first"], ["switch", "b"], ["ok"], ["switch", "a"]],
+    sent: ["a:first"],
+  },
+  {
+    name: "chat switch while queued: nothing goes out while away, the queue goes out on return, once, in order",
+    steps: [["enter", "first"], ["enter", "second"], ["switch", "b"], ["ok"], ["sent", ["a:first"]], ["switch", "a"], ["rows", ["sending second"]], ["ok"]],
+    sent: ["a:first", "a:second"],
+  },
+  {
+    name: "remount with a failed row: the row stays failed and is not sent again",
+    steps: [["enter", "first"], ["fail", "closed"], ["remount"]],
+    sent: ["a:first"], rows: ["failed first: closed"],
+  },
+  {
+    name: "chat switch with a failed row: the row stays failed and is not sent again",
+    steps: [["enter", "first"], ["fail", "closed"], ["switch", "b"], ["switch", "a"]],
+    sent: ["a:first"], rows: ["failed first: closed"],
+  },
+  {
+    name: "a send that fails while away shows as failed on return and is not sent again",
+    steps: [["enter", "first"], ["enter", "second"], ["switch", "b"], ["fail", "closed"], ["switch", "a"]],
+    sent: ["a:first"], rows: ["failed first: closed", "queued second"],
+  },
+  {
+    name: "new chat: the key changes during the first send; the rest goes to the created chat, once, after it",
+    steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["created"], ["rows", ["sending first", "queued second"]], ["sent", ["new:first"]], ["ok"], ["ok"]],
+    sent: ["new:first", "s1:second"],
+  },
+  {
+    name: "new chat: the first send fails after the key changed; it shows failed in the created chat",
+    steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["created"], ["fail", "closed"]],
+    sent: ["new:first"], rows: ["failed first: closed", "queued second"],
+  },
+  {
+    name: "new chat left before it was created: the queued text goes back to its box, unsent",
+    steps: [["switch", "new"], ["enter", "first"], ["enter", "second"], ["switch", "b"], ["ok"], ["switch", "new"], ["box", "second"]],
+    sent: ["new:first"],
+  },
+];
+
+test.each(queueCases)("chat queue owner: $name", async ({ name, steps, sent: expectedSent, rows: expectedRows = [] }) => {
   const sends = heldSends();
-  const composer = owner(sends.onSubmit);
-  void composer.submit();
-  composer.edit("second"); void composer.submit();
-  composer.edit("third"); void composer.submit();
-  expect(composer.getModel()).toMatchObject({ draft: "", queue: [{ text: "first" }, { text: "second" }, { text: "third" }] });
-  await sends.release();
-  expect(sends.sent).toEqual(["first", "second"]);
-  await sends.release();
-  await sends.release();
-  expect(sends.sent).toEqual(["first", "second", "third"]);
-  expect(composer.getModel()).toMatchObject({ draft: "", sending: false, queue: [] });
-});
-
-test("a message canceled with x or with esc is never sent", async () => {
-  const sends = heldSends();
-  const composer = owner(sends.onSubmit);
-  void composer.submit();
-  for (const text of ["second", "third", "fourth"]) { composer.edit(text); void composer.submit(); }
-  const third = composer.getModel().queue.find((item) => item.text === "third")!;
-  composer.cancel(third.id); // the x
-  composer.cancel(); // esc in an empty box: the last one
-  await sends.release();
-  await sends.release();
-  expect(sends.sent).toEqual(["first", "second"]);
-  expect(composer.getModel().queue).toEqual([]);
-});
-
-test("a queued message that fails stays first with its error; nothing after it goes out until retry", async () => {
-  const sends = heldSends();
-  const composer = owner(sends.onSubmit);
-  void composer.submit();
-  for (const text of ["second", "third"]) { composer.edit(text); void composer.submit(); }
-  await sends.release();
-  await sends.release(new Error("zeta said no"));
-  expect(sends.sent).toEqual(["first", "second"]);
-  const [failed] = composer.getModel().queue;
-  expect(composer.getModel().queue).toMatchObject([{ text: "second", failed: "zeta said no" }, { text: "third" }]);
-  void composer.retry(failed.id);
-  await sends.release();
-  await sends.release();
-  expect(sends.sent).toEqual(["first", "second", "second", "third"]);
-  expect(composer.getModel().queue).toEqual([]);
-});
-
-test("a failed message stays a row and never comes back on its own; retry counts tries, and edit puts its text back in the box", async () => {
-  const sends = heldSends();
-  const composer = owner(sends.onSubmit);
-  void composer.submit();
-  composer.edit("typed meanwhile");
-  await sends.release(new Error("denied"));
-  expect(composer.getModel()).toMatchObject({ draft: "typed meanwhile", queue: [{ id: 1, text: "first", failed: "denied", tries: 1 }] });
-  void composer.retry(1);
-  await sends.release(new Error("denied again"));
-  expect(composer.getModel().queue).toMatchObject([{ text: "first", failed: "denied again", tries: 2 }]);
-  composer.restore(1);
-  expect(composer.getModel()).toMatchObject({ draft: "first\ntyped meanwhile", queue: [] });
-  expect(sends.sent).toEqual(["first", "first"]);
-});
-
-test("the first message of a new chat: the queue moves to the created chat and goes out there once, in order", async () => {
-  const newChat = heldSends();
-  const created = heldSends();
-  const before = owner(newChat.onSubmit, { parkQueue: (queue) => chatQueues.park("new:page", queue) });
-  const detach = before.attach();
-  void before.submit();
-  for (const text of ["second", "third"]) { before.edit(text); void before.submit(); }
-  // the key changes from new:page to the session id while the first send is pending
-  detach();
-  const after = owner(created.onSubmit, { defaultValue: "", takeQueue: () => chatQueues.take(["new:page", "session-1"]) });
-  after.attach();
-  chatQueues.settleNewChats();
-  expect(after.getModel()).toMatchObject({ waiting: true, queue: [{ text: "second" }, { text: "third" }] });
-  expect(created.sent).toEqual([]);
-  await newChat.release();
-  await created.release();
-  await created.release();
-  expect(newChat.sent).toEqual(["first"]);
-  expect(created.sent).toEqual(["second", "third"]);
-});
-
-test("a chat switch keeps the queue with its chat: nothing goes to another chat, and it goes out on return", async () => {
-  const chatA = heldSends();
-  const chatB = heldSends();
-  const leaving = owner(chatA.onSubmit, { parkQueue: (queue) => chatQueues.park("chat-a", queue) });
-  const detach = leaving.attach();
-  void leaving.submit();
-  leaving.edit("for a"); void leaving.submit();
-  detach();
-  await chatA.release();
-  expect(chatA.sent).toEqual(["first"]); // the unmounted composer sends nothing more
-  const other = owner(chatB.onSubmit, { defaultValue: "", takeQueue: () => chatQueues.take(["chat-b"]) });
-  other.attach();
-  await Promise.resolve();
-  expect(chatB.sent).toEqual([]);
-  const back = owner(chatA.onSubmit, { defaultValue: "", takeQueue: () => chatQueues.take(["chat-a"]) });
-  back.attach();
-  expect(back.getModel().queue).toMatchObject([{ text: "for a" }]);
-  for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
-  await chatA.release();
-  expect(chatA.sent).toEqual(["first", "for a"]);
-  expect(chatB.sent).toEqual([]);
+  const sent: string[] = [];
+  // chat ids are unique to this case; the owner registry is shared by the module
+  const key = (chat: string) => chat === "new" ? `new:${name}` : `${name}/${chat}`;
+  const mount = (chat: string, fromNewChat?: string) => {
+    const owner = chatQueues.open(key(chat), {
+      state: "idle",
+      defaultValue: draftStore.get(key(chat)),
+      onDraftChange: (text) => draftStore.set(key(chat), text),
+      onDraftSubmit: (text) => draftStore.confirm(key(chat), text),
+      onSubmit: (text) => { sent.push(`${chat}:${text}`); return sends.onSubmit(text); },
+    }, fromNewChat && key(fromNewChat));
+    return { chat, owner, mounted: () => { const detach = owner.attach(); owner.sync("idle", draftStore.get(key(chat))); return detach; } };
+  };
+  // like a React commit: the next composer renders (and opens its owner), the old one detaches, the next attaches, then settle
+  let view = mount("a");
+  let detach = view.mounted();
+  const replace = (chat: string, fromNewChat?: string) => {
+    const next = mount(chat, fromNewChat);
+    detach();
+    detach = next.mounted();
+    view = next;
+    chatQueues.settle();
+  };
+  const rowOf = (text: string) => view.owner.getModel().queue.find((item) => item.text === text)!.id;
+  const rows = () => {
+    const model = view.owner.getModel();
+    return model.queue.map((item) => item.failed ? `failed ${item.text}: ${item.failed}${(item.tries ?? 1) > 1 ? ` (${item.tries} tries)` : ""}` : `${item === inFlight(model) ? "sending" : "queued"} ${item.text}`);
+  };
+  try {
+    for (const step of steps) {
+      switch (step[0]) {
+        case "enter": view.owner.edit(step[1]); void view.owner.submit(); break;
+        case "ok": await sends.release(); break;
+        case "fail": await sends.release(new Error(step[1])); break;
+        case "x": view.owner.cancel(rowOf(step[1])); break;
+        case "esc": view.owner.cancel(); break;
+        case "retry": void view.owner.retry(rowOf(step[1])); break;
+        case "edit": view.owner.restore(rowOf(step[1])); break;
+        case "remount": replace(view.chat); break;
+        case "switch": replace(step[1]); break;
+        case "created": replace("s1", "new"); break;
+        case "rows": expect(rows()).toEqual(step[1]); break;
+        case "box": expect(view.owner.getModel().draft).toBe(step[1]); break;
+        case "sent": expect(sent).toEqual(step[1]); break;
+      }
+      await ticks();
+    }
+    expect(sent).toEqual(expectedSent);
+    expect(rows()).toEqual(expectedRows);
+  } finally {
+    detach();
+    chatQueues.settle();
+  }
 });

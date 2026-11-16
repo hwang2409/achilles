@@ -1,31 +1,44 @@
 import { draftStore } from "../draftStore";
-import type { ParkedQueue } from "./useComposerDelivery";
+import { createComposerDelivery, type ComposerDelivery, type DeliveryOptions } from "./useComposerDelivery";
 
 /**
- * Queued messages of chats whose composer is not mounted. Each chat keeps its own;
- * nothing here sends. The chat's next composer takes them and sends them in order.
- * shortcut: memory only, so a page reload drops parked messages; persist like drafts if that matters.
+ * The one owner of each chat's submitted messages: the rows (sending, queued, failed, with tries) and the
+ * send in flight. It lives here, keyed by chat id, not in a composer: a remount or a chat switch shows the
+ * same rows, so a failed message stays failed and nothing is sent twice. A composer only renders its chat's
+ * owner and passes user intents to it. An owner starts sends only while a composer of its chat is attached.
+ * shortcut: memory only, so a page reload drops queued messages; persist like drafts if that matters.
  */
-const parked = new Map<string, ParkedQueue>();
+const owners = new Map<string, ComposerDelivery>();
 
 export const chatQueues = {
-  park(chat: string, queue: ParkedQueue) {
-    const earlier = parked.get(chat);
-    parked.set(chat, earlier ? { texts: [...earlier.texts, ...queue.texts], after: earlier.after.then(() => queue.after) } : queue);
+  /** The owner of `chat`. `fromNewChat`: the page's new-chat composer created this chat, so its owner (with
+   * the first send still in flight) becomes this chat's owner. */
+  open(chat: string, options: DeliveryOptions, fromNewChat?: string): ComposerDelivery {
+    let owner = owners.get(chat);
+    if (!owner && fromNewChat) {
+      owner = owners.get(fromNewChat);
+      owners.delete(fromNewChat);
+    }
+    if (!owner) {
+      const created = createComposerDelivery(options);
+      // a send that ends while no composer shows the chat settles it at once, not at some later commit
+      created.subscribe(() => { if (!created.attached()) chatQueues.settle(); });
+      owner = created;
+    }
+    owners.set(chat, owner);
+    owner.update(options);
+    return owner;
   },
-  /** Takes the queues of `chats` in order, joined behind one wait. */
-  take(chats: string[]): ParkedQueue | undefined {
-    const found = chats.flatMap((chat) => { const queue = parked.get(chat); parked.delete(chat); return queue ? [queue] : []; });
-    if (!found.length) return undefined;
-    return { texts: found.flatMap((queue) => queue.texts), after: Promise.all(found.map((queue) => queue.after)).then((outcomes) => outcomes.find((outcome) => outcome.failed) ?? {}) };
-  },
-  /** A new chat's queue moves only to the chat its first message created, in the same commit.
-   * What is left goes back into that new chat's box, unsent. */
-  settleNewChats() {
-    for (const [chat, queue] of parked) {
-      if (!chat.startsWith("new:")) continue;
-      parked.delete(chat);
-      draftStore.set(chat, [draftStore.get(chat), ...queue.texts].filter((text) => text.trim()).join("\n\n"));
+  /** Runs after each commit, and when a send of a chat with no composer ends. Drops owners with no composer and nothing to send. A page's new-chat owner whose
+   * chat did not take it (it was not on screen when the chat was created) puts its unsent texts back into
+   * that page's new-chat box, unsent, once its send in flight has ended. */
+  settle() {
+    for (const [chat, owner] of owners) {
+      const { queue, sending } = owner.getModel();
+      if (owner.attached() || sending) continue;
+      if (queue.length && !chat.startsWith("new:")) continue;
+      owners.delete(chat);
+      if (queue.length) draftStore.set(chat, [draftStore.get(chat), ...queue.map((item) => item.text)].filter((text) => text.trim()).join("\n\n"));
     }
   },
 };
