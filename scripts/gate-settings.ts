@@ -132,27 +132,45 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
 }
 
 type Frame = { method?: string; params?: { session_id?: string }; id?: unknown; result?: { approval_mode?: string } };
-type ApprovalModeResponse = (method: "session_settings" | "set_settings", sessionId: string) => string | undefined;
+type ApprovalMethod = "session_settings" | "set_settings";
+// one waiting owner for every approval-mode reply read: the client re-fetches session_settings on each
+// resume/reload/restart, so the newest request's reply can still be in flight. callers wait, bounded, for
+// the newest reply and assert it, so a wrong reply fails at once and a missing reply fails at the bound.
+export type AwaitApprovalMode = (method: ApprovalMethod, sessionId: string, expected: string, label: string) => Promise<void>;
 
 const sessionId = (page: Page) => page.locator("[data-session-id]").getAttribute("data-session-id");
 const settingsWrites = (frames: Frame[], id: string) => frames.filter((frame) => frame.method === "set_settings" && frame.params?.session_id === id).length;
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 
-export async function assertServerAskWins(page: Page, id: string, frames: () => Frame[], approvalModeResponse: ApprovalModeResponse, waitFor: WaitFor): Promise<void> {
-  // the client re-fetches session_settings on each resume, so the latest request can still be in flight
-  await waitFor(async () => approvalModeResponse("session_settings", id) !== undefined, "server-forced ask session_settings response");
-  if (approvalModeResponse("session_settings", id) !== "ask") throw new Error("server-forced ask session did not report ask settings");
+export function approvalModeWaiter(frames: () => Frame[], waitFor: WaitFor): AwaitApprovalMode {
+  // the newest matching request's reply, or undefined while that reply is still in flight
+  const approvalModeResponse = (method: ApprovalMethod, sessionId: string): string | undefined => {
+    const messages = frames();
+    const request = messages.findLast((frame) => frame.method === method && frame.params?.session_id === sessionId);
+    if (!request) return undefined;
+    return messages.slice(messages.indexOf(request) + 1).find((frame) => frame.id === request.id && frame.result)?.result?.approval_mode;
+  };
+  return async (method, sessionId, expected, label) => {
+    await waitFor(async () => approvalModeResponse(method, sessionId) !== undefined, `${label} (${method} reply)`);
+    const mode = approvalModeResponse(method, sessionId);
+    if (mode !== expected) throw new Error(`${label}: expected ${method} approval_mode "${expected}", got "${mode ?? "none"}"`);
+  };
+}
+
+export async function assertServerAskWins(page: Page, id: string, frames: () => Frame[], awaitApprovalMode: AwaitApprovalMode): Promise<void> {
+  await awaitApprovalMode("session_settings", id, "ask", "server-forced ask session");
   if (settingsWrites(frames(), id)) throw new Error("server-forced ask session sent a no-op set_settings frame");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("server-forced ask session showed the auto-approve marker");
 }
 
-export async function gateCreationApprovalDefaults(page: Page, frames: () => Frame[], approvalModeResponse: ApprovalModeResponse, gateWait: GateWait): Promise<void> {
+export async function gateCreationApprovalDefaults(page: Page, frames: () => Frame[], awaitApprovalMode: AwaitApprovalMode, gateWait: GateWait): Promise<void> {
   const initial = await sessionId(page);
   await page.locator("button.new-chat").click();
   await gateWait.playwright(page, "waitForFunction", (previous) => document.querySelector("[data-session-id]")?.getAttribute("data-session-id") !== previous, initial);
   const allowId = await sessionId(page);
-  if (!allowId || approvalModeResponse("set_settings", allowId) !== "allow") throw new Error("default-on new chat did not use allow mode");
+  if (!allowId) throw new Error("default-on new chat did not expose a session id");
+  await awaitApprovalMode("set_settings", allowId, "allow", "default-on new chat");
   await gateWait.playwright(page.getByLabel("auto-approve", { exact: true }), "waitFor", { state: "visible" });
 
   await openSettings(page, gateWait);
@@ -164,7 +182,8 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   await page.locator("button.new-chat").click();
   await gateWait.playwright(page, "waitForFunction", (previous) => document.querySelector("[data-session-id]")?.getAttribute("data-session-id") !== previous, allowId);
   const askId = await sessionId(page);
-  if (!askId || approvalModeResponse("session_settings", askId) !== "ask") throw new Error("default-off new chat did not use ask mode");
+  if (!askId) throw new Error("default-off new chat did not expose a session id");
+  await awaitApprovalMode("session_settings", askId, "ask", "default-off new chat");
   if (settingsWrites(frames(), askId)) throw new Error("default-off new chat sent a set_settings frame");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("default-off new chat showed the auto-approve marker");
 
@@ -175,7 +194,7 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   await page.reload();
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   if (await sessionId(page) !== askId) throw new Error("reopening after changing the default changed the chat id");
-  if (approvalModeResponse("session_settings", askId) !== "ask") throw new Error("reopening after changing the default changed ask mode");
+  await awaitApprovalMode("session_settings", askId, "ask", "reopened default-off chat");
   if (settingsWrites(frames(), askId) !== writesBeforeReopen) throw new Error("reopening after changing the default sent set_settings");
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("reopened ask chat showed the auto-approve marker");
   console.log("settings approval gate passed: default allow, default ask, and reopen preservation");
