@@ -216,6 +216,16 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 TextContent(
                     "# Rendered markdown\n\n## Structured reply\n\n"
                     "* first item\n* second item\n\n"
+                    "| book | change since june | status |\n"
+                    "| :--- | ---: | :--- |\n"
+                    "| achilles | +12 | ready |\n"
+                    "| fulcrum | -3 | review |\n\n"
+                    "| one | two | three | four | five | six | seven | eight |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+                    "| alphaaaaaaaaaaaaaaaaaaaaaaaaaaaa | betaaaaaaaaaaaaaaaaaaaaaaaaaaaa | "
+                    "gammaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | deltaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | "
+                    "epsiloooooooooooooooooooooooooooo | zetaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | "
+                    "etaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | thetaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |\n\n"
                     "```python\nvalue = 42\nprint(value)\n```"
                 )
             ]
