@@ -447,6 +447,47 @@ def create_app() -> Starlette:
         await notify_tools_changed(page_id)
         return JSONResponse({"ok": True})
 
+    async def require_page_bearer(request) -> str:
+        """Same-origin request carrying this page's own credential; returns the page id."""
+        if not _same_origin(request):
+            raise HTTPException(403, "same-origin request required")
+        page_id = request.path_params["id"]
+        token = request.headers.get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise HTTPException(401, "missing bearer")
+        principal = await anyio.to_thread.run_sync(store.authenticate, token[7:])
+        if principal is None or principal["id"] != page_id:
+            raise HTTPException(403, "forbidden")
+        return page_id
+
+    async def versions(request):
+        page_id = await require_page_bearer(request)
+        return JSONResponse(
+            await anyio.to_thread.run_sync(store.versions, page_id),
+            headers={"cache-control": "no-store"},
+        )
+
+    async def restore_layout(request):
+        page_id = await require_page_bearer(request)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = None
+        if not isinstance(body, dict):
+            error = ValidationError("", "JSON object")
+            return JSONResponse({"error": error_document(error)}, status_code=400)
+        try:
+            # the same store path as the agent's restore_version: appends a copy, never rewrites
+            version, _, _ = await anyio.to_thread.run_sync(
+                store.restore_layout, page_id, body.get("version"), body.get("expected_version")
+            )
+        except ValidationError as exc:
+            status = 409 if exc.code == "conflict" else 400
+            return JSONResponse({"error": error_document(exc)}, status_code=status)
+        except PermissionError as exc:
+            raise HTTPException(403, "turn on create mode to restore a layout") from exc
+        return JSONResponse({"version": version, "restored_from": body["version"]})
+
     async def create_mode(request):
         if not _same_origin(request):
             raise HTTPException(403, "same-origin request required")
@@ -482,6 +523,8 @@ def create_app() -> Starlette:
             Route("/api/pages/{id}/tools", page_tools),
             Route("/api/pages/{id}/tools/{name}/invoke", invoke_tool, methods=["POST"]),
             Route("/api/pages/{id}/tools/{name}/rollback", rollback_tool, methods=["POST"]),
+            Route("/api/pages/{id}/versions", versions),
+            Route("/api/pages/{id}/layout/restore", restore_layout, methods=["POST"]),
             Route("/api/pages/{id}/records/{collection}", records),
             Route("/api/pages/{route:path}", page),
             Mount("/mcp", app=mcp),

@@ -887,6 +887,44 @@ class PageStore:
         with self._connect() as db:
             return self._inspect_page(db, page_id)
 
+    def versions(self, page_id: str) -> dict[str, Any]:
+        """The page's layout and tool versions, newest first, for the user's history list."""
+        with self._connect() as db:
+            # shortcut: the newest 100 of each kind, page the list when a page outgrows it.
+            layouts = db.execute(
+                "SELECT lv.version, lv.created_at, lv.document, "
+                "lv.version=COALESCE(p.active_layout_version, 1), "
+                "(SELECT a.action FROM audit a WHERE a.page_id=lv.page_id "
+                "AND a.version_digest=lv.digest AND a.created_at=lv.created_at "
+                "AND a.action IN ('create_page','update_layout','restore_layout') LIMIT 1) "
+                "FROM layout_version lv JOIN page p ON p.id=lv.page_id WHERE lv.page_id=? "
+                "ORDER BY lv.version DESC LIMIT 100",
+                (page_id,),
+            ).fetchall()
+            tools = db.execute(
+                "SELECT t.name, v.version, v.created_at, v.version=pt.active_version "
+                "FROM page_tool pt JOIN tool t ON t.id=pt.tool_id "
+                "JOIN tool_version v ON v.tool_id=t.id WHERE pt.page_id=? "
+                "ORDER BY t.name, v.version DESC LIMIT 100",
+                (page_id,),
+            ).fetchall()
+        return {
+            "layout": [
+                {
+                    "version": row[0],
+                    "created_at": row[1],
+                    "block_types": [block["type"] for block in json.loads(row[2])["blocks"]],
+                    "active": bool(row[3]),
+                    "action": row[4],
+                }
+                for row in layouts
+            ],
+            "tools": [
+                {"name": row[0], "version": row[1], "created_at": row[2], "active": bool(row[3])}
+                for row in tools
+            ],
+        }
+
     def records(
         self, page_id: str, collection: str, limit: int = 100
     ) -> tuple[list[dict[str, Any]], int]:

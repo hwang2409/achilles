@@ -1164,3 +1164,76 @@ def test_chats_from_a_database_without_the_sent_marker_stay_listed(tmp_path: Pat
     }
     with sqlite3.connect(home / "achilles.sqlite3") as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+def test_layout_restore_is_page_bound_guarded_and_audited(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    page = store.create_page("/notes", "notes", {"blocks": [{"type": "text", "text": "one"}]})
+    page_id = page[0]["id"]
+    store.set_create_mode(page_id, True)
+    store.update_layout(page_id, {"blocks": [{"type": "text", "text": "two"}]}, 1)
+    own = {"authorization": f"Bearer {store.ensure_credential(page_id)}"}
+    other = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = chat_client()
+    restore = f"/api/pages/{page_id}/layout/restore"
+
+    assert client.get(f"/api/pages/{page_id}/versions", headers=other).status_code == 403
+    refused = client.post(restore, headers=other, json={"version": 1, "expected_version": 2})
+    assert refused.status_code == 403
+    stale = client.post(restore, headers=own, json={"version": 1, "expected_version": 1})
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "conflict"
+    assert store.layout(page_id)["blocks"][0]["text"] == "two"
+
+    restored = client.post(restore, headers=own, json={"version": 1, "expected_version": 2})
+    assert restored.json() == {"version": 3, "restored_from": 1}
+    assert store.layout(page_id)["blocks"][0]["text"] == "one"
+    history = client.get(f"/api/pages/{page_id}/versions", headers=own).json()
+    assert [(row["version"], row["active"], row["action"]) for row in history["layout"]] == [
+        (3, True, "restore_layout"),
+        (2, False, "update_layout"),
+        (1, False, "create_page"),
+    ]
+    with store._connect() as db:
+        actions = [
+            row[0] for row in db.execute("SELECT action FROM audit WHERE page_id=?", (page_id,))
+        ]
+    assert actions[-1] == "restore_layout"
+
+    store.set_create_mode(page_id, False)
+    off = client.post(restore, headers=own, json={"version": 2, "expected_version": 3})
+    assert off.status_code == 403
+    assert store.layout(page_id)["blocks"][0]["text"] == "one"
+
+
+def test_versions_lists_tool_versions_with_the_active_one(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    store.set_create_mode("home", True)
+    bundle = {
+        "format_version": 1,
+        "kind": "data_operation",
+        "name": "annotate_trace",
+        "description": "annotate",
+        "input_schema": {"type": "object"},
+        "implementation": {
+            "operation": "insert",
+            "collection": "annotations",
+            "data_schema": {"type": "object"},
+        },
+    }
+    store.create_tool("home", bundle)
+    store.create_tool("home", bundle | {"description": "annotate v2"})
+    own = {"authorization": f"Bearer {store.ensure_credential('home')}"}
+    client = chat_client()
+    rollback = client.post(
+        "/api/pages/home/tools/annotate_trace/rollback",
+        headers=own,
+        json={"version": 1, "expected_version": 2},
+    )
+    assert rollback.status_code == 200
+    tools = client.get("/api/pages/home/versions", headers=own).json()["tools"]
+    assert [(row["name"], row["version"], row["active"]) for row in tools] == [
+        ("annotate_trace", 2, False),
+        ("annotate_trace", 1, True),
+    ]
