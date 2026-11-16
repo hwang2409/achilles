@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, 
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
+import { CodeFence } from "./chat/CodeFence";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
@@ -22,8 +23,8 @@ import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
-import { CodeFence } from "./chat/CodeFence";
 import "./chat/markdown.css";
+import "./shell.css";
 
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
@@ -44,7 +45,7 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean; held: boolean };
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const draft = useSyncExternalStore(
     (listener) => {
@@ -64,6 +65,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, props, onActivity }:
     chatId: sessionId,
     fromNewChat,
     onActivity,
+    questionWaiting,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
@@ -281,7 +283,7 @@ export function App() {
           const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
         }}>jump to latest</button>}</section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} props={composerProps} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} props={composerProps} />
         </div>
         </div>
       </RunProvider>}
@@ -352,18 +354,19 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
-  const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : page.create_mode ? "create mode on" : "create mode off";
-  const controls = (inMenu: boolean) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button><button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button></>;
+  const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : `◻ create mode${page.create_mode ? " on" : ""}`;
+  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-label={toggling ? modeLabel : page.create_mode ? "create mode on" : "create mode off"} aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button>}</>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   // the fold hides the full controls into the ••• menu below 64em, but an enabled mode must stay visible
   // without opening it (spec.md:36, :109): a short word mark per mode that is on sits beside •••.
-  // below 40em the status (run state + mode words) stacks into a narrow column so the title keeps its width;
-  // .fold-long drops "-approve"/" mode" there, and role="img" + aria-label keeps the full name for screen readers.
+  // when the header is tight the CSS-hidden .fold-long parts drop: "auto-approve" becomes "auto" and
+  // "create mode" becomes its hollow square alone; role="img" plus aria-label keeps the full name for screen readers.
   const autoApprove = page.approval_mode === "allow";
-  const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on">create<span className="fold-long"> mode</span></span>}</span>;
-  return <header className="chat-header"><div className="chat-heading">{titleNode}<span title={page.title} aria-label={page.title}>{page.title}</span></div><div className="chat-actions" ref={actions}>{controls(false)}<div className="header-status"><span className={`run-state state-${state}`} role="status">{state === "approval" ? "waiting on you" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state}</span>{foldMarkers}</div><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
+  const routeLabel = page.route === "/" ? "home" : page.route.replace(/^\//, "");
+  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status">{state === "approval" ? "needs you" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {

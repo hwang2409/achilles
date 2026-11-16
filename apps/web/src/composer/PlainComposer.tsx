@@ -13,6 +13,7 @@ import {
   useComposerDelivery,
   type ComposerAdapterProps,
 } from "./useComposerDelivery";
+import { ComposerHint } from "./hint";
 
 /** A textarea adapter for the shared Achilles composer delivery module. */
 export function PlainComposer(props: ComposerAdapterProps) {
@@ -23,6 +24,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
     placeholder,
     className,
     onStop,
+    questionWaiting,
   } = props;
   const id = useId();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -35,14 +37,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint =
-    state === "running"
-      ? "a turn is running · stop it or wait to send"
-      : queues
-        ? "enter to queue · esc in an empty box cancels the last"
-        : steer
-          ? "enter to steer · shift+enter new line"
-          : "enter to send · shift+enter for a new line";
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -141,13 +136,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           data-tone={tone}
           title={model.error?.text}
         >
-          <span
-            data-part="composer-hint"
-            id={`${id}-hint`}
-            hidden={Boolean(message)}
-          >
-            {hint}
-          </span>
+          <ComposerHint id={`${id}-hint`} state={state} queues={queues} questionWaiting={questionWaiting} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>
