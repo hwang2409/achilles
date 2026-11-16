@@ -741,11 +741,16 @@ type KeptRow = {
   start: "refused" | "seeded";
   // the user presses x on the failed row before the reload
   cancel?: boolean;
+  // the kept text's create made "chat" (it attached, the send never left); `took`: zeta has it in that transcript
+  own?: boolean;
+  took?: boolean;
 };
 const keptRows: KeptRow[] = [
   { name: "a refused create, then a reload, keeps the text for a new chat", start: "refused" },
   { name: "x on the refused row forgets the text for good", start: "refused", cancel: true },
   { name: "the opened chat holds a different user message", start: "seeded" },
+  { name: "the opened chat is the one its create made", start: "seeded", own: true },
+  { name: "the chat its create made already holds it", start: "seeded", own: true, took: true },
 ];
 const KEPT_TEXT = "second story PINEAPPLE";
 const TEXTS_KEY = "achilles-pending-create-texts";
@@ -754,6 +759,7 @@ test.each(keptRows)("kept first message: $name", async (row) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new MemoryStorage();
   if (row.start === "seeded") storage.setItem(TEXTS_KEY, JSON.stringify({ home: KEPT_TEXT }));
+  if (row.own) storage.setItem("achilles-pending-create-text-chats", JSON.stringify({ home: "chat" }));
   let running = row.start === "refused";
   let created = 0;
   const listed = [chat.session_id];
@@ -779,7 +785,7 @@ test.each(keptRows)("kept first message: $name", async (row) => {
   // the running chat already holds an older user message, so "any user message" would wrongly count as delivered
   const store = (id: string) => ({
     getState: () => ({ outline: id === "chat" ? [{ id: "u1" }] : [] }),
-    getItem: () => ({ type: "user", event: { type: "user_message", text: "older story" } }),
+    getItem: () => ({ type: "user", event: { type: "user_message", text: row.took ? ` ${KEPT_TEXT}\n` : "older story" } }),
     resync() {},
   });
   const zeta = {
@@ -845,10 +851,18 @@ test.each(keptRows)("kept first message: $name", async (row) => {
     }
     // the page opens its newest chat; the text was written for a new chat, so it waits, unsent, in the new-chat box
     expect(harness.active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
-    expect(draftStore.get("chat")).toBe("");
-    expect(draftStore.get("new:home"), "the kept text was lost").toBe(row.cancel ? "" : KEPT_TEXT);
+    expect(draftStore.get("chat")).toBe(row.own && !row.took ? KEPT_TEXT : "");
+    expect(draftStore.get("new:home"), "the kept text was lost").toBe(row.cancel || row.own ? "" : KEPT_TEXT);
     expect(sendsOfText()).toEqual([]);
-    if (row.cancel) return;
+    if (row.took) expect(storage.getItem(TEXTS_KEY), "zeta took it, so it is not kept").toBeNull();
+    if (row.cancel || row.took) return;
+    if (row.own) {
+      const box = composer("chat");
+      const detach = box.attach();
+      try { await act(async () => { await box.submit(); }); } finally { detach(); }
+      expect(sendsOfText()).toEqual([{ method: "send", session: "chat", text: KEPT_TEXT }]);
+      return;
+    }
     // the turn ends; "new chat" makes the chat the text was written for, and the text moves into its box, still unsent
     running = false;
     await act(async () => { await harness.active.newChat(); });
