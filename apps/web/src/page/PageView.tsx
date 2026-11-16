@@ -27,14 +27,14 @@ export function PageView({ page, pageId, credential, refreshKey }: PageViewProps
       <div><p className="page-route">{page.route}</p><h1>{page.title}</h1>{lead && <p className="page-lead">{lead}</p>}</div>
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>
     </header>
-    <div className="page-blocks">{groupBlocks(content).map((group, index) => group.length === 1 ? <LayoutBlock key={index} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} /> : <div className="metric-strip" key={index}>{group.map((block) => <MetricBlock key={String(block.label)} block={block} pageId={pageId} credential={credential} />)}</div>)}</div>
+    <div className="page-blocks">{groupBlocks(content).map((group, index) => group.length === 1 ? <LayoutBlock key={index} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} /> : <div className="metric-strip" key={index}>{group.map((block) => <MetricBlock key={String(block.label)} block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />)}</div>)}</div>
   </main>;
 }
 
 export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
-  if (block.type === "metric") return <MetricBlock block={block} pageId={pageId} credential={credential} />;
+  if (block.type === "metric") return <MetricBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
   if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
@@ -46,7 +46,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
-function MetricBlock({ block, pageId, credential }: { block: Record<string, unknown>; pageId: string; credential: string }) {
+function MetricBlock({ block, pageId, credential, refreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
   const [value, setValue] = useState(block.value == null ? (block.count ? "…" : "0") : String(block.value));
   useEffect(() => {
     if (!block.count || typeof block.collection !== "string") return;
@@ -55,7 +55,7 @@ function MetricBlock({ block, pageId, credential }: { block: Record<string, unkn
       if (live) setValue(response.ok ? Number(response.headers.get("x-achilles-total") ?? 0).toLocaleString() : "—");
     }).catch(() => { if (live) setValue("—"); });
     return () => { live = false; };
-  }, [block.collection, block.count, credential, pageId]);
+  }, [block.collection, block.count, credential, pageId, refreshKey]);
   const status = String(block.status ?? block.label ?? "").toLowerCase();
   return <section className="metric-block"><span className={`record-mark record-mark-${status}`} aria-hidden="true" /><div><span className="metric-label">{String(block.label)}</span><strong className={block.warn ? "metric-warn" : undefined}>{value}</strong>{block.detail != null && <small>{String(block.detail)}</small>}</div>{block.delta != null && <span className="metric-delta">{String(block.delta)}</span>}</section>;
 }

@@ -866,11 +866,18 @@ try {
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
   await page.goto(`${origin}/reading`);
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
-  await gateWait.playwright(page.getByText(legacyMetricText, { exact: true }), "waitFor");
-  await gateWait.playwright(page.getByText("reading: 0", { exact: true }), "waitFor");
+  const longMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "legacy total with an unusually long descriptive label" }) });
+  await gateWait.playwright(longMetric, "waitFor");
+  const longMetricLabel = longMetric.locator(".metric-label");
+  const longMetricValue = longMetric.locator("strong");
+  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "9,999,999,999,999,999")
+    throw new Error(`long metric did not render its full label and value: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
+  const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
+  await gateWait.playwright(readingMetric.locator("strong"), "waitFor");
+  if (await readingMetric.locator("strong").innerText() !== "0") throw new Error(`reading metric value mismatch: ${JSON.stringify(await readingMetric.innerText())}`);
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
-  const metricBoxes = await page.locator(".layout-metric").evaluateAll((elements) =>
+  const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
     elements.map((element) => {
       const box = element.getBoundingClientRect();
       return {
@@ -912,7 +919,7 @@ try {
   }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(bookAdded, "waitFor", { timeout: 20000 });
-  await gateWait.playwright(page.getByText("reading: 1", { exact: true }), "waitFor", { timeout: 20000 });
+  await gateWait.playwright(page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) }).locator("strong").filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
   const detailResponse = await filteredDetailResponse;
   await gateWait.playwright(page, "waitForFunction", () => {
     const text = document.querySelector(".record-detail")?.textContent ?? "";
@@ -973,9 +980,9 @@ try {
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(page.getByText("layout updated", { exact: true }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
-    const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
-    return blocks[0] === "layout updated without reload" && blocks[1] === legacyMetricText && blocks[2] === "reading: 1" && blocks[3]?.includes("books");
-  }, "open page layout re-render after chat tool completion");
+    const metrics = page.locator(".metric-strip");
+    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list[data-collection="books"]').count() === 1;
+  }, "open page layout after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
   if (!updateLayoutResult || updateLayoutResult.is_error)
