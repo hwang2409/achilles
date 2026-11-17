@@ -264,7 +264,7 @@ export function App() {
     scroll.addEventListener("keydown", arrows);
     const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
     return () => { scroll.removeEventListener("keydown", arrows); stop(); };
-  }, [pageChatSheetOpen, store, transcript]);
+  }, [store, transcript]);
   const lastState = activeLastState(waiting, outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
