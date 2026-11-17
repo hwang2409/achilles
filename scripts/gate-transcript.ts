@@ -232,13 +232,29 @@ export async function gateTranscript(
   await gateWait(() => textOnlyJump.waitFor({ state: "visible", timeout: 20_000 }));
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("text-only stream rendered more than one visible jump to latest control");
+  await scroll.evaluate((element) => {
+    const original = element.scrollTo.bind(element);
+    element.scrollTo = ((options: ScrollToOptions | number, y?: number) => {
+      if (typeof options === "object" && options.behavior === "smooth") {
+        original({ top: (options.top ?? element.scrollTop) - 20, behavior: "auto" });
+      } else if (typeof options === "number") {
+        original(options, y);
+      } else {
+        original(options);
+      }
+    }) as typeof element.scrollTo;
+  });
+  await waitFor(async () => (JSON.parse(await Bun.file(controlPath).text()).jump_stream_barrier ?? null) === "held", "held jump stream chunks");
   await textOnlyJump.evaluate((element) => { (element as HTMLElement).dataset.gateFocused = "text-jump"; });
   await textOnlyJump.focus();
   if (!(await focusKept("text-jump"))) throw new Error("text-only jump to latest control is not keyboard focusable");
   await textOnlyJump.click();
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  const jumped = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest"]')?.getClientRects().length) }));
-  if (jumped.gap > 4 || jumped.jumpVisible) throw new Error(`mid-stream jump did not resume following: ${JSON.stringify(jumped)}`);
+  const heldJumpControl = JSON.parse(await Bun.file(controlPath).text());
+  await writeControl(controlPath, { ...heldJumpControl, release_jump_stream_barrier: true });
+  await waitFor(async () => await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest"]:visible').count() === 0, "jump to latest for this turn");
+  const jumped = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop }));
+  if (jumped.gap > 4 || await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
+    throw new Error(`mid-stream jump did not resume following: ${JSON.stringify(jumped)}`);
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 100") && await distanceFromBottom() <= 4, "mid-stream jump resumes following");
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
     throw new Error("mid-stream jump to latest control stayed visible after returning to the bottom");

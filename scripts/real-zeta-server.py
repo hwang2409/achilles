@@ -62,6 +62,15 @@ class BarrierBackend(FakeBackend):
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
+            jump_chunk = (
+                event.type.name == "MESSAGE_UPDATE"
+                and isinstance(event.content, TextContent)
+                and event.content.text.startswith("text-only line 080")
+            )
+            if jump_chunk:
+                yield event
+                await hold(self.control, "jump_stream_barrier")
+                continue
             if event.type.name == "MESSAGE_END":
                 document = read_control(self.control) or {}
                 returned = document.get("returned_tool_calls", [])
