@@ -37,7 +37,7 @@ class BarrierBackend(FakeBackend):
                 block.text
                 for block in latest_user.content
                 if isinstance(block, TextContent)
-                and block.text in {"open created page", "start allow-mode chat"}
+                and block.text in {"open created page", "start allow-mode chat", "sb7 page stream"}
             ),
             None,
         )
@@ -51,6 +51,17 @@ class BarrierBackend(FakeBackend):
             ),
             "start allow-mode chat": FakeBackend(
                 [ScriptedTurn(content=[TextContent("allow page ready")])],
+                request_serializer=request_serializer,
+            ),
+            "sb7 page stream": FakeBackend(
+                [
+                    ScriptedTurn(
+                        content=[
+                            TextContent(f"sb7 stream line {index:03d}\\n") for index in range(120)
+                        ],
+                        delay=0.03,
+                    )
+                ],
                 request_serializer=request_serializer,
             ),
         }

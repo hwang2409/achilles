@@ -62,11 +62,14 @@ const readDiscovery = async (path: string) => {
 // a pre-kill read is diagnostics only: a missing or partial file adds a note and never fails or masks the gate.
 const listTokens = (path: string) => readDiscovery(path).catch((error) => { artifactNotes.push([new Date().toISOString(), `discovery read failed before SIGTERM: ${error}`]); });
 const redact = (text: string) => diagnostic(text, secrets);
-const safeControl = (text: string) => controlSnapshot(text, secrets);
+const safeControl = async () => {
+  try { return controlSnapshot(await Bun.file(control).text(), secrets); }
+  catch (error) { return `<control missing: ${redactArtifact(String(error), secrets)}>`; }
+};
 const frameRing = createFrameRing();
 const gateWait = createGateWait(
   frameRing.snapshot,
-  async () => safeControl(await Bun.file(control).text()),
+  async () => await safeControl(),
 );
 const start = (
   command: string,
@@ -216,6 +219,30 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const pageChatLayout = () => page.evaluate(() => {
+    const describe = (element: Element | null) => {
+      if (!element) return null;
+      const node = element as HTMLElement;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const ancestors: { tag: string; className: string; display: string; visibility: string; ariaHidden: string | null; rect: { width: number; height: number } }[] = [];
+      for (let current: Element | null = node.parentElement; current; current = current.parentElement) {
+        const currentNode = current as HTMLElement;
+        const currentStyle = getComputedStyle(currentNode);
+        const currentRect = currentNode.getBoundingClientRect();
+        ancestors.push({ tag: current.tagName, className: currentNode.className, display: currentStyle.display, visibility: currentStyle.visibility, ariaHidden: current.getAttribute("aria-hidden"), rect: { width: currentRect.width, height: currentRect.height } });
+      }
+      return { display: style.display, visibility: style.visibility, rect: { width: rect.width, height: rect.height }, ariaHidden: element.getAttribute("aria-hidden"), ancestors };
+    };
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches,
+      pageChat: describe(document.querySelector(".page-chat")),
+      surface: describe(document.querySelector(".page-chat-surface")),
+      transcript: describe(document.querySelector(".transcript")),
+    };
+  });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
   await gateWait.playwright(setupAlert, "waitFor", { timeout: 20000 });
@@ -236,7 +263,9 @@ try {
     );
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
-  await gateWait.playwright(page.locator(".transcript"), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator(".transcript"), "waitFor", { state: "visible" }).catch(async (error) => {
+    throw new Error(`${error}; page-chat layout=${JSON.stringify(await pageChatLayout())}`);
+  });
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 }).catch(async (error) => {
       throw new Error(`${error}\nhome session id missing at ${page.url()}: ${redact(await page.locator("body").innerText({ timeout: 10_000 }))}`);
@@ -745,7 +774,7 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await createApproval.count()) > createApprovalBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > createRequestBefore), "create page approval").catch(async (error) => {
     throw new Error(
-      `${error}\nbackend did not receive achilles__create_page catalog: ${safeControl(await Bun.file(control).text())}`,
+      `${error}\nbackend did not receive achilles__create_page catalog: ${await safeControl()}`,
     );
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
@@ -844,9 +873,9 @@ try {
     throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
   const discoveryControl = JSON.parse(await Bun.file(control).text());
   if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "discover-resources" && !result.is_error))
-    throw new Error(`mcp_discover resources call did not succeed: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+    throw new Error(`mcp_discover resources call did not succeed: ${await safeControl()}`);
   if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "inspect-after-discovery" && !result.is_error))
-    throw new Error(`achilles inspect_page call did not succeed after resources discovery: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+    throw new Error(`achilles inspect_page call did not succeed after resources discovery: ${await safeControl()}`);
   console.log(`two-chat page tools asserted: ${chatOne} created /reading; ${chatTwo} discovered resources and inspected it`);
   const homeInspect = await homeMcp(11, "tools/call", {
     name: "inspect_page",
@@ -875,7 +904,7 @@ try {
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const desktopViewport = page.viewportSize();
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 760 });
   const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
     elements.map((element) => {
       const box = element.getBoundingClientRect();
@@ -897,6 +926,54 @@ try {
     throw new Error(
       `390px metrics did not render two wrapped columns: ${JSON.stringify(metricBoxes)}`,
     );
+  const pageChatBar = page.locator(".page-chat-bar");
+  await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
+  const closedGeometry = await page.evaluate(() => {
+    const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
+    const action = document.querySelector<HTMLElement>(".record-form-actions button")?.getBoundingClientRect();
+    return { barBottom: bar?.bottom ?? 0, barHeight: bar?.height ?? 0, actionBottom: action?.bottom ?? 0, viewport: innerHeight };
+  });
+  if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
+    throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-390x844.png"), fullPage: true });
+  await pageChatBar.click();
+  const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
+  await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
+  if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press("Tab");
+    if (!(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))))
+      throw new Error("390px page chat tab focus escaped the modal sheet");
+  }
+  const backgroundControl = page.locator(".record-form-actions button").first();
+  const backgroundControlBox = await backgroundControl.boundingBox();
+  if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
+  const pathBeforeOutsideClick = new URL(page.url()).pathname;
+  await page.mouse.click(backgroundControlBox.x + backgroundControlBox.width / 2, backgroundControlBox.y + backgroundControlBox.height / 2);
+  await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
+  if (new URL(page.url()).pathname !== pathBeforeOutsideClick)
+    throw new Error("background chat control activated through open page chat sheet");
+  await pageChatBar.click();
+  await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x760.png"), fullPage: true });
+  await field.fill("sb7 page stream");
+  await field.press("Enter");
+  await waitFor(async () => (await page.locator(".page-chat-surface").innerText()).includes("sb7 stream line 119"), "sb7 stream line 119");
+  const streamProof = await page.locator(".page-chat-surface").evaluate((surface) => {
+    const text = surface.textContent ?? "";
+    const lines = text.match(/sb7 stream line \d{3}/g) ?? [];
+    const scroll = surface.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
+    const gap = scroll ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : -1;
+    const expected = Array.from({ length: 120 }, (_, index) => `sb7 stream line ${String(index).padStart(3, "0")}`);
+    return { lines: lines.length, orderedUnique: lines.length === expected.length && lines.every((line, index) => line === expected[index]) && new Set(lines).size === lines.length, first: text.includes("sb7 stream line 000"), last: text.includes("sb7 stream line 119"), lastVisible: gap <= 1, gap };
+  });
+  if (streamProof.lines !== 120 || !streamProof.orderedUnique || !streamProof.first || !streamProof.last || !streamProof.lastVisible || streamProof.gap > 1)
+    throw new Error(`390px page chat did not retain and follow all 120 chunks: ${JSON.stringify(streamProof)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-last-chunk-open-390x760.png"), fullPage: true });
+  await pageChatDialog.getByRole("button", { name: "close page chat" }).click();
+  await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "false", "page chat close");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-after-stream-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const readingSessionId = await homeSessionId();
   if (!readingSessionId || readingSessionId === first)
@@ -907,7 +984,7 @@ try {
   await field.press("Enter");
   await gateWait.playwright(addBookApproval, "waitFor", { timeout: 20000 }).catch(async (error) => {
     throw new Error(
-      `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+      `${error}\nbackend=${await safeControl()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
     );
   });
   const filteredDetailResponse = gateWait.playwright(page, "waitForResponse", (response) => {
@@ -1202,13 +1279,13 @@ try {
   await gateWait.playwright(emptyRecords, "waitFor", { state: "visible" });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(
-      `${error}\nannotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
+      `${error}\nannotation approval missing: backend=${await safeControl()} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
     );
   });
   await annotationApproval.nth(annotationApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > generatedAnnotationCompleteBefore, "generated tool completion").catch(async (error) => {
       throw new Error(
-        `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+        `${error}\nbackend=${await safeControl()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
       );
     });
   if ((await homeSessionId()) !== sessionBeforeToolTurn)
@@ -1240,7 +1317,7 @@ try {
   ).json();
   if (!Array.isArray(homeRecords) || homeRecords.length !== 1)
     throw new Error(
-      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
+      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${await safeControl()} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
   await waitForIdleTurn(page, waitFor);
   const createdPageId = createdPage.id;
@@ -1326,6 +1403,27 @@ try {
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
+  await page.setViewportSize({ width: 390, height: 760 });
+  await page.goto(`${origin}/allow`);
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
+  const blocklessChat = page.locator(".page-chat");
+  const blocklessComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
+  const blocklessLayout = await page.evaluate(() => {
+    const chat = document.querySelector<HTMLElement>(".page-chat");
+    const transcript = chat?.querySelector<HTMLElement>(".transcript");
+    const composer = document.querySelector<HTMLElement>('[data-part="composer"]');
+    return {
+      chatClass: chat?.className ?? "",
+      transcriptHeight: transcript?.getBoundingClientRect().height ?? 0,
+      composerVisible: Boolean(composer && getComputedStyle(composer).display !== "none" && composer.getBoundingClientRect().height > 0),
+      barCount: document.querySelectorAll(".page-chat-bar").length,
+      dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
+    };
+  });
+  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
+    throw new Error(`390px blockless page chat gained sheet semantics or lost its layout: ${JSON.stringify(blocklessLayout)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "blockless-chat-390x760.png"), fullPage: true });
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
