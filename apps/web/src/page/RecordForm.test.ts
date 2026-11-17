@@ -94,7 +94,8 @@ test("a selected row fills the update form and its record_id and revision are se
   const stored = { record_id: "b1", revision: 3, status: "to read", title: "Dune" };
   const sent = serveUpdate(stored);
   mounted = render(editBlock());
-  await view().findByText("select a row in the table to edit it");
+  await view().findByText("select a book in the list to edit it");
+  expect((view().getByRole("button", { name: "add" }) as HTMLButtonElement).disabled).toBe(true);
   act(() => selectRow("books", { collection: "books", record: { ...stored } }));
   const status = await view().findByRole("button", { name: /status/ });
   expect(status.textContent).toContain("to read");
@@ -116,7 +117,7 @@ test("a 409 for a row changed from chat keeps typed values; reload row keeps the
   const stored = { record_id: "b1", revision: 3, status: "to read", title: "Dune" };
   const sent = serveUpdate(stored);
   mounted = render(editBlock());
-  await view().findByText("select a row in the table to edit it");
+  await view().findByText("select a book in the list to edit it");
   act(() => selectRow("books", { collection: "books", record: { ...stored } }));
   await chooseStatus("done");
   // chat renames the book first

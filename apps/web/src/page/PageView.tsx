@@ -8,6 +8,7 @@ import "./page.css";
 import { RecordMark } from "./RecordMark";
 
 type PageLike = { title: string; route: string; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
+type InsertCapability = { collection: string; focusFirst: () => void };
 type PageViewProps = { page: PageLike; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void };
 
 function groupBlocks(blocks: Array<Record<string, unknown>>): Array<Array<Record<string, unknown>>> {
@@ -76,6 +77,9 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat }: Pa
   const lead = leadIndex >= 0 ? String(blocks[leadIndex].text ?? "") : "";
   const content = blocks.filter((_, index) => index !== leadIndex);
   const counts = useMetricCounts(content, pageId, credential, refreshKey);
+  const [insertCapabilities, setInsertCapabilities] = useState<InsertCapability[]>([]);
+  const registerInsert = (capability: InsertCapability | null) => setInsertCapabilities((current) => capability ? [...current.filter((item) => item.collection !== capability.collection), capability] : current);
+  const addFor = (collection: string) => insertCapabilities.find((item) => item.collection === collection);
   return <main className="page-content">
     <header className="page-head">
       <div><h1>{page.title}</h1>{lead && <p className="page-lead">{lead}</p>}</div>
@@ -83,7 +87,7 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat }: Pa
     </header>
     <div className="page-blocks">{groupBlocks(content).map((group, index) => {
       if (group[0].type === "metric") return <div className="metric-strip" key={`metric-strip:${index}`}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} value={counts.get(metricQueryKey(block, pageId, credential) ?? "")} />)}</div>;
-      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} />;
+      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} insertCapability={addFor(String(group[0].collection ?? ""))} onRegisterInsert={registerInsert} />;
     })}</div>
   </main>;
 }
@@ -95,19 +99,19 @@ function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<stri
   return `${type}:${signature}:${ordinal}`;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (capability: InsertCapability | null) => void }) {
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
   if (block.type === "metric") return <MetricBlock block={block} value={block.count ? "…" : undefined} />;
-  if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} onAskChat={onAskChat} />;
+  if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} onAskChat={onAskChat} insertCapability={insertCapability} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
     const filter = block.filter as DetailFilter | undefined;
     if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} selected={selected?.collection === block.collection ? selected.record : undefined} />;
     return <section className="record-detail"><h2>{String(block.title)}</h2><p>{fields.join(", ")}</p></section>;
   }
-  if (block.type === "form") return <FormBlock title={String(block.title)} toolName={String(block.tool)} fields={Array.isArray(block.fields) ? block.fields.map(String) : undefined} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} />;
+  if (block.type === "form") return <FormBlock title={String(block.title)} toolName={String(block.tool)} fields={Array.isArray(block.fields) ? block.fields.map(String) : undefined} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} onRegisterInsert={onRegisterInsert} />;
   return null;
 }
 
@@ -118,30 +122,30 @@ function MetricBlock({ block, value }: { block: Record<string, unknown>; value?:
   return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${String(displayValue).length > 10 ? " metric-value-long" : ""}`}>{displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
-function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void }) {
+function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
   const key = `${pageId}:${String(block.collection)}`;
   const list = { title: String(block.title), collection: String(block.collection), pageId, credential, refreshKey, filter: block.filter as DetailFilter | undefined };
-  return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} onAskChat={onAskChat} /> : <SchemaRecordList key={key} {...list} toolsKey={toolsKey} onAskChat={onAskChat} />;
+  return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} onAskChat={onAskChat} insertCapability={insertCapability} /> : <SchemaRecordList key={key} {...list} toolsKey={toolsKey} onAskChat={onAskChat} insertCapability={insertCapability} />;
 }
 
-function SchemaRecordList({ toolsKey, onAskChat, ...list }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; toolsKey: string; onAskChat?: (draft: string) => void }) {
+function SchemaRecordList({ toolsKey, onAskChat, insertCapability, ...list }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
   const { tools, error } = usePageTools(list.pageId, list.credential, toolsKey);
   const last = useRef<PageTool[] | null>(null);
   if (tools !== null) last.current = tools;
   const shown = tools ?? last.current;
-  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} extendColumns onAskChat={onAskChat} />;
+  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} extendColumns onAskChat={onAskChat} insertCapability={insertCapability} />;
 }
 
-export function RecordList({ title, collection, pageId, credential, refreshKey, filter, columns = [], extendColumns = false, onAskChat }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; columns?: string[] | null; extendColumns?: boolean; onAskChat?: (draft: string) => void }) {
+export function RecordList({ title, collection, pageId, credential, refreshKey, filter, columns = [], extendColumns = false, onAskChat, insertCapability }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; columns?: string[] | null; extendColumns?: boolean; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
   const query = new URLSearchParams({ ...filter && { field: filter.field, equals: JSON.stringify(filter.equals) }, limit: "100" }).toString();
   const [records, setRecords] = useState<Record<string, unknown>[] | null>(null); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const [retry, setRetry] = useState(0); const requestSequence = useRef(0);
   useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); refreshSelection(pageId, collection, value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, query, refreshKey, retry]);
   const selected = useSelectedRow(pageId);
   const selectedId = selected?.collection === collection ? selected.record.record_id : undefined;
-  return <RecordListView title={title} collection={collection} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onRetry={() => { setRecords(null); setRetry((value) => value + 1); }} onAskChat={onAskChat} onSelect={(record, row) => selectRow(pageId, record && { collection, record, opener: row })} />;
+  return <RecordListView title={title} collection={collection} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onRetry={() => { setRecords(null); setRetry((value) => value + 1); }} onAskChat={onAskChat} insertCapability={insertCapability} onSelect={(record, row) => selectRow(pageId, record && { collection, record, opener: row })} />;
 }
 
-export function RecordListView({ title, collection, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onRetry, onAskChat, onSelect }: { title: string; collection?: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onRetry?: () => void; onAskChat?: (draft: string) => void; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void }) {
+export function RecordListView({ title, collection, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onRetry, onAskChat, insertCapability, onSelect }: { title: string; collection?: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onRetry?: () => void; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void }) {
   const loadedRecords = records ?? [];
   const [focusedId, setFocusedId] = useState<unknown>(undefined);
   const [expanded, setExpanded] = useState(false);
@@ -150,9 +154,9 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => handleRecordKeyDown(event, record, onSelect);
   const retry = () => { onRetry?.(); };
-  const ask = () => onAskChat?.(`help me understand why the ${title.toLowerCase()} list is empty: there are no records yet`);
-  const add = () => document.querySelector<HTMLElement>(`.record-form[data-collection="${CSS.escape(collection ?? "")}"][data-operation="insert"] [name]`)?.focus();
-  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{loading || error ? "0" : total.toLocaleString()}</span></h2><span>{loading ? "loading…" : "sorted by updated"}</span></header>{error ? <div className="record-list-error" role="alert"><strong>could not load {title.toLowerCase()}</strong><p>{error}. your data is safe; nothing was changed.</p><div className="record-list-actions"><button type="button" onClick={retry}>try again</button><button type="button" className="record-list-chat" onClick={() => onAskChat?.(`help me understand why the ${title.toLowerCase()} list could not load: ${error}`)}>ask the chat why</button></div></div> : loading ? <div className="record-list-skeleton" role="status" aria-label="loading records">{[0, 1, 2, 3, 4].map((row) => <span key={row} />)}</div> : projection.loaded.length === 0 ? <div className="record-list-empty"><strong>no {title.toLowerCase()} yet</strong><p>add the first one, or ask the page chat to add several.</p><div className="record-list-actions">{document.querySelector(`.record-form[data-collection="${CSS.escape(collection ?? "")}"][data-operation="insert"]`) && <button type="button" onClick={add}>add {title.toLowerCase().replace(/s$/, "")}</button>}<button type="button" className="record-list-chat" onClick={ask}>ask the chat</button></div></div> : <><LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}</>}</section>;
+  const ask = () => onAskChat?.(`add a ${title.toLowerCase().replace(/s$/, "")} to this page`);
+  const add = () => insertCapability?.focusFirst();
+  return <section className="record-list" aria-busy={loading}><header><h2>{title}{loading ? " loading…" : error ? "" : <> <span className="record-count">{total.toLocaleString()}</span></>}</h2>{!loading && !error && projection.loaded.length > 0 && <span>sorted by updated</span>}</header>{error ? <div className="record-list-error" role="alert"><strong>could not load {title.toLowerCase()}</strong><p>{title.toLowerCase()} request failed: {error}. your data is safe; nothing was changed.</p><div className="record-list-actions"><button type="button" onClick={retry}>try again</button><button type="button" className="record-list-chat" onClick={() => onAskChat?.(`help me understand why the ${title.toLowerCase()} list could not load: ${error}`)}>ask the chat why</button></div></div> : loading ? <div className="record-list-skeleton" role="status" aria-label="loading records">{[0, 1, 2, 3, 4].map((row) => <span key={row} aria-hidden="true" />)}</div> : projection.loaded.length === 0 ? <div className="record-list-empty"><strong>no {title.toLowerCase()} yet</strong><p>add the first one, or ask the page chat to add several.</p><div className="record-list-actions">{insertCapability && <button type="button" onClick={add}>add {title.toLowerCase().replace(/s$/, "")}</button>}<button type="button" className="record-list-chat" onClick={ask}>ask the chat</button></div></div> : <><LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}</>}</section>;
 }
 
 type RecordListProjection = { loaded: Record<string, unknown>[]; visible: Record<string, unknown>[]; tabStop: unknown; loadedRemaining: number; total: number; showReveal: boolean };

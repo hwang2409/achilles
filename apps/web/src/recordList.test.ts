@@ -63,10 +63,10 @@ describe("RecordList", () => {
   test("shows loading instead of empty while the first fetch is held", async () => {
     holdFetches();
     const result = renderList(props);
-    expect(text(result)).toContain("loading records…");
-    expect(text(result)).not.toContain("no records yet");
+    expect(text(result)).toContain("loading…");
+    expect(text(result)).not.toContain("no reading yet");
     await settle(calls[0], []);
-    expect(text(result)).toContain("no records yet");
+    expect(text(result)).toContain("no reading yet");
   });
 
   test("resets rows when the layout page identity changes", async () => {
@@ -76,7 +76,7 @@ describe("RecordList", () => {
     await settle(calls[0], [{ record_id: "book-1", title: "The Dispossessed" }]);
 
     result.rerender(React.createElement(LayoutBlock, { block, pageId: "page-two", credential: props.credential, refreshKey: props.refreshKey }));
-    expect(text(result)).toContain("loading records…");
+    expect(text(result)).toContain("loading…");
     expect(text(result)).not.toContain("The Dispossessed");
   });
 
@@ -84,7 +84,7 @@ describe("RecordList", () => {
     holdFetches();
     const result = renderList(props);
     await settle(calls[0], []);
-    expect(text(result)).toContain("no records yet");
+    expect(text(result)).toContain("no reading yet");
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:1" }));
     await settle(calls[1], [{ record_id: "book-1", title: "The Dispossessed" }]);
@@ -92,7 +92,7 @@ describe("RecordList", () => {
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:2" }));
     expect(text(result)).toContain("The Dispossessed");
-    expect(text(result)).not.toContain("loading records…");
+    expect(text(result)).not.toContain("loading…");
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:3" }));
     await settle(calls[3], [{ record_id: "book-2", title: "A Wizard of Earthsea" }]);

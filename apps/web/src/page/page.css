@@ -93,4 +93,4 @@
 .record-list-skeleton { display: grid; }
 .record-list-skeleton span { display: block; height: 40px; border-top: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-border) 55%, transparent); }
 .record-list-actions button:focus-visible, .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
-.record-form form:has(:disabled) { opacity: .5; }
+.record-form-no-selection form { opacity: .5; }
