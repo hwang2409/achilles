@@ -1,5 +1,5 @@
-import { afterAll, afterEach, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./test-dom";
+import { afterEach, expect, test } from "bun:test";
 import { act, createElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { chatQueues } from "./composer/chatQueues";
@@ -7,8 +7,6 @@ import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
 
-GlobalRegistrator.register();
-afterAll(() => GlobalRegistrator.unregister());
 
 const EXPECTED_ATTACH_SLOW_MS = 15_000;
 const originalGlobals = {
@@ -18,7 +16,6 @@ const originalGlobals = {
   addEventListener: globalThis.addEventListener,
   removeEventListener: globalThis.removeEventListener,
   fetch: globalThis.fetch,
-  IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
 };
 let mounted: RenderResult | null = null;
 
@@ -102,7 +99,6 @@ async function flushUntil(done: () => boolean) {
 }
 
 test("a slow attachment can retry without accepting its late answer", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   setGlobals({
     localStorage: new MemoryStorage(),
     location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
@@ -218,7 +214,6 @@ async function refreshFailureHarness(failures: number) {
 }
 
 test("a failed tool refresh on the first send keeps the new chat with a retry notice", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const harness = await refreshFailureHarness(2);
   const { requests, lastRefresh } = harness;
   await act(async () => { await harness.active.toggle(); });
@@ -258,7 +253,6 @@ test("a failed tool refresh on the first send keeps the new chat with a retry no
 });
 
 test("a failed tool refresh on the new chat button keeps its notice across the chat's own re-attach", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const harness = await refreshFailureHarness(1);
   const { requests, lastRefresh } = harness;
   await act(async () => { await harness.active.toggle(); });
@@ -304,7 +298,6 @@ const pendingSelectionRows: { name: string; move: (harness: Harness) => Promise<
 ];
 
 test.each(pendingSelectionRows)("the first turn's end selects its chat only if the user stayed: $name", async (row) => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const harness = await refreshFailureHarness(0);
   harness.lastRefresh.resolve();
   await act(async () => { await harness.active.send("make a reading list", { steer: false }, () => {}); });
@@ -319,7 +312,6 @@ test.each(pendingSelectionRows)("the first turn's end selects its chat only if t
 });
 
 test("a page refresh keeps the header create mode while the tool refresh still fails", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const harness = await refreshFailureHarness(1);
   await act(async () => { await harness.active.toggle(); });
   await act(async () => { await harness.active.newChat(); });
@@ -333,7 +325,6 @@ test("a page refresh keeps the header create mode while the tool refresh still f
 });
 
 test("a reload during a pending approval re-binds the page tools, so the approved page tool runs", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   setGlobals({
     localStorage: new MemoryStorage(),
     location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
@@ -454,7 +445,6 @@ const turnEndRows: Row[] = [
 ];
 
 test.each(turnEndRows)("a pending ask mode is applied when the turn ends: $name", async (row) => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   setGlobals({
     localStorage: new MemoryStorage(),
     location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
@@ -491,7 +481,6 @@ test.each(turnEndRows)("a pending ask mode is applied when the turn ends: $name"
 });
 
 test("a settle zeta keeps refusing after the turn end retries a bounded number of times, then waits for the next turn end", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   setGlobals({
     localStorage: new MemoryStorage(),
     location: { pathname: "/", search: "?chat=chat", origin: "http://achilles.test", assign() {} },
@@ -562,7 +551,6 @@ const createRows: CreateRow[] = [
 ];
 
 test.each(createRows)("first chat of a page: $name", async (row) => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new MemoryStorage();
   const popListeners: Array<() => void> = [];
   const location = { pathname: "/", search: "", href: "http://achilles.test/", origin: "http://achilles.test", assign() {} };
@@ -720,7 +708,6 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
 // zeta refuses new_session (-32004) while another chat's turn runs. the text typed after "new chat" was written for a new
 // chat: it must never reach the running chat, whatever zeta allows.
 test("new chat while another chat's turn runs keeps the new chat and never sends its text to the running chat", async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const delivered: { method: string; session: unknown }[] = [];
   const requests: string[] = [];
   setGlobals({
@@ -797,7 +784,6 @@ const unsentRows: UnsentRow[] = [
 const UNSENT_TEXT = "hi";
 
 test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new MemoryStorage();
   let running = row.start === "refused";
   let failSend = row.start === "failed";
