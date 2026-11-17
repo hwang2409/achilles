@@ -17,7 +17,7 @@ type Store = Pick<ReturnType<typeof createRunStore>, "subscribe" | "getState" | 
  */
 const inputExpiryMs = 500;
 
-export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (shown: boolean) => void, follow: () => void): () => void {
+export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (shown: boolean) => void, follow: () => void, reset = true): () => void {
   // the reader moved up by their own input; a WebKit wheel scroll lands after its event, so mark it at the input
   let userScrolled = false;
   // and that input's scroll has landed: a follow write queued before the input must not count as a return to the bottom
@@ -34,7 +34,7 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
   };
   let seen = tail();
   let bottomTop = atBottom() ? scroll.scrollTop : Number.NaN;
-  setShown(false);
+  if (reset) setShown(false);
   const unsubscribe = store.subscribe(() => {
     const next = tail();
     if (next.length === seen.length && next.last === seen.last) return;

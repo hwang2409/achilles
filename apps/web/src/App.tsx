@@ -178,6 +178,7 @@ export function App() {
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const watchedJumpStore = useRef<typeof store>(null);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const mobilePageChat = useMobilePageChat();
   const pageChatSheetOpen = mobilePageChat && mobileChatOpen;
@@ -262,7 +263,9 @@ export function App() {
       scroll.scrollBy({ top: event.key === "ArrowUp" ? -40 : 40 });
     };
     scroll.addEventListener("keydown", arrows);
-    const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
+    const sameStore = watchedJumpStore.current === store;
+    watchedJumpStore.current = store;
+    const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1), !sameStore);
     return () => { scroll.removeEventListener("keydown", arrows); stop(); };
   }, [store, transcript]);
   const lastState = activeLastState(waiting, outcome, turn);
