@@ -875,7 +875,7 @@ try {
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const desktopViewport = page.viewportSize();
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 760 });
   const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
     elements.map((element) => {
       const box = element.getBoundingClientRect();
@@ -897,6 +897,25 @@ try {
     throw new Error(
       `390px metrics did not render two wrapped columns: ${JSON.stringify(metricBoxes)}`,
     );
+  const pageChatBar = page.getByRole("button", { name: /page chat/ });
+  await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
+  const closedGeometry = await page.evaluate(() => {
+    const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
+    const action = document.querySelector<HTMLElement>(".record-form-actions button")?.getBoundingClientRect();
+    return { barBottom: bar?.bottom ?? 0, barHeight: bar?.height ?? 0, actionBottom: action?.bottom ?? 0, viewport: innerHeight };
+  });
+  if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
+    throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-390x844.png"), fullPage: true });
+  await pageChatBar.click();
+  const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
+  await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
+  if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x844.png"), fullPage: true });
+  await pageChatDialog.getByRole("button", { name: "close page chat" }).click();
+  await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "false", "page chat close");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-last-chunk-390x844.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const readingSessionId = await homeSessionId();
   if (!readingSessionId || readingSessionId === first)

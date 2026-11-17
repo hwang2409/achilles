@@ -164,6 +164,10 @@ export function App() {
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0);
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const mobileChatWasOpen = useRef(false);
+  const pageChatButton = useRef<HTMLButtonElement | null>(null);
+  const pageChatClose = useRef<HTMLButtonElement | null>(null);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
   const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0, failed: false, held: false });
@@ -210,6 +214,25 @@ export function App() {
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
+  useEffect(() => {
+    setMobileChatOpen(false);
+  }, [ready?.sessionId, activePage?.id]);
+  useEffect(() => {
+    if (!mobileChatOpen) {
+      if (mobileChatWasOpen.current) pageChatButton.current?.focus();
+      mobileChatWasOpen.current = false;
+      return;
+    }
+    mobileChatWasOpen.current = true;
+    pageChatClose.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setMobileChatOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileChatOpen]);
   // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
@@ -276,7 +299,10 @@ export function App() {
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} />}
-        <div className="page-chat">
+        <div className={`page-chat${mobileChatOpen ? " mobile-chat-open" : ""}`}>
+        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={mobileChatOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{mobileChatOpen ? "⌃" : "⌃"}</span></button>}
+        <div id="page-chat-sheet" className="page-chat-surface" role={mobileChatOpen ? "dialog" : undefined} aria-modal={mobileChatOpen ? "true" : undefined} aria-labelledby={mobileChatOpen ? "page-chat-title" : undefined} aria-hidden={hasBlocks && !mobileChatOpen ? "true" : undefined}>
+        {hasBlocks && <div className="page-chat-sheet-head"><strong id="page-chat-title">page chat</strong><button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button></div>}
         <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
@@ -286,6 +312,7 @@ export function App() {
         }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
         </section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} props={composerProps} />
+        </div>
         </div>
         </div>
       </RunProvider>}
