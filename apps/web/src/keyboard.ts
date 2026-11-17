@@ -4,6 +4,10 @@ export function isEditableTarget(event: KeyboardEvent) {
 }
 
 export const isMac = navigator.platform.includes("Mac");
+export const hasAppModifier = (event: Pick<KeyboardEvent, "metaKey" | "ctrlKey">) => {
+  const mac = navigator.platform.includes("Mac");
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+};
 export const modKey = (key: string) => isMac ? `⌘${key}` : `ctrl+${key}`;
 
 export const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";

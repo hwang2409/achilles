@@ -43,12 +43,38 @@ export async function gateTranscript(
   await waitFor(async () => await messages.count() > beforeMarkdown, "markdown reply for this turn");
   const markdown = messages.nth(beforeMarkdown);
   await waitFor(async () => await markdown.locator("pre > code span").count() > 0, "highlighted code for this markdown reply");
+  if (await markdown.locator('[data-part="code-fence-head"] span', { hasText: "python" }).count() !== 1 ||
+    await markdown.locator('[data-part="code-fence-head"] button', { hasText: "code" }).count() !== 1)
+    throw new Error("ordinary fenced code did not render its language head and copy button");
   if (await markdown.locator("h3", { hasText: "Rendered markdown" }).count() !== 1)
     throw new Error("markdown # heading did not render as the message h3");
   if (await markdown.locator("h4", { hasText: "Structured reply" }).count() !== 1)
     throw new Error("markdown ## heading did not render as the message h4");
   if (await markdown.locator("ul > li").count() !== 2)
     throw new Error("markdown list did not render as ul/li elements");
+  const checkTableGeometry = async (width: number, expectWideScroll: boolean) => {
+    await page.setViewportSize({ width, height: 900 });
+    const tablesLocator = page.locator('[data-part="message"][data-format="markdown"] [data-part="md-table"]');
+    await waitFor(async () => await tablesLocator.count() === 2, `two markdown tables at ${width}`);
+    const geometry = await tablesLocator.evaluateAll((tables, expectWide) => {
+      const container = tables[0]?.closest('[data-part="message"]')?.getBoundingClientRect();
+      return {
+        containerLeft: container?.left,
+        containerRight: container?.right,
+        tables: tables.map((table) => {
+          const rect = table.getBoundingClientRect();
+          return { right: rect.right, width: rect.width, scrollWidth: table.scrollWidth, clientWidth: table.clientWidth };
+        }),
+        wideScroll: expectWide ? (tables[1]?.scrollWidth ?? 0) > (tables[1]?.clientWidth ?? 0) : true,
+      };
+    }, expectWideScroll);
+    if (geometry.tables.length !== 2 || geometry.containerLeft === undefined || geometry.containerRight === undefined ||
+      geometry.tables.some((table) => table.right > geometry.containerRight + 1 || table.width > geometry.containerRight - geometry.containerLeft + 1) || !geometry.wideScroll)
+      throw new Error(`markdown table geometry failed at ${width}: ${JSON.stringify(geometry)}`);
+  };
+  await checkTableGeometry(1440, false);
+  await checkTableGeometry(390, true);
+  await page.setViewportSize({ width: 1440, height: 900 });
   const markdownText = await markdown.innerText();
   if (markdownText.includes("# Rendered markdown") || markdownText.includes("* first item"))
     throw new Error("markdown source markers remained visible");

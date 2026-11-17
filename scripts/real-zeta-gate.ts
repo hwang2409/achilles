@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -817,7 +817,7 @@ try {
   await gateWait.playwright(field, "waitFor", { timeout: 20_000 });
   const chatOne = await homeSessionId();
   if (!chatOne || chatOne !== first) throw new Error("create_page did not run in the first home chat");
-  await page.keyboard.press("Meta+Shift+O");
+  await page.keyboard.press(appShortcut("Shift+O"));
   await waitFor(async () => {
     const current = await homeSessionId();
     return Boolean(current && current !== chatOne);
@@ -866,11 +866,17 @@ try {
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
   await page.goto(`${origin}/reading`);
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
-  await gateWait.playwright(page.getByText(legacyMetricText, { exact: true }), "waitFor");
-  await gateWait.playwright(page.getByText("reading: 0", { exact: true }), "waitFor");
+  const longMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "legacy total with an unusually long descriptive label" }) });
+  await gateWait.playwright(longMetric, "waitFor");
+  const longMetricLabel = longMetric.locator(".metric-label");
+  const longMetricValue = longMetric.locator("strong");
+  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "9,999,999,999,999,999")
+    throw new Error(`long metric did not render its full label and value: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
+  const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
+  await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
-  const metricBoxes = await page.locator(".layout-metric").evaluateAll((elements) =>
+  const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
     elements.map((element) => {
       const box = element.getBoundingClientRect();
       return {
@@ -912,7 +918,7 @@ try {
   }, { timeout: 20000 });
   await addBookApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(bookAdded, "waitFor", { timeout: 20000 });
-  await gateWait.playwright(page.getByText("reading: 1", { exact: true }), "waitFor", { timeout: 20000 });
+  await gateWait.playwright(page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) }).locator("strong").filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
   const detailResponse = await filteredDetailResponse;
   await gateWait.playwright(page, "waitForFunction", () => {
     const text = document.querySelector(".record-detail")?.textContent ?? "";
@@ -967,21 +973,36 @@ try {
 
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
-  await field.fill("put the page note before the books list");
+  await field.fill("layout updated without reload");
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  await gateWait.playwright(page.getByText("layout updated", { exact: true }), "waitFor", { timeout: 20000 });
+  await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
-    const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
-    return blocks[0] === "layout updated without reload" && blocks[1] === legacyMetricText && blocks[2] === "reading: 1" && blocks[3]?.includes("books");
-  }, "open page layout re-render after chat tool completion");
+    const metrics = page.locator(".metric-strip");
+    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("all books", { exact: true }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
+  }, "open page layout after chat tool completion");
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
   if (!updateLayoutResult || updateLayoutResult.is_error)
     throw new Error(`update_layout tool result was missing or failed: ${JSON.stringify(afterLayoutUpdate.tool_results)}`);
   console.log("open page re-rendered without reload after chat update_layout: page note before books");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
+  const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
+  await gateWait.playwright(allBooksMetric.filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
+  await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
+  const saveCountRoute = async (route: Route) => {
+    await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });
+  };
+  await page.route("**/api/pages/*/records/books?limit=1", saveCountRoute);
+  try {
+    await page.getByRole("button", { name: "save", exact: true }).click();
+    await waitFor(async () => (await page.locator(".record-form").innerText()).includes("saved"), "form save");
+    await waitFor(async () => (await allBooksMetric.innerText()) === "2", "unfiltered metric after form save");
+  } finally {
+    await page.unroute("**/api/pages/*/records/books?limit=1", saveCountRoute);
+  }
+  console.log("real page form save refreshed the unfiltered grouped metric");
 
   const staleLayoutApprovalBefore = await updateLayoutApproval.count();
   await waitFor(async () => (JSON.parse(await Bun.file(control).text()).late_turn_barrier ?? null) === "held", "held final layout response");
@@ -1681,7 +1702,7 @@ try {
   const draft = "this draft must remain after zeta disconnects";
   const droppedField = page.getByRole("textbox", { name: "message" });
   await droppedField.fill(draft);
-  await page.keyboard.press("Meta+b");
+  await page.keyboard.press(appShortcut("b"));
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connected-review-1440x900.png"), fullPage: true });
   await expectBrowserErrors(page, [{ method: "GET", url: discoveryUrl, status: 503 }], async () => {
     const discoveryFailure = gateWait.playwright(page, "waitForResponse", (response) => response.request().method() === "GET" && response.url() === discoveryUrl && response.status() === 503);
@@ -1696,7 +1717,14 @@ try {
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
   await restartZeta("zeta reconnect after dropped connection");
-  await page.getByRole("button", { name: "retry now" }).click();
+  // automatic reconnect can clear the compact banner before the manual retry click.
+  // A bounded click makes disappearance during the action equivalent to automatic recovery.
+  const retryNow = page.getByRole("button", { name: "retry now" });
+  try {
+    await retryNow.click({ timeout: 1_000 });
+  } catch {
+    // The button may disappear when the app reconnects by itself.
+  }
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");

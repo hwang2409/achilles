@@ -13,9 +13,8 @@ button { background: transparent; border: 1px solid var(--fulcrum-border); curso
 a { color: inherit; text-decoration: none; }
 kbd { color: var(--fulcrum-muted); font: inherit; }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
-.app-shell { height: 100%; display: grid; grid-template-columns: 288px minmax(0, 1fr); background: var(--fulcrum-bg); }
+.app-shell { height: 100%; display: grid; background: var(--fulcrum-bg); }
 .sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border); }
 .brand-row strong { font-size: 16px; letter-spacing: .02em; }
 .brand-row > span:last-of-type { color: var(--fulcrum-muted); font-size: 12px; }
@@ -46,7 +45,6 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
    (36px list head + 36px group head) instead of hidden under them. */
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
-.chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; display: flex; align-items: center; margin: 0; padding: 0 16px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 14px; font-weight: 400; text-transform: lowercase; }
 .chat-row { position: relative; display: block; padding: 10px 48px 10px 16px; border-left: 2px solid transparent; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
 .chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.4; font-weight: 500; }
 .chat-row > span { display: flex; gap: 4px; min-width: 0; margin-top: 5px; color: var(--fulcrum-muted); font-size: 14px; }
@@ -58,8 +56,6 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
-.chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.chat-row.current strong { font-weight: 700; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 8%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
@@ -85,10 +81,8 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .sidebar-skeleton i { display: block; width: 88%; height: 10px; margin: 16px 0; background: var(--fulcrum-surface); }
 .sidebar-skeleton i:nth-child(even) { width: 62%; }
 .waiting-count { display: none; }
-.main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .skip-link { position: fixed; z-index: 20; top: 8px; left: 8px; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-accent); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
-.chat-header { container-type: inline-size; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--fulcrum-border); }
 .chat-heading { display: flex; flex: 1 1 auto; align-items: center; gap: 12px; min-width: 0; }
 .chat-heading span { flex: 0 1 220px; min-width: 0; overflow: hidden; color: var(--fulcrum-muted); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 /* min-width: 0, not a 160px floor: the floor let a long title overflow past .chat-heading's own
@@ -108,6 +102,9 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .approval-mode.mode-allow { color: var(--fulcrum-warn); }
 .approval-mode.mode-allow::before { background: var(--fulcrum-warn); }
 .header-overflow, .header-menu, .fold-indicator { display: none; }
+/* the status wrapper is transparent to layout on desktop; below 40em it becomes a narrow right-aligned
+   column (run state over the mode words), so the mode words never steal the title's horizontal room */
+.header-status { display: contents; }
 /* the actions move into the ••• menu whenever they would squeeze the title (not only at the narrow
    width): 64em of header leaves the title about 30 characters beside the full actions. em follows the
    ui font size; ch would also follow the font face, and a wide fallback face folded them at 1440. */
@@ -122,15 +119,14 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
      (only rendered when that mode is on) stays beside ••• in the header itself, at every width. the divider
      (rendered only with a mark) keeps the marks from reading as part of the run state word. */
   .fold-indicator { display: flex; gap: 12px; align-items: center; padding-left: 12px; border-left: 1px solid var(--fulcrum-border); }
-  .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
+  .fold-mark::before, .header-menu button[aria-pressed="true"]::before { content: ""; display: inline-block; box-sizing: border-box; width: 8px; height: 8px; margin-right: 8px; }
   .fold-mark-approve { color: var(--fulcrum-warn); }
   .fold-mark-approve::before { background: var(--fulcrum-warn); }
-  /* a hollow square in the text color, so it never reads as the filled accent "running" mark; the menu repeats
-     both marks in front of their full names, so it works as a legend */
-  .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { box-shadow: inset 0 0 0 1px currentColor; }
-  /* the gap sits on the word, so the square alone (tight header) has no trailing space */
-  .fold-mark-create::before { margin-right: 0; }
-  .fold-mark-create .fold-long { margin-left: 8px; }
+  /* an accent chip + its own word (the app's "on/active" colour, as on the current chat row), so create mode
+     reads as visibly on and named even at 390 where the word stays; hollow fill keeps it from reading as the
+     filled accent "running" dot, and the menu repeats the mark in front of the full name as a legend */
+  .fold-mark-create { color: var(--fulcrum-accent); }
+  .fold-mark-create::before, .header-menu button[aria-pressed="true"]::before { border: 1px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 22%, transparent); }
   /* the title keeps a minimum width; the marks get shorter instead of pushing it off-screen */
   .chat-heading { min-width: 6em; }
 }
@@ -138,6 +134,17 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
   .fold-long { display: none; }
   /* a long state ("maybe not sent", "waiting on you") wraps to two lines (9ch: never one word a line) instead of pushing ••• off-screen */
   .run-state { min-width: 9ch; white-space: normal; }
+  /* stack run state over the named mode words in a narrow column, so the title keeps its full width and
+     no mode is ever a bare square; the divider is dropped since the marks sit under the run state now */
+  .header-status { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; min-width: 0; }
+  .fold-indicator { gap: 6px; padding-left: 0; border-left: none; }
+  .header-status .fold-mark::before { width: 7px; height: 7px; margin-right: 5px; }
+  .chat-actions { gap: 10px; }
+  .chat-heading { min-width: 0; }
+}
+/* on narrow headers, keep the named create marker visible and fold only the less important auto marker. */
+@container (max-width: 25em) {
+  .fold-mark-approve { display: none; }
 }
 .run-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: var(--fulcrum-muted); }
 .run-state.state-running::before { background: var(--fulcrum-accent); }
@@ -153,30 +160,18 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .chat-header > [role="alert"] { position: absolute; top: 56px; right: 16px; color: var(--fulcrum-danger); }
 .create-mode-alert { position: relative; z-index: 2; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: var(--fulcrum-danger); background: var(--fulcrum-bg); border-bottom: 1px solid var(--fulcrum-border); }
 .create-mode-alert button { flex: 0 0 auto; }
-.layout-blocks { flex: 0 1 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; column-gap: 16px; overflow-y: auto; padding: 16px max(24px, calc((100% - 880px) / 2)); border-bottom: 1px solid var(--fulcrum-border); }
-.layout-blocks > :not(.layout-metric) { grid-column: 1 / -1; }
 /* the stacked page view (.page-view without .docked) is the only place blocks share a column with
    the chat below them, so only there do blocks give up half the height (M-2 in firstrun-2a2a863);
    the busy-state blocks render with no chat alongside and keep their full height. 40%, not 50%:
    at 390x844 half the height left the chat about 11 lines. */
-.page-view > .layout-blocks { max-height: 40%; }
 /* below 1100px (or with no blocks) the page stacks as before: .page-chat adds no box, so blocks,
    transcript and composer share .page-view's column. at 1100px+ (or short and wide) the chat docks right and each side scrolls alone. */
 .page-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.page-chat { display: contents; }
 /* a short landscape viewport (a phone on its side) docks too: stacked, the page got a 77px band. */
 @media (min-width: 1100px), (max-height: 500px) and (min-width: 700px) {
   .page-view.docked { flex-direction: row; }
-  .page-view.docked > .layout-blocks { flex: 1 1 0; min-width: 0; max-height: none; align-content: start; padding: 16px 24px; border-bottom: 0; border-right: 1px solid var(--fulcrum-border); }
   .page-view.docked > .page-chat { flex: 0 0 clamp(380px, 40%, 460px); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 }
-.layout-metric { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.record-detail h2 { margin: 0 0 12px; font-size: 16px; text-wrap: balance; }
-.record-detail dl { display: grid; grid-template-columns: minmax(96px, .35fr) minmax(0, 1fr); gap: 8px 16px; margin: 0; }
-.record-detail dl > div { display: contents; }
-.record-detail dt { color: var(--fulcrum-muted); }
-.record-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.record-detail .match-note { margin: 12px 0 0; color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
 /* a page's own layout blocks (forms, lists, metrics) can be tall: stacked, they keep their own
    height up to half the page (M-2 in firstrun-2a2a863: a 160-210px band cut forms and notices);
    .transcript takes the rest but keeps a usable floor, so the chat and the empty-chat starters
@@ -185,12 +180,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 /* one jump control: fulcrum's counts only new rows, so achilles owns it and text-only growth is covered too */
 .transcript [data-part="jump-to-latest-lane"] { display: none; }
 .transcript > [data-part="jump-to-latest"] { position: absolute; right: 24px; bottom: 16px; z-index: 1; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); border: 1px solid var(--fulcrum-border); }
-.transcript table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
 html[data-density="compact"] .transcript { line-height: 1.35; }
-.transcript :is(code, pre) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.transcript :is([data-part="md-code-inline"], [data-part="md-code-block"]) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
-/* fulcrum gives ordered markers 3ch; "10." plus its gap needs 4ch or the first digit is clipped */
-.transcript ol[data-part="md-list"] { padding-left: 4ch; }
 .transcript > [data-part="timeline-frame"] { height: 100%; max-width: 880px; margin: 0 auto; }
 .main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
 .main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
@@ -262,33 +252,8 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .kept-message { margin: 0; max-width: min(60ch, 100%); }
 .kept-message figcaption { color: var(--fulcrum-muted); }
 .kept-message blockquote { margin: 4px 0 0; padding: 8px 12px; max-height: 12em; overflow-y: auto; border-left: 2px solid var(--fulcrum-border); white-space: pre-wrap; overflow-wrap: anywhere; }
-.record-list { margin: 1rem 0; overflow-x: auto; }
-.record-list h2 { font-size: 1rem; margin: 0 0 .5rem; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; border: 1px solid var(--fulcrum-border); padding: .4rem .5rem; vertical-align: top; }
-.record-list tr[aria-selected] { cursor: pointer; }
-.record-list tr[aria-selected="false"]:hover { background: color-mix(in srgb, var(--fulcrum-fg) 4%, transparent); }
-.record-list tr[aria-selected="true"] { background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); box-shadow: inset 3px 0 var(--fulcrum-accent); }
-.record-list tr[aria-selected]:focus-visible { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
-th { color: var(--fulcrum-muted); font-weight: 600; }
-.record-list p { color: var(--fulcrum-muted); }
-.record-form { margin: 1rem 0; min-width: 0; }
-.record-form h2 { font-size: 1rem; margin: 0 0 .5rem; overflow-wrap: anywhere; }
-.record-form > p { color: var(--fulcrum-muted); }
-.record-form form { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 12px 16px; align-items: start; }
-.record-field { display: grid; gap: 4px; min-width: 0; }
-.record-field label { color: var(--fulcrum-muted); overflow-wrap: anywhere; }
-.record-field input:not([type="checkbox"]), .record-field select { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface, transparent); }
-.record-field-check { grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: center; }
-.record-field-check input { grid-row: 1; grid-column: 1; width: 18px; height: 18px; margin: 6px 0; }
-.record-field-check label { grid-row: 1; grid-column: 2; }
-.record-field-check small, .record-field-check .field-error { grid-column: 1 / -1; }
-.record-field [aria-invalid="true"] { border-color: var(--fulcrum-danger); }
-.record-field small { color: var(--fulcrum-muted); }
 .required-mark { color: var(--fulcrum-warn); }
 .field-error { margin: 0; color: var(--fulcrum-danger); overflow-wrap: anywhere; }
-.record-form-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.record-form-actions p { margin: 0; color: var(--fulcrum-muted); }
 .record-form-actions p[role="alert"] { color: var(--fulcrum-danger); }
 .record-form-actions .primary { min-height: 36px; padding: 6px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
 .record-form-actions button:not(.primary) { min-height: 36px; padding: 6px 12px; }
