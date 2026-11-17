@@ -62,11 +62,14 @@ const readDiscovery = async (path: string) => {
 // a pre-kill read is diagnostics only: a missing or partial file adds a note and never fails or masks the gate.
 const listTokens = (path: string) => readDiscovery(path).catch((error) => { artifactNotes.push([new Date().toISOString(), `discovery read failed before SIGTERM: ${error}`]); });
 const redact = (text: string) => diagnostic(text, secrets);
-const safeControl = (text: string) => controlSnapshot(text, secrets);
+const safeControl = async () => {
+  try { return controlSnapshot(await Bun.file(control).text(), secrets); }
+  catch (error) { return `<control missing: ${redactArtifact(String(error), secrets)}>`; }
+};
 const frameRing = createFrameRing();
 const gateWait = createGateWait(
   frameRing.snapshot,
-  async () => safeControl(await Bun.file(control).text()),
+  async () => await safeControl(),
 );
 const start = (
   command: string,
@@ -745,7 +748,7 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await createApproval.count()) > createApprovalBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > createRequestBefore), "create page approval").catch(async (error) => {
     throw new Error(
-      `${error}\nbackend did not receive achilles__create_page catalog: ${safeControl(await Bun.file(control).text())}`,
+      `${error}\nbackend did not receive achilles__create_page catalog: ${await safeControl()}`,
     );
   });
   await createApproval.nth(createApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
@@ -844,9 +847,9 @@ try {
     throw new Error("new chat transcript reported achilles as unavailable after resources discovery");
   const discoveryControl = JSON.parse(await Bun.file(control).text());
   if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "discover-resources" && !result.is_error))
-    throw new Error(`mcp_discover resources call did not succeed: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+    throw new Error(`mcp_discover resources call did not succeed: ${await safeControl()}`);
   if (!discoveryControl.tool_results?.some((result: { call_id: string; is_error: boolean }) => result.call_id === "inspect-after-discovery" && !result.is_error))
-    throw new Error(`achilles inspect_page call did not succeed after resources discovery: ${safeControl(JSON.stringify(discoveryControl.tool_results))}`);
+    throw new Error(`achilles inspect_page call did not succeed after resources discovery: ${await safeControl()}`);
   console.log(`two-chat page tools asserted: ${chatOne} created /reading; ${chatTwo} discovered resources and inspected it`);
   const homeInspect = await homeMcp(11, "tools/call", {
     name: "inspect_page",
@@ -912,10 +915,22 @@ try {
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x844.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x760.png"), fullPage: true });
+  await field.fill("sb7 page stream");
+  await field.press("Enter");
+  await gateWait.playwright(page.getByText("sb7 stream line 119", { exact: true }), "waitFor", { timeout: 20000 });
+  const streamProof = await page.locator(".page-chat-surface").evaluate((surface) => {
+    const text = surface.textContent ?? "";
+    const lines = text.match(/sb7 stream line \d{3}/g) ?? [];
+    const scroll = surface.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
+    return { lines: lines.length, first: text.includes("sb7 stream line 000"), last: text.includes("sb7 stream line 119"), gap: scroll ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : -1 };
+  });
+  if (streamProof.lines !== 120 || !streamProof.first || !streamProof.last || streamProof.gap > 1)
+    throw new Error(`390px page chat did not retain and follow all 120 chunks: ${JSON.stringify(streamProof)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-last-chunk-open-390x760.png"), fullPage: true });
   await pageChatDialog.getByRole("button", { name: "close page chat" }).click();
   await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "false", "page chat close");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-last-chunk-390x844.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-after-stream-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const readingSessionId = await homeSessionId();
   if (!readingSessionId || readingSessionId === first)
@@ -926,7 +941,7 @@ try {
   await field.press("Enter");
   await gateWait.playwright(addBookApproval, "waitFor", { timeout: 20000 }).catch(async (error) => {
     throw new Error(
-      `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+      `${error}\nbackend=${await safeControl()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
     );
   });
   const filteredDetailResponse = gateWait.playwright(page, "waitForResponse", (response) => {
@@ -1221,13 +1236,13 @@ try {
   await gateWait.playwright(emptyRecords, "waitFor", { state: "visible" });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(
-      `${error}\nannotation approval missing: backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
+      `${error}\nannotation approval missing: backend=${await safeControl()} zeta-log=${redact(logs.get(zetaProcess) ?? "")}`,
     );
   });
   await annotationApproval.nth(annotationApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
   await waitFor(async () => (await annotationComplete.count()) > generatedAnnotationCompleteBefore, "generated tool completion").catch(async (error) => {
       throw new Error(
-        `${error}\nbackend=${safeControl(await Bun.file(control).text())}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
+        `${error}\nbackend=${await safeControl()}\nzeta-log=${redact(logs.get(zetaProcess) ?? "")}\nachilles-log=${redact(logs.get(app) ?? "")}`,
       );
     });
   if ((await homeSessionId()) !== sessionBeforeToolTurn)
@@ -1259,7 +1274,7 @@ try {
   ).json();
   if (!Array.isArray(homeRecords) || homeRecords.length !== 1)
     throw new Error(
-      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${safeControl(await Bun.file(control).text())} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
+      `expected exactly one page-scoped record, got ${JSON.stringify(homeRecords)} backend=${await safeControl()} zeta-log=${redact(logs.get(zetaProcess) ?? "")} body=${redact(await page.locator("body").innerText())}`,
     );
   await waitForIdleTurn(page, waitFor);
   const createdPageId = createdPage.id;
