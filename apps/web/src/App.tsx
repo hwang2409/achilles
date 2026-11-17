@@ -45,6 +45,20 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean; held: boolean };
 
+const MOBILE_PAGE_CHAT_QUERY = "(max-width: 1099px) and (min-height: 501px)";
+
+function useMobilePageChat() {
+  const [matches, setMatches] = useState(() => matchMedia(MOBILE_PAGE_CHAT_QUERY).matches);
+  useEffect(() => {
+    const media = matchMedia(MOBILE_PAGE_CHAT_QUERY);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return matches;
+}
+
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
 function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
@@ -165,6 +179,8 @@ export function App() {
   const completedCreatePages = useRef(new Set<string>());
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const mobilePageChat = useMobilePageChat();
+  const pageChatSheetOpen = mobilePageChat && mobileChatOpen;
   const mobileChatWasOpen = useRef(false);
   const pageChatButton = useRef<HTMLButtonElement | null>(null);
   const pageChatClose = useRef<HTMLButtonElement | null>(null);
@@ -218,7 +234,7 @@ export function App() {
     setMobileChatOpen(false);
   }, [ready?.sessionId, activePage?.id]);
   useEffect(() => {
-    if (!mobileChatOpen) {
+    if (!pageChatSheetOpen) {
       if (mobileChatWasOpen.current) pageChatButton.current?.focus();
       mobileChatWasOpen.current = false;
       return;
@@ -232,7 +248,7 @@ export function App() {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [mobileChatOpen]);
+  }, [pageChatSheetOpen]);
   // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
   useLayoutEffect(() => {
     const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
@@ -299,9 +315,9 @@ export function App() {
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} />}
-        <div className={`page-chat${mobileChatOpen ? " mobile-chat-open" : ""}`}>
-        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={mobileChatOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{mobileChatOpen ? "⌃" : "⌃"}</span></button>}
-        <div id="page-chat-sheet" className="page-chat-surface" role={mobileChatOpen ? "dialog" : undefined} aria-modal={mobileChatOpen ? "true" : undefined} aria-labelledby={mobileChatOpen ? "page-chat-title" : undefined} aria-hidden={hasBlocks && !mobileChatOpen ? "true" : undefined}>
+        <div className={`page-chat${pageChatSheetOpen ? " mobile-chat-open" : ""}`}>
+        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{pageChatSheetOpen ? "⌃" : "⌃"}</span></button>}
+        <div id="page-chat-sheet" className="page-chat-surface" role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen ? "true" : undefined} aria-labelledby={pageChatSheetOpen ? "page-chat-title" : undefined} aria-hidden={mobilePageChat && hasBlocks && !pageChatSheetOpen ? "true" : undefined}>
         {hasBlocks && <div className="page-chat-sheet-head"><strong id="page-chat-title">page chat</strong><button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button></div>}
         <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
