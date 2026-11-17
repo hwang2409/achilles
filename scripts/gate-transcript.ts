@@ -261,6 +261,22 @@ export async function gateTranscript(
   };
   const assertJumpLane = async (width: number) => {
     await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+    await waitFor(async () => await page.evaluate((narrow) => {
+      const shell = document.querySelector<HTMLElement>(".app-shell");
+      const main = document.querySelector<HTMLElement>(".main-pane");
+      const sidebar = document.querySelector<HTMLElement>(".sidebar");
+      const scrim = document.querySelector<HTMLElement>(".drawer-scrim");
+      const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest"]');
+      if (!shell || !main || !sidebar || !scrim || !control || !control.isConnected || !control.getClientRects().length) return false;
+      const style = getComputedStyle(control);
+      const scrimStyle = getComputedStyle(scrim);
+      if (style.visibility === "hidden" || style.opacity === "0" || style.pointerEvents === "none") return false;
+      if (narrow && (sidebar.getBoundingClientRect().right > 0 || scrimStyle.opacity !== "0" || scrimStyle.pointerEvents !== "none")) return false;
+      const rect = control.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return !shell.classList.contains("drawer-open") && !main.inert && main.getAttribute("aria-hidden") !== "true" &&
+        (hit === control || control.contains(hit)) && !hit?.closest(".drawer-scrim, [role=dialog], dialog");
+    }, width <= 760), `responsive shell and unobscured jump control at ${width}`);
     const geometry = await page.locator('[data-part="jump-to-latest"]:visible').evaluate((control) => {
       const rect = (element: Element) => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; };
       const controlRect = rect(control);
@@ -290,9 +306,8 @@ export async function gateTranscript(
   };
   await assertJumpLane(1440);
   await capture("streaming-scrolled-up-jump-1440x900.png");
-  await page.setViewportSize({ width: 390, height: 760 });
-  await capture("streaming-scrolled-up-jump-390x760.png");
   await assertJumpLane(390);
+  await capture("streaming-scrolled-up-jump-390x760.png");
   await page.setViewportSize({ width: 1440, height: 900 });
   await scroll.evaluate((element) => {
     const original = element.scrollTo.bind(element);
