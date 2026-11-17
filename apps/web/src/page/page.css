@@ -92,5 +92,10 @@
 .record-list-error .record-list-actions { justify-content: flex-start; }
 .record-list-skeleton { display: grid; }
 .record-list-skeleton span { display: block; height: 40px; border-top: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-border) 55%, transparent); }
+.record-list-skeleton span:nth-child(1) { width: 58%; }
+.record-list-skeleton span:nth-child(2) { width: 82%; }
+.record-list-skeleton span:nth-child(3) { width: 68%; }
+.record-list-skeleton span:nth-child(4) { width: 92%; }
+.record-list-skeleton span:nth-child(5) { width: 74%; }
 .record-list-actions button:focus-visible, .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
 .record-form-no-selection form { opacity: .5; }

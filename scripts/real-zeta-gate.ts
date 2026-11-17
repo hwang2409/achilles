@@ -916,6 +916,67 @@ try {
     throw new Error(`long metric did not render its full label and value: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
+  const booksList = page.locator('.record-list[data-collection="books"]');
+  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (await booksList.locator("header .record-count").innerText() !== "0" || await booksList.getByText("sorted by updated", { exact: true }).count())
+    throw new Error("empty books state showed the wrong count or sort label");
+  const addBook = booksList.getByRole("button", { name: "add a book", exact: true });
+  await addBook.click();
+  if (!(await page.locator('.record-form[data-collection="books"][data-operation="insert"] input[name="title"]').evaluate((element) => document.activeElement === element)))
+    throw new Error("empty books add action did not focus the insert form");
+  const desktopComposer = page.locator('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
+  await booksList.getByRole("button", { name: "ask the chat", exact: true }).click();
+  await waitFor(async () => (await desktopComposer.inputValue()) === "add a book to this page", "desktop empty-state chat draft");
+  if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
+  if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
+  await desktopComposer.fill("");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-a-empty-1440.png"), fullPage: true });
+
+  const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
+  await page.route(recordsPattern, async (route) => {
+    if (new URL(route.request().url()).searchParams.get("limit") === "100") {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    await route.continue();
+  });
+  await page.reload();
+  await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (await booksList.getByText("no books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-b-loading-1440.png"), fullPage: true });
+  await page.unroute(recordsPattern);
+
+  let failRecords = true;
+  await page.route(recordsPattern, async (route) => {
+    if (new URL(route.request().url()).searchParams.get("limit") === "100" && failRecords) {
+      failRecords = false;
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+  await page.reload();
+  await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
+  await booksList.getByRole("button", { name: "try again", exact: true }).click();
+  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  await page.unroute(recordsPattern);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-c-recovered-1440.png"), fullPage: true });
+
+  const pageApiPattern = `**/api/pages/${createdPage.id}`;
+  await page.route(pageApiPattern, async (route) => {
+    const response = await route.fetch();
+    const document = await response.json() as { layout: { blocks: Array<Record<string, unknown>> } };
+    document.layout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
+    await route.fulfill({ response, body: JSON.stringify(document), headers: { "content-type": "application/json" } });
+  });
+  await page.reload();
+  const updateHeading = page.getByRole("heading", { name: /update book/ });
+  await gateWait.playwright(updateHeading, "waitFor", { timeout: 20_000 });
+  const disabledTitle = page.locator('.record-form[data-operation="update"] input[name="title"]');
+  if (!(await disabledTitle.isDisabled()) || (await disabledTitle.getAttribute("placeholder")) !== "—") throw new Error("no-selection update form did not disable its real field with a placeholder");
+  if (!(await page.getByRole("button", { name: "add", exact: true }).last().isDisabled())) throw new Error("no-selection update form save was not disabled");
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-d-no-selection-1440.png"), fullPage: true });
+  await page.unroute(pageApiPattern);
+
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 760 });
   const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>

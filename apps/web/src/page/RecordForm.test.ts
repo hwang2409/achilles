@@ -96,6 +96,8 @@ test("a selected row fills the update form and its record_id and revision are se
   mounted = render(editBlock());
   await view().findByText("select a book in the list to edit it");
   expect((view().getByRole("button", { name: "add" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((view().getByLabelText(/title/) as HTMLInputElement).disabled).toBe(true);
+  expect((view().getByLabelText(/title/) as HTMLInputElement).placeholder).toBe("—");
   act(() => selectRow("books", { collection: "books", record: { ...stored } }));
   const status = await view().findByRole("button", { name: /status/ });
   expect(status.textContent).toContain("to read");

@@ -69,6 +69,20 @@ describe("RecordList", () => {
     expect(text(result)).toContain("no reading yet");
   });
 
+  test("retries the same request and renders the recovered rows", async () => {
+    holdFetches();
+    const result = renderList(props);
+    await act(async () => calls[0].resolve(new Response("no", { status: 503 })));
+    expect(text(result)).toContain("could not load reading");
+    const retry = result.getByRole("button", { name: "try again" });
+    fireEvent.keyDown(retry, { key: "Enter" });
+    fireEvent.click(retry);
+    expect(calls).toHaveLength(2);
+    await settle(calls[1], [{ record_id: "book-retry", title: "Recovered" }]);
+    expect(text(result)).toContain("Recovered");
+    expect(text(result)).not.toContain("could not load reading");
+  });
+
   test("resets rows when the layout page identity changes", async () => {
     holdFetches();
     const block = { type: "list", title: props.title, collection: props.collection };
