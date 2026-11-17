@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ToolBodyProps, ToolItem } from "@fulcrum/react";
+import { ToolBody, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
 import "./tool-summary.css";
 
 const MAX_INPUT = 64_000;
@@ -99,8 +99,9 @@ function json(value: unknown): string {
 
 export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNode {
   const summary = summarizeToolOutput(output, item.is_error || state === "error");
+  const showPreview = summary.lines.length > 1 || text(summary.raw) !== summary.lines[0];
   return <>
-    <div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div>
+    {showPreview ? <div data-part="tool-output"><div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div></div> : <ToolBody item={item} output={output} state={state} />}
     <details data-part="tool-raw">
       <summary>raw</summary>
       <pre>{`arguments\n${json(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre>

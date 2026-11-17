@@ -923,6 +923,7 @@ try {
     throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
   if (filteredDetailText.includes("could not load record"))
     throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-single-record-1440.png"), fullPage: true });
   const readingModeResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
@@ -965,13 +966,37 @@ try {
       `invalid metric did not return the safe error document: ${JSON.stringify(invalidMetricCall.result)}`,
     );
 
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-failed-1440.png"), fullPage: true });
+
+  const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
+  if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
   await field.fill("put the page note before the books list");
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  const listSummaryApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "list_books" });
+  await gateWait.playwright(listSummaryApproval, "waitFor", { timeout: 20000 });
+  await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
   await gateWait.playwright(page.getByText("layout updated", { exact: true }), "waitFor", { timeout: 20000 });
+  const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
+  await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
+  const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
+  await gateWait.playwright(summaryBody.getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
+  await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
+  if (screenshotDir) {
+    for (const width of [390, 1280, 1440, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+  if ((await toolRow.locator('[data-part="tool-raw"] pre').count()) !== 0 && (await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes('"Summary Book 1"'))
+    throw new Error("raw list result was visible before opening raw");
+  await toolRow.locator('[data-part="tool-raw"] summary').click();
+  await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
     return blocks[0] === "layout updated without reload" && blocks[1] === legacyMetricText && blocks[2] === "reading: 1" && blocks[3]?.includes("books");
@@ -1242,7 +1267,7 @@ try {
       headers: { Authorization: `Bearer ${secondCredential}` },
     })
   ).json();
-  if (secondRecords.length !== 1 || secondRecords[0]?.title !== "Synthetic Book")
+  if (secondRecords.length !== 5 || !secondRecords.some((record: { title?: string }) => record.title === "Synthetic Book"))
     throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
 
   if (createdPage.route !== "/reading") throw new Error("created page route changed");
