@@ -1,13 +1,39 @@
-/* keep the control outside the centered transcript column; reserve a short mobile gutter above the composer */
-.transcript [data-part="jump-to-latest-lane"] { display: none; }
-.transcript > [data-part="jump-to-latest"] {
-  position: absolute;
-  right: max(12px, calc((100% - 880px) / 2 - 150px));
-  bottom: 8px;
-  z-index: 1;
+/* keep one bottom lane inside the transcript frame, outside the scrollable timeline rows */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  min-height: 0 !important;
+}
+.transcript > [data-part="timeline-frame"] {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+  height: auto !important;
+}
+.transcript > [data-part="timeline-frame"] > [data-part="timeline-scroll"] {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.transcript [data-part="jump-to-latest-lane"]:not([data-jump-owned="true"]) { display: none !important; }
+.transcript > [data-part="jump-to-latest-lane"] {
+  display: flex;
+  flex: none;
+  min-height: 48px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 max(12px, calc((100% - 880px) / 2));
+}
+.transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"] {
   padding: 8px 12px;
   color: var(--fulcrum-bg);
   background: var(--fulcrum-fg);
   border: 1px solid var(--fulcrum-border);
+  white-space: nowrap;
 }
-.transcript:has(> [data-part="jump-to-latest"]) [data-part="timeline"] { padding-bottom: 64px; }
+[data-jump-label="compact"] { display: none; }
+@media (max-width: 480px) {
+  .transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"] { width: 44px; min-width: 44px; height: 44px; padding: 0; }
+  [data-jump-label="full"] { display: none; }
+  [data-jump-label="compact"] { display: inline; font-size: 18px; line-height: 1; }
+}
