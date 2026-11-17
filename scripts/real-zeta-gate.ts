@@ -974,8 +974,49 @@ try {
   const backgroundControl = page.locator(".record-form-actions button").first();
   const backgroundControlBox = await backgroundControl.boundingBox();
   if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
+  // wait for the sheet's own transition, not an arbitrary delay: a click during the
+  // transition can use a stale box and miss the native dialog backdrop.
+  await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+  const outsideClick = await pageChatDialog.evaluate((dialog, box) => {
+    const rect = dialog.getBoundingClientRect();
+    const surface = document.querySelector<HTMLElement>(".page-chat-surface")?.getBoundingClientRect();
+    const point = { x: box.x + box.width / 2, y: (surface?.top ?? 0) - 1 };
+    const hit = document.elementFromPoint(point.x, point.y);
+    const animations = dialog.getAnimations({ subtree: true }).map((animation) => ({ playState: animation.playState, currentTime: animation.currentTime }));
+    return {
+      error: null,
+      point,
+      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches(".page-chat-backdrop"), backgroundControl: Boolean(hit.closest(".record-form-actions button")) } : null,
+      dialog: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, modal: dialog.matches(":modal") },
+      surface: surface ? { left: surface.left, top: surface.top, right: surface.right, bottom: surface.bottom } : null,
+      animations,
+    };
+  }, backgroundControlBox);
+  if (outsideClick.error || !outsideClick.point || !outsideClick.surface || !outsideClick.hit?.backdrop || outsideClick.animations.some(({ playState }) => playState !== "finished"))
+    throw new Error(`page chat backdrop was not ready for outside click: ${JSON.stringify(outsideClick)}`);
+  const { point } = outsideClick;
+  if (point.x > outsideClick.surface.left && point.x < outsideClick.surface.right && point.y > outsideClick.surface.top && point.y < outsideClick.surface.bottom)
+    throw new Error(`page chat backdrop click point landed inside the sheet: ${JSON.stringify(outsideClick)}`);
   const pathBeforeOutsideClick = new URL(page.url()).pathname;
-  await pageChatDialog.getByRole("button", { name: "close page chat" }).click();
+  await page.evaluate(() => {
+    const backdrop = document.querySelector<HTMLButtonElement>(".page-chat-backdrop");
+    if (!backdrop) throw new Error("page chat backdrop disappeared before click");
+    (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick = { target: "", backdrop: false };
+    backdrop.addEventListener("click", (event) => {
+      const state = (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick;
+      if (!state) return;
+      state.target = (event.target as Element).tagName;
+      state.backdrop = event.target === backdrop;
+    }, { once: true });
+  });
+  await page.mouse.click(point.x, point.y);
+  const backdropClick = await page.evaluate(() => {
+    const state = (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick;
+    delete (window as typeof window & { __pageChatBackdropClick?: unknown }).__pageChatBackdropClick;
+    return state;
+  });
+  if (!backdropClick?.backdrop)
+    throw new Error(`page chat outside click did not target the backdrop: ${JSON.stringify({ outsideClick, backdropClick })}`);
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
   if (new URL(page.url()).pathname !== pathBeforeOutsideClick)
     throw new Error("background chat control activated through open page chat sheet");
