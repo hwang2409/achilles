@@ -936,21 +936,123 @@ try {
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-390x844.png"), fullPage: true });
+  await page.evaluate(() => {
+    const originalAdd = window.addEventListener.bind(window);
+    const result = { prevented: false, inside: false };
+    let armed = true;
+    (window as typeof window & { __pageChatFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame = { result, originalAdd: window.addEventListener };
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      originalAdd(type, listener, options);
+      if (armed && type === "keydown" && options === true) {
+        armed = false;
+        const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        window.dispatchEvent(event);
+        result.prevented = event.defaultPrevented;
+        result.inside = Boolean(document.activeElement?.closest('[role="dialog"]'));
+      }
+    }) as typeof window.addEventListener;
+  });
   await pageChatBar.click();
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
+  const preTabFocus = await page.evaluate(() => ({
+    inside: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')),
+    close: document.activeElement?.getAttribute("aria-label") === "close page chat",
+  }));
+  if (!preTabFocus.inside || !preTabFocus.close)
+    throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify(preTabFocus)}`);
+  const backdropTabIndex = await page.locator(".page-chat-backdrop").evaluate((element) => (element as HTMLElement).tabIndex);
+  if (backdropTabIndex >= 0) throw new Error(`page chat backdrop is in sequential focus order: tabIndex=${backdropTabIndex}`);
+  await page.keyboard.press("Tab");
+  if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement)))
+    throw new Error("390px page chat real Tab escaped the modal sheet");
+  if (await page.locator(".page-chat-backdrop").evaluate((element) => element === document.activeElement))
+    throw new Error("390px page chat real Tab focused the backdrop");
+  const firstFrameTabPrevented = await page.evaluate(() => {
+    const state = (window as typeof window & { __pageChatFirstFrame?: { result: { prevented: boolean; inside: boolean }; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame;
+    if (!state) return false;
+    window.addEventListener = state.originalAdd;
+    delete (window as typeof window & { __pageChatFirstFrame?: unknown }).__pageChatFirstFrame;
+    return state.result.inside;
+  });
+  if (!firstFrameTabPrevented) throw new Error("390px page chat first-frame Tab was not trapped inside the modal sheet");
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
+  await page.keyboard.press("ControlOrMeta+Comma");
+  const nativeSettings = page.getByRole("dialog", { name: "settings" });
+  await gateWait.playwright(nativeSettings, "waitFor", { state: "visible" });
+  const nativeInitial = nativeSettings.locator("button:not(:disabled):not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])").first();
+  await nativeInitial.focus();
+  await nativeInitial.evaluate((node) => { if (document.activeElement !== node) throw new Error("settings initial focus was not stable"); });
+  const nativeBeforeTabHandle = await page.evaluateHandle(() => document.activeElement);
+  const nativeBeforeTab = await page.evaluate(() => ({ name: document.activeElement?.getAttribute("aria-label"), id: document.activeElement?.id, outerHTML: document.activeElement?.outerHTML }));
+  await page.keyboard.press("Tab");
+  const nativeAfterTab = await page.evaluate(() => ({ name: document.activeElement?.getAttribute("aria-label"), id: document.activeElement?.id, outerHTML: document.activeElement?.outerHTML }));
+  if (!(await nativeSettings.evaluate((dialog) => dialog.contains(document.activeElement)))) throw new Error(`native settings Tab did not advance inside the page chat sheet: before=${JSON.stringify(nativeBeforeTab)} active=${JSON.stringify(nativeAfterTab)}`);
+  if (await nativeBeforeTabHandle.evaluate((node) => node === document.activeElement)) throw new Error(`native settings focus did not advance in the page chat sheet: before=${JSON.stringify(nativeBeforeTab)} active=${JSON.stringify(nativeAfterTab)}`);
+  const nativeAfterTabHandle = await page.evaluateHandle(() => document.activeElement);
+  await page.keyboard.press("Shift+Tab");
+  const nativeAfterShiftTab = await page.evaluate(() => ({ name: document.activeElement?.getAttribute("aria-label"), id: document.activeElement?.id, outerHTML: document.activeElement?.outerHTML }));
+  if (!await nativeSettings.evaluate((dialog) => dialog.contains(document.activeElement)) || await nativeAfterTabHandle.evaluate((node) => node === document.activeElement)) throw new Error(`native settings reverse Tab did not advance inside the page chat sheet: before=${JSON.stringify(nativeBeforeTab)} afterTab=${JSON.stringify(nativeAfterTab)} active=${JSON.stringify(nativeAfterShiftTab)}`);
+  await page.keyboard.press("Escape");
+  await gateWait.playwright(nativeSettings, "waitFor", { state: "hidden" });
+  const pageChatLast = page.locator(".page-chat-surface button:not(:disabled), .page-chat-surface a[href], .page-chat-surface input:not(:disabled), .page-chat-surface textarea:not(:disabled), .page-chat-surface [tabindex]:not([tabindex='-1'])").last();
+  await pageChatLast.focus();
+  await page.keyboard.press("Tab");
+  if (!(await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement)))) throw new Error("page chat focus trap did not resume after native settings closed");
   for (let index = 0; index < 8; index += 1) {
     await page.keyboard.press("Tab");
     if (!(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))))
       throw new Error("390px page chat tab focus escaped the modal sheet");
   }
+  await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations().map((animation) => animation.finished)));
   const backgroundControl = page.locator(".record-form-actions button").first();
   const backgroundControlBox = await backgroundControl.boundingBox();
   if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
+  // wait for the sheet's own transition, not an arbitrary delay: a click during the
+  // transition can use a stale box and miss the native dialog backdrop.
+  await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+  const outsideClick = await pageChatDialog.evaluate((dialog, box) => {
+    const rect = dialog.getBoundingClientRect();
+    const surface = document.querySelector<HTMLElement>(".page-chat-surface")?.getBoundingClientRect();
+    const point = { x: box.x + box.width / 2, y: (surface?.top ?? 0) - 1 };
+    const hit = document.elementFromPoint(point.x, point.y);
+    const animations = dialog.getAnimations({ subtree: true }).map((animation) => ({ playState: animation.playState, currentTime: animation.currentTime }));
+    return {
+      error: null,
+      point,
+      hit: hit ? { tag: hit.tagName, id: hit.id, className: hit.className, backdrop: hit.matches(".page-chat-backdrop"), backgroundControl: Boolean(hit.closest(".record-form-actions button")) } : null,
+      dialog: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, modal: dialog.matches(":modal") },
+      surface: surface ? { left: surface.left, top: surface.top, right: surface.right, bottom: surface.bottom } : null,
+      animations,
+    };
+  }, backgroundControlBox);
+  if (outsideClick.error || !outsideClick.point || !outsideClick.surface || !outsideClick.hit?.backdrop || outsideClick.animations.some(({ playState }) => playState !== "finished"))
+    throw new Error(`page chat backdrop was not ready for outside click: ${JSON.stringify(outsideClick)}`);
+  const { point } = outsideClick;
+  if (point.x > outsideClick.surface.left && point.x < outsideClick.surface.right && point.y > outsideClick.surface.top && point.y < outsideClick.surface.bottom)
+    throw new Error(`page chat backdrop click point landed inside the sheet: ${JSON.stringify(outsideClick)}`);
   const pathBeforeOutsideClick = new URL(page.url()).pathname;
-  await page.mouse.click(backgroundControlBox.x + backgroundControlBox.width / 2, backgroundControlBox.y + backgroundControlBox.height / 2);
+  await page.evaluate(() => {
+    const backdrop = document.querySelector<HTMLButtonElement>(".page-chat-backdrop");
+    if (!backdrop) throw new Error("page chat backdrop disappeared before click");
+    (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick = { target: "", backdrop: false };
+    backdrop.addEventListener("click", (event) => {
+      const state = (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick;
+      if (!state) return;
+      state.target = (event.target as Element).tagName;
+      state.backdrop = event.target === backdrop;
+    }, { once: true });
+  });
+  await page.mouse.click(point.x, point.y);
+  const backdropClick = await page.evaluate(() => {
+    const state = (window as typeof window & { __pageChatBackdropClick?: { target: string; backdrop: boolean } }).__pageChatBackdropClick;
+    delete (window as typeof window & { __pageChatBackdropClick?: unknown }).__pageChatBackdropClick;
+    return state;
+  });
+  if (!backdropClick?.backdrop)
+    throw new Error(`page chat outside click did not target the backdrop: ${JSON.stringify({ outsideClick, backdropClick })}`);
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
   if (new URL(page.url()).pathname !== pathBeforeOutsideClick)
     throw new Error("background chat control activated through open page chat sheet");

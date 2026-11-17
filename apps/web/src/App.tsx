@@ -13,7 +13,7 @@ import { HistoryDialog } from "./page/HistoryDialog";
 import { useRecordWrites } from "./page/RecordForm";
 import { PageView } from "./page/PageView";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
+import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
@@ -71,7 +71,7 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, pro
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
   );
-  useLayoutEffect(() => { if (focus && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
+  useLayoutEffect(() => { if (focus && !document.querySelector('[role="dialog"][aria-modal="true"]') && !document.activeElement?.closest("[data-chat-id], [data-page-id]")) slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]')?.focus({ preventScroll: true }); }, [focus]);
   const adapterProps = {
     ...props,
     defaultValue: draft,
@@ -234,6 +234,7 @@ export function App() {
   useEffect(() => {
     setMobileChatOpen(false);
   }, [ready?.sessionId, activePage?.id]);
+  useModalFocus(pageChatSheetOpen && hasBlocks, pageChatSurface, pageChatClose);
   useEffect(() => {
     if (!pageChatSheetOpen || !hasBlocks) {
       if (mobileChatWasOpen.current) pageChatButton.current?.focus();
@@ -241,30 +242,13 @@ export function App() {
       return;
     }
     mobileChatWasOpen.current = true;
-    pageChatClose.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       setMobileChatOpen(false);
     };
-    const trapTab = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const focusable = [...pageChatSurface.current?.querySelectorAll<HTMLElement>('button, textarea, input, select, a[href], [tabindex]:not([tabindex="-1"])') ?? []]
-        .filter((element) => !element.hasAttribute("disabled") && element.getClientRects().length > 0);
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      }
-    };
     window.addEventListener("keydown", closeOnEscape);
-    pageChatSurface.current?.addEventListener("keydown", trapTab);
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape);
-      pageChatSurface.current?.removeEventListener("keydown", trapTab);
-    };
+    return () => window.removeEventListener("keydown", closeOnEscape);
   }, [pageChatSheetOpen, hasBlocks]);
   // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
   useLayoutEffect(() => {
@@ -334,7 +318,7 @@ export function App() {
         {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} />}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetOpen ? " mobile-chat-open" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{pageChatSheetOpen ? "⌃" : "⌃"}</span></button>}
-        {hasBlocks && pageChatSheetOpen && <button className="page-chat-backdrop" type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)} />}
+        {hasBlocks && pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
         <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={hasBlocks && pageChatSheetOpen ? "dialog" : undefined} aria-modal={hasBlocks && pageChatSheetOpen ? "true" : undefined} aria-labelledby={hasBlocks && pageChatSheetOpen ? "page-chat-title" : undefined} aria-hidden={mobilePageChat && hasBlocks && !pageChatSheetOpen ? "true" : undefined}>
         {hasBlocks && <div className="page-chat-sheet-head"><strong id="page-chat-title">page chat</strong><button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button></div>}
         <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
