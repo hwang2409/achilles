@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import "./EnumListbox.css";
 
 type EnumListboxProps = {
   value: string;
@@ -76,7 +77,7 @@ export function EnumListbox({
 
   const typeAhead = (character: string) => {
     const nextQuery = `${query}${character}`.toLowerCase();
-    const match = options.findIndex((option) => option.toLowerCase().startsWith(nextQuery));
+    const match = options.findIndex((option) => display(option).toLowerCase().startsWith(nextQuery));
     setQuery(nextQuery);
     if (match >= 0) setActiveIndex(match);
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -121,6 +122,10 @@ export function EnumListbox({
     }
   };
 
+  const display = (option: string) => {
+    if (!option) return "—";
+    try { return String(JSON.parse(option)); } catch { return option; }
+  };
   const activeOption = options[activeIndex];
   const labelId = label ? `${baseId}-label` : undefined;
   return (
@@ -142,7 +147,7 @@ export function EnumListbox({
         onKeyDown={onButtonKeyDown}
       >
         <span className="enum-listbox-value">
-          {open && query ? <><span className="enum-listbox-query-label">jump</span> <span className="enum-listbox-query">{query}</span></> : (value || "—")}
+          {open && query ? <><span className="enum-listbox-query-label">jump</span> <span className="enum-listbox-query">{query}</span></> : display(value)}
         </span>
         <span aria-hidden="true">⌄</span>
       </button>
@@ -159,7 +164,7 @@ export function EnumListbox({
           onKeyDown={onListboxKeyDown}
         >
           {options.map((option, index) => {
-            const matched = query && index === activeIndex && option.toLowerCase().startsWith(query);
+            const matched = query && index === activeIndex && display(option).toLowerCase().startsWith(query);
             return (
               <div
                 key={option}
@@ -170,7 +175,7 @@ export function EnumListbox({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => choose(index)}
               >
-                <span>{matched ? <><u>{option.slice(0, query.length)}</u>{option.slice(query.length)}</> : option}</span>
+                <span>{matched ? <><u>{display(option).slice(0, query.length)}</u>{display(option).slice(query.length)}</> : display(option)}</span>
                 {option === value && <span aria-hidden="true">✓</span>}
               </div>
             );

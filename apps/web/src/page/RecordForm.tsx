@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { fieldError, formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
+import { EnumListbox } from "./EnumListbox";
 
 export type { PageTool };
 type FieldError = { path: string; expected: string };
@@ -188,12 +189,12 @@ function Field({ id, field, value, error, onChange }: { id: string; field: FormF
   const described = [field.description ? `${id}-help` : "", error ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined;
   const common = { id, name: field.name, "aria-required": field.required, "aria-invalid": error ? true : undefined, "aria-describedby": described };
   const control = field.kind === "boolean" ? <input {...common} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
-    : field.kind === "enum" ? <select {...common} value={String(value)} onChange={(event) => onChange(event.target.value)}><option value="">{field.required ? "choose…" : "none"}</option>{field.options.map((option, index) => <option key={index} value={JSON.stringify(option)}>{String(option)}</option>)}</select>
+    : field.kind === "enum" ? <EnumListbox value={String(value)} options={["", ...field.options.map((option) => JSON.stringify(option))]} onChange={onChange} label={`${field.name}${field.required ? " *" : ""}`} aria-describedby={described} invalid={Boolean(error)} />
     : field.kind === "string" ? <input {...common} type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} />
     // a phone keypad without a minus key only when the schema rules out negatives
     : <input {...common} type="number" step={field.multipleOf ?? (field.kind === "integer" ? 1 : "any")} min={field.minimum} inputMode={field.minimum !== undefined && field.minimum >= 0 ? (field.kind === "integer" ? "numeric" : "decimal") : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
   return <div className={`record-field${field.kind === "boolean" ? " record-field-check" : ""}`}>
-    <label htmlFor={id}>{field.name}{field.required && <span className="required-mark" aria-hidden="true"> *</span>}</label>
+    {field.kind !== "enum" && <label htmlFor={id}>{field.name}{field.required && <span className="required-mark" aria-hidden="true"> *</span>}</label>}
     {control}
     {field.description && <small id={`${id}-help`}>{field.description}</small>}
     {error && <p id={`${id}-error`} className="field-error">{error}</p>}

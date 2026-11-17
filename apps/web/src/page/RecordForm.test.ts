@@ -42,24 +42,26 @@ function serve(tool: { version: number; input_schema: unknown }) {
 
 const block = (refreshKey: string) => createElement(FormBlock, { title: "add book", toolName: "add_book", pageId: "books", credential: "c", refreshKey });
 const done = JSON.stringify("done");
+const statusButton = () => view().getByRole("button", { name: /status/ });
+const chooseStatus = (value: string) => { fireEvent.click(statusButton()); fireEvent.click(view().getByRole("option", { name: value })); };
 
 test("a chat turn end (refreshKey change) keeps typed values and the same inputs", async () => {
   serve({ version: 1, input_schema: schema() });
   mounted = render(block("0:0"));
-  const status = await view().findByLabelText(/status/) as HTMLSelectElement;
-  fireEvent.change(status, { target: { value: done } });
+  const status = await view().findByRole("button", { name: /status/ });
+  chooseStatus("done");
   // The tool gains a field during the turn; the form takes the new schema in place.
   serve({ version: 2, input_schema: schema({ rating: { type: "number" } }) });
   await act(async () => { mounted?.rerender(block("1:0")); });
   await view().findByLabelText(/rating/);
-  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
-  expect(view().getByLabelText(/status/)).toBe(status);
+  expect(statusButton().textContent).toContain("done");
+  expect(statusButton()).toBe(status);
 });
 
 test("reload tool after a 409 keeps typed values and focuses the first field", async () => {
   serve({ version: 1, input_schema: schema() });
   mounted = render(block("0:0"));
-  fireEvent.change(await view().findByLabelText(/status/), { target: { value: done } });
+  chooseStatus("done");
   const calls = serve({ version: 2, input_schema: schema() });
   fireEvent.click(view().getByRole("button", { name: "add" }));
   const reload = await view().findByRole("button", { name: "reload tool" });
@@ -67,8 +69,8 @@ test("reload tool after a 409 keeps typed values and focuses the first field", a
   fireEvent.click(reload);
   await waitFor(() => expect(calls.filter((call) => call.endsWith("/tools")).length).toBe(1));
   await act(async () => { await Promise.resolve(); });
-  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
-  expect(document.activeElement).toBe(view().getByLabelText(/status/));
+  expect(statusButton().textContent).toContain("done");
+  expect(document.activeElement).toBe(statusButton());
   // The retry now carries the new version and succeeds.
   fireEvent.click(view().getByRole("button", { name: "add" }));
   expect(await view().findByText("added")).toBeTruthy();
@@ -98,12 +100,12 @@ test("a selected row fills the update form and its record_id and revision are se
   mounted = render(editBlock());
   await view().findByText("select a row in the table to edit it");
   act(() => selectRow("books", { collection: "books", record: { ...stored } }));
-  const status = await view().findByLabelText(/status/) as HTMLSelectElement;
-  expect(status.value).toBe(JSON.stringify("to read"));
+  const status = await view().findByRole("button", { name: /status/ });
+  expect(status.textContent).toContain("to read");
   expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune");
   expect(view().queryByLabelText(/record_id/)).toBeNull();
   expect(view().queryByLabelText(/revision/)).toBeNull();
-  fireEvent.change(status, { target: { value: done } });
+  chooseStatus("done");
   fireEvent.click(view().getByRole("button", { name: "save" }));
   expect(await view().findByText("saved")).toBeTruthy();
   expect(sent[0]).toEqual({ record_id: "b1", revision: 3, status: "done", title: "Dune" });
@@ -120,15 +122,15 @@ test("a 409 for a row changed from chat keeps typed values; reload row keeps the
   mounted = render(editBlock());
   await view().findByText("select a row in the table to edit it");
   act(() => selectRow("books", { collection: "books", record: { ...stored } }));
-  fireEvent.change(await view().findByLabelText(/status/), { target: { value: done } });
+  chooseStatus("done");
   // chat renames the book first
   Object.assign(stored, { title: "Dune Messiah", revision: 4 });
   fireEvent.click(view().getByRole("button", { name: "save" }));
   expect(await view().findByText(/changed since you selected it/)).toBeTruthy();
-  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
+  expect(statusButton().textContent).toContain("done");
   fireEvent.click(view().getByRole("button", { name: "reload row" }));
   await waitFor(() => expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune Messiah"));
-  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
+  expect(statusButton().textContent).toContain("done");
   fireEvent.click(view().getByRole("button", { name: "save" }));
   expect(await view().findByText("saved")).toBeTruthy();
   expect(sent.at(-1)).toEqual({ record_id: "b1", revision: 4, status: "done", title: "Dune Messiah" });
@@ -152,7 +154,7 @@ test("an agent write to the selected record updates a clean form at once, and a 
   await act(async () => { mounted?.rerender(editPage("0:1")); });
   await waitFor(() => expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune Messiah"));
   expect(view().queryByRole("button", { name: "discard" })).toBeNull();
-  fireEvent.change(view().getByLabelText(/status/), { target: { value: done } });
+  chooseStatus("done");
   fireEvent.click(view().getByRole("button", { name: "save" }));
   expect(await view().findByText("saved")).toBeTruthy();
   expect(sent.at(-1)).toEqual({ record_id: "b1", revision: 4, status: "done", title: "Dune Messiah" });
@@ -163,13 +165,13 @@ test("an agent write while the form has edits keeps them, says so, and discard l
   serveUpdate(stored);
   mounted = render(editPage("0:0"));
   await pickRow("Dune");
-  fireEvent.change(await view().findByLabelText(/status/), { target: { value: done } });
+  chooseStatus("done");
   Object.assign(stored, { status: "to read", title: "Dune Messiah", revision: 4 });
   await act(async () => { mounted?.rerender(editPage("0:1")); });
   expect(await view().findByText("this record changed (title); your edits are kept — review and save, or discard")).toBeTruthy();
-  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(done);
+  expect(statusButton().textContent).toContain("done");
   fireEvent.click(view().getByRole("button", { name: "discard" }));
-  expect((view().getByLabelText(/status/) as HTMLSelectElement).value).toBe(JSON.stringify("to read"));
+  expect(statusButton().textContent).toContain("to read");
   expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune Messiah");
   expect(view().queryByText(/this record changed/)).toBeNull();
 });
