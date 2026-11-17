@@ -37,7 +37,7 @@ class BarrierBackend(FakeBackend):
                 block.text
                 for block in latest_user.content
                 if isinstance(block, TextContent)
-                and block.text in {"open created page", "start allow-mode chat"}
+                and block.text in {"open created page", "start allow-mode chat", "sb7 page stream"}
             ),
             None,
         )
@@ -53,6 +53,17 @@ class BarrierBackend(FakeBackend):
                 [ScriptedTurn(content=[TextContent("allow page ready")])],
                 request_serializer=request_serializer,
             ),
+            "sb7 page stream": FakeBackend(
+                [
+                    ScriptedTurn(
+                        content=[
+                            TextContent(f"sb7 stream line {index:03d}\\n") for index in range(120)
+                        ],
+                        delay=0.03,
+                    )
+                ],
+                request_serializer=request_serializer,
+            ),
         }
         self.control = control
 
@@ -62,6 +73,15 @@ class BarrierBackend(FakeBackend):
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
+            jump_chunk = (
+                event.type.name == "MESSAGE_UPDATE"
+                and isinstance(event.content, TextContent)
+                and event.content.text.startswith("text-only line 080")
+            )
+            if jump_chunk:
+                yield event
+                await hold(self.control, "jump_stream_barrier")
+                continue
             if event.type.name == "MESSAGE_END":
                 document = read_control(self.control) or {}
                 returned = document.get("returned_tool_calls", [])
@@ -345,6 +365,12 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 {"type": "text", "text": "layout updated without reload"},
                                 {
                                     "type": "metric",
+                                    "label": "all books",
+                                    "collection": "books",
+                                    "count": True,
+                                },
+                                {
+                                    "type": "metric",
                                     "label": (
                                         "legacy total with an unusually long descriptive label"
                                     ),
@@ -365,6 +391,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                     "fields": ["title"],
                                     "filter": {"field": "status", "equals": "reading"},
                                 },
+                                {"type": "form", "title": "edit book", "tool": "update_book"},
                             ]
                         },
                         "expected_version": 1,

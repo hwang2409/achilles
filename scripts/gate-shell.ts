@@ -68,7 +68,31 @@ export async function gateShell(
   const sidebar = page.locator("aside.sidebar");
   await waitFor(async () => (await sidebar.getAttribute("aria-hidden")) === "true", "closed drawer accessibility state");
   const menu = page.getByRole("button", { name: "open menu" });
+  await page.evaluate(() => {
+    const originalAdd = window.addEventListener.bind(window);
+    const result = { prevented: false, inside: false };
+    let armed = true;
+    (window as typeof window & { __drawerFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__drawerFirstFrame = { result, originalAdd: window.addEventListener };
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      originalAdd(type, listener, options);
+      if (armed && type === "keydown" && options === true) {
+        armed = false;
+        const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+        window.dispatchEvent(event);
+        result.prevented = event.defaultPrevented;
+        result.inside = Boolean(document.activeElement?.closest("aside.sidebar"));
+      }
+    }) as typeof window.addEventListener;
+  });
   await menu.click();
+  const drawerFirstFrameTab = await page.evaluate(() => {
+    const state = (window as typeof window & { __drawerFirstFrame?: { result: { prevented: boolean; inside: boolean }; originalAdd: typeof window.addEventListener } }).__drawerFirstFrame;
+    if (!state) return { prevented: false, inside: false };
+    window.addEventListener = state.originalAdd;
+    delete (window as typeof window & { __drawerFirstFrame?: unknown }).__drawerFirstFrame;
+    return state.result;
+  });
+  if (!drawerFirstFrameTab.inside) throw new Error(`390px drawer first-frame Shift+Tab was not trapped inside the drawer: ${JSON.stringify(drawerFirstFrameTab)}`);
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   const main = page.locator("main.main-pane");
   if (!(await main.evaluate((element) => element.inert)) || await main.getAttribute("aria-hidden") !== "true")

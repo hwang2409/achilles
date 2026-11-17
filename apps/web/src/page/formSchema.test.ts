@@ -92,7 +92,7 @@ test.each(keepRows)("keepValues: %s", (_name, values, expected) => {
 
 const cents: FormField = { name: "amount", kind: "number", required: true, minimum: 0, multipleOf: 0.01 };
 const serverErrorRows: [string, FormField, string, string][] = [
-  ["multipleOf names the step", cents, "multipleOf", "use steps of 0.01"],
+  ["multipleOf names the step", cents, "multipleOf", "use steps of 0.01, e.g. 12.35"],
   ["minimum names the limit", cents, "minimum", "must be at least 0"],
   ["a keyword the schema does not state stays as the server said it", { name: "amount", kind: "number", required: true }, "multipleOf", "multipleOf"],
   ["other server words pass through", cents, "number", "number"],

@@ -14,7 +14,7 @@ type Discovery = { pid: number; port: number; origins: string[] };
 export type ServeDecision = { kind: "reuse"; document: Discovery; origin: string } | { kind: "start" } | { kind: "origin-missing"; command: string };
 export type ProcessIdentity = { pid: number; started: string; command: string };
 type AchillesState = ProcessIdentity & { stamp: string };
-type ZetaServeState = ProcessIdentity & { executable: string };
+type ZetaServeState = ProcessIdentity & { executable: string; pin: string };
 export type AchillesDecision = { kind: "start" } | { kind: "restart"; saved: AchillesState } | { kind: "reuse" } | { kind: "foreign"; pid: number };
 type McpConfig = { transport?: string; url?: string };
 export type McpDecision = { kind: "add" } | { kind: "unchanged" } | { kind: "different"; command: string };
@@ -172,7 +172,7 @@ async function attachServe(discovery: string, requestedOrigin: string): Promise<
   if (decision.kind === "origin-missing") throw new Error(`attached zeta serve does not allow ${requestedOrigin}; restart it with: ${decision.command}`);
   throw new Error(`ACHILLES_ZETA_DISCOVERY does not name a live zeta serve: ${discovery}`);
 }
-async function chooseOwnedServe(discovery: string, requestedOrigin: string, executable: string): Promise<{ origin: string; discovery: string }> {
+async function chooseOwnedServe(discovery: string, requestedOrigin: string, executable: string, pin: string): Promise<{ origin: string; discovery: string }> {
   let saved: ZetaServeState | null = null;
   try { saved = JSON.parse(await readFile(resolve(cache, "zeta-serve.json"), "utf8")); } catch {}
   const savedIdentity = saved ? await processIdentity(saved.pid) : null;
@@ -180,7 +180,7 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string, exec
   const discoveryIdentity = document?.pid === saved?.pid ? savedIdentity : document?.pid ? await processIdentity(document.pid) : null;
   const decision = serveDecision(document, requestedOrigin, discoveryIdentity?.command ?? null);
   if (saved && ownedProcessMatches(saved, savedIdentity)) {
-    if (saved.executable === executable && document?.pid === saved.pid && decision.kind === "reuse") {
+    if (saved.executable === executable && saved.pin === pin && document?.pid === saved.pid && decision.kind === "reuse") {
       console.log(`reusing achilles zeta serve on port ${decision.document.port}`);
       return { origin: decision.origin, discovery };
     }
@@ -195,15 +195,18 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string, exec
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
   catch (error) { child.kill(); await child.exited; throw new Error(`${error instanceof Error ? error.message : error}. fix the error and retry:\n${await tail(logPath)}`); }
-  if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
+  if (outcome === "exited") {
+    const logTail = await tail(logPath);
+    throw new Error(zetaStoredFormatMessage(logTail, home, process.env.ACHILLES_USE_PATH_ZETA === "1", (await readFile(resolve(root, "zeta.rev"), "utf8")).trim()) ?? `zeta serve exited during startup. fix the error and retry:\n${logTail}`);
+  }
   const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
-  await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify({ ...identityAfter, executable })); child.unref();
+  await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify({ ...identityAfter, executable, pin })); child.unref();
   console.log(`started achilles zeta serve on port ${ws}`); return { origin: alternate, discovery };
 }
-async function chooseServe(requestedOrigin: string, executable: string): Promise<{ origin: string; discovery: string }> {
+async function chooseServe(requestedOrigin: string, executable: string, pin: string): Promise<{ origin: string; discovery: string }> {
   const attached = process.env.ACHILLES_ZETA_DISCOVERY;
   if (attached) return await attachServe(resolve(attached), requestedOrigin);
-  return await chooseOwnedServe(resolve(achillesHome, "run/serve.json"), requestedOrigin, executable);
+  return await chooseOwnedServe(resolve(achillesHome, "run/serve.json"), requestedOrigin, executable, pin);
 }
 async function portPid(): Promise<number | null> {
   const result = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
@@ -269,6 +272,15 @@ async function zetaCheckout(): Promise<string | null> {
 export function zetaRemediationMessage(pin: string): string {
   return `your zeta is older than zeta.rev ${pin}; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one`;
 }
+export function zetaStoredFormatMessage(log: string, homePath: string, usePathZeta: boolean, pin: string): string | null {
+  const match = log.match(/stored format (\d+) is newer than writer capability (\d+)/);
+  if (!match) return null;
+  const [, epoch, capability] = match;
+  const fix = usePathZeta
+    ? zetaRemediationMessage(pin)
+    : `achilles' zeta pin (zeta.rev ${pin}) is older than this home (stored format ${epoch}); update achilles (git pull) or move zeta.rev to a zeta main commit with WRITER_EPOCH >= ${epoch}`;
+  return `zeta serve cannot start for home ${homePath}: stored format ${epoch} is newer than writer capability ${capability}. ${fix}`;
+}
 export type ZetaRevision = { kind: "ok" } | { kind: "behind"; message: string } | { kind: "unknown"; reason: string };
 export function zetaRevisionDecision(pin: string, checkout: string | null, headKnown: boolean, pinIsAncestor: boolean): ZetaRevision {
   if (!checkout) return { kind: "unknown", reason: "zeta is not installed from a git checkout" };
@@ -333,7 +345,7 @@ async function dev() {
     let old = ""; try { old = await readFile(webStamp, "utf8"); } catch {}
     if (old !== hash) { run(["bun", "run", "build"], resolve(root, "apps/web")); await writeFile(webStamp, hash); } else console.log("web build unchanged");
   }
-  const requestedOrigin = `http://127.0.0.1:${port}`; const selected = await chooseServe(requestedOrigin, zeta);
+  const requestedOrigin = `http://127.0.0.1:${port}`; const zetaPin = process.env.ACHILLES_ZETA_DISCOVERY ? "" : (await readFile(resolve(root, "zeta.rev"), "utf8")).trim(); const selected = await chooseServe(requestedOrigin, zeta, zetaPin);
   const achillesStamp = await digest([webStamp, ...(await filesUnder(resolve(root, "src/achilles"))), resolve(root, "pyproject.toml"), resolve(root, "uv.lock")]);
   process.env.ACHILLES_ZETA_DISCOVERY = selected.discovery;
   await ensureMcp(mcpUrl(port), zeta); await startAchilles(selected.origin, achillesStamp);

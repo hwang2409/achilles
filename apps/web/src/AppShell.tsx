@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { CommandPalette, Highlight, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
-import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
+import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, useModalFocus } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
 
@@ -200,14 +200,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     document.addEventListener("keydown", escape, true);
     return () => document.removeEventListener("keydown", escape, true);
   }, [drawer, query, settingsOpen, shortcutsOpen, paletteOpen]);
-  useEffect(() => {
-    if (!narrow || !drawer) return;
-    const key = (event: KeyboardEvent) => {
-      if (sidebar.current?.contains(document.activeElement)) wrapTab(event, sidebar.current);
-    };
-    document.addEventListener("keydown", key, true);
-    return () => document.removeEventListener("keydown", key, true);
-  }, [drawer, narrow]);
+  useModalFocus(narrow && drawer, sidebar);
   useEffect(() => {
     // capture on window runs before the composer (CodeMirror vim too) sees app shortcuts.
     const key = (event: KeyboardEvent) => {
@@ -354,7 +347,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
     </aside>
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
-      <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => { requestFocus(() => firstFocusable(sidebar.current)); setDrawer(true); }}>☰</button>
+      <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
       {children}
     </main>
     <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} />

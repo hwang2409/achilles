@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { RecordMark } from "./page/RecordMark";
 
 export type DetailFilter = { field: string; equals: string | number | boolean | null };
 
@@ -10,25 +11,32 @@ type DetailRecordProps = {
   pageId: string;
   credential: string;
   refreshKey: string;
+  selected?: Record<string, unknown>;
 };
 
 type DetailRecordViewProps = Pick<DetailRecordProps, "title" | "collection" | "fields" | "filter"> & {
   records: Record<string, unknown>[] | null;
   total: number;
   error: string | null;
+  selected?: Record<string, unknown>;
 };
 
-export function DetailRecord({ title, collection, fields, filter, pageId, credential, refreshKey }: DetailRecordProps) {
+export function DetailRecord({ title, collection, fields, filter, pageId, credential, refreshKey, selected }: DetailRecordProps) {
   const [records, setRecords] = useState<Record<string, unknown>[] | null>(null);
+  const [refreshing, setRefreshing] = useState(true);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const queryKey = `${filter.field}:${JSON.stringify(filter.equals)}`;
+  const previousQuery = useRef(queryKey);
   useEffect(() => {
     let live = true;
     const request = ++requestSequence.current;
     const query = new URLSearchParams({ field: filter.field, equals: JSON.stringify(filter.equals), limit: "1" });
-    setRecords(null);
     setError(null);
+    if (previousQuery.current !== queryKey) setRecords(null);
+    previousQuery.current = queryKey;
+    setRefreshing(true);
     void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?${query}`, {
       headers: { Authorization: `Bearer ${credential}` },
       cache: "no-store",
@@ -42,21 +50,31 @@ export function DetailRecord({ title, collection, fields, filter, pageId, creden
       }
     }).catch((caught) => {
       if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught));
+    }).finally(() => {
+      if (live && request === requestSequence.current) setRefreshing(false);
     });
     return () => { live = false; };
-  }, [collection, credential, filter.equals, filter.field, pageId, refreshKey]);
-  return <DetailRecordView title={title} collection={collection} fields={fields} filter={filter} records={records} total={total} error={error} />;
+  }, [collection, credential, filter.equals, filter.field, pageId, refreshKey, queryKey]);
+  return <DetailRecordView title={title} collection={collection} fields={fields} filter={filter} records={records} total={total} error={error} refreshing={refreshing} selected={selected} />;
 }
 
-export function DetailRecordView({ title, collection, fields, filter, records, total, error }: DetailRecordViewProps) {
+export function DetailRecordView({ title, collection, fields, filter, records, total, error, refreshing, selected }: DetailRecordViewProps & { refreshing: boolean }) {
   const filterValue = formatValue(filter.equals) || "—";
+  const selectedMatches = selected !== undefined;
+  const shownRecords = selected ? [selected] : records;
+  const firstRecord = shownRecords?.[0];
+  const selectedTitle = selectedMatches ? String(selected.title ?? selected.name ?? selected.label ?? title) : title;
   return <section className="record-detail">
-    <h2>{title}</h2>
-    {error ? <p role="alert">{error}</p>
-      : records === null ? <p role="status">loading record…</p>
-      : records.length === 0 ? <p>no {collection} with {filter.field} = {filterValue} yet</p>
-      : <><dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{formatValue(records[0][field]) || "—"}</dd></div>)}</dl>{total > 1 && <p className="match-note">{total} records match</p>}</>}
+    <h2>{selectedMatches ? <>{selectedTitle} <small className="selected-note">selected</small></> : title}</h2>
+    <DetailRecordBody error={error} refreshing={refreshing} records={shownRecords} firstRecord={firstRecord} collection={collection} filter={filter} filterValue={filterValue} fields={fields} total={total} selectedMatches={selectedMatches} />
   </section>;
+}
+
+function DetailRecordBody({ error, refreshing, records, firstRecord, collection, filter, filterValue, fields, total, selectedMatches }: { error: string | null; refreshing: boolean; records: Record<string, unknown>[] | null; firstRecord?: Record<string, unknown>; collection: string; filter: DetailFilter; filterValue: string; fields: string[]; total: number; selectedMatches: boolean }) {
+  if (error) return <p role="alert">{error}</p>;
+  if (records === null) return <>{refreshing && <p role="status">loading record…</p>}</>;
+  if (!firstRecord) return <>{refreshing && <p role="status">loading record…</p>}<p>no {collection} with {filter.field} = {filterValue} yet</p></>;
+  return <>{refreshing && <p role="status">loading record…</p>}<dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(firstRecord[field] ?? "")} />{formatValue(firstRecord[field]) || "—"}</> : formatValue(firstRecord[field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="match-note">{total} records match</p>}</>;
 }
 
 function formatValue(value: unknown): string {
