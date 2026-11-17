@@ -220,16 +220,36 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const captureBlockState = async (state: string) => {
+  const captureBlockState = async (state: string, target: Locator) => {
     if (!screenshotDir) return;
     for (const width of [390, 1280, 1440, 1920]) {
       await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
       if (width === 390) {
         const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
-        if (await pageChatClose.count() && await pageChatClose.isVisible()) await pageChatClose.evaluate((button) => (button as HTMLButtonElement).click());
+        if (await pageChatClose.count() && await pageChatClose.isVisible()) await pageChatClose.click({ force: true });
         const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
-        if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.evaluate((button) => (button as HTMLButtonElement).click());
-        await waitFor(async () => (!(await pageChatClose.count()) || !(await pageChatClose.isVisible())) && (!(await drawerClose.count()) || !(await drawerClose.isVisible())), "mobile overlays closed");
+        if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
+        await waitFor(async () => {
+          const sidebar = await page.locator(".sidebar").evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { transform: style.transform, right: element.getBoundingClientRect().right };
+          });
+          const sheet = await page.locator(".page-chat-surface").evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { transform: style.transform, visibility: style.visibility };
+          });
+          return sidebar.right <= 0 && sidebar.transform !== "matrix(1, 0, 0, 1, 0, 0)" && sheet.visibility === "hidden" && sheet.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+        }, "mobile overlays settled");
+        await waitFor(async () => await target.evaluate((element) => {
+          element.scrollIntoView({ block: "center", inline: "nearest" });
+          const box = element.getBoundingClientRect();
+          if (![box.top, box.right, box.bottom, box.left].every(Number.isFinite)) return false;
+          if (box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth) return false;
+          const x = Math.max(box.left + 1, Math.min(box.right - 1, innerWidth / 2));
+          const y = Math.max(box.top + 1, Math.min(box.bottom - 1, innerHeight / 2));
+          const hit = document.elementFromPoint(x, y);
+          return Boolean(hit && (hit === element || element.contains(hit)));
+        }), `state ${state} target visible and unobscured`);
       }
       await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
     }
@@ -945,7 +965,7 @@ try {
   if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
   if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
   await desktopComposer.fill("");
-  await captureBlockState("a-empty");
+  await captureBlockState("a-empty", booksList.locator(".record-list-empty"));
 
   const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
   await page.route(recordsPattern, async (route) => {
@@ -960,7 +980,7 @@ try {
   await page.reload();
   await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
   if (await booksList.getByText("no books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
-  await captureBlockState("b-loading");
+  await captureBlockState("b-loading", booksList.locator('[role="status"]'));
   await page.unroute(recordsPattern);
 
   let failRecords = true;
@@ -974,7 +994,7 @@ try {
   });
   await page.reload();
   await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
-  await captureBlockState("c-failed");
+  await captureBlockState("c-failed", booksList.locator('[role="alert"]'));
   await booksList.getByRole("button", { name: "try again", exact: true }).click();
   await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   await page.unroute(recordsPattern);
@@ -1009,7 +1029,7 @@ try {
   if (!(await disabledTitle.isDisabled()) || (await disabledTitle.getAttribute("placeholder")) !== "—") throw new Error("no-selection update form did not disable its real field with a placeholder");
   if (!(await page.getByRole("button", { name: "add", exact: true }).last().isDisabled())) throw new Error("no-selection update form save was not disabled");
   if (screenshotDir) {
-    await captureBlockState("d-no-selection");
+    await captureBlockState("d-no-selection", page.locator('.record-form[data-operation="update"]'));
     const proofPath = join(screenshotDir, "run-proof.txt");
     await writeFile(proofPath, `${await Bun.file(proofPath).text()}D production path: visible create mode off control clicked; waited for create mode on; authenticated reading-page tools/list exposed update_layout; real update_layout published the complete inspected layout with the update form; waited for the real page reload and attached disabled form; visible create mode on control clicked and waited for create mode off before later journey assertions.\n`);
   }

@@ -164,7 +164,7 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const add = () => insertCapability?.focusFirst();
   return <section className="record-list" data-collection={collection} aria-busy={loading}>
     <RecordListHeader title={title} loading={loading} error={error} total={total} hasRecords={projection.loaded.length > 0} />
-    <RecordListState error={error} loading={loading} listName={listName} itemName={itemName} onRetry={retry} onAskChat={onAskChat} ask={ask} insertCapability={insertCapability} add={add} />
+    {(!error && !loading && projection.loaded.length === 0 || error || loading) && <RecordListState error={error} loading={loading} listName={listName} itemName={itemName} onRetry={retry} onAskChat={onAskChat} ask={ask} insertCapability={insertCapability} add={add} />}
     {!error && !loading && projection.loaded.length > 0 && <>
       <LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />
       {projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}

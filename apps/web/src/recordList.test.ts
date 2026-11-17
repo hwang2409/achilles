@@ -101,6 +101,9 @@ describe("RecordList", () => {
     await settle(calls[1], [{ record_id: "book-retry", title: "Recovered" }]);
     expect(text(result)).toContain("Recovered");
     expect(text(result)).not.toContain("could not load reading");
+    expect(text(result)).not.toContain("no reading yet");
+    expect(result.queryByRole("button", { name: "add a record", exact: true })).toBeNull();
+    expect(result.queryByRole("button", { name: "ask the chat", exact: true })).toBeNull();
   });
 
   test("resets rows when the layout page identity changes", async () => {
