@@ -9,9 +9,10 @@ GlobalRegistrator.register();
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 afterAll(() => { GlobalRegistrator.unregister(); globalThis.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment; });
 
-const { act, createElement } = await import("react");
+const { act, createElement, useState } = await import("react");
 const { fireEvent, render, waitFor } = await import("@testing-library/react");
 const { FormBlock, selectRow } = await import("./RecordForm");
+const { EnumListbox } = await import("./EnumListbox");
 
 let mounted: ReturnType<typeof render> | null = null;
 // Queries come from the render result: `screen` binds to the document that existed when testing-library was first imported, which another test file may do before any DOM.
@@ -174,4 +175,45 @@ test("an agent write while the form has edits keeps them, says so, and discard l
   expect(statusButton().textContent).toContain("to read");
   expect((view().getByLabelText(/title/) as HTMLInputElement).value).toBe("Dune Messiah");
   expect(view().queryByText(/this record changed/)).toBeNull();
+});
+
+// EnumListbox interaction stays in this suite because page-form tests own the process-global Happy DOM.
+const enumOptions = ["food", "fiction", "music", "travel"] as const;
+const enumHarness = () => {
+  const [value, setValue] = useState("music");
+  return createElement(EnumListbox, { value, options: enumOptions, onChange: setValue, label: "kind" });
+};
+const enumButton = () => view().getByRole("button", { name: "kind" });
+const enumMenu = () => view().getByRole("listbox");
+const openEnum = async (key = "Enter") => { fireEvent.keyDown(enumButton(), { key }); await act(async () => Promise.resolve()); };
+
+test("enum listbox opens, navigates, type-aheads, and selects through its public interface", async () => {
+  mounted = render(createElement(enumHarness));
+  await openEnum();
+  expect(enumButton().getAttribute("aria-expanded")).toBe("true");
+  fireEvent.keyDown(enumMenu(), { key: "ArrowDown" });
+  fireEvent.keyDown(enumMenu(), { key: "ArrowDown" });
+  fireEvent.keyDown(enumMenu(), { key: "Home" });
+  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-0");
+  fireEvent.keyDown(enumMenu(), { key: "End" });
+  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-3");
+  fireEvent.keyDown(enumMenu(), { key: "f" });
+  fireEvent.keyDown(enumMenu(), { key: "o" });
+  expect(enumButton().textContent).toContain("jump fo");
+  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-0");
+  expect(enumMenu().querySelector('[aria-selected="false"] u')?.textContent).toBe("fo");
+  fireEvent.keyDown(enumMenu(), { key: "Enter" });
+  expect(enumButton().textContent).toContain("food");
+  expect(enumButton().getAttribute("aria-expanded")).toBe("false");
+});
+
+test("enum listbox escape cancels and returns focus, while selected semantics stay explicit", async () => {
+  mounted = render(createElement(enumHarness));
+  await openEnum("ArrowUp");
+  expect(enumMenu().getAttribute("aria-activedescendant")).toContain("option-3");
+  fireEvent.keyDown(enumMenu(), { key: "Escape" });
+  expect(enumButton().textContent).toContain("music");
+  expect(document.activeElement).toBe(enumButton());
+  fireEvent.click(enumButton());
+  expect(view().getByRole("option", { name: "music" }).getAttribute("aria-selected")).toBe("true");
 });
