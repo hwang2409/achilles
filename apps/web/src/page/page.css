@@ -54,9 +54,9 @@
 .record-field:nth-child(odd):not(.record-field-check) { grid-column: 1; }
 .record-field:nth-child(even):not(.record-field-check) { grid-column: 2; }
 .record-field label { color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
-.record-field :is(input, select, textarea) { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--fulcrum-border); border-radius: 0; background: var(--fulcrum-surface); }
+.record-field :is(input, textarea) { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--fulcrum-border); border-radius: 0; background: var(--fulcrum-surface); }
 .record-field input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--fulcrum-accent); }
-.record-field:focus-within :is(input, select, textarea) { border-color: var(--fulcrum-accent); outline: 1px solid var(--fulcrum-accent); }
+.record-field:focus-within :is(input, textarea, .enum-listbox-button) { border-color: var(--fulcrum-accent); outline: 1px solid var(--fulcrum-accent); }
 .record-field-check { grid-column: 1 / -1 !important; display: flex; align-items: center; min-height: 40px; }
 .record-field-check label { order: 2; color: var(--fulcrum-fg); }
 .record-form-actions { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

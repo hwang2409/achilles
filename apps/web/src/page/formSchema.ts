@@ -79,7 +79,10 @@ export function formErrors(fields: FormField[], values: FormValues): Record<stri
 // multipleOf is checked only by the server, which does exact decimal math.
 export function fieldError(field: FormField, expected: string): string {
   if (field.kind === "enum" || field.kind === "boolean") return expected;
-  if (expected === "multipleOf" && field.multipleOf !== undefined) return `use steps of ${field.multipleOf}`;
+  if (expected === "multipleOf" && field.multipleOf !== undefined) {
+    const example = field.multipleOf === 0.01 ? ", e.g. 12.35" : "";
+    return `use steps of ${field.multipleOf}${example}`;
+  }
   if (expected === "minimum" && field.minimum !== undefined) return `must be at least ${field.minimum}`;
   if (expected === "maximum" && field.maximum !== undefined) return `must be at most ${field.maximum}`;
   return expected;

@@ -10,8 +10,8 @@ export const hasAppModifier = (event: Pick<KeyboardEvent, "metaKey" | "ctrlKey">
 };
 export const modKey = (key: string) => isMac ? `⌘${key}` : `ctrl+${key}`;
 
-export const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
-const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
+export const focusable = "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
+const nativelyFocusable = "button, a[href], input, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 // in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
 const tabbable = (element: HTMLElement) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true });
 export const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
