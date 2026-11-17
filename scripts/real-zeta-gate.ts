@@ -941,6 +941,21 @@ try {
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press("Tab");
+    if (!(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))))
+      throw new Error("390px page chat tab focus escaped the modal sheet");
+  }
+  const modeButton = page.getByRole("button", { name: "create mode off", exact: true });
+  const modeBeforeOutsideClick = await modeButton.getAttribute("aria-pressed");
+  const modeBox = await modeButton.boundingBox();
+  if (!modeBox) throw new Error("create mode button was not measurable behind page chat sheet");
+  await page.mouse.click(modeBox.x + modeBox.width / 2, modeBox.y + modeBox.height / 2);
+  await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
+  if (await modeButton.getAttribute("aria-pressed") !== modeBeforeOutsideClick)
+    throw new Error("background create-mode control activated through open page chat sheet");
+  await pageChatBar.click();
+  await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x760.png"), fullPage: true });
   await field.fill("sb7 page stream");
   await field.press("Enter");
@@ -1388,6 +1403,27 @@ try {
   });
   if (allowPage.result?.isError || (await fetch(`${origin}/api/pages/allow`)).status !== 200)
     throw new Error(`could not create allow-mode gate page: ${JSON.stringify(allowPage)}`);
+  await page.setViewportSize({ width: 390, height: 760 });
+  await page.goto(`${origin}/allow`);
+  await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20000 });
+  const blocklessChat = page.locator(".page-chat");
+  const blocklessComposer = page.locator('[data-part="composer"] textarea[aria-label="message"]');
+  const blocklessLayout = await page.evaluate(() => {
+    const chat = document.querySelector<HTMLElement>(".page-chat");
+    const transcript = chat?.querySelector<HTMLElement>(".transcript");
+    const composer = document.querySelector<HTMLElement>('[data-part="composer"]');
+    return {
+      chatClass: chat?.className ?? "",
+      transcriptHeight: transcript?.getBoundingClientRect().height ?? 0,
+      composerVisible: Boolean(composer && getComputedStyle(composer).display !== "none" && composer.getBoundingClientRect().height > 0),
+      barCount: document.querySelectorAll(".page-chat-bar").length,
+      dialogCount: document.querySelectorAll('.page-chat [role="dialog"]').length,
+    };
+  });
+  if (!blocklessChat.count() || blocklessLayout.chatClass.includes("page-chat-docked") || blocklessLayout.transcriptHeight <= 0 || !blocklessLayout.composerVisible || blocklessLayout.barCount !== 0 || blocklessLayout.dialogCount !== 0 || !(await blocklessComposer.isVisible()) || await blocklessComposer.isDisabled())
+    throw new Error(`390px blockless page chat gained sheet semantics or lost its layout: ${JSON.stringify(blocklessLayout)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "blockless-chat-390x760.png"), fullPage: true });
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   const off = await fetch(`${origin}/api/pages/home/create-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
