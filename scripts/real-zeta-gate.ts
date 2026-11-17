@@ -946,7 +946,7 @@ try {
     if (!(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))))
       throw new Error("390px page chat tab focus escaped the modal sheet");
   }
-  const backgroundControl = page.locator(".chat-actions button").first();
+  const backgroundControl = page.locator(".record-form-actions button").first();
   const backgroundControlBox = await backgroundControl.boundingBox();
   if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
   const pathBeforeOutsideClick = new URL(page.url()).pathname;
