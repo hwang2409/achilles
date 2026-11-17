@@ -996,6 +996,11 @@ try {
     throw new Error("raw list result was visible before opening raw");
   await toolRow.locator('[data-part="tool-raw"] summary').click();
   await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
+  const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
+  const nextTranscriptItem = toolRow.locator("xpath=following::div[@data-part='message'][1]");
+  const nextBox = await nextTranscriptItem.boundingBox();
+  if (!rawBox || !nextBox || nextBox.y < rawBox.y + rawBox.height)
+    throw new Error(`raw disclosure overlaps the next transcript item: raw=${JSON.stringify(rawBox)} next=${JSON.stringify(nextBox)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
