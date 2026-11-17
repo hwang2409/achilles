@@ -1191,18 +1191,69 @@ try {
   }
   if ((await toolRow.locator('[data-part="tool-raw"] pre').count()) !== 0 && (await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes('"Summary Book 1"'))
     throw new Error("raw list result was visible before opening raw");
+  if (process.env.ONLY_TOOL_SUMMARY) {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.reload();
+    await gateWait.playwright(page.locator(".page-chat-bar"), "waitFor", { timeout: 20000 });
+    await page.locator(".page-chat-bar").click();
+    await gateWait.playwright(page.getByRole("dialog", { name: "page chat" }), "waitFor", { timeout: 20000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
+  }
   await toolRow.locator('[data-part="tool-raw"] summary').click();
   await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
-  await waitFor(async () => {
+  const owningVirtualRow = toolRow.locator('xpath=ancestor::*[@data-virtual-id][1]');
+  const nextTranscriptRow = owningVirtualRow.locator('xpath=following-sibling::*[@data-virtual-id][1]');
+  const rawGeometry = async () => {
     const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
     const rowBox = await toolRow.boundingBox();
-    return Boolean(rawBox && rowBox && rowBox.y + rowBox.height >= rawBox.y + rawBox.height);
-  }, "raw disclosure remeasured inside tool row");
-  const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
-  const rowBox = await toolRow.boundingBox();
-  if (!rawBox || !rowBox || rowBox.y + rowBox.height < rawBox.y + rawBox.height)
-    throw new Error(`raw disclosure escaped the tool row flow: raw=${JSON.stringify(rawBox)} row=${JSON.stringify(rowBox)}`);
+    const nextBox = await nextTranscriptRow.boundingBox();
+    const nextText = (await nextTranscriptRow.innerText().catch(() => "")).slice(0, 160);
+    const virtualDebug = await page.locator('[data-part="virtual-debug"]').allTextContents();
+    const timeline = page.locator('[data-part="timeline"]');
+    const virtualDimensions = await timeline.evaluate((node) => ({
+      virtual: node.getAttribute("data-virtual"),
+      styleHeight: (node as HTMLElement).style.height,
+      clientHeight: (node as HTMLElement).clientHeight,
+      scrollHeight: (node as HTMLElement).scrollHeight,
+      childCount: node.children.length,
+      rows: [...node.children].map((row) => ({ id: row.getAttribute("data-virtual-id"), index: row.getAttribute("data-virtual-index"), top: (row as HTMLElement).offsetTop, height: (row as HTMLElement).offsetHeight })).slice(-8),
+    })).catch(() => null);
+    return { rawBox, rowBox, nextBox, nextId: await nextTranscriptRow.getAttribute("data-virtual-id"), nextText, virtualDebug, virtualDimensions };
+  };
+  try {
+    await waitFor(async () => {
+      const { rawBox, nextBox, nextText } = await rawGeometry();
+      return Boolean(rawBox && nextBox && nextText.includes("layout updated") && nextBox.y >= rawBox.y + rawBox.height);
+    }, "raw disclosure remeasured before next transcript row");
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(await rawGeometry())}`);
+  }
+  const geometry = await rawGeometry();
+  const { rawBox, rowBox, nextBox } = geometry;
+  if (!rawBox || !rowBox || !nextBox || !geometry.nextText.includes("layout updated") || nextBox.y < rawBox.y + rawBox.height)
+    throw new Error(`raw disclosure overlaps next transcript row: ${JSON.stringify(geometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
+  if (process.env.ONLY_TOOL_SUMMARY) {
+    const rawSummary = toolRow.locator('[data-part="tool-raw"] summary');
+    await rawSummary.click();
+    await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre'), "waitFor", { state: "detached", timeout: 20000 });
+    const closedGeometry = await owningVirtualRow.evaluate((row) => ({ minHeight: (row as HTMLElement).style.minHeight, height: row.getBoundingClientRect().height }));
+    const closedNext = await nextTranscriptRow.boundingBox();
+    if (closedGeometry.minHeight || !closedNext) throw new Error(`raw close left owned virtual height: ${JSON.stringify({ closedGeometry, closedNext })}`);
+    await rawSummary.click();
+    await waitFor(async () => {
+      await rawGeometry();
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      const settled = await rawGeometry();
+      return Boolean(settled.rawBox && settled.nextBox && settled.nextText.includes("layout updated") && settled.nextBox.y >= settled.rawBox.y + settled.rawBox.height);
+    }, "raw disclosure reopened after cleanup");
+    const reopened = await rawGeometry();
+    if (!reopened.rawBox || !reopened.nextBox || reopened.nextBox.y < reopened.rawBox.y + reopened.rawBox.height)
+      throw new Error(`raw disclosure failed after reopen: ${JSON.stringify(reopened)}`);
+    console.log(`isolated raw close cleanup passed: ${JSON.stringify({ closedGeometry, closedNext, reopened })}`);
+    process.exit(0);
+  }
   await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
     const metrics = page.locator(".metric-strip");
@@ -1215,7 +1266,11 @@ try {
   console.log("open page re-rendered without reload after chat update_layout: page note before books");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
   const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  await gateWait.playwright(allBooksMetric.filter({ hasText: "5" }), "waitFor", { timeout: 20000 });
+  try {
+    await waitFor(async () => (await allBooksMetric.innerText()) === "5", "exact all-books metric");
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: observed=${JSON.stringify(await allBooksMetric.innerText().catch(() => "<missing>"))}`);
+  }
   await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
   const saveCountRoute = async (route: Route) => {
     await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });

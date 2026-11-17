@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ToolBody, type ItemState, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
 import "./tool-summary.css";
 
@@ -33,7 +33,7 @@ function isScalar(value: unknown): value is string | number | boolean {
 }
 
 function dateLike(key: string): boolean {
-  return /(?:date|at|on|time|updated|created|finished|due)/i.test(key);
+  return /(?:^|[_-])(date|at|on|time|updated|created|finished|due)(?:$|[_-])/i.test(key) || /^(date|updated|created|finished|due)(?:On|At|Time)?$/i.test(key);
 }
 
 function scalarEntries(record: Record<string, unknown>): [string, unknown][] {
@@ -103,7 +103,10 @@ function argValue(value: unknown): string {
       if (values.length >= MAX_ARRAY_ITEMS || !isScalar(entry)) break;
       values.push(text(entry, 32));
     }
-    if (values.length && values.length === Math.min(value.length, MAX_ARRAY_ITEMS)) return `in [${values.join(", ")}]`;
+    if (values.length && values.length === Math.min(value.length, MAX_ARRAY_ITEMS)) {
+      const omission = value.length > MAX_ARRAY_ITEMS ? `, … ${value.length - MAX_ARRAY_ITEMS} more` : "";
+      return `in [${values.join(", ")}${omission}]`;
+    }
   }
   return isScalar(value) ? text(value, 48) : "…";
 }
@@ -136,20 +139,81 @@ export function summarizeToolOutput(output: ToolBodyProps["output"], error = fal
   return { lines: parseSummary(read.text, error), raw: read.text || "no retained result", fallback: false };
 }
 
-function json(value: unknown): string {
-  try { return JSON.stringify(value, null, 2) ?? "{}"; } catch { return "unable to format arguments"; }
+const MAX_RAW_NODES = 512;
+const MAX_RAW_DEPTH = 12;
+const MAX_RAW_TEXT = 16_000;
+
+type RawState = { nodes: number; seen: WeakSet<object>; truncated: boolean };
+
+function formatRaw(value: unknown): string {
+  const state: RawState = { nodes: 0, seen: new WeakSet(), truncated: false };
+  const visit = (current: unknown, depth: number, indent: string): string => {
+    if (state.nodes++ >= MAX_RAW_NODES || depth > MAX_RAW_DEPTH) {
+      state.truncated = true;
+      return "[truncated]";
+    }
+    if (current === null) return "null";
+    if (typeof current === "string") return JSON.stringify(current);
+    if (typeof current === "number" || typeof current === "boolean") return String(current);
+    if (typeof current === "bigint") return `${current}n`;
+    if (typeof current !== "object") return JSON.stringify(String(current));
+    if (state.seen.has(current)) return "[circular]";
+    state.seen.add(current);
+    const nextIndent = `${indent}  `;
+    const entries: string[] = [];
+    const keys = Array.isArray(current) ? Object.keys(current) : Object.keys(current as Record<string, unknown>);
+    for (const key of keys) {
+      if (state.nodes >= MAX_RAW_NODES || entries.join("\\n").length >= MAX_RAW_TEXT) { state.truncated = true; break; }
+      let child: unknown;
+      try { child = (current as Record<string, unknown>)[key]; } catch { child = "[unavailable]"; }
+      const label = Array.isArray(current) ? "" : `${JSON.stringify(key)}: `;
+      entries.push(`${nextIndent}${label}${visit(child, depth + 1, nextIndent)}`);
+    }
+    state.seen.delete(current);
+    const open = Array.isArray(current) ? "[" : "{";
+    const close = Array.isArray(current) ? "]" : "}";
+    if (state.truncated) entries.push(`${nextIndent}[truncated]`);
+    return entries.length ? `${open}\\n${entries.join(",\\n")}\\n${indent}${close}` : `${open}${close}`;
+  };
+  const formatted = visit(value, 0, "");
+  return formatted.length > MAX_RAW_TEXT ? `${formatted.slice(0, MAX_RAW_TEXT - 14)}\\n[truncated]` : formatted;
 }
+
+export function formatToolArguments(value: unknown): string { return formatRaw(value); }
 
 export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNode {
   const [rawOpen, setRawOpen] = useState(false);
+  const rawRef = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => {
+    const details = rawRef.current;
+    const row = details?.closest<HTMLElement>("[data-virtual-id]");
+    if (!details || !row) return;
+    let frame: number | null = null;
+    const syncOwnerHeight = () => {
+      frame = null;
+      if (!details.open) { row.style.removeProperty("min-height"); return; }
+      // the virtual owner can retain its old measured height after a mobile-to-desktop remount; publish the disclosure's actual bottom.
+      const rowBox = row.getBoundingClientRect();
+      const detailsBox = details.getBoundingClientRect();
+      row.style.minHeight = `${Math.ceil(detailsBox.bottom - rowBox.top)}px`;
+    };
+    const scheduleOwnerHeight = () => {
+      if (frame === null) frame = requestAnimationFrame(syncOwnerHeight);
+    };
+    scheduleOwnerHeight();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleOwnerHeight);
+    observer?.observe(details);
+    return () => { observer?.disconnect(); if (frame !== null) cancelAnimationFrame(frame); row.style.removeProperty("min-height"); };
+  }, [rawOpen]);
+
   const summary = summarizeToolOutput(output, item.is_error || state === "error", state);
   const useFulcrumBody = summary.fallback;
   const showPreview = !useFulcrumBody && (summary.lines.length > 1 || text(summary.raw) !== summary.lines[0]);
   return <>
     {useFulcrumBody ? <ToolBody item={item} output={output} state={state} /> : showPreview ? <div data-part="tool-output"><div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div></div> : <ToolBody item={item} output={output} state={state} />}
-    <details data-part="tool-raw" onToggle={(event) => setRawOpen(event.currentTarget.open)}>
+    <details ref={rawRef} data-part="tool-raw" onToggle={(event) => setRawOpen(event.currentTarget.open)}>
       <summary>raw</summary>
-      {rawOpen && !useFulcrumBody ? <pre>{`arguments\n${json(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre> : null}
+      {rawOpen && !useFulcrumBody ? <pre>{`arguments\n${formatRaw(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre> : null}
       {rawOpen && useFulcrumBody ? <p>fulcrum shows the complete retained result above.</p> : null}
     </details>
   </>;

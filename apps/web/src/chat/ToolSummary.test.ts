@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { summarizeToolOutput, toolArgumentSummary } from "./ToolSummary";
+import { formatToolArguments, summarizeToolOutput, toolArgumentSummary } from "./ToolSummary";
 import type { ToolBodyProps, ToolItem } from "@fulcrum/react";
 
 const output = (text: string, extra: Partial<ToolBodyProps["output"]> = {}): ToolBodyProps["output"] => ({
@@ -56,6 +56,24 @@ describe("tool summaries", () => {
     for (let index = 0; index < 100_000; index += 1) huge[`key_${index}`] = { deep: { value: "x".repeat(1_000) } };
     expect(() => toolArgumentSummary(item(huge))).not.toThrow();
     expect(toolArgumentSummary(item(huge)).length).toBeLessThanOrEqual(260);
+  });
+
+  test("marks omitted scalar array values", () => {
+    expect(toolArgumentSummary(item({ status: ["a", "b", "c", "d", "e", "f", "g", "h", "i"] }))).toContain("in [a, b, c, d, e, f, g, h, … 1 more]");
+  });
+
+  test("prioritizes date tokens without matching ordinary substrings", () => {
+    const { lines } = summarizeToolOutput(output(JSON.stringify({ title: "book", location: "shelf", description: "plain", updated_at: "today" })));
+    expect(lines).toEqual(["book · today · shelf"]);
+  });
+
+  test("bounds raw formatting and marks deep and cyclic values", () => {
+    const huge: Record<string, unknown> = {};
+    for (let index = 0; index < 100_000; index += 1) huge[`key_${index}`] = index;
+    const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
+    expect(formatToolArguments(huge)).toContain("[truncated]");
+    expect(formatToolArguments({ deep: { deeper: { value: 1 } } })).toContain('"value": 1');
+    expect(formatToolArguments(cyclic)).toContain("[circular]");
   });
 
   test("uses the fulcrum fallback for valid json while streaming", () => {

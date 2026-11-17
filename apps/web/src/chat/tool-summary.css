@@ -1,11 +1,14 @@
 /* fulcrum's timeline rows use content-visibility for long logs; disclosures must remeasure in normal flow. */
 .transcript [data-part="tool"] { display: flow-root; content-visibility: visible; contain: none; }
+/* virtual rows carry inline containment; raw disclosure growth must reach the owner observer after reloads and breakpoint changes. */
+.transcript [data-part="timeline"][data-virtual="true"] > [data-virtual-id] { contain: none !important; }
 .transcript [data-part="tool-summary-preview"] {
   padding: 8px 12px 8px 12px;
   color: var(--fulcrum-fg);
   white-space: pre-wrap;
 }
-.transcript [data-part="tool-summary-preview"] > div:first-child { color: var(--fulcrum-muted); }
+.transcript [data-part="tool-summary-preview"] > div:first-child,
+.transcript [data-part="tool-summary-preview"] > div:last-child { color: var(--fulcrum-muted); }
 .transcript [data-part="tool-summary-preview"] > div + div { margin-top: 2px; }
 /* keep the disclosure in normal flow so its open pre moves every later transcript row. */
 .transcript [data-part="tool-raw"] { display: block; margin: 0 12px 8px 12px; color: var(--fulcrum-muted); }
