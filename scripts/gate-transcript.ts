@@ -285,8 +285,10 @@ export async function gateTranscript(
       if (narrow && (sidebar.getBoundingClientRect().right > 0 || scrimStyle.opacity !== "0" || scrimStyle.pointerEvents !== "none")) return false;
       const rect = control.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const dialog = hit?.closest("[role=dialog], dialog");
+      const pageChatSheet = document.querySelector<HTMLElement>("#page-chat-sheet");
       return !shell.classList.contains("drawer-open") && !main.inert && main.getAttribute("aria-hidden") !== "true" &&
-        (hit === control || control.contains(hit)) && !hit?.closest(".drawer-scrim, [role=dialog], dialog");
+        (hit === control || control.contains(hit)) && !hit?.closest(".drawer-scrim") && (!dialog || dialog === pageChatSheet);
     }, width <= 760), `responsive shell and unobscured jump control at ${width}`);
     const geometry = await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').evaluate((control) => {
       const rect = (element: Element) => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; };
