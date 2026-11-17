@@ -226,10 +226,10 @@ try {
       await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
       if (width === 390) {
         const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
-        if (await pageChatClose.isVisible()) await pageChatClose.click();
+        if (await pageChatClose.count() && await pageChatClose.isVisible()) await pageChatClose.click();
         const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
-        if (await drawerClose.isVisible()) await drawerClose.click();
-        await waitFor(async () => !(await pageChatClose.isVisible()) && !(await drawerClose.isVisible()), "mobile overlays closed");
+        if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click();
+        await waitFor(async () => (!(await pageChatClose.count()) || !(await pageChatClose.isVisible())) && (!(await drawerClose.count()) || !(await drawerClose.isVisible())), "mobile overlays closed");
       }
       await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
     }
