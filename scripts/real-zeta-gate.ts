@@ -864,7 +864,7 @@ try {
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
   const legacyMetricText =
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
-  await page.goto(`${origin}/reading`);
+  await page.goto(`${origin}/reading?theme=gruvbox-dark`);
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   await gateWait.playwright(page.getByText(legacyMetricText, { exact: true }), "waitFor");
   await gateWait.playwright(page.getByText("reading: 0", { exact: true }), "waitFor");
