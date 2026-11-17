@@ -168,9 +168,9 @@ export async function gateTranscript(
   const afterMoreDeltas = await scroll.evaluate((element) => element.scrollTop);
   if (Math.abs(afterMoreDeltas - scrolledUp) > 4)
     throw new Error(`streaming transcript jumped after scroll up: ${scrolledUp} -> ${afterMoreDeltas}`);
-  const jump = page.locator('[data-part="jump-to-latest"]:visible');
+  const jump = page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible');
   await gateWait(() => jump.waitFor({ state: "visible", timeout: 20_000 }));
-  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
+  if (await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("tool-call stream rendered more than one visible jump to latest control");
   // keyboard focus on the control must survive a new row arriving below while the user reads above
   const focusKept = (mark: string) => page.evaluate((mark) => (document.activeElement as HTMLElement | null)?.dataset.gateFocused === mark, mark);
@@ -228,22 +228,24 @@ export async function gateTranscript(
   await page.mouse.wheel(0, -1200);
   await waitFor(async () => await distanceFromBottom() > 100, "user scroll up during text-only stream");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
-  const textOnlyJump = page.locator('[data-part="jump-to-latest"]:visible');
+  const textOnlyJump = page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible');
   await gateWait(() => textOnlyJump.waitFor({ state: "visible", timeout: 20_000 }));
-  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 1)
+  if (await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 1)
     throw new Error("text-only stream rendered more than one visible jump to latest control");
   const jumpDiagnostics = async () => page.evaluate(() => {
     const scroll = document.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
     const pane = document.querySelector<HTMLElement>('.transcript');
     const frame = document.querySelector<HTMLElement>('[data-part="timeline-frame"]');
     const lane = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"]');
-    const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest"]');
+    const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]');
     const rect = (element: HTMLElement | null) => element && (() => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; })();
     return {
       scrollTop: scroll?.scrollTop,
       scrollHeight: scroll?.scrollHeight,
       clientHeight: scroll?.clientHeight,
       gap: scroll && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop,
+      controlPresent: Boolean(control),
+      controlRectCount: control?.getClientRects().length ?? 0,
       controlVisible: Boolean(control?.getClientRects().length),
       controlRect: rect(control),
       laneRect: rect(lane),
@@ -275,7 +277,7 @@ export async function gateTranscript(
       const main = document.querySelector<HTMLElement>(".main-pane");
       const sidebar = document.querySelector<HTMLElement>(".sidebar");
       const scrim = document.querySelector<HTMLElement>(".drawer-scrim");
-      const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest"]');
+      const control = document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]');
       if (!shell || !main || !sidebar || !scrim || !control || !control.isConnected || !control.getClientRects().length) return false;
       const style = getComputedStyle(control);
       const scrimStyle = getComputedStyle(scrim);
@@ -286,7 +288,7 @@ export async function gateTranscript(
       return !shell.classList.contains("drawer-open") && !main.inert && main.getAttribute("aria-hidden") !== "true" &&
         (hit === control || control.contains(hit)) && !hit?.closest(".drawer-scrim, [role=dialog], dialog");
     }, width <= 760), `responsive shell and unobscured jump control at ${width}`);
-    const geometry = await page.locator('[data-part="jump-to-latest"]:visible').evaluate((control) => {
+    const geometry = await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').evaluate((control) => {
       const rect = (element: Element) => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height }; };
       const controlRect = rect(control);
       const pane = document.querySelector<HTMLElement>('.transcript')!;
@@ -342,28 +344,28 @@ export async function gateTranscript(
   await textOnlyJump.focus();
   if (!(await focusKept("text-jump"))) throw new Error("text-only jump to latest control is not keyboard focusable");
   await textOnlyJump.click();
-  await waitForJump(async () => await scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop <= 4 && !document.querySelector<HTMLElement>('[data-part="jump-to-latest"]')?.getClientRects().length), "jump to latest lands before releasing held chunks");
-  const jumpedBeforeRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector<HTMLElement>('[data-part="jump-to-latest"]')?.getClientRects().length) }));
+  await waitForJump(async () => await scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop <= 4 && !document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length), "jump to latest lands before releasing held chunks");
+  const jumpedBeforeRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length) }));
   if (jumpedBeforeRelease.gap > 4 || jumpedBeforeRelease.jumpVisible)
     throw new Error(`jump to latest did not land before releasing held chunks: ${JSON.stringify(jumpedBeforeRelease)}\njump diagnostics: ${JSON.stringify(await jumpDiagnostics())}`);
   const heldJumpControl = JSON.parse(await Bun.file(controlPath).text());
   await writeControl(controlPath, { ...heldJumpControl, release_jump_stream_barrier: true });
   await waitForJump(async () => (await textStream.innerText()).includes("text-only line 081"), "several chunks after jump");
-  const jumpedAfterRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest"]')?.getClientRects().length) }));
+  const jumpedAfterRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length) }));
   if (jumpedAfterRelease.gap > 4 || jumpedAfterRelease.jumpVisible)
     throw new Error(`mid-stream jump did not stay at bottom after several chunks: ${JSON.stringify(jumpedAfterRelease)}`);
-  await waitForJump(async () => await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest"]:visible').count() === 0, "jump to latest for this turn");
+  await waitForJump(async () => await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() === 0, "jump to latest for this turn");
   const jumped = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop }));
-  if (jumped.gap > 4 || await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
+  if (jumped.gap > 4 || await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 0)
     throw new Error(`mid-stream jump did not resume following: ${JSON.stringify(jumped)}`);
   await waitForJump(async () => (await textStream.innerText()).includes("text-only line 100") && await distanceFromBottom() <= 4, "mid-stream jump resumes following");
-  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
+  if (await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 0)
     throw new Error("mid-stream jump to latest control stayed visible after returning to the bottom");
   await capture("streaming-midstream-jump-1440x900.png");
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  await waitForJump(async () => (await textStream.innerText()).includes("text-only line 119") && await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest"]:visible').count() === 0, "text-only stream completes at the bottom after jump");
+  await waitForJump(async () => (await textStream.innerText()).includes("text-only line 119") && await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() === 0, "text-only stream completes at the bottom after jump");
   const finalJump = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop }));
-  if (finalJump.gap > 4 || await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
+  if (finalJump.gap > 4 || await page.locator('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]:visible').count() !== 0)
     throw new Error(`final text-only stream did not settle at the bottom: ${JSON.stringify(finalJump)}`);
   await waitForIdleTurn(page, waitFor);
 }

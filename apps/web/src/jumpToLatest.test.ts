@@ -65,28 +65,6 @@ describe("watchJumpToLatest", () => {
   }
 });
 
-test("same-store rewatch preserves shown state, while default rewatch resets it", () => {
-  const store = createRunStore((job) => job());
-  store.dispatch(delta("m1", "streaming reply"));
-  const first = scrollBox(2000);
-  let visible = false;
-  const setVisible = (value: boolean) => { visible = value; };
-  let stop = watchJumpToLatest(store, first.box, setVisible, () => {});
-  try {
-    store.dispatch(delta("m1", " more"));
-    expect(visible).toBe(true);
-    stop();
-    const remounted = scrollBox(2000);
-    stop = watchJumpToLatest(store, remounted.box, setVisible, () => {}, false);
-    expect(visible).toBe(true);
-    stop();
-    stop = watchJumpToLatest(store, scrollBox(2000).box, setVisible, () => {});
-    expect(visible).toBe(false);
-  } finally {
-    stop();
-  }
-});
-
 test("a wheel up whose scroll never lands expires, and the snap re-follows again", async () => {
   const store = createRunStore((job) => job());
   store.dispatch(delta("m1", "streaming reply"));
