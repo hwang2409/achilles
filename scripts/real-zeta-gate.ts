@@ -999,7 +999,7 @@ try {
   const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
   const transcriptItem = toolRow.locator("xpath=ancestor::*[@data-part='item'][1]");
   const nextTranscriptItem = transcriptItem.locator("xpath=following-sibling::*[1]");
-  const nextBox = await nextTranscriptItem.boundingBox();
+  const nextBox = await nextTranscriptItem.count() ? await nextTranscriptItem.boundingBox() : null;
   const itemBox = await transcriptItem.boundingBox();
   if (!rawBox || (nextBox ? nextBox.y < rawBox.y + rawBox.height : !itemBox || itemBox.y + itemBox.height < rawBox.y + rawBox.height))
     throw new Error(`raw disclosure overlaps the next transcript item: raw=${JSON.stringify(rawBox)} next=${JSON.stringify(nextBox)} item=${JSON.stringify(itemBox)}`);
