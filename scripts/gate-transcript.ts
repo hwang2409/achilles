@@ -261,6 +261,15 @@ export async function gateTranscript(
   };
   const assertJumpLane = async (width: number) => {
     await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+    if (width === 390) {
+      const bar = page.locator(".page-chat-bar");
+      await gateWait.playwright(bar, "waitFor", { state: "visible" });
+      await bar.click();
+      const sheet = page.getByRole("dialog", { name: "page chat" });
+      await gateWait.playwright(sheet, "waitFor", { state: "visible" });
+      await gateWait.playwright(sheet.locator(".transcript"), "waitFor", { state: "visible" });
+      if (await sheet.locator(".transcript").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
+    }
     await waitForJump(async () => await page.evaluate((narrow) => {
       const shell = document.querySelector<HTMLElement>(".app-shell");
       const main = document.querySelector<HTMLElement>(".main-pane");
@@ -303,6 +312,13 @@ export async function gateTranscript(
     const expectedCompact = width <= 480;
     if (!geometry.insidePane || geometry.rowIntersecting !== 0 || geometry.laneHeight < 48 || geometry.laneHeight > 48 || (expectedCompact && (geometry.control.width !== 44 || geometry.control.height !== 44)) || geometry.compactVisible !== expectedCompact || geometry.fullVisible === expectedCompact || geometry.ariaLabel !== "jump to latest" || geometry.title !== "jump to latest")
       throw new Error(`jump control geometry or labels failed at ${width}: ${JSON.stringify(geometry)}`);
+    if (width === 390) {
+      const sheet = page.getByRole("dialog", { name: "page chat" });
+      await sheet.getByRole("button", { name: "close page chat" }).click();
+      const bar = page.locator(".page-chat-bar");
+      await gateWait.playwright(bar, "waitFor", { state: "visible" });
+      await bar.evaluate((element) => { if (document.activeElement !== element) throw new Error("390px page chat close did not restore focus to the bar"); });
+    }
   };
   await assertJumpLane(1440);
   await capture("streaming-scrolled-up-jump-1440x900.png");
