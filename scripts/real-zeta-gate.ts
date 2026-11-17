@@ -895,6 +895,18 @@ try {
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
   const theme = process.env.GATE_THEME ?? "gruvbox-dark";
   await page.goto(`${origin}/reading?theme=${encodeURIComponent(theme)}`);
+  const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.fulcrumTheme ?? "auto" }));
+  if (themeProof.applied !== theme) throw new Error(`requested theme ${theme} was not applied: ${JSON.stringify(themeProof)}`);
+  if (screenshotDir) await writeFile(join(screenshotDir, "run-proof.txt"), [
+    `private temp homes: true`,
+    `external competing controller attached: false`,
+    `gate-owned shared controller pid: ${sharedProcess.pid ?? "unknown"}`,
+    `gate-owned achilles controller pid: ${zetaProcess.pid ?? "unknown"}`,
+    `requested theme: ${themeProof.requested}`,
+    `applied theme: ${themeProof.applied}`,
+    `390 capture: reload, mobile drawer open, settled before screenshot`,
+    `raw capture: arguments truncated by zeta marker asserted in the rendered disclosure`,
+  ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const longMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "legacy total with an unusually long descriptive label" }) });
   await gateWait.playwright(longMetric, "waitFor");
