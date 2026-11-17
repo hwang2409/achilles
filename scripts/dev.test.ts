@@ -223,7 +223,7 @@ exit 0
   try {
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    expect(owned.stderr).toBe(zetaRemediationMessage("3ab68a2d670eeb49ee8925d52b1d741e48a5fc1f") + "\n");
+    expect(owned.stderr).toBe(zetaRemediationMessage("682a158e5efc20839233f585cf5d1e4fb26404b6") + "\n");
     expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
     expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);
