@@ -223,7 +223,7 @@ exit 0
   try {
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    expect(owned.stderr).toBe(zetaRemediationMessage("682a158e5efc20839233f585cf5d1e4fb26404b6") + "\n");
+    expect(owned.stderr).toBe(zetaRemediationMessage("308935dbd492c1cd61f1103bdbbe182963ce1a55") + "\n");
     expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
     expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);
@@ -391,10 +391,23 @@ exec /usr/bin/git "$@"
     managed.push(firstState);
     expect(alive(firstState.pid)).toBe(true);
 
+    const attached = await runDev({ ...baseEnv, ACHILLES_ZETA_DISCOVERY: resolve(achillesHome, "run/serve.json") });
+    expect(attached.exitCode, attached.stderr).toBe(0);
+    expect(alive(firstZetaState.pid), "attached discovery must not restart the external zeta serve").toBe(true);
+
     const second = await runDev();
     expect(second.exitCode, second.stderr).toBe(0);
     const secondState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
     expect(secondState.pid).toBe(firstState.pid);
+
+    await writeFile(resolve(testRoot, "zeta.rev"), "changed-pin\n");
+    const changedPin = await runDev();
+    expect(changedPin.exitCode, changedPin.stderr).toBe(0);
+    const changedPinState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"))) as ProcessIdentity & { pin: string };
+    expect(changedPinState.pin).toBe("changed-pin");
+    expect(changedPinState.pid).not.toBe(firstZetaState.pid);
+    expect(alive(firstZetaState.pid), "changed zeta pin must replace the owned serve").toBe(false);
+    discovered.push(changedPinState);
 
     const defaultRun = await runDev({ ...baseEnv, ACHILLES_USE_PATH_ZETA: "0" });
     expect(defaultRun.exitCode, defaultRun.stderr).toBe(0);
@@ -424,7 +437,7 @@ exec /usr/bin/git "$@"
     await rm(dirtyFile);
 
     const callsAfterSecond = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
-    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(2);
+    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(3);
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
 
     const ownedDiscovery = resolve(achillesHome, "run/serve.json");

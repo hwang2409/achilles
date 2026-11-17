@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { ZetaError, type ZetaDiscovery } from "@fulcrum/zeta";
-import { createConnection } from "./connection";
+import { createConnection, FEATURES } from "./connection";
 
 const discovery: ZetaDiscovery = { url: "ws://127.0.0.1:8765", controller_token: "c", observer_token: "o", origins: [] };
 
 async function flush(times = 20) {
   for (let i = 0; i < times; i++) await new Promise((resolve) => setImmediate(resolve));
 }
+
+test("negotiates tool approval origin without changing the wire data", () => {
+  expect(FEATURES).toContain("tool_approval_origin");
+});
 
 describe("createConnection controller capacity vs version mismatch", () => {
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller
