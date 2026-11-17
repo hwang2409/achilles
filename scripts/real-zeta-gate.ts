@@ -960,6 +960,19 @@ try {
   await field.fill("sb7 page stream");
   await field.press("Enter");
   await waitFor(async () => (await page.locator(".page-chat-surface").innerText()).includes("sb7 stream line 119"), "sb7 stream line 119");
+  const insetGeometry = await page.evaluate(() => {
+    const transcript = [...document.querySelectorAll<HTMLElement>('.page-chat-surface [data-part="message"]')].find((element) => element.textContent?.includes("sb7 stream line 119"));
+    const title = document.querySelector<HTMLElement>("#page-chat-title");
+    const composer = document.querySelector<HTMLElement>('.page-chat-surface [data-part="composer"]');
+    const transcriptBox = transcript?.getBoundingClientRect();
+    const titleBox = title?.getBoundingClientRect();
+    const composerBox = composer?.getBoundingClientRect();
+    return { transcriptLeft: transcriptBox?.left ?? null, titleLeft: titleBox?.left ?? null, composerLeft: composerBox?.left ?? null, composerRight: composerBox?.right ?? null };
+  });
+  if (insetGeometry.transcriptLeft === null || insetGeometry.titleLeft === null || Math.abs(insetGeometry.transcriptLeft - insetGeometry.titleLeft) > 1)
+    throw new Error(`390px open page chat transcript content is not aligned with the sheet title: ${JSON.stringify(insetGeometry)}`);
+  if (insetGeometry.composerLeft === null || insetGeometry.composerRight === null || insetGeometry.titleLeft === null || Math.abs(insetGeometry.composerLeft - insetGeometry.titleLeft) > 1 || Math.abs(insetGeometry.composerRight - (390 - insetGeometry.titleLeft)) > 1)
+    throw new Error(`390px open page chat composer outer gutter is not aligned with the sheet title: ${JSON.stringify(insetGeometry)}`);
   const streamProof = await page.locator(".page-chat-surface").evaluate((surface) => {
     const text = surface.textContent ?? "";
     const lines = text.match(/sb7 stream line \d{3}/g) ?? [];
