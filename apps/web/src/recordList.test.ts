@@ -204,15 +204,23 @@ test("record list reveal projection keeps loaded rows and one reachable tab stop
   }
 });
 
-test("long page metric values stay readable without breaking digit groups", () => {
-  const fullValue = "9,999,999,999,999,999";
-  const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "legacy total", value: fullValue }] } };
+test("ten-character metric values compact before they can overflow a mobile cell", () => {
+  const metrics = [
+    ["positive", "9999999999", "10B"],
+    ["signed", "-999999999", "-1B"],
+    ["nine digits", "999999999", "999999999"],
+    ["decimal", "1234567890.5", "1.2B"],
+    ["nonnumeric", "9999999999 items", "9999999999 items"],
+  ] as const;
+  const page = { title: "page", route: "/page", layout: { blocks: metrics.map(([label, value]) => ({ type: "metric", label, value })) } };
   const result = render(React.createElement(PageView, { page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
-  const value = result.container.querySelector(".metric-value")!;
-  expect(value.classList.contains("metric-value-long")).toBe(false);
-  expect(value.textContent).toBe("10,000T");
-  expect(value.getAttribute("title")).toBe(fullValue);
-  expect(value.getAttribute("aria-label")).toBe(`legacy total: ${fullValue}`);
+  for (const [label, fullValue, displayValue] of metrics) {
+    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === label)!;
+    const value = block.querySelector(".metric-value")!;
+    expect(value.textContent, label).toBe(displayValue);
+    expect(value.getAttribute("title"), label).toBe(fullValue);
+    expect(value.getAttribute("aria-label"), label).toBe(`${label}: ${fullValue}`);
+  }
 });
 
 test("page metrics render a live static layout value", () => {
