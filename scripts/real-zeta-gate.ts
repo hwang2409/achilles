@@ -974,7 +974,7 @@ try {
   if (!(await nativeSettings.evaluate((dialog) => dialog.contains(document.activeElement)))) throw new Error("native settings Tab escaped the page chat sheet");
   await page.keyboard.press("Escape");
   await gateWait.playwright(nativeSettings, "waitFor", { state: "hidden" });
-  const pageChatLast = pageChatSurface.locator("button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])").last();
+  const pageChatLast = page.locator(".page-chat-surface button:not(:disabled), .page-chat-surface a[href], .page-chat-surface input:not(:disabled), .page-chat-surface textarea:not(:disabled), .page-chat-surface [tabindex]:not([tabindex='-1'])").last();
   await pageChatLast.focus();
   await page.keyboard.press("Tab");
   if (!(await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement)))) throw new Error("page chat focus trap did not resume after native settings closed");

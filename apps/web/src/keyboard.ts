@@ -38,8 +38,13 @@ export const keyboardFocusToComposer = (event: { detail: number; currentTarget: 
 // keeps Tab inside `container`: from the last tabbable control to the first, and back with Shift+Tab
 const nativeModal = (event: KeyboardEvent) => {
   const pathDialog = event.composedPath().find((target): target is HTMLDialogElement => target instanceof HTMLDialogElement);
-  if (pathDialog?.matches(":modal")) return true;
-  return document.querySelector<HTMLDialogElement>("dialog:modal") !== null;
+  try {
+    if (pathDialog?.matches(":modal")) return true;
+    return document.querySelector<HTMLDialogElement>("dialog:modal") !== null;
+  } catch {
+    // older engines have no :modal selector; every app-native dialog uses showModal().
+    return document.querySelector<HTMLDialogElement>("dialog[open]") !== null;
+  }
 };
 
 export function useModalFocus(open: boolean, container: RefObject<HTMLElement | null>, initial?: RefObject<HTMLElement | null>) {
