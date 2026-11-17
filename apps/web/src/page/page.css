@@ -82,3 +82,15 @@
 }
 
 @media (min-width: 1100px), (max-height: 500px) and (min-width: 700px) { .page-view.docked > .page-content { flex: 1 1 0; min-width: 0; } }
+.record-list-empty, .record-list-error { padding: 28px 16px; border: 1px dashed var(--fulcrum-border); text-align: center; }
+.record-list-empty strong, .record-list-error strong { display: block; font-size: 14px; }
+.record-list-empty p, .record-list-error p { margin: 8px 0 16px; color: var(--fulcrum-muted); font-size: 13px; }
+.record-list-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.record-list-actions button { min-height: 36px; padding: 0 16px; border: 1px solid var(--fulcrum-accent); border-radius: 0; color: var(--fulcrum-accent); background: transparent; font: inherit; cursor: pointer; }
+.record-list-actions .record-list-chat { border-color: var(--fulcrum-border); }
+.record-list-error { border-style: solid; border-color: color-mix(in srgb, var(--fulcrum-danger) 35%, var(--fulcrum-border)); border-left: 3px solid var(--fulcrum-danger); background: color-mix(in srgb, var(--fulcrum-danger) 8%, transparent); text-align: left; }
+.record-list-error .record-list-actions { justify-content: flex-start; }
+.record-list-skeleton { display: grid; }
+.record-list-skeleton span { display: block; height: 40px; border-top: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-border) 55%, transparent); }
+.record-list-actions button:focus-visible, .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
+.record-form form:has(:disabled) { opacity: .5; }

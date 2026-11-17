@@ -8,7 +8,7 @@ import "./page.css";
 import { RecordMark } from "./RecordMark";
 
 type PageLike = { title: string; route: string; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
-type PageViewProps = { page: PageLike; pageId: string; credential: string; refreshKey: string };
+type PageViewProps = { page: PageLike; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void };
 
 function groupBlocks(blocks: Array<Record<string, unknown>>): Array<Array<Record<string, unknown>>> {
   const groups: Array<Array<Record<string, unknown>>> = [];
@@ -70,7 +70,7 @@ function useMetricCounts(blocks: Array<Record<string, unknown>>, pageId: string,
   return new Map(queries.map(({ key }) => [key, entries.current.get(key)?.value ?? "…"]));
 }
 
-export function PageView({ page, pageId, credential, refreshKey }: PageViewProps) {
+export function PageView({ page, pageId, credential, refreshKey, onAskChat }: PageViewProps) {
   const blocks = page.layout.blocks;
   const leadIndex = blocks.findIndex((block) => block.type === "text");
   const lead = leadIndex >= 0 ? String(blocks[leadIndex].text ?? "") : "";
@@ -83,7 +83,7 @@ export function PageView({ page, pageId, credential, refreshKey }: PageViewProps
     </header>
     <div className="page-blocks">{groupBlocks(content).map((group, index) => {
       if (group[0].type === "metric") return <div className="metric-strip" key={`metric-strip:${index}`}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} value={counts.get(metricQueryKey(block, pageId, credential) ?? "")} />)}</div>;
-      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} />;
+      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} />;
     })}</div>
   </main>;
 }
@@ -95,12 +95,12 @@ function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<stri
   return `${type}:${signature}:${ordinal}`;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void }) {
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
   if (block.type === "metric") return <MetricBlock block={block} value={block.count ? "…" : undefined} />;
-  if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} />;
+  if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} onAskChat={onAskChat} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
     const filter = block.filter as DetailFilter | undefined;
@@ -118,30 +118,30 @@ function MetricBlock({ block, value }: { block: Record<string, unknown>; value?:
   return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${String(displayValue).length > 10 ? " metric-value-long" : ""}`}>{displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
-function ListBlock({ block, pageId, credential, refreshKey, toolsKey }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string }) {
+function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void }) {
   const key = `${pageId}:${String(block.collection)}`;
   const list = { title: String(block.title), collection: String(block.collection), pageId, credential, refreshKey, filter: block.filter as DetailFilter | undefined };
-  return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} /> : <SchemaRecordList key={key} {...list} toolsKey={toolsKey} />;
+  return Array.isArray(block.fields) && block.fields.length > 0 ? <RecordList key={key} {...list} columns={block.fields.map(String)} onAskChat={onAskChat} /> : <SchemaRecordList key={key} {...list} toolsKey={toolsKey} onAskChat={onAskChat} />;
 }
 
-function SchemaRecordList({ toolsKey, ...list }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; toolsKey: string }) {
+function SchemaRecordList({ toolsKey, onAskChat, ...list }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; toolsKey: string; onAskChat?: (draft: string) => void }) {
   const { tools, error } = usePageTools(list.pageId, list.credential, toolsKey);
   const last = useRef<PageTool[] | null>(null);
   if (tools !== null) last.current = tools;
   const shown = tools ?? last.current;
-  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} extendColumns />;
+  return <RecordList {...list} columns={shown ? schemaColumns(shown, list.collection) : error ? [] : null} extendColumns onAskChat={onAskChat} />;
 }
 
-export function RecordList({ title, collection, pageId, credential, refreshKey, filter, columns = [], extendColumns = false }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; columns?: string[] | null; extendColumns?: boolean }) {
+export function RecordList({ title, collection, pageId, credential, refreshKey, filter, columns = [], extendColumns = false, onAskChat }: { title: string; collection: string; pageId: string; credential: string; refreshKey: string; filter?: DetailFilter; columns?: string[] | null; extendColumns?: boolean; onAskChat?: (draft: string) => void }) {
   const query = new URLSearchParams({ ...filter && { field: filter.field, equals: JSON.stringify(filter.equals) }, limit: "100" }).toString();
-  const [records, setRecords] = useState<Record<string, unknown>[] | null>(null); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const requestSequence = useRef(0);
-  useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); refreshSelection(pageId, collection, value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, query, refreshKey]);
+  const [records, setRecords] = useState<Record<string, unknown>[] | null>(null); const [total, setTotal] = useState(0); const [error, setError] = useState<string | null>(null); const [retry, setRetry] = useState(0); const requestSequence = useRef(0);
+  useEffect(() => { let live = true; const request = ++requestSequence.current; void fetch(`/api/pages/${pageId}/records/${encodeURIComponent(collection)}?${query}`, { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`could not load records (${response.status})`); const value = await response.json(); if (!Array.isArray(value)) throw new Error("invalid records response"); if (live && request === requestSequence.current) { setRecords(value); refreshSelection(pageId, collection, value); setTotal(Number(response.headers.get("x-achilles-total") ?? value.length)); setError(null); } }).catch((caught) => { if (live && request === requestSequence.current) setError(caught instanceof Error ? caught.message : String(caught)); }); return () => { live = false; }; }, [collection, credential, pageId, query, refreshKey, retry]);
   const selected = useSelectedRow(pageId);
   const selectedId = selected?.collection === collection ? selected.record.record_id : undefined;
-  return <RecordListView title={title} collection={collection} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onSelect={(record, row) => selectRow(pageId, record && { collection, record, opener: row })} />;
+  return <RecordListView title={title} collection={collection} records={records} columns={columns} extendColumns={extendColumns} total={total} error={error} selectedId={selectedId} onRetry={() => { setRecords(null); setRetry((value) => value + 1); }} onAskChat={onAskChat} onSelect={(record, row) => selectRow(pageId, record && { collection, record, opener: row })} />;
 }
 
-export function RecordListView({ title, collection, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onSelect }: { title: string; collection?: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void }) {
+export function RecordListView({ title, collection, records, columns: chosen = [], extendColumns = false, total, error, selectedId, onRetry, onAskChat, onSelect }: { title: string; collection?: string; records: Record<string, unknown>[] | null; columns?: string[] | null; extendColumns?: boolean; total: number; error: string | null; selectedId?: unknown; onRetry?: () => void; onAskChat?: (draft: string) => void; onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void }) {
   const loadedRecords = records ?? [];
   const [focusedId, setFocusedId] = useState<unknown>(undefined);
   const [expanded, setExpanded] = useState(false);
@@ -149,7 +149,10 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const columns = !chosen?.length ? recordColumns(loadedRecords) : extendColumns ? extendWithRecordKeys(chosen, loadedRecords) : chosen;
   const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => handleRecordKeyDown(event, record, onSelect);
-  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{total.toLocaleString()}</span></h2><span>sorted by updated</span></header>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : projection.loaded.length === 0 ? <p>no records yet</p> : <><LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}</>}</section>;
+  const retry = () => { onRetry?.(); };
+  const ask = () => onAskChat?.(`help me understand why the ${title.toLowerCase()} list is empty: there are no records yet`);
+  const add = () => document.querySelector<HTMLElement>(`.record-form[data-collection="${CSS.escape(collection ?? "")}"][data-operation="insert"] [name]`)?.focus();
+  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{loading || error ? "0" : total.toLocaleString()}</span></h2><span>{loading ? "loading…" : "sorted by updated"}</span></header>{error ? <div className="record-list-error" role="alert"><strong>could not load {title.toLowerCase()}</strong><p>{error}. your data is safe; nothing was changed.</p><div className="record-list-actions"><button type="button" onClick={retry}>try again</button><button type="button" className="record-list-chat" onClick={() => onAskChat?.(`help me understand why the ${title.toLowerCase()} list could not load: ${error}`)}>ask the chat why</button></div></div> : loading ? <div className="record-list-skeleton" role="status" aria-label="loading records">{[0, 1, 2, 3, 4].map((row) => <span key={row} />)}</div> : projection.loaded.length === 0 ? <div className="record-list-empty"><strong>no {title.toLowerCase()} yet</strong><p>add the first one, or ask the page chat to add several.</p><div className="record-list-actions">{document.querySelector(`.record-form[data-collection="${CSS.escape(collection ?? "")}"][data-operation="insert"]`) && <button type="button" onClick={add}>add {title.toLowerCase().replace(/s$/, "")}</button>}<button type="button" className="record-list-chat" onClick={ask}>ask the chat</button></div></div> : <><LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}</>}</section>;
 }
 
 type RecordListProjection = { loaded: Record<string, unknown>[]; visible: Record<string, unknown>[]; tabStop: unknown; loadedRemaining: number; total: number; showReveal: boolean };

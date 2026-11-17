@@ -67,7 +67,8 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, pro
     (listener) => {
       const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
       const unsubscribeRemote = draftStore.subscribeRemote(sessionId, listener);
-      return () => { unsubscribeConfirm(); unsubscribeRemote(); };
+      const unsubscribeDraft = draftStore.subscribe(sessionId, listener);
+      return () => { unsubscribeConfirm(); unsubscribeRemote(); unsubscribeDraft(); };
     },
     () => draftStore.get(sessionId),
     () => draftStore.get(sessionId),
@@ -186,6 +187,7 @@ export function App() {
   const pageChatButton = useRef<HTMLButtonElement | null>(null);
   const pageChatClose = useRef<HTMLButtonElement | null>(null);
   const pageChatSurface = useRef<HTMLDivElement | null>(null);
+  const pendingPageChatFocus = useRef(false);
   const [transcript, setTranscript] = useState<HTMLElement | null>(null);
   const [queuedSteers, setQueuedSteers] = useState<ReadonlySet<string>>(new Set());
   const [composerActivity, setComposerActivity] = useState<ComposerActivity>({ sending: false, queued: 0, failed: false, held: false });
@@ -236,6 +238,20 @@ export function App() {
     setMobileChatOpen(false);
   }, [ready?.sessionId, activePage?.id]);
   useModalFocus(pageChatSheetOpen && hasBlocks, pageChatSurface, pageChatClose);
+  useLayoutEffect(() => {
+    if (!pendingPageChatFocus.current) return;
+    const composer = pageChatSurface.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+    if (!composer) return;
+    pendingPageChatFocus.current = false;
+    composer.focus({ preventScroll: true });
+  }, [pageChatSheetOpen]);
+  const askPageChat = (draft: string) => {
+    const sessionId = ready?.sessionId ?? (activePage ? `new:${activePage.id}` : null);
+    if (!sessionId) return;
+    if (!draftStore.get(sessionId).trim()) draftStore.set(sessionId, draft);
+    if (mobilePageChat) { pendingPageChatFocus.current = true; setMobileChatOpen(true); }
+    else document.querySelector<HTMLElement>('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]')?.focus({ preventScroll: true });
+  };
   useEffect(() => {
     if (!pageChatSheetOpen || !hasBlocks) {
       if (mobileChatWasOpen.current) pageChatButton.current?.focus();
@@ -311,12 +327,12 @@ export function App() {
       : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} />}</>
+      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={askPageChat} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} />}
+        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={askPageChat} />}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetOpen ? " mobile-chat-open" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{pageChatSheetOpen ? "⌃" : "⌃"}</span></button>}
         {hasBlocks && pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
