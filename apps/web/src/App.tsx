@@ -3,6 +3,7 @@ import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { CodeFence } from "./chat/CodeFence";
+import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import { AppShell, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
@@ -31,7 +32,7 @@ const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
 const fences: Fences = new Proxy({}, { get: () => CodeFence });
 const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
-const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} />, error: ({ id }) => <Fallback id={id} /> };
+const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ({ id }) => <Fallback id={id} /> };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles.
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {

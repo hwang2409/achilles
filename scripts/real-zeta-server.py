@@ -188,7 +188,11 @@ def book_tool(name: str, operation: str, description: str) -> dict:
         "additionalProperties": False,
     }
     if operation == "list":
-        input_schema = {"type": "object", "additionalProperties": False}
+        input_schema = {
+            "type": "object",
+            "properties": {"search": {"type": "string"}},
+            "additionalProperties": False,
+        }
     elif operation == "update":
         input_schema = {
             "type": "object",
@@ -396,7 +400,12 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         },
                         "expected_version": 1,
                     },
-                )
+                ),
+                ToolCall(
+                    "list-books-summary",
+                    "achilles__list_books",
+                    {"search": "synthetic-" + "x" * 9_000},
+                ),
             ]
         ),
         ScriptedTurn(content=[TextContent("layout updated")]),

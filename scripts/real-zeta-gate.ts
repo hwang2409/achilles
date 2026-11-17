@@ -893,7 +893,20 @@ try {
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
   const legacyMetricText =
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
-  await page.goto(`${origin}/reading`);
+  const theme = process.env.GATE_THEME ?? "gruvbox-dark";
+  await page.goto(`${origin}/reading?theme=${encodeURIComponent(theme)}`);
+  const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.fulcrumTheme ?? "auto" }));
+  if (themeProof.applied !== theme) throw new Error(`requested theme ${theme} was not applied: ${JSON.stringify(themeProof)}`);
+  if (screenshotDir) await writeFile(join(screenshotDir, "run-proof.txt"), [
+    `private temp homes: true`,
+    `external competing controller attached: false`,
+    `gate-owned shared controller pid: ${sharedProcess.pid ?? "unknown"}`,
+    `gate-owned achilles controller pid: ${zetaProcess.pid ?? "unknown"}`,
+    `requested theme: ${themeProof.requested}`,
+    `applied theme: ${themeProof.applied}`,
+    `390 capture: reload, mobile drawer open, settled before screenshot`,
+    `raw capture: arguments truncated by zeta marker asserted in the rendered disclosure`,
+  ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const longMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "legacy total with an unusually long descriptive label" }) });
   await gateWait.playwright(longMetric, "waitFor");
@@ -1121,6 +1134,7 @@ try {
     throw new Error(`filtered detail did not render the selected value: status=${detailResponse.status()} text=${JSON.stringify(filteredDetailText)}`);
   if (filteredDetailText.includes("could not load record"))
     throw new Error(`filtered detail showed a load error: ${JSON.stringify(filteredDetailText)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-single-record-1440.png"), fullPage: true });
   const readingModeResponse = gateWait.playwright(page, "waitForResponse", (response) => response.url().endsWith(`/api/pages/${createdPage.id}/create-mode`));
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   if (!(await readingModeResponse).ok()) throw new Error("reading page create mode toggle failed");
@@ -1163,12 +1177,104 @@ try {
       `invalid metric did not return the safe error document: ${JSON.stringify(invalidMetricCall.result)}`,
     );
 
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-failed-1440.png"), fullPage: true });
+
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
   await field.fill("layout updated without reload");
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
+  if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
+  const listSummaryApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "list_books" });
+  await gateWait.playwright(listSummaryApproval, "waitFor", { timeout: 20000 });
+  await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
+  const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
+  await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
+  const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
+  await gateWait.playwright(summaryBody.getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
+  await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
+  if (screenshotDir) {
+    for (const width of [390, 1280, 1440, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 390) {
+        await page.reload();
+        await gateWait.playwright(page.locator(".page-chat-bar"), "waitFor", { timeout: 20000 });
+        await page.locator(".page-chat-bar").click();
+        await gateWait.playwright(page.getByRole("dialog", { name: "page chat" }), "waitFor", { timeout: 20000 });
+      }
+      await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+  if ((await toolRow.locator('[data-part="tool-raw"] pre').count()) !== 0 && (await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes('"Summary Book 1"'))
+    throw new Error("raw list result was visible before opening raw");
+  if (process.env.ONLY_TOOL_SUMMARY) {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.reload();
+    await gateWait.playwright(page.locator(".page-chat-bar"), "waitFor", { timeout: 20000 });
+    await page.locator(".page-chat-bar").click();
+    await gateWait.playwright(page.getByRole("dialog", { name: "page chat" }), "waitFor", { timeout: 20000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
+  }
+  await toolRow.locator('[data-part="tool-raw"] summary').click();
+  await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
+  if (!(await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes("arguments truncated by zeta"))
+    throw new Error("raw disclosure hid zeta's argument truncation marker");
+  const owningVirtualRow = toolRow.locator('xpath=ancestor::*[@data-virtual-id][1]');
+  const nextTranscriptRow = owningVirtualRow.locator('xpath=following-sibling::*[@data-virtual-id][1]');
+  const rawGeometry = async () => {
+    const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
+    const rowBox = await toolRow.boundingBox();
+    const nextBox = await nextTranscriptRow.boundingBox();
+    const nextText = (await nextTranscriptRow.innerText().catch(() => "")).slice(0, 160);
+    const virtualDebug = await page.locator('[data-part="virtual-debug"]').allTextContents();
+    const timeline = page.locator('[data-part="timeline"]');
+    const virtualDimensions = await timeline.evaluate((node) => ({
+      virtual: node.getAttribute("data-virtual"),
+      styleHeight: (node as HTMLElement).style.height,
+      clientHeight: (node as HTMLElement).clientHeight,
+      scrollHeight: (node as HTMLElement).scrollHeight,
+      childCount: node.children.length,
+      rows: [...node.children].map((row) => ({ id: row.getAttribute("data-virtual-id"), index: row.getAttribute("data-virtual-index"), top: (row as HTMLElement).offsetTop, height: (row as HTMLElement).offsetHeight })).slice(-8),
+    })).catch(() => null);
+    return { rawBox, rowBox, nextBox, nextId: await nextTranscriptRow.getAttribute("data-virtual-id"), nextText, virtualDebug, virtualDimensions };
+  };
+  try {
+    await waitFor(async () => {
+      const { rawBox, nextBox, nextText } = await rawGeometry();
+      return Boolean(rawBox && nextBox && nextText.includes("layout updated") && nextBox.y >= rawBox.y + rawBox.height);
+    }, "raw disclosure remeasured before next transcript row");
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(await rawGeometry())}`);
+  }
+  const geometry = await rawGeometry();
+  const { rawBox, rowBox, nextBox } = geometry;
+  if (!rawBox || !rowBox || !nextBox || !geometry.nextText.includes("layout updated") || nextBox.y < rawBox.y + rawBox.height)
+    throw new Error(`raw disclosure overlaps next transcript row: ${JSON.stringify(geometry)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
+  if (process.env.ONLY_TOOL_SUMMARY) {
+    const rawSummary = toolRow.locator('[data-part="tool-raw"] summary');
+    await rawSummary.click();
+    await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre'), "waitFor", { state: "detached", timeout: 20000 });
+    const closedGeometry = await owningVirtualRow.evaluate((row) => ({ minHeight: (row as HTMLElement).style.minHeight, height: row.getBoundingClientRect().height }));
+    const closedNext = await nextTranscriptRow.boundingBox();
+    if (closedGeometry.minHeight || !closedNext) throw new Error(`raw close left owned virtual height: ${JSON.stringify({ closedGeometry, closedNext })}`);
+    await rawSummary.click();
+    await waitFor(async () => {
+      await rawGeometry();
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      const settled = await rawGeometry();
+      return Boolean(settled.rawBox && settled.nextBox && settled.nextText.includes("layout updated") && settled.nextBox.y >= settled.rawBox.y + settled.rawBox.height);
+    }, "raw disclosure reopened after cleanup");
+    const reopened = await rawGeometry();
+    if (!reopened.rawBox || !reopened.nextBox || reopened.nextBox.y < reopened.rawBox.y + reopened.rawBox.height)
+      throw new Error(`raw disclosure failed after reopen: ${JSON.stringify(reopened)}`);
+    console.log(`isolated raw close cleanup passed: ${JSON.stringify({ closedGeometry, closedNext, reopened })}`);
+    process.exit(0);
+  }
   await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
   await waitFor(async () => {
     const metrics = page.locator(".metric-strip");
@@ -1181,7 +1287,11 @@ try {
   console.log("open page re-rendered without reload after chat update_layout: page note before books");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
   const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  await gateWait.playwright(allBooksMetric.filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
+  try {
+    await waitFor(async () => (await allBooksMetric.innerText()) === "5", "exact all-books metric");
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: observed=${JSON.stringify(await allBooksMetric.innerText().catch(() => "<missing>"))}`);
+  }
   await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
   const saveCountRoute = async (route: Route) => {
     await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });
@@ -1455,7 +1565,7 @@ try {
       headers: { Authorization: `Bearer ${secondCredential}` },
     })
   ).json();
-  if (secondRecords.length !== 1 || secondRecords[0]?.title !== "Synthetic Book")
+  if (secondRecords.length !== 5 || !secondRecords.some((record: { title?: string }) => record.title === "Synthetic Book"))
     throw new Error(`reading page did not retain its book: ${JSON.stringify(secondRecords)}`);
 
   if (createdPage.route !== "/reading") throw new Error("created page route changed");
