@@ -44,6 +44,7 @@ test("a chat turn end (refreshKey change) keeps typed values and the same inputs
   serve({ version: 1, input_schema: schema() });
   mounted = render(block("0:0"));
   const status = await view().findByRole("button", { name: /status/ });
+  expect(status.getAttribute("name")).toBe("status");
   await chooseStatus("done");
   // The tool gains a field during the turn; the form takes the new schema in place.
   serve({ version: 2, input_schema: schema({ rating: { type: "number" } }) });

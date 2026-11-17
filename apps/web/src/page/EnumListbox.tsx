@@ -5,6 +5,9 @@ type EnumListboxProps = {
   value: string;
   options: readonly string[];
   onChange: (value: string) => void;
+  id?: string;
+  name?: string;
+  required?: boolean;
   label?: string;
   "aria-describedby"?: string;
   invalid?: boolean;
@@ -17,13 +20,16 @@ export function EnumListbox({
   value,
   options,
   onChange,
+  id,
+  name,
+  required = false,
   label,
   "aria-describedby": describedBy,
   invalid = false,
   disabled = false,
 }: EnumListboxProps) {
   const baseId = useId().replace(/:/g, "");
-  const buttonId = `${baseId}-button`;
+  const buttonId = id ?? `${baseId}-button`;
   const listboxId = `${baseId}-listbox`;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -140,6 +146,8 @@ export function EnumListbox({
         aria-expanded={open}
         aria-controls={listboxId}
         aria-labelledby={labelId}
+        name={name}
+        aria-required={required || undefined}
         aria-describedby={describedBy}
         aria-invalid={invalid || undefined}
         disabled={disabled}

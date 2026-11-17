@@ -6,6 +6,4 @@ if (!processState[registrationKey]) {
   GlobalRegistrator.register();
   processState[registrationKey] = true;
 }
-const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
-actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-if (actEnvironment.IS_REACT_ACT_ENVIRONMENT !== true) throw new Error("shared test DOM must enable React act environment");
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
