@@ -967,7 +967,7 @@ try {
     document.layout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
     await route.fulfill({ response, body: JSON.stringify(document), headers: { "content-type": "application/json" } });
   });
-  await page.reload();
+  await page.goto(page.url(), { waitUntil: "domcontentloaded" });
   const updateHeading = page.getByRole("heading", { name: /update book/ });
   await gateWait.playwright(updateHeading, "waitFor", { timeout: 20_000 });
   const disabledTitle = page.locator('.record-form[data-operation="update"] input[name="title"]');
