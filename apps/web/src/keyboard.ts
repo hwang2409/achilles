@@ -1,3 +1,5 @@
+import { useLayoutEffect, type RefObject } from "react";
+
 export function isEditableTarget(event: KeyboardEvent) {
   const target = event.target;
   return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable], [role="textbox"], .cm-editor'));
@@ -34,6 +36,18 @@ export const keyboardFocusToComposer = (event: { detail: number; currentTarget: 
 };
 
 // keeps Tab inside `container`: from the last tabbable control to the first, and back with Shift+Tab
+export function useModalFocus(open: boolean, container: RefObject<HTMLElement | null>, initial?: RefObject<HTMLElement | null>) {
+  useLayoutEffect(() => {
+    if (!open) return;
+    const node = container.current;
+    if (!node) return;
+    const key = (event: KeyboardEvent) => wrapTab(event, node);
+    window.addEventListener("keydown", key, true);
+    (initial?.current ?? firstFocusable(node))?.focus();
+    return () => window.removeEventListener("keydown", key, true);
+  }, [open, container, initial]);
+}
+
 export function wrapTab(event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault">, container: HTMLElement) {
   if (event.key !== "Tab") return;
   const controls = Array.from(container.querySelectorAll<HTMLElement>(focusable)).filter(tabbable);

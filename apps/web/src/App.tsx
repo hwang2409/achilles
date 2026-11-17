@@ -13,7 +13,7 @@ import { HistoryDialog } from "./page/HistoryDialog";
 import { useRecordWrites } from "./page/RecordForm";
 import { PageView } from "./page/PageView";
 import { EmptyChat } from "./EmptyChat";
-import { isEditableTarget, keyboardFocusToComposer } from "./keyboard";
+import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
 import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
@@ -234,6 +234,7 @@ export function App() {
   useEffect(() => {
     setMobileChatOpen(false);
   }, [ready?.sessionId, activePage?.id]);
+  useModalFocus(pageChatSheetOpen && hasBlocks, pageChatSurface, pageChatClose);
   useEffect(() => {
     if (!pageChatSheetOpen || !hasBlocks) {
       if (mobileChatWasOpen.current) pageChatButton.current?.focus();
@@ -241,30 +242,13 @@ export function App() {
       return;
     }
     mobileChatWasOpen.current = true;
-    pageChatClose.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       setMobileChatOpen(false);
     };
-    const trapTab = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const focusable = [...pageChatSurface.current?.querySelectorAll<HTMLElement>('button, textarea, input, select, a[href], [tabindex]:not([tabindex="-1"])') ?? []]
-        .filter((element) => !element.hasAttribute("disabled") && element.getClientRects().length > 0);
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      }
-    };
     window.addEventListener("keydown", closeOnEscape);
-    pageChatSurface.current?.addEventListener("keydown", trapTab);
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape);
-      pageChatSurface.current?.removeEventListener("keydown", trapTab);
-    };
+    return () => window.removeEventListener("keydown", closeOnEscape);
   }, [pageChatSheetOpen, hasBlocks]);
   // layout effect: the reset for a new store lands before paint, so the previous chat's control never shows for a frame
   useLayoutEffect(() => {

@@ -936,9 +936,33 @@ try {
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-390x844.png"), fullPage: true });
+  await page.evaluate(() => {
+    const originalAdd = window.addEventListener.bind(window);
+    const result = { prevented: false, inside: false };
+    let armed = true;
+    (window as typeof window & { __pageChatFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame = { result, originalAdd: window.addEventListener };
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      originalAdd(type, listener, options);
+      if (armed && type === "keydown" && options === true) {
+        armed = false;
+        const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        window.dispatchEvent(event);
+        result.prevented = event.defaultPrevented;
+        result.inside = Boolean(document.activeElement?.closest('[role="dialog"]'));
+      }
+    }) as typeof window.addEventListener;
+  });
   await pageChatBar.click();
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  const firstFrameTabPrevented = await page.evaluate(() => {
+    const state = (window as typeof window & { __pageChatFirstFrame?: { result: { prevented: boolean; inside: boolean }; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame;
+    if (!state) return false;
+    window.addEventListener = state.originalAdd;
+    delete (window as typeof window & { __pageChatFirstFrame?: unknown }).__pageChatFirstFrame;
+    return state.result.inside;
+  });
+  if (!firstFrameTabPrevented) throw new Error("390px page chat first-frame Tab was not trapped inside the modal sheet");
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
   for (let index = 0; index < 8; index += 1) {
