@@ -401,7 +401,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                         "expected_version": 1,
                     },
                 ),
-                ToolCall("list-books-summary", "achilles__list_books", {"search": "synthetic-" + "x" * 9_000}),
+                ToolCall(
+                    "list-books-summary",
+                    "achilles__list_books",
+                    {"search": "synthetic-" + "x" * 9_000},
+                ),
             ]
         ),
         ScriptedTurn(content=[TextContent("layout updated")]),
