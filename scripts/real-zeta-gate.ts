@@ -960,12 +960,14 @@ try {
   await page.unroute(recordsPattern);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-c-recovered-1440.png"), fullPage: true });
 
-  const pageApiPattern = `**/api/pages/${createdPage.id}`;
+  const pageApiPattern = "**/api/pages/*";
   await page.route(pageApiPattern, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== `/api/pages/${createdPage.id}`) return route.fallback();
     const response = await route.fetch();
     const document = await response.json() as { layout: { blocks: Array<Record<string, unknown>> } };
     document.layout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
-    await route.fulfill({ response, body: JSON.stringify(document), headers: { "content-type": "application/json" } });
+    await route.fulfill({ status: response.status(), headers: response.headers(), body: JSON.stringify(document) });
   });
   await page.goto(page.url(), { waitUntil: "domcontentloaded" });
   const updateHeading = page.getByRole("heading", { name: /update book/ });
