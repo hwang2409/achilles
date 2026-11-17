@@ -250,7 +250,9 @@ test("page-owned metric counts keep unchanged values across layout lifecycles", 
       result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.readd } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
       expect(calls).toHaveLength(initialCount + 1);
       await settle(calls[initialCount], [{ record_id: "new-value" }, { record_id: "new-value-2" }]);
+      expect(value(result, "two")).toBe("2");
       await settle(calls[1], [{ record_id: "stale" }]);
+      expect(value(result, "two")).toBe("2");
     } else {
       expect(calls).toHaveLength(initialCount + scenario.extra!);
       for (const call of calls.slice(initialCount)) await settle(call, [{ record_id: "new" }]);
