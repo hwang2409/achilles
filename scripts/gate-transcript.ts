@@ -236,7 +236,7 @@ export async function gateTranscript(
     const original = element.scrollTo.bind(element);
     element.scrollTo = ((options: ScrollToOptions | number, y?: number) => {
       if (typeof options === "object" && options.behavior === "smooth") {
-        original({ top: (options.top ?? element.scrollTop) - 20, behavior: "auto" });
+        setTimeout(() => original({ top: Math.max(0, element.scrollTop - 200), behavior: "auto" }), 150);
       } else if (typeof options === "number") {
         original(options, y);
       } else {
@@ -249,8 +249,16 @@ export async function gateTranscript(
   await textOnlyJump.focus();
   if (!(await focusKept("text-jump"))) throw new Error("text-only jump to latest control is not keyboard focusable");
   await textOnlyJump.click();
+  await page.waitForTimeout(100);
+  const jumpedBeforeRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest"]')?.getClientRects().length) }));
+  if (jumpedBeforeRelease.gap > 4 || jumpedBeforeRelease.jumpVisible)
+    throw new Error(`jump to latest did not land before releasing held chunks: ${JSON.stringify(jumpedBeforeRelease)}`);
   const heldJumpControl = JSON.parse(await Bun.file(controlPath).text());
   await writeControl(controlPath, { ...heldJumpControl, release_jump_stream_barrier: true });
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 081"), "several chunks after jump");
+  const jumpedAfterRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest"]')?.getClientRects().length) }));
+  if (jumpedAfterRelease.gap > 4 || jumpedAfterRelease.jumpVisible)
+    throw new Error(`mid-stream jump did not stay at bottom after several chunks: ${JSON.stringify(jumpedAfterRelease)}`);
   await waitFor(async () => await distanceFromBottom() <= 4 && await page.locator('[data-part="jump-to-latest"]:visible').count() === 0, "jump to latest for this turn");
   const jumped = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop }));
   if (jumped.gap > 4 || await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
