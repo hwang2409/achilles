@@ -67,11 +67,20 @@ describe("tool summaries", () => {
     expect(lines).toEqual(["book · today · shelf"]);
   });
 
-  test("bounds raw formatting and marks deep and cyclic values", () => {
-    const huge: Record<string, unknown> = {};
-    for (let index = 0; index < 100_000; index += 1) huge[`key_${index}`] = index;
+  test("bounds raw formatting and stops property inspection at the node budget", () => {
+    const keys = Array.from({ length: 100_000 }, (_, index) => `key_${index}`);
+    let descriptors = 0;
+    const huge = new Proxy(Object.create(null), {
+      ownKeys: () => keys,
+      getOwnPropertyDescriptor: (_target, key) => {
+        descriptors += 1;
+        return { enumerable: true, configurable: true, value: key };
+      },
+      get: (_target, key) => key,
+    });
     const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
     expect(formatToolArguments(huge)).toContain("[truncated]");
+    expect(descriptors).toBeLessThanOrEqual(1024);
     expect(formatToolArguments({ deep: { deeper: { value: 1 } } })).toContain('"value": 1');
     expect(formatToolArguments(cyclic)).toContain("[circular]");
   });

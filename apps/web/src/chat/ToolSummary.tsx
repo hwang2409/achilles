@@ -143,10 +143,31 @@ const MAX_RAW_NODES = 512;
 const MAX_RAW_DEPTH = 12;
 const MAX_RAW_TEXT = 16_000;
 
-type RawState = { nodes: number; seen: WeakSet<object>; truncated: boolean };
+type RawState = { nodes: number; seen: WeakSet<object>; text: number; truncated: boolean };
+type RawChild = { key: string; value: unknown };
+
+function* rawChildren(current: object, state: RawState): Generator<RawChild> {
+  if (Array.isArray(current)) {
+    for (let index = 0; index < current.length; index += 1) {
+      if (state.nodes >= MAX_RAW_NODES || state.text >= MAX_RAW_TEXT) { state.truncated = true; return; }
+      if (!Object.prototype.hasOwnProperty.call(current, index)) continue;
+      let value: unknown;
+      try { value = current[index]; } catch { value = "[unavailable]"; }
+      yield { key: String(index), value };
+    }
+    return;
+  }
+  for (const key in current) {
+    if (!Object.prototype.propertyIsEnumerable.call(current, key)) continue;
+    if (state.nodes >= MAX_RAW_NODES || state.text >= MAX_RAW_TEXT) { state.truncated = true; return; }
+    let value: unknown;
+    try { value = (current as Record<string, unknown>)[key]; } catch { value = "[unavailable]"; }
+    yield { key, value };
+  }
+}
 
 function formatRaw(value: unknown): string {
-  const state: RawState = { nodes: 0, seen: new WeakSet(), truncated: false };
+  const state: RawState = { nodes: 0, seen: new WeakSet(), text: 0, truncated: false };
   const visit = (current: unknown, depth: number, indent: string): string => {
     if (state.nodes++ >= MAX_RAW_NODES || depth > MAX_RAW_DEPTH) {
       state.truncated = true;
@@ -161,13 +182,11 @@ function formatRaw(value: unknown): string {
     state.seen.add(current);
     const nextIndent = `${indent}  `;
     const entries: string[] = [];
-    const keys = Array.isArray(current) ? Object.keys(current) : Object.keys(current as Record<string, unknown>);
-    for (const key of keys) {
-      if (state.nodes >= MAX_RAW_NODES || entries.join("\\n").length >= MAX_RAW_TEXT) { state.truncated = true; break; }
-      let child: unknown;
-      try { child = (current as Record<string, unknown>)[key]; } catch { child = "[unavailable]"; }
+    for (const { key, value } of rawChildren(current, state)) {
       const label = Array.isArray(current) ? "" : `${JSON.stringify(key)}: `;
-      entries.push(`${nextIndent}${label}${visit(child, depth + 1, nextIndent)}`);
+      const child = `${nextIndent}${label}${visit(value, depth + 1, nextIndent)}`;
+      state.text += child.length;
+      entries.push(child);
     }
     state.seen.delete(current);
     const open = Array.isArray(current) ? "[" : "{";
