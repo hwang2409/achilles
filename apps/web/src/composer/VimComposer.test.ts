@@ -1,5 +1,5 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "../test-dom";
+import { afterEach, expect, test } from "bun:test";
 import { act } from "react";
 import React from "react";
 import { cleanup, render } from "@testing-library/react";
@@ -8,11 +8,6 @@ import { RunProvider } from "@fulcrum/react";
 import { AppShell } from "../AppShell";
 import { VimComposer } from "./VimComposer";
 
-GlobalRegistrator.register();
-afterAll(() => GlobalRegistrator.unregister());
-beforeAll(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-});
 afterEach(cleanup);
 
 let chatSeq = 0;

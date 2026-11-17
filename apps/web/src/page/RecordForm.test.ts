@@ -1,13 +1,7 @@
-import { afterAll, afterEach, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "../test-dom";
+import { afterEach, expect, test } from "bun:test";
 
-// Saved before register so afterAll restores bun's own globals, not happy-dom's.
 const originalFetch = globalThis.fetch;
-const originalActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT;
-GlobalRegistrator.register();
-// testing-library sets this only on its first import, which another test file may have done and then reset.
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-afterAll(() => { GlobalRegistrator.unregister(); globalThis.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment; });
 
 const { act, createElement, useState } = await import("react");
 const { fireEvent, render, waitFor } = await import("@testing-library/react");

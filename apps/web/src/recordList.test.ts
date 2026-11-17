@@ -1,5 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./test-dom";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
@@ -9,8 +9,6 @@ import type { PageTool } from "./page/usePageTools";
 
 const originalFetch = globalThis.fetch;
 
-GlobalRegistrator.register();
-afterAll(() => GlobalRegistrator.unregister());
 
 type Deferred = { promise: Promise<Response>; resolve: (response: Response) => void };
 
@@ -25,15 +23,10 @@ type RecordListProps = {
 const props: RecordListProps = { title: "reading", collection: "books", pageId: "page-one", credential: "secret", refreshKey: "0:0" };
 let calls: Deferred[] = [];
 
-beforeAll(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-});
-
 afterEach(cleanup);
 
 afterAll(() => {
   globalThis.fetch = originalFetch;
-  delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 
 function deferred(): Deferred {
