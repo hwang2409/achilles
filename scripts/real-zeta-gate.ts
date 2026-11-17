@@ -965,6 +965,19 @@ try {
   if (!firstFrameTabPrevented) throw new Error("390px page chat first-frame Tab was not trapped inside the modal sheet");
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
+  await page.keyboard.press("ControlOrMeta+Comma");
+  const nativeSettings = page.getByRole("dialog", { name: "settings" });
+  await gateWait.playwright(nativeSettings, "waitFor", { state: "visible" });
+  const nativeLast = nativeSettings.locator("button, input, select, textarea").last();
+  await nativeLast.focus();
+  await page.keyboard.press("Tab");
+  if (!(await nativeSettings.evaluate((dialog) => dialog.contains(document.activeElement)))) throw new Error("native settings Tab escaped the page chat sheet");
+  await page.keyboard.press("Escape");
+  await gateWait.playwright(nativeSettings, "waitFor", { state: "hidden" });
+  const pageChatLast = pageChatSurface.locator("button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])").last();
+  await pageChatLast.focus();
+  await page.keyboard.press("Tab");
+  if (!(await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement)))) throw new Error("page chat focus trap did not resume after native settings closed");
   for (let index = 0; index < 8; index += 1) {
     await page.keyboard.press("Tab");
     if (!(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))))

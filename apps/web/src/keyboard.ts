@@ -36,12 +36,21 @@ export const keyboardFocusToComposer = (event: { detail: number; currentTarget: 
 };
 
 // keeps Tab inside `container`: from the last tabbable control to the first, and back with Shift+Tab
+const nativeModal = (event: KeyboardEvent) => {
+  const pathDialog = event.composedPath().find((target): target is HTMLDialogElement => target instanceof HTMLDialogElement);
+  if (pathDialog?.matches(":modal")) return true;
+  return document.querySelector<HTMLDialogElement>("dialog:modal") !== null;
+};
+
 export function useModalFocus(open: boolean, container: RefObject<HTMLElement | null>, initial?: RefObject<HTMLElement | null>) {
   useLayoutEffect(() => {
     if (!open) return;
     const node = container.current;
     if (!node) return;
-    const key = (event: KeyboardEvent) => wrapTab(event, node);
+    const key = (event: KeyboardEvent) => {
+      if (nativeModal(event)) return;
+      wrapTab(event, node);
+    };
     window.addEventListener("keydown", key, true);
     (initial?.current ?? firstFocusable(node))?.focus();
     return () => window.removeEventListener("keydown", key, true);
