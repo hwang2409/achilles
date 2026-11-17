@@ -912,8 +912,8 @@ try {
   await gateWait.playwright(longMetric, "waitFor");
   const longMetricLabel = longMetric.locator(".metric-label");
   const longMetricValue = longMetric.locator("strong");
-  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "9,999,999,999,999,999")
-    throw new Error(`long metric did not render its full label and value: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
+  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || await longMetricValue.getAttribute("aria-label") !== "legacy total with an unusually long descriptive label: 9,999,999,999,999,999")
+    throw new Error(`long metric did not retain its full value accessibly: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const desktopViewport = page.viewportSize();
