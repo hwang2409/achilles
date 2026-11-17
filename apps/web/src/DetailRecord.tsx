@@ -66,11 +66,15 @@ export function DetailRecordView({ title, collection, fields, filter, records, t
   const selectedTitle = selectedMatches ? String(selected.title ?? selected.name ?? selected.label ?? title) : title;
   return <section className="record-detail">
     <h2>{selectedMatches ? <>{selectedTitle} <small className="selected-note">selected</small></> : title}</h2>
-    {error ? <p role="alert">{error}</p>
-      : <>{refreshing && <p role="status">loading record…</p>}{shownRecords === null ? null
-      : !firstRecord ? <p>no {collection} with {filter.field} = {filterValue} yet</p>
-      : <><dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(firstRecord[field] ?? "")} />{formatValue(firstRecord[field]) || "—"}</> : formatValue(firstRecord[field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="match-note">{total} records match</p>}</>}</>}
+    <DetailRecordBody error={error} refreshing={refreshing} records={shownRecords} firstRecord={firstRecord} collection={collection} filter={filter} filterValue={filterValue} fields={fields} total={total} selectedMatches={selectedMatches} />
   </section>;
+}
+
+function DetailRecordBody({ error, refreshing, records, firstRecord, collection, filter, filterValue, fields, total, selectedMatches }: { error: string | null; refreshing: boolean; records: Record<string, unknown>[] | null; firstRecord?: Record<string, unknown>; collection: string; filter: DetailFilter; filterValue: string; fields: string[]; total: number; selectedMatches: boolean }) {
+  if (error) return <p role="alert">{error}</p>;
+  if (records === null) return <>{refreshing && <p role="status">loading record…</p>}</>;
+  if (!firstRecord) return <>{refreshing && <p role="status">loading record…</p>}<p>no {collection} with {filter.field} = {filterValue} yet</p></>;
+  return <>{refreshing && <p role="status">loading record…</p>}<dl>{fields.map((field) => <div key={field}><dt>{field}</dt><dd>{field === "status" ? <><RecordMark status={String(firstRecord[field] ?? "")} />{formatValue(firstRecord[field]) || "—"}</> : formatValue(firstRecord[field]) || "—"}</dd></div>)}</dl>{total > 1 && !selectedMatches && <p className="match-note">{total} records match</p>}</>;
 }
 
 function formatValue(value: unknown): string {

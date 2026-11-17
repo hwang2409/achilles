@@ -145,13 +145,21 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const loadedRecords = records ?? [];
   const [focusedId, setFocusedId] = useState<unknown>(undefined);
   const [expanded, setExpanded] = useState(false);
-  const has = (id: unknown) => id !== undefined && loadedRecords.some((record) => record.record_id === id);
-  const tabStop = has(focusedId) ? focusedId : has(selectedId) ? selectedId : loadedRecords[0]?.record_id;
+  const projection = recordListProjection(loadedRecords, total, expanded, focusedId, selectedId);
   const columns = !chosen?.length ? recordColumns(loadedRecords) : extendColumns ? extendWithRecordKeys(chosen, loadedRecords) : chosen;
   const loading = (records === null || chosen === null) && !error;
   const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>) => handleRecordKeyDown(event, record, onSelect);
-  const visible = expanded ? loadedRecords : loadedRecords.slice(0, 5);
-  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{total.toLocaleString()}</span></h2><span>sorted by updated</span></header>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : loadedRecords.length === 0 ? <p>no records yet</p> : <><LoadedRecordTable columns={columns} records={visible} collection={collection} title={title} selectedId={selectedId} tabStop={tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{total > 5 && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${total - 5} more`}</button><small>{expanded ? `${loadedRecords.length} of ${total}` : `5 of ${total}`}</small></div>}</>}</section>;
+  return <section className="record-list" aria-busy={loading}><header><h2>{title} <span className="record-count">{total.toLocaleString()}</span></h2><span>sorted by updated</span></header>{error ? <p role="alert">{error}</p> : loading ? <p role="status">loading records…</p> : projection.loaded.length === 0 ? <p>no records yet</p> : <><LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}</>}</section>;
+}
+
+type RecordListProjection = { loaded: Record<string, unknown>[]; visible: Record<string, unknown>[]; tabStop: unknown; loadedRemaining: number; total: number; showReveal: boolean };
+
+function recordListProjection(records: Record<string, unknown>[], total: number, expanded: boolean, focusedId: unknown, selectedId: unknown): RecordListProjection {
+  const visible = expanded ? records : records.slice(0, 5);
+  const visibleHas = (id: unknown) => id !== undefined && visible.some((record) => record.record_id === id);
+  const tabStop = visibleHas(focusedId) ? focusedId : visibleHas(selectedId) ? selectedId : visible[0]?.record_id;
+  const loadedRemaining = Math.max(records.length - visible.length, 0);
+  return { loaded: records, visible, tabStop, loadedRemaining, total, showReveal: records.length > 5 };
 }
 
 function handleRecordKeyDown(event: KeyboardEvent<HTMLTableRowElement>, record: Record<string, unknown>, onSelect?: (record: Record<string, unknown> | null, row: HTMLElement) => void) {

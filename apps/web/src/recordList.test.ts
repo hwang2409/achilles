@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
-import { LayoutBlock, PageView, RecordList } from "./page/PageView";
+import { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import type { PageTool } from "./page/usePageTools";
 
@@ -184,6 +184,33 @@ describe("list columns", () => {
 });
 
 
+test("record list reveal projection keeps loaded rows and one reachable tab stop", () => {
+  const rows = Array.from({ length: 8 }, (_, index) => ({ record_id: `book-${index + 1}`, title: `book ${index + 1}` }));
+  const cases = [
+    { name: "collapsed", total: 8, expanded: false, expectedRows: 5, expectedAction: "show 3 more", expectedCount: "5 of 8" },
+    { name: "expanded", total: 8, expanded: true, initialAction: "show 3 more", expectedRows: 8, expectedAction: "show less", expectedCount: "8 of 8" },
+    { name: "loaded less than server total", total: 1000, expanded: false, records: Array.from({ length: 100 }, (_, index) => ({ record_id: `loaded-${index}`, title: `loaded ${index}` })), expectedRows: 5, expectedAction: "show 95 more", expectedCount: "5 of 1000" },
+    { name: "expanded loaded less than server total", total: 1000, expanded: true, initialAction: "show 95 more", records: Array.from({ length: 100 }, (_, index) => ({ record_id: `loaded-${index}`, title: `loaded ${index}` })), expectedRows: 100, expectedAction: "show less", expectedCount: "100 of 1000" },
+  ];
+  for (const scenario of cases) {
+    const result = render(React.createElement(RecordListView, { title: "reading", collection: "books", records: scenario.records ?? rows, columns: ["title"], total: scenario.total, error: null, selectedId: undefined, onSelect: () => {} }));
+    if (scenario.expanded) fireEvent.click(result.getByRole("button", { name: scenario.initialAction }));
+    expect(result.getAllByRole("row")).toHaveLength(scenario.expectedRows + 1);
+    expect(result.getByRole("button").textContent).toBe(scenario.expectedAction);
+    expect(result.getByText(scenario.expectedCount)).toBeTruthy();
+    if (scenario.name === "collapsed") {
+      fireEvent.click(result.getByRole("button", { name: "show 3 more" }));
+      fireEvent.focus(result.getAllByRole("row")[6]);
+      fireEvent.click(result.getByRole("button", { name: "show less" }));
+      const visibleTabStops = result.getAllByRole("row").slice(1).filter((row) => row.getAttribute("tabindex") === "0");
+      expect(visibleTabStops).toHaveLength(1);
+      expect(visibleTabStops[0]?.getAttribute("data-record-id")).toBe("book-1");
+      expect(result.getByRole("button").textContent).toBe("show 3 more");
+    }
+    cleanup();
+  }
+});
+
 test("page metrics render a live static layout value", () => {
   const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "score", value: "1" }] } };
   const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
@@ -211,9 +238,12 @@ test("page-owned metric counts keep unchanged values across layout lifecycles", 
     const result = render(React.createElement(PageView, { page, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
     const initialCount = scenario.initial.filter((block) => block.type === "metric").length;
     expect(calls).toHaveLength(initialCount);
-    for (let index = 0; index < initialCount; index++) await settle(calls[index], [{ record_id: `${index}-one` }, ...(index ? [{ record_id: `${index}-two` }] : [])]);
+    for (let index = 0; index < initialCount; index++) {
+      if (scenario.readd && index === 1) continue;
+      await settle(calls[index], [{ record_id: `${index}-one` }, ...(index ? [{ record_id: `${index}-two` }] : [])]);
+    }
     expect(value(result, "one")).toBe("1");
-    if (scenario.initial.length > 1) expect(value(result, "two")).toBe("2");
+    if (scenario.initial.length > 1 && !scenario.readd) expect(value(result, "two")).toBe("2");
     result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.next } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
     if (scenario.readd) {
       expect(calls).toHaveLength(initialCount);
