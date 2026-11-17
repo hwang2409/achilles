@@ -36,6 +36,7 @@ function useMetricCounts(blocks: Array<Record<string, unknown>>, pageId: string,
   const writes = useRecordWrites(pageId);
   const generation = `${chatRefreshKey}:${writes}`;
   const entries = useRef(new Map<string, CountEntry>());
+  const requestSequence = useRef(0);
   const [, redraw] = useState(0);
   const queries = blocks.filter((block) => metricQueryKey(block, pageId, credential)).map((block) => ({ block, key: metricQueryKey(block, pageId, credential)! }));
   const queryShape = queries.map(({ key }) => key).join("\n");
@@ -45,7 +46,7 @@ function useMetricCounts(blocks: Array<Record<string, unknown>>, pageId: string,
     for (const { block, key } of queries) {
       const previous = entries.current.get(key);
       if (previous?.generation === generation) continue;
-      const request = (previous?.request ?? 0) + 1;
+      const request = ++requestSequence.current;
       entries.current.set(key, { value: "…", generation, request });
       const query = new URLSearchParams({ limit: "1" });
       if (block.where && typeof block.where === "object") {

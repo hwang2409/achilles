@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
-import { LayoutBlock, PageView, RecordList } from "./App";
+import { LayoutBlock, PageView, RecordList } from "./page/PageView";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import type { PageTool } from "./page/usePageTools";
 
@@ -192,34 +192,71 @@ test("page metrics render a live static layout value", () => {
   expect(result.getByText("2")).toBeTruthy();
 });
 
-test("page-owned metric counts survive layout edits and refresh after writes", async () => {
-  holdFetches();
+test("page-owned metric counts keep unchanged values across layout lifecycles", async () => {
   const metric = (label: string) => ({ type: "metric", label, count: true, collection: `books-${label}` });
-  const page = { title: "page", route: "/page", layout: { blocks: [metric("one"), metric("two")] } };
-  const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
-  expect(calls).toHaveLength(2);
-  await settle(calls[0], []);
-  await settle(calls[1], [{ record_id: "book-1" }]);
-  expect(text(result)).toContain("0");
-  expect(text(result)).toContain("1");
-  result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: [metric("new"), metric("one"), metric("two")] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
-  expect(calls).toHaveLength(3);
-  await settle(calls[2], [{ record_id: "book-2" }, { record_id: "book-3" }]);
-  expect(text(result)).toContain("2");
-  result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: [metric("one"), metric("two")] } }, pageId: "metric-page", credential: "secret", refreshKey: "0:1" }));
-  expect(calls).toHaveLength(5);
-  await settle(calls[3], [{ record_id: "book-4" }]);
-  await settle(calls[4], [{ record_id: "book-5" }]);
-  expect(text(result)).toContain("1");
+  const value = (result: RenderResult, label: string) => [...result.container.querySelectorAll(".metric-label")].find((node) => node.textContent === label)?.closest(".metric-block")?.querySelector(".metric-value")?.textContent;
+  const cases = [
+    { name: "prepend", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
+    { name: "remove and re-add in flight", initial: [metric("one"), metric("two")], next: [metric("one")], readd: [metric("one"), metric("two")] },
+    { name: "lone metric gains a neighbour", initial: [metric("one")], next: [metric("one"), metric("two")], extra: 1 },
+    { name: "strip inserted above", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
+    { name: "list inserted between metrics", initial: [metric("one"), metric("two")], next: [metric("one"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("two")], extra: 1 },
+  ];
+  for (const scenario of cases) {
+    holdFetches();
+    const page = { title: scenario.name, route: "/page", layout: { blocks: scenario.initial } };
+    const result = render(React.createElement(PageView, { page, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+    const initialCount = scenario.initial.length;
+    expect(calls).toHaveLength(initialCount);
+    await settle(calls[0], [{ record_id: "one" }]);
+    if (!scenario.readd) {
+      if (calls[1]) await settle(calls[1], [{ record_id: "two" }, { record_id: "two-b" }]);
+      if (scenario.initial.length > 1) expect(value(result, "two")).toBe("2");
+    }
+    expect(value(result, "one")).toBe("1");
+    result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.next } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+    if (scenario.readd) {
+      expect(calls).toHaveLength(initialCount);
+      result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.readd } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+      expect(calls).toHaveLength(initialCount + 1);
+      await settle(calls[initialCount], [{ record_id: "new-value" }, { record_id: "new-value-2" }]);
+      await settle(calls[1], [{ record_id: "stale" }]);
+      expect(value(result, "two")).toBe("2");
+    } else {
+      expect(calls).toHaveLength(initialCount + scenario.extra!);
+      if (scenario.name === "list inserted between metrics") await settle(calls[initialCount], []);
+      else await settle(calls[initialCount], [{ record_id: "new" }]);
+    }
+    expect(value(result, "one")).toBe("1");
+    if (!scenario.readd) expect(value(result, "two")).toBe(scenario.initial.length > 1 ? "2" : "1");
+    expect(value(result, "one")).not.toBe("…");
+    expect(value(result, "two")).not.toBe("…");
+  }
 });
 
-test("keyboard and click selection update the row and detail", async () => {
+test("page-owned counts refresh for a new generation", async () => {
+  holdFetches();
+  const metric = { type: "metric", label: "total", count: true, collection: "books" };
+  const page = { title: "page", route: "/page", layout: { blocks: [metric] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-refresh", credential: "secret", refreshKey: "0" }));
+  await settle(calls[0], [{ record_id: "one" }]);
+  expect(result.getByText("1")).toBeTruthy();
+  result.rerender(React.createElement(PageView, { page, pageId: "metric-refresh", credential: "secret", refreshKey: "0:1" }));
+  expect(calls).toHaveLength(2);
+  await settle(calls[1], [{ record_id: "one" }, { record_id: "two" }]);
+  expect(result.getByText("2")).toBeTruthy();
+});
+
+test("keyboard and click selection update the row and detail without auto-scroll", async () => {
   holdFetches();
   const page = { title: "reading", route: "/reading", layout: { blocks: [
     { type: "list", title: "books", collection: "books", fields: ["title", "status"] },
     { type: "detail", title: "selected book", collection: "books", fields: ["title"], filter: { field: "status", equals: "reading" } },
   ] } };
   const result = render(React.createElement(PageView, { page, pageId: "selection-page", credential: "secret", refreshKey: "0" }));
+  const scrollIntoView = HTMLElement.prototype.scrollIntoView;
+  let scrolls = 0;
+  HTMLElement.prototype.scrollIntoView = () => { scrolls += 1; };
   const first = { record_id: "book-1", title: "first book", status: "reading" };
   const second = { record_id: "book-2", title: "second book", status: "reading" };
   await settle(calls[0], [first, second]);
@@ -234,4 +271,6 @@ test("keyboard and click selection update the row and detail", async () => {
   await act(async () => fireEvent.click(rows[2]));
   expect(rows[2].getAttribute("aria-selected")).toBe("true");
   expect(result.getAllByText("second book").length).toBeGreaterThan(1);
+  expect(scrolls).toBe(0);
+  HTMLElement.prototype.scrollIntoView = scrollIntoView;
 });
