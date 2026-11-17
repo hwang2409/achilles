@@ -54,7 +54,14 @@ class BarrierBackend(FakeBackend):
                 request_serializer=request_serializer,
             ),
             "sb7 page stream": FakeBackend(
-                [ScriptedTurn(content=[TextContent(f"sb7 stream line {index:03d}\\n") for index in range(120)], delay=0.03)],
+                [
+                    ScriptedTurn(
+                        content=[
+                            TextContent(f"sb7 stream line {index:03d}\\n") for index in range(120)
+                        ],
+                        delay=0.03,
+                    )
+                ],
                 request_serializer=request_serializer,
             ),
         }
