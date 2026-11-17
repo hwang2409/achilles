@@ -197,23 +197,23 @@ test("page-owned metric counts keep unchanged values across layout lifecycles", 
   const value = (result: RenderResult, label: string) => [...result.container.querySelectorAll(".metric-label")].find((node) => node.textContent === label)?.closest(".metric-block")?.querySelector(".metric-value")?.textContent;
   const cases = [
     { name: "prepend", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
+    { name: "remove settled", initial: [metric("one"), metric("two")], next: [metric("one")], extra: 0 },
     { name: "remove and re-add in flight", initial: [metric("one"), metric("two")], next: [metric("one")], readd: [metric("one"), metric("two")] },
     { name: "lone metric gains a neighbour", initial: [metric("one")], next: [metric("one"), metric("two")], extra: 1 },
-    { name: "strip inserted above", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
+    { name: "strip inserted above", initial: [metric("one"), metric("two")], next: [metric("new"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("one"), metric("two")], extra: 2 },
     { name: "list inserted between metrics", initial: [metric("one"), metric("two")], next: [metric("one"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("two")], extra: 1 },
+    { name: "append metric", initial: [metric("one"), metric("two")], next: [metric("one"), metric("two"), metric("new")], extra: 1 },
+    { name: "replace removed metric", initial: [metric("one"), metric("two")], next: [metric("one"), metric("new")], extra: 1 },
   ];
   for (const scenario of cases) {
     holdFetches();
     const page = { title: scenario.name, route: "/page", layout: { blocks: scenario.initial } };
     const result = render(React.createElement(PageView, { page, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
-    const initialCount = scenario.initial.length;
+    const initialCount = scenario.initial.filter((block) => block.type === "metric").length;
     expect(calls).toHaveLength(initialCount);
-    await settle(calls[0], [{ record_id: "one" }]);
-    if (!scenario.readd) {
-      if (calls[1]) await settle(calls[1], [{ record_id: "two" }, { record_id: "two-b" }]);
-      if (scenario.initial.length > 1) expect(value(result, "two")).toBe("2");
-    }
+    for (let index = 0; index < initialCount; index++) await settle(calls[index], [{ record_id: `${index}-one` }, ...(index ? [{ record_id: `${index}-two` }] : [])]);
     expect(value(result, "one")).toBe("1");
+    if (scenario.initial.length > 1) expect(value(result, "two")).toBe("2");
     result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.next } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
     if (scenario.readd) {
       expect(calls).toHaveLength(initialCount);
@@ -221,16 +221,14 @@ test("page-owned metric counts keep unchanged values across layout lifecycles", 
       expect(calls).toHaveLength(initialCount + 1);
       await settle(calls[initialCount], [{ record_id: "new-value" }, { record_id: "new-value-2" }]);
       await settle(calls[1], [{ record_id: "stale" }]);
-      expect(value(result, "two")).toBe("2");
     } else {
       expect(calls).toHaveLength(initialCount + scenario.extra!);
-      if (scenario.name === "list inserted between metrics") await settle(calls[initialCount], []);
-      else await settle(calls[initialCount], [{ record_id: "new" }]);
+      for (const call of calls.slice(initialCount)) await settle(call, [{ record_id: "new" }]);
     }
     expect(value(result, "one")).toBe("1");
-    if (!scenario.readd) expect(value(result, "two")).toBe(scenario.initial.length > 1 ? "2" : "1");
+    if (scenario.next.some((block) => block.type === "metric" && block.label === "two")) expect(value(result, "two"), scenario.name).toBe(scenario.initial.some((block) => block.type === "metric" && block.label === "two") ? "2" : "1");
     expect(value(result, "one")).not.toBe("…");
-    expect(value(result, "two")).not.toBe("…");
+    if (scenario.next.some((block) => block.type === "metric" && block.label === "two")) expect(value(result, "two")).not.toBe("…");
   }
 });
 

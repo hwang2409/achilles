@@ -1717,9 +1717,14 @@ try {
   if (!(await page.locator(".run-state").innerText()).includes("offline")) throw new Error("dropped connection did not mark the chat offline");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "06-collapsed-connection-lost-review-1440x900.png"), fullPage: true });
   await restartZeta("zeta reconnect after dropped connection");
-  // automatic reconnect can clear the compact banner before the manual retry click; click it only when it is still present.
+  // automatic reconnect can clear the compact banner before the manual retry click.
+  // A bounded click makes disappearance during the action equivalent to automatic recovery.
   const retryNow = page.getByRole("button", { name: "retry now" });
-  if (await retryNow.count()) await retryNow.click();
+  try {
+    await retryNow.click({ timeout: 1_000 });
+  } catch {
+    // The button may disappear when the app reconnects by itself.
+  }
   const recoveredField = page.getByRole("textbox", { name: "message", exact: true });
   await gateWait.playwright(recoveredField, "waitFor", { timeout: 20_000 });
   if (await recoveredField.inputValue() !== draft) throw new Error("reconnecting discarded the composer draft");

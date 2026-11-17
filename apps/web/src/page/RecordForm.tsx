@@ -55,7 +55,6 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
   const order = fields ?? (tool && shown ? schemaColumns(shown, tool.collection) : undefined);
-  const label = tool && tool.operation === "update" && row ? editingLabel(tool, order, row) : "";
   const heading = title;
   const headingNote = tool?.operation === "update" ? `runs ${toolName} on the selected row` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
@@ -65,14 +64,6 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
     : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
   return <section className="record-form"><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
-}
-
-// Names which record a form edits by its first listed field, in the form heading.
-function editingLabel(tool: PageTool, order: string[] | undefined, row: Record<string, unknown>): string {
-  const mapped = formFields(tool.input_schema, order);
-  const first = ("fields" in mapped ? mapped.fields : []).find((field) => field.name !== "record_id" && field.name !== "revision");
-  const value = first ? row[first.name] : undefined;
-  return value === null || value === undefined ? "" : String(value);
 }
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
