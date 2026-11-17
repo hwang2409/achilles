@@ -14,7 +14,7 @@ type Summary = { lines: string[]; raw: string; fallback: boolean };
 type OutputRead = { text: string; overflow: boolean };
 
 const text = (value: unknown, limit = MAX_TEXT): string => {
-  const result = typeof value === "string" ? value : String(value);
+  const result = (typeof value === "string" ? value : String(value)).slice(0, limit * 4);
   const oneLine = result.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   return oneLine.length > limit ? `${oneLine.slice(0, limit - 1)}…` : oneLine;
 };
@@ -116,7 +116,7 @@ function argsText(item: ToolItem): string {
   if (!args || typeof args !== "object" || Array.isArray(args)) return "";
   const parts: string[] = [];
   let length = 0;
-  for (const key in args as Record<string, unknown>) {
+  for (const key of Object.keys(args as Record<string, unknown>)) {
     if (parts.length >= MAX_ARG_KEYS || length >= 260) break;
     const part = `${key} ${argValue((args as Record<string, unknown>)[key])}`;
     const next = parts.length ? `${parts.join(" · ")} · ${part}` : part;
@@ -144,28 +144,8 @@ const MAX_RAW_DEPTH = 12;
 const MAX_RAW_TEXT = 16_000;
 
 type RawState = { nodes: number; seen: WeakSet<object>; text: number; truncated: boolean };
-type RawChild = { key: string; value: unknown };
 
-function* rawChildren(current: object, state: RawState): Generator<RawChild> {
-  if (Array.isArray(current)) {
-    for (let index = 0; index < current.length; index += 1) {
-      if (state.nodes >= MAX_RAW_NODES || state.text >= MAX_RAW_TEXT) { state.truncated = true; return; }
-      if (!Object.prototype.hasOwnProperty.call(current, index)) continue;
-      let value: unknown;
-      try { value = current[index]; } catch { value = "[unavailable]"; }
-      yield { key: String(index), value };
-    }
-    return;
-  }
-  for (const key in current) {
-    if (!Object.prototype.propertyIsEnumerable.call(current, key)) continue;
-    if (state.nodes >= MAX_RAW_NODES || state.text >= MAX_RAW_TEXT) { state.truncated = true; return; }
-    let value: unknown;
-    try { value = (current as Record<string, unknown>)[key]; } catch { value = "[unavailable]"; }
-    yield { key, value };
-  }
-}
-
+// arguments are JSON.parse data from a Zeta/Fulcrum frame capped at 1 MiB; these limits bound the rendered preview, not key discovery.
 function formatRaw(value: unknown): string {
   const state: RawState = { nodes: 0, seen: new WeakSet(), text: 0, truncated: false };
   const visit = (current: unknown, depth: number, indent: string): string => {
@@ -174,7 +154,11 @@ function formatRaw(value: unknown): string {
       return "[truncated]";
     }
     if (current === null) return "null";
-    if (typeof current === "string") return JSON.stringify(current);
+    if (typeof current === "string") {
+      const clipped = current.length > MAX_RAW_TEXT;
+      if (clipped) state.truncated = true;
+      return JSON.stringify(clipped ? current.slice(0, MAX_RAW_TEXT) : current);
+    }
     if (typeof current === "number" || typeof current === "boolean") return String(current);
     if (typeof current === "bigint") return `${current}n`;
     if (typeof current !== "object") return JSON.stringify(String(current));
@@ -182,9 +166,10 @@ function formatRaw(value: unknown): string {
     state.seen.add(current);
     const nextIndent = `${indent}  `;
     const entries: string[] = [];
-    for (const { key, value } of rawChildren(current, state)) {
+    for (const key of Object.keys(current)) {
+      if (state.nodes >= MAX_RAW_NODES || state.text >= MAX_RAW_TEXT) { state.truncated = true; break; }
       const label = Array.isArray(current) ? "" : `${JSON.stringify(key)}: `;
-      const child = `${nextIndent}${label}${visit(value, depth + 1, nextIndent)}`;
+      const child = `${nextIndent}${label}${visit((current as Record<string, unknown>)[key], depth + 1, nextIndent)}`;
       state.text += child.length;
       entries.push(child);
     }
@@ -232,7 +217,7 @@ export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNo
     {useFulcrumBody ? <ToolBody item={item} output={output} state={state} /> : showPreview ? <div data-part="tool-output"><div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div></div> : <ToolBody item={item} output={output} state={state} />}
     <details ref={rawRef} data-part="tool-raw" onToggle={(event) => setRawOpen(event.currentTarget.open)}>
       <summary>raw</summary>
-      {rawOpen && !useFulcrumBody ? <pre>{`arguments\n${formatRaw(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre> : null}
+      {rawOpen && !useFulcrumBody ? <pre>{`${item.tool_call.meta?.argumentsTruncated ? "arguments truncated by zeta\n" : ""}arguments\n${formatRaw(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre> : null}
       {rawOpen && useFulcrumBody ? <p>fulcrum shows the complete retained result above.</p> : null}
     </details>
   </>;

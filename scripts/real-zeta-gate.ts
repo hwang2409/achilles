@@ -893,7 +893,8 @@ try {
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
   const legacyMetricText =
     "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
-  await page.goto(`${origin}/reading?theme=gruvbox-dark`);
+  const theme = process.env.GATE_THEME ?? "gruvbox-dark";
+  await page.goto(`${origin}/reading?theme=${encodeURIComponent(theme)}`);
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const longMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "legacy total with an unusually long descriptive label" }) });
   await gateWait.playwright(longMetric, "waitFor");
@@ -1185,6 +1186,12 @@ try {
   if (screenshotDir) {
     for (const width of [390, 1280, 1440, 1920]) {
       await page.setViewportSize({ width, height: 900 });
+      if (width === 390) {
+        await page.reload();
+        await gateWait.playwright(page.locator(".page-chat-bar"), "waitFor", { timeout: 20000 });
+        await page.locator(".page-chat-bar").click();
+        await gateWait.playwright(page.getByRole("dialog", { name: "page chat" }), "waitFor", { timeout: 20000 });
+      }
       await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -1202,6 +1209,8 @@ try {
   }
   await toolRow.locator('[data-part="tool-raw"] summary').click();
   await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
+  if (!(await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes("arguments truncated by zeta"))
+    throw new Error("raw disclosure hid zeta's argument truncation marker");
   const owningVirtualRow = toolRow.locator('xpath=ancestor::*[@data-virtual-id][1]');
   const nextTranscriptRow = owningVirtualRow.locator('xpath=following-sibling::*[@data-virtual-id][1]');
   const rawGeometry = async () => {

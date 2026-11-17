@@ -7,6 +7,11 @@
   color: var(--fulcrum-fg);
   white-space: pre-wrap;
 }
+.transcript [data-part="tool-summary-preview"] > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .transcript [data-part="tool-summary-preview"] > div:first-child,
 .transcript [data-part="tool-summary-preview"] > div:last-child { color: var(--fulcrum-muted); }
 .transcript [data-part="tool-summary-preview"] > div + div { margin-top: 2px; }

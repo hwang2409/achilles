@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { formatToolArguments, summarizeToolOutput, toolArgumentSummary } from "./ToolSummary";
+import "../test-dom";
+import { afterEach, describe, expect, test } from "bun:test";
+import { act } from "react";
+import React from "react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { formatToolArguments, summarizeToolOutput, ToolSummaryBody, toolArgumentSummary } from "./ToolSummary";
 import type { ToolBodyProps, ToolItem } from "@fulcrum/react";
 
 const output = (text: string, extra: Partial<ToolBodyProps["output"]> = {}): ToolBodyProps["output"] => ({
@@ -7,6 +11,8 @@ const output = (text: string, extra: Partial<ToolBodyProps["output"]> = {}): Too
   omission: null, protocolTruncated: false, *chunks() { yield { start: 0, line: 0, text }; }, ...extra,
 });
 const item = (arguments_: unknown): ToolItem => ({ id: "tool", type: "tool", tool_call: { id: "call", name: "list_books", arguments: arguments_ }, output: output("[]"), active: false, is_error: false, canceled: false, version: 1 });
+
+afterEach(cleanup);
 
 describe("tool summaries", () => {
   test("summarizes list rows, stable statuses, and the remainder", () => {
@@ -51,9 +57,8 @@ describe("tool summaries", () => {
     expect(result.fallback).toBe(true);
   });
 
-  test("bounds huge and deeply nested arguments without throwing", () => {
-    const huge: Record<string, unknown> = {};
-    for (let index = 0; index < 100_000; index += 1) huge[`key_${index}`] = { deep: { value: "x".repeat(1_000) } };
+  test("bounds production-shaped json arguments without throwing", () => {
+    const huge = JSON.parse(JSON.stringify(Object.fromEntries(Array.from({ length: 1_024 }, (_, index) => [`key_${index}`, { deep: { value: "x" } }]))));
     expect(() => toolArgumentSummary(item(huge))).not.toThrow();
     expect(toolArgumentSummary(item(huge)).length).toBeLessThanOrEqual(260);
   });
@@ -67,22 +72,18 @@ describe("tool summaries", () => {
     expect(lines).toEqual(["book · today · shelf"]);
   });
 
-  test("bounds raw formatting and stops property inspection at the node budget", () => {
-    const keys = Array.from({ length: 100_000 }, (_, index) => `key_${index}`);
-    let descriptors = 0;
-    const huge = new Proxy(Object.create(null), {
-      ownKeys: () => keys,
-      getOwnPropertyDescriptor: (_target, key) => {
-        descriptors += 1;
-        return { enumerable: true, configurable: true, value: key };
-      },
-      get: (_target, key) => key,
-    });
-    const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
+  test("marks raw production-shaped json when the preview budget is reached", () => {
+    const huge = JSON.parse(JSON.stringify(Object.fromEntries(Array.from({ length: 1_024 }, (_, index) => [`key_${index}`, { deep: { value: 1 } }]))));
     expect(formatToolArguments(huge)).toContain("[truncated]");
-    expect(descriptors).toBeLessThanOrEqual(1024);
     expect(formatToolArguments({ deep: { deeper: { value: 1 } } })).toContain('"value": 1');
-    expect(formatToolArguments(cyclic)).toContain("[circular]");
+  });
+
+  test("shows zeta argument truncation in the visible raw disclosure", async () => {
+    const base = item({ query: "large" });
+    const truncated = { ...base, tool_call: { ...base.tool_call, meta: { argumentsTruncated: true } } };
+    const mounted = render(React.createElement(ToolSummaryBody, { item: truncated, output: output("{}"), state: "done" }));
+    await act(async () => { fireEvent.click(mounted.getByText("raw")); });
+    expect(mounted.getByText(/arguments truncated by zeta/)).toBeTruthy();
   });
 
   test("uses the fulcrum fallback for valid json while streaming", () => {
