@@ -131,4 +131,5 @@
   .transcript [data-part="timeline"] { padding: 14px 12px 8px; }
   .transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: 100%; }
   .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: 12px; }
+  .page-chat-docked .page-chat-surface [data-part="composer"] { width: calc(100% - 32px); }
 }
