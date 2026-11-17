@@ -946,14 +946,14 @@ try {
     if (!(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))))
       throw new Error("390px page chat tab focus escaped the modal sheet");
   }
-  const modeButton = page.getByRole("button", { name: "create mode off", exact: true });
-  const modeBeforeOutsideClick = await modeButton.getAttribute("aria-pressed");
-  const modeBox = await modeButton.boundingBox();
-  if (!modeBox) throw new Error("create mode button was not measurable behind page chat sheet");
-  await page.mouse.click(modeBox.x + modeBox.width / 2, modeBox.y + modeBox.height / 2);
+  const backgroundControl = page.locator(".chat-actions button").first();
+  const backgroundControlBox = await backgroundControl.boundingBox();
+  if (!backgroundControlBox) throw new Error("background chat control was not measurable behind page chat sheet");
+  const pathBeforeOutsideClick = new URL(page.url()).pathname;
+  await page.mouse.click(backgroundControlBox.x + backgroundControlBox.width / 2, backgroundControlBox.y + backgroundControlBox.height / 2);
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
-  if (await modeButton.getAttribute("aria-pressed") !== modeBeforeOutsideClick)
-    throw new Error("background create-mode control activated through open page chat sheet");
+  if (new URL(page.url()).pathname !== pathBeforeOutsideClick)
+    throw new Error("background chat control activated through open page chat sheet");
   await pageChatBar.click();
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x760.png"), fullPage: true });
