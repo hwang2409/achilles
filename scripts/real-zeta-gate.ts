@@ -14,7 +14,7 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
-const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
+const { chromium, webkit } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
 if (!/^[0-9a-f]{40}$/.test(zetaRef))
@@ -199,7 +199,7 @@ try {
       ),
     "achilles",
   );
-  browser = await chromium.launch({ headless: true });
+  browser = await (process.env.GATE_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
   const requestFailures: string[] = [];
@@ -220,6 +220,14 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
+  const captureBlockState = async (state: string) => {
+    if (!screenshotDir) return;
+    for (const width of [390, 1280, 1440, 1920]) {
+      await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+      await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
   const pageChatLayout = () => page.evaluate(() => {
     const describe = (element: Element | null) => {
       if (!element) return null;
@@ -674,13 +682,17 @@ try {
       },
     },
   ];
-  for (const row of focusRows) {
-    await row.run();
-    console.log(`focus after commit: ${row.name}`);
+  if (process.env.GATE_BROWSER !== "webkit") {
+    for (const row of focusRows) {
+      await row.run();
+      console.log(`focus after commit: ${row.name}`);
+    }
   }
   await reloadShell();
-  await gateTranscript(page, waitFor, requests, control, gateWait);
-  await gateReloadMidTurn(page, waitFor, requests, gateWait);
+  if (process.env.GATE_BROWSER !== "webkit") {
+    await gateTranscript(page, waitFor, requests, control, gateWait);
+    await gateReloadMidTurn(page, waitFor, requests, gateWait);
+  }
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests, awaitApprovalMode);
@@ -715,8 +727,8 @@ try {
       throw new Error(`mcp ${method} failed: ${response.status} ${redact(await response.text())}`);
     return response.json();
   };
-  const homeMcp = (id: number, method: string, params: object) =>
-    mcp(credential, id, method, params);
+  const homeMcp = (id: number, method: string, params: object, token = credential) =>
+    mcp(token, id, method, params);
   const pageIndexRequests: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -930,13 +942,13 @@ try {
   if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
   if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
   await desktopComposer.fill("");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-a-empty-1440.png"), fullPage: true });
+  await captureBlockState("a-empty");
 
   const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
   await page.route(recordsPattern, async (route) => {
     try {
       const response = await route.fetch();
-      if (new URL(route.request().url()).searchParams.get("limit") === "100") await new Promise((resolve) => setTimeout(resolve, 500));
+      if (new URL(route.request().url()).searchParams.get("limit") === "100") await new Promise((resolve) => setTimeout(resolve, 5000));
       await route.fulfill({ response });
     } catch (error) {
       if (!String(error).includes("already handled")) throw error;
@@ -945,7 +957,7 @@ try {
   await page.reload();
   await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
   if (await booksList.getByText("no books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-b-loading-1440.png"), fullPage: true });
+  await captureBlockState("b-loading");
   await page.unroute(recordsPattern);
 
   let failRecords = true;
@@ -962,25 +974,44 @@ try {
   await booksList.getByRole("button", { name: "try again", exact: true }).click();
   await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   await page.unroute(recordsPattern);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-c-recovered-1440.png"), fullPage: true });
+  await captureBlockState("c-recovered");
 
-  const pageApiPattern = "**/api/pages/*";
-  await page.route(pageApiPattern, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname !== `/api/pages/${createdPage.id}`) return route.fallback();
-    const response = await route.fetch();
-    const document = await response.json() as { layout: { blocks: Array<Record<string, unknown>> } };
-    document.layout.blocks.push({ type: "form", title: "update book", tool: "update_book", collection: "books" });
-    await route.fulfill({ status: response.status(), headers: response.headers(), body: JSON.stringify(document) });
-  });
-  await page.goto(page.url(), { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode on", exact: true }), "waitFor");
+  const readingPageCredential = (await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()).trim();
+  secrets.push(readingPageCredential);
+  await homeMcp(29, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "block-state-gate", version: "1" },
+  }, readingPageCredential);
+  const updateLayoutSchema = await homeMcp(30, "tools/list", {}, readingPageCredential);
+  const updateLayoutTool = updateLayoutSchema.result?.tools?.find((tool: { name: string }) => tool.name === "update_layout") as { inputSchema?: { properties?: Record<string, { type?: string }>; required?: string[] } } | undefined;
+  const updateLayoutProperties = updateLayoutTool?.inputSchema?.properties;
+  if (
+    !updateLayoutTool ||
+    updateLayoutProperties?.layout?.type !== "object" ||
+    updateLayoutProperties.expected_version?.type !== "integer" ||
+    !updateLayoutTool.inputSchema?.required?.includes("layout") ||
+    !updateLayoutTool.inputSchema.required.includes("expected_version")
+  ) throw new Error(`reading page exposed an unexpected update_layout schema: ${JSON.stringify(updateLayoutSchema)}`);
+  const dLayout = structuredClone(homeInspectValue.layout) as { blocks: Array<Record<string, unknown>> };
+  dLayout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
+  const updatedD = await homeMcp(31, "tools/call", { name: "update_layout", arguments: { layout: dLayout, expected_version: homeInspectValue.layout_version } }, readingPageCredential);
+  if (updatedD.result?.isError) throw new Error(`real D update_layout failed: ${JSON.stringify(updatedD)}`);
+  await page.reload();
   const updateHeading = page.getByRole("heading", { name: /update book/ });
   await gateWait.playwright(updateHeading, "waitFor", { timeout: 20_000 });
   const disabledTitle = page.locator('.record-form[data-operation="update"] input[name="title"]');
   if (!(await disabledTitle.isDisabled()) || (await disabledTitle.getAttribute("placeholder")) !== "—") throw new Error("no-selection update form did not disable its real field with a placeholder");
   if (!(await page.getByRole("button", { name: "add", exact: true }).last().isDisabled())) throw new Error("no-selection update form save was not disabled");
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "state-d-no-selection-1440.png"), fullPage: true });
-  await page.unroute(pageApiPattern);
+  if (screenshotDir) {
+    await captureBlockState("d-no-selection");
+    await page.getByRole("button", { name: "create mode on", exact: true }).click();
+    await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
+    const proofPath = join(screenshotDir, "run-proof.txt");
+    await writeFile(proofPath, `${await Bun.file(proofPath).text()}D production path: visible create mode off control clicked; waited for create mode on; authenticated reading-page tools/list exposed update_layout; real update_layout published the complete inspected layout with the update form; waited for the real page reload and attached disabled form; visible create mode on control clicked and waited for create mode off before later journey assertions.\n`);
+  }
 
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 760 });
@@ -1566,7 +1597,7 @@ try {
   const nextTurnCatalog = JSON.parse(await Bun.file(control).text());
   if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
-  const emptyRecords = page.getByText("no records yet", { exact: true });
+  const emptyRecords = page.locator(".record-list-empty").first();
   await gateWait.playwright(emptyRecords, "waitFor", { state: "visible" });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(
