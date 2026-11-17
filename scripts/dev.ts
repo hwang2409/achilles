@@ -195,7 +195,10 @@ async function chooseOwnedServe(discovery: string, requestedOrigin: string, exec
   let outcome: "ready" | "exited";
   try { outcome = await Promise.race([waitForSpawnedServe(discovery, child.pid, ws).then(() => "ready" as const), child.exited.then(() => "exited" as const)]); }
   catch (error) { child.kill(); await child.exited; throw new Error(`${error instanceof Error ? error.message : error}. fix the error and retry:\n${await tail(logPath)}`); }
-  if (outcome === "exited") throw new Error(`zeta serve exited during startup. fix the error and retry:\n${await tail(logPath)}`);
+  if (outcome === "exited") {
+    const logTail = await tail(logPath);
+    throw new Error(zetaStoredFormatMessage(logTail, home, process.env.ACHILLES_USE_PATH_ZETA === "1", (await readFile(resolve(root, "zeta.rev"), "utf8")).trim()) ?? `zeta serve exited during startup. fix the error and retry:\n${logTail}`);
+  }
   const identityAfter = await processIdentity(child.pid); if (!identityAfter) throw new Error("zeta serve disappeared during startup");
   await writeFile(resolve(cache, "zeta-serve.json"), JSON.stringify({ ...identityAfter, executable })); child.unref();
   console.log(`started achilles zeta serve on port ${ws}`); return { origin: alternate, discovery };
@@ -268,6 +271,15 @@ async function zetaCheckout(): Promise<string | null> {
 }
 export function zetaRemediationMessage(pin: string): string {
   return `your zeta is older than zeta.rev ${pin}; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one`;
+}
+export function zetaStoredFormatMessage(log: string, homePath: string, usePathZeta: boolean, pin: string): string | null {
+  const match = log.match(/stored format (\d+) is newer than writer capability (\d+)/);
+  if (!match) return null;
+  const [, epoch, capability] = match;
+  const fix = usePathZeta
+    ? zetaRemediationMessage(pin)
+    : `achilles' zeta pin (zeta.rev ${pin}) is older than this home (stored format ${epoch}); update achilles (git pull) or move zeta.rev to a zeta main commit with WRITER_EPOCH >= ${epoch}`;
+  return `zeta serve cannot start for home ${homePath}: stored format ${epoch} is newer than writer capability ${capability}. ${fix}`;
 }
 export type ZetaRevision = { kind: "ok" } | { kind: "behind"; message: string } | { kind: "unknown"; reason: string };
 export function zetaRevisionDecision(pin: string, checkout: string | null, headKnown: boolean, pinIsAncestor: boolean): ZetaRevision {

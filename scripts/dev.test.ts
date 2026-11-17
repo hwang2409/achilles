@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, type ProcessIdentity } from "./dev";
+import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, zetaStoredFormatMessage, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
@@ -109,6 +109,13 @@ test("zeta invocations use one selected executable", () => {
     }
     else expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/", executable), name).toMatchObject({ kind: "different", command });
   }
+});
+
+test("newer stored formats produce actionable startup messages", () => {
+  const log = "error: stored format 12 is newer than writer capability 11";
+  expect(zetaStoredFormatMessage(log, "/tmp/home", false, "pinsha")).toBe("zeta serve cannot start for home /tmp/home: stored format 12 is newer than writer capability 11. achilles' zeta pin (zeta.rev pinsha) is older than this home (stored format 12); update achilles (git pull) or move zeta.rev to a zeta main commit with WRITER_EPOCH >= 12");
+  expect(zetaStoredFormatMessage(log, "/tmp/home", true, "pinsha")).toBe("zeta serve cannot start for home /tmp/home: stored format 12 is newer than writer capability 11. your zeta is older than zeta.rev pinsha; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one");
+  expect(zetaStoredFormatMessage("other failure", "/tmp/home", false, "pinsha")).toBeNull();
 });
 
 test("web dependencies install only when the web-deps stamp changed", () => {
@@ -216,7 +223,7 @@ exit 0
   try {
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    expect(owned.stderr).toBe(zetaRemediationMessage("3ab68a2d670eeb49ee8925d52b1d741e48a5fc1f") + "\n");
+    expect(owned.stderr).toBe(zetaRemediationMessage("682a158e5efc20839233f585cf5d1e4fb26404b6") + "\n");
     expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
     expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);
