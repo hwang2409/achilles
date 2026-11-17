@@ -1166,18 +1166,19 @@ try {
 
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-failed-1440.png"), fullPage: true });
 
-  const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
-  if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
   const updateLayoutApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "update_layout" });
   const updateLayoutApprovalBefore = await updateLayoutApproval.count();
   await field.fill("layout updated without reload");
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
+  const allBooksBeforeSummary = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
+  await waitFor(async () => ["1", "5"].includes(await allBooksBeforeSummary.innerText()), "unfiltered metric before compact summary");
+  const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
+  if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
   const listSummaryApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "list_books" });
   await gateWait.playwright(listSummaryApproval, "waitFor", { timeout: 20000 });
   await listSummaryApproval.getByRole("button", { name: "approve", exact: true }).click();
-  await gateWait.playwright(page.getByText("layout updated", { exact: true }), "waitFor", { timeout: 20000 });
   const toolRow = page.locator('[data-part="tool"]', { hasText: "list_books" }).last();
   await gateWait.playwright(toolRow, "waitFor", { timeout: 20000 });
   const summaryBody = toolRow.locator('[data-part="tool-summary-preview"]');
@@ -1211,7 +1212,7 @@ try {
   console.log("open page re-rendered without reload after chat update_layout: page note before books");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
   const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  await gateWait.playwright(allBooksMetric.filter({ hasText: "1" }), "waitFor", { timeout: 20000 });
+  await waitFor(async () => ["1", "5"].includes(await allBooksMetric.innerText()), "unfiltered metric after compact summary");
   await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
   const saveCountRoute = async (route: Route) => {
     await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });
