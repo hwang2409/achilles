@@ -9,6 +9,7 @@ import { RecordMark } from "./RecordMark";
 
 type PageLike = { title: string; route: string; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
 type InsertCapability = { collection: string; focusFirst: () => void };
+type InsertRegistration = { id: string; capability: InsertCapability };
 type PageViewProps = { page: PageLike; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void };
 
 function groupBlocks(blocks: Array<Record<string, unknown>>): Array<Array<Record<string, unknown>>> {
@@ -77,9 +78,12 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat }: Pa
   const lead = leadIndex >= 0 ? String(blocks[leadIndex].text ?? "") : "";
   const content = blocks.filter((_, index) => index !== leadIndex);
   const counts = useMetricCounts(content, pageId, credential, refreshKey);
-  const [insertCapabilities, setInsertCapabilities] = useState<InsertCapability[]>([]);
-  const registerInsert = useCallback((capability: InsertCapability | null) => setInsertCapabilities((current) => capability ? [...current.filter((item) => item.collection !== capability.collection), capability] : current), []);
-  const addFor = (collection: string) => insertCapabilities.find((item) => item.collection === collection);
+  const [insertCapabilities, setInsertCapabilities] = useState<InsertRegistration[]>([]);
+  const registerInsert = useCallback((id: string, capability: InsertCapability) => {
+    setInsertCapabilities((current) => [...current.filter((item) => item.id !== id), { id, capability }]);
+    return () => setInsertCapabilities((current) => current.filter((item) => item.id !== id || item.capability !== capability));
+  }, []);
+  const addFor = (collection: string) => insertCapabilities.find((item) => item.capability.collection === collection)?.capability;
   return <main className="page-content">
     <header className="page-head">
       <div><h1>{page.title}</h1>{lead && <p className="page-lead">{lead}</p>}</div>
@@ -99,7 +103,7 @@ function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<stri
   return `${type}:${signature}:${ordinal}`;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (capability: InsertCapability | null) => void }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (id: string, capability: InsertCapability) => () => void }) {
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
@@ -158,7 +162,24 @@ export function RecordListView({ title, collection, records, columns: chosen = [
   const itemName = listName === "books" ? "book" : "record";
   const ask = () => onAskChat?.(`add a ${itemName} to this page`);
   const add = () => insertCapability?.focusFirst();
-  return <section className="record-list" data-collection={collection} aria-busy={loading}><header><h2>{title}{loading ? " loading…" : error ? "" : <> <span className="record-count">{total.toLocaleString()}</span></>}</h2>{!loading && !error && projection.loaded.length > 0 && <span>sorted by updated</span>}</header>{error ? <div className="record-list-error" role="alert"><strong>could not load {listName}</strong><p>{listName} request failed: {error}. your data is safe; nothing was changed.</p><div className="record-list-actions"><button type="button" onClick={retry}>try again</button>{onAskChat && <button type="button" className="record-list-chat" onClick={() => onAskChat(`help me understand why the ${listName} list could not load: ${error}`)}>ask the chat why</button>}</div></div> : loading ? <div className="record-list-skeleton" role="status" aria-label="loading records">{[0, 1, 2, 3, 4].map((row) => <span key={row} aria-hidden="true" />)}</div> : projection.loaded.length === 0 ? <div className="record-list-empty"><strong>no {listName} yet</strong><p>add the first one, or ask the page chat to add several.</p><div className="record-list-actions">{insertCapability && <button type="button" onClick={add}>{itemName === "book" ? "add a book" : "add a record"}</button>}{onAskChat && <button type="button" className="record-list-chat" onClick={ask}>ask the chat</button>}</div></div> : <><LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />{projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}</>}</section>;
+  return <section className="record-list" data-collection={collection} aria-busy={loading}>
+    <RecordListHeader title={title} loading={loading} error={error} total={total} hasRecords={projection.loaded.length > 0} />
+    <RecordListState error={error} loading={loading} listName={listName} itemName={itemName} onRetry={retry} onAskChat={onAskChat} ask={ask} insertCapability={insertCapability} add={add} />
+    {!error && !loading && projection.loaded.length > 0 && <>
+      <LoadedRecordTable columns={columns} records={projection.visible} collection={collection} title={title} selectedId={selectedId} tabStop={projection.tabStop} onSelect={onSelect} onFocus={setFocusedId} onKeyDown={onKeyDown} />
+      {projection.showReveal && <div className="record-reveal"><button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? "show less" : `show ${projection.loadedRemaining} more`}</button><small>{expanded ? `${projection.loaded.length} of ${projection.total}` : `${projection.visible.length} of ${projection.total}`}</small></div>}
+    </>}
+  </section>;
+}
+
+function RecordListHeader({ title, loading, error, total, hasRecords }: { title: string; loading: boolean; error: string | null; total: number; hasRecords: boolean }) {
+  return <header><h2>{title}{loading ? " loading…" : error ? "" : <> <span className="record-count">{total.toLocaleString()}</span></>}</h2>{!loading && !error && hasRecords && <span>sorted by updated</span>}</header>;
+}
+
+function RecordListState({ error, loading, listName, itemName, onRetry, onAskChat, ask, insertCapability, add }: { error: string | null; loading: boolean; listName: string; itemName: string; onRetry: () => void; onAskChat?: (draft: string) => void; ask: () => void; insertCapability?: InsertCapability; add: () => void }) {
+  if (error) return <div className="record-list-error" role="alert"><strong>could not load {listName}</strong><p>{listName} request failed: {error}. your data is safe; nothing was changed.</p><div className="record-list-actions"><button type="button" onClick={onRetry}>try again</button>{onAskChat && <button type="button" className="record-list-chat" onClick={() => onAskChat(`help me understand why the ${listName} list could not load: ${error}`)}>ask the chat why</button>}</div></div>;
+  if (loading) return <div className="record-list-skeleton" role="status" aria-label="loading records">{[0, 1, 2, 3, 4].map((row) => <span key={row} aria-hidden="true" />)}</div>;
+  return <div className="record-list-empty"><strong>no {listName} yet</strong><p>add the first one, or ask the page chat to add several.</p><div className="record-list-actions">{insertCapability && <button type="button" onClick={add}>{itemName === "book" ? "add a book" : "add a record"}</button>}{onAskChat && <button type="button" className="record-list-chat" onClick={ask}>ask the chat</button>}</div></div>;
 }
 
 type RecordListProjection = { loaded: Record<string, unknown>[]; visible: Record<string, unknown>[]; tabStop: unknown; loadedRemaining: number; total: number; showReveal: boolean };

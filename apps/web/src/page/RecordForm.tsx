@@ -40,7 +40,7 @@ export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
-export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (capability: { collection: string; focusFirst: () => void } | null) => void }) {
+export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void }) {
   const [reload, setReload] = useState(0);
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
@@ -53,6 +53,7 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const selected = useSelectedRow(pageId);
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
   const formRef = useRef<HTMLFormElement>(null);
+  const registrationId = useId();
   const onReloadTool = () => setReload((value) => value + 1);
   // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
@@ -60,9 +61,8 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   useEffect(() => {
     if (tool?.operation !== "insert" || !onRegisterInsert) return;
     const capability = { collection: tool.collection, focusFirst: () => formRef.current?.querySelector<HTMLElement>("[name]")?.focus() };
-    onRegisterInsert(capability);
-    return () => onRegisterInsert(null);
-  }, [onRegisterInsert, tool?.collection, tool?.operation]);
+    return onRegisterInsert(registrationId, capability);
+  }, [onRegisterInsert, registrationId, tool?.collection, tool?.operation]);
   const heading = title;
   const headingNote = tool?.operation === "update" ? row ? `runs ${toolName} on the selected row` : `select a ${tool.collection.replace(/s$/, "")} in the list to edit it` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>

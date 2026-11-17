@@ -67,6 +67,19 @@ describe("RecordList", () => {
     expect(result.getByRole("button", { name: "add a book", exact: true })).toBeTruthy();
   });
 
+  test("removes an insert action when its form leaves the same page", async () => {
+    routeFetches([{ name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], []);
+    const page = (blocks: Array<Record<string, unknown>>) => React.createElement(PageView, { page: { title: "reading", route: "/reading", layout: { blocks } }, pageId: "page-capability-cleanup", credential: "secret", refreshKey: "0:0" });
+    const result = render(page([{ type: "form", title: "add book", tool: "add_book" }, { type: "list", title: "books", collection: "books" }]));
+    await act(async () => {});
+    const addBook = result.getByRole("button", { name: "add a book", exact: true });
+    fireEvent.click(addBook);
+    expect(result.container.querySelector('input[name="title"]')).toBe(document.activeElement);
+    result.rerender(page([{ type: "list", title: "books", collection: "books" }]));
+    await act(async () => {});
+    expect(result.queryByRole("button", { name: "add a book", exact: true })).toBeNull();
+  });
+
   test("shows loading instead of empty while the first fetch is held", async () => {
     holdFetches();
     const result = renderList(props);

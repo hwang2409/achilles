@@ -14,7 +14,7 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
-const { chromium, webkit } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
+const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
 if (!/^[0-9a-f]{40}$/.test(zetaRef))
@@ -199,7 +199,7 @@ try {
       ),
     "achilles",
   );
-  browser = await (process.env.GATE_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
+  browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors: string[] = [];
   const requestFailures: string[] = [];
@@ -224,6 +224,13 @@ try {
     if (!screenshotDir) return;
     for (const width of [390, 1280, 1440, 1920]) {
       await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+      if (width === 390) {
+        const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
+        if (await pageChatClose.isVisible()) await pageChatClose.click();
+        const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
+        if (await drawerClose.isVisible()) await drawerClose.click();
+        await waitFor(async () => !(await pageChatClose.isVisible()) && !(await drawerClose.isVisible()), "mobile overlays closed");
+      }
       await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -682,17 +689,13 @@ try {
       },
     },
   ];
-  if (process.env.GATE_BROWSER !== "webkit") {
-    for (const row of focusRows) {
-      await row.run();
-      console.log(`focus after commit: ${row.name}`);
-    }
+  for (const row of focusRows) {
+    await row.run();
+    console.log(`focus after commit: ${row.name}`);
   }
   await reloadShell();
-  if (process.env.GATE_BROWSER !== "webkit") {
-    await gateTranscript(page, waitFor, requests, control, gateWait);
-    await gateReloadMidTurn(page, waitFor, requests, gateWait);
-  }
+  await gateTranscript(page, waitFor, requests, control, gateWait);
+  await gateReloadMidTurn(page, waitFor, requests, gateWait);
   if (requests().some((frame) => frame.method === "resume" && frame.params?.session_id === "foreign-session"))
     throw new Error("hostile chat query reached zeta resume");
   await assertServerAskWins(page, second, requests, awaitApprovalMode);
@@ -971,10 +974,10 @@ try {
   });
   await page.reload();
   await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
+  await captureBlockState("c-failed");
   await booksList.getByRole("button", { name: "try again", exact: true }).click();
   await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
   await page.unroute(recordsPattern);
-  await captureBlockState("c-recovered");
 
   await page.getByRole("button", { name: "create mode off", exact: true }).click();
   await gateWait.playwright(page.getByRole("button", { name: "create mode on", exact: true }), "waitFor");
@@ -992,8 +995,8 @@ try {
     !updateLayoutTool ||
     updateLayoutProperties?.layout?.type !== "object" ||
     updateLayoutProperties.expected_version?.type !== "integer" ||
-    !updateLayoutTool.inputSchema?.required?.includes("layout") ||
-    !updateLayoutTool.inputSchema.required.includes("expected_version")
+    JSON.stringify(Object.keys(updateLayoutProperties).sort()) !== JSON.stringify(["expected_version", "layout"]) ||
+    JSON.stringify([...updateLayoutTool.inputSchema.required ?? []].sort()) !== JSON.stringify(["expected_version", "layout"])
   ) throw new Error(`reading page exposed an unexpected update_layout schema: ${JSON.stringify(updateLayoutSchema)}`);
   const dLayout = structuredClone(homeInspectValue.layout) as { blocks: Array<Record<string, unknown>> };
   dLayout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
