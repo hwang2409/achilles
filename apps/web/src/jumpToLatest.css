@@ -1,0 +1,13 @@
+/* keep the control outside the centered transcript column; reserve a short mobile gutter above the composer */
+.transcript [data-part="jump-to-latest-lane"] { display: none; }
+.transcript > [data-part="jump-to-latest"] {
+  position: absolute;
+  right: max(12px, calc((100% - 880px) / 2 - 150px));
+  bottom: 8px;
+  z-index: 1;
+  padding: 8px 12px;
+  color: var(--fulcrum-bg);
+  background: var(--fulcrum-fg);
+  border: 1px solid var(--fulcrum-border);
+}
+.transcript:has(> [data-part="jump-to-latest"]) [data-part="timeline"] { padding-bottom: 64px; }

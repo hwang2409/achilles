@@ -225,7 +225,7 @@ export async function gateTranscript(
   await waitFor(async () => await textStream.count() === 1, "text-only streaming reply for this turn");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 030") && await distanceFromBottom() <= 4, "text-only line 030 at the bottom for this turn");
   await scroll.hover();
-  await page.mouse.wheel(0, -480);
+  await page.mouse.wheel(0, -1200);
   await waitFor(async () => await distanceFromBottom() > 100, "user scroll up during text-only stream");
   await waitFor(async () => (await textStream.innerText()).includes("text-only line 080"), "text-only line 080 for this turn");
   const textOnlyJump = page.locator('[data-part="jump-to-latest"]:visible');
@@ -235,14 +235,18 @@ export async function gateTranscript(
   await textOnlyJump.evaluate((element) => { (element as HTMLElement).dataset.gateFocused = "text-jump"; });
   await textOnlyJump.focus();
   if (!(await focusKept("text-jump"))) throw new Error("text-only jump to latest control is not keyboard focusable");
-  await waitFor(async () => (await textStream.innerText()).includes("text-only line 119"), "text-only stream complete");
+  await textOnlyJump.click();
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const jumped = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector('[data-part="jump-to-latest"]')?.getClientRects().length) }));
+  if (jumped.gap > 4 || jumped.jumpVisible) throw new Error(`mid-stream jump did not resume following: ${JSON.stringify(jumped)}`);
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 100") && await distanceFromBottom() <= 4, "mid-stream jump resumes following");
+  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
+    throw new Error("mid-stream jump to latest control stayed visible after returning to the bottom");
+  await capture("streaming-midstream-jump-1440x900.png");
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 119") && await distanceFromBottom() <= 4, "text-only stream stays at bottom after jump");
+  if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
+    throw new Error("mid-stream jump to latest control returned while later chunks streamed");
   await waitForIdleTurn(page, waitFor);
-  if (!(await focusKept("text-jump"))) {
-    const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 120) ?? "none");
-    throw new Error(`jump to latest lost keyboard focus while the reply streamed; focus is on ${active}`);
-  }
-  await page.keyboard.press("Enter");
-  await waitFor(async () => await distanceFromBottom() <= 4, "keyboard jump to latest after text-only stream");
 }
 
 // A reload in the middle of a streaming reply keeps the turn (`turn_reconnect`): the reloaded page attaches to it with

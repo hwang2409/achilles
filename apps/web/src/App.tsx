@@ -25,6 +25,7 @@ import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 import "./chat/markdown.css";
 import "./shell.css";
+import "./jumpToLatest.css";
 
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
@@ -280,8 +281,8 @@ export function App() {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
-          const scroll = transcript?.querySelector('[data-part="timeline-scroll"]');
-          scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+          const scroll = transcript?.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
+          scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
         }}>jump to latest</button>}</section>
         <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} props={composerProps} />
         </div>
