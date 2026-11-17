@@ -949,9 +949,11 @@ try {
     const text = surface.textContent ?? "";
     const lines = text.match(/sb7 stream line \d{3}/g) ?? [];
     const scroll = surface.querySelector<HTMLElement>('[data-part="timeline-scroll"]');
-    return { lines: lines.length, first: text.includes("sb7 stream line 000"), last: text.includes("sb7 stream line 119"), gap: scroll ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : -1 };
+    const gap = scroll ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : -1;
+    const expected = Array.from({ length: 120 }, (_, index) => `sb7 stream line ${String(index).padStart(3, "0")}`);
+    return { lines: lines.length, orderedUnique: lines.length === expected.length && lines.every((line, index) => line === expected[index]) && new Set(lines).size === lines.length, first: text.includes("sb7 stream line 000"), last: text.includes("sb7 stream line 119"), lastVisible: gap <= 1, gap };
   });
-  if (streamProof.lines !== 120 || !streamProof.first || !streamProof.last || streamProof.gap > 1)
+  if (streamProof.lines !== 120 || !streamProof.orderedUnique || !streamProof.first || !streamProof.last || !streamProof.lastVisible || streamProof.gap > 1)
     throw new Error(`390px page chat did not retain and follow all 120 chunks: ${JSON.stringify(streamProof)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-last-chunk-open-390x760.png"), fullPage: true });
   await pageChatDialog.getByRole("button", { name: "close page chat" }).click();
