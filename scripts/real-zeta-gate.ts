@@ -926,7 +926,7 @@ try {
     throw new Error(
       `390px metrics did not render two wrapped columns: ${JSON.stringify(metricBoxes)}`,
     );
-  const pageChatBar = page.getByRole("button", { name: /page chat/ });
+  const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
