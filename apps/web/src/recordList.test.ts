@@ -60,6 +60,13 @@ function renderList(listProps: RecordListProps, key = `${listProps.pageId}:${lis
 }
 
 describe("RecordList", () => {
+  test("projects an insert form capability to the matching empty list", async () => {
+    routeFetches([{ name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], []);
+    const result = render(React.createElement(PageView, { page: { title: "reading", route: "/reading", layout: { blocks: [{ type: "form", title: "add book", tool: "add_book" }, { type: "list", title: "books", collection: "books" }] } }, pageId: "page-capability", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    expect(result.getByRole("button", { name: "add a book", exact: true })).toBeTruthy();
+  });
+
   test("shows loading instead of empty while the first fetch is held", async () => {
     holdFetches();
     const result = renderList(props);
