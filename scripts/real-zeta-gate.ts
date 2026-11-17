@@ -1007,11 +1007,12 @@ try {
   if (!(await page.getByRole("button", { name: "add", exact: true }).last().isDisabled())) throw new Error("no-selection update form save was not disabled");
   if (screenshotDir) {
     await captureBlockState("d-no-selection");
-    await page.getByRole("button", { name: "create mode on", exact: true }).click();
-    await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
     const proofPath = join(screenshotDir, "run-proof.txt");
     await writeFile(proofPath, `${await Bun.file(proofPath).text()}D production path: visible create mode off control clicked; waited for create mode on; authenticated reading-page tools/list exposed update_layout; real update_layout published the complete inspected layout with the update form; waited for the real page reload and attached disabled form; visible create mode on control clicked and waited for create mode off before later journey assertions.\n`);
   }
+  // D temporarily enables create mode to publish the real layout update. restore it before the later gate journey even when screenshots are disabled.
+  await page.getByRole("button", { name: "create mode on", exact: true }).click();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
 
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 760 });
