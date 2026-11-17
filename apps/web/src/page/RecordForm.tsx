@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { fieldError, formArguments, formErrors, formFields, keepValues, recordValues, type FormField, type FormValues } from "./formSchema";
 import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
@@ -40,7 +40,7 @@ export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
-export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string }) {
+export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void }) {
   const [reload, setReload] = useState(0);
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
@@ -52,19 +52,25 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const tool = shown === null ? undefined : shown.find((item) => item.name === toolName) ?? null;
   const selected = useSelectedRow(pageId);
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
+  const formRef = useRef<HTMLFormElement>(null);
+  const registrationId = useId();
   const onReloadTool = () => setReload((value) => value + 1);
   // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
   const order = fields ?? (tool && shown ? schemaColumns(shown, tool.collection) : undefined);
+  useEffect(() => {
+    if (tool?.operation !== "insert" || !onRegisterInsert) return;
+    const capability = { collection: tool.collection, focusFirst: () => formRef.current?.querySelector<HTMLElement>("[name]")?.focus() };
+    return onRegisterInsert(registrationId, capability);
+  }, [onRegisterInsert, registrationId, tool?.collection, tool?.operation]);
   const heading = title;
-  const headingNote = tool?.operation === "update" ? `runs ${toolName} on the selected row` : "";
+  const headingNote = tool?.operation === "update" ? row ? `runs ${toolName} on the selected row` : `select a ${tool.collection.replace(/s$/, "")} in the list to edit it` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
-    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
+    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
-    : <p aria-disabled="true">select a row in the table to edit it</p>;
-  return <section className="record-form"><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+    : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row} formRef={formRef} />;
+  return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
@@ -75,7 +81,7 @@ const tableRow = (opener: HTMLElement | undefined, collection: string, recordId:
 };
 
 // With a row, the form edits that record: record_id and revision come from the row and are never inputs.
-export function RecordForm({ tool, order, row, opener, pageId, credential, onReloadTool }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; opener?: HTMLElement; pageId: string; credential: string; onReloadTool: () => void }) {
+export function RecordForm({ tool, order, row, opener, pageId, credential, onReloadTool, disabled = false, formRef }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; opener?: HTMLElement; pageId: string; credential: string; onReloadTool: () => void; disabled?: boolean; formRef?: RefObject<HTMLFormElement | null> }) {
   const mapped = formFields(tool.input_schema, order);
   const fields = "fields" in mapped ? mapped.fields.filter((field) => !row || (field.name !== "record_id" && field.name !== "revision")) : [];
   // typed holds only what the user changed, so a reloaded row shows its new values under the user's edits
@@ -95,7 +101,8 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
     }
   }
   const [busy, setBusy] = useState(false);
-  const form = useRef<HTMLFormElement>(null);
+  const internalForm = useRef<HTMLFormElement>(null);
+  const form = formRef ?? internalForm;
   const idPrefix = useId();
   // a new notice can render below the visible part of the scrolling page blocks (M-3 in firstrun-2a2a863); a
   // successful save on a row scrolls to the row instead, since that is what "saved" means to the user here
@@ -113,7 +120,7 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
   };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (disabled || busy) return;
     setMessage(null);
     const errors = formErrors(fields, values);
     setFieldErrors(errors);
@@ -169,11 +176,11 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
 
   return <>
     <form ref={form} noValidate onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === "Escape" && row && !event.defaultPrevented && !event.nativeEvent.isComposing) { event.preventDefault(); cancel(); } }}>
-    {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={values[field.name]} error={fieldErrors[field.name] ?? null} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
+    {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={disabled ? field.kind === "boolean" ? false : "" : values[field.name]} error={fieldErrors[field.name] ?? null} disabled={disabled} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
       {/* a mouse save keeps focus where the user was (webkit never focuses a clicked button), and the button is not disabled
           while busy, since a disabled button drops focus; submit() ignores a second click */}
-      <button type="submit" className="primary" aria-disabled={busy || undefined} onMouseDown={(event) => event.preventDefault()}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
+      <button type="submit" className="primary" disabled={disabled || busy} aria-disabled={busy || undefined} onMouseDown={(event) => event.preventDefault()}>{row ? (busy ? "saving…" : "save") : busy ? "adding…" : "add"}</button>
       {row && <button type="button" onClick={cancel}>cancel</button>}
       {message?.kind === "row-changed" && <button type="button" onClick={() => { setTyped({}); setMessage(null); focusField(); }}>discard</button>}
       {/* a changed record is news, not an error: the user's edits are safe */}
@@ -185,14 +192,14 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
   </>;
 }
 
-function Field({ id, field, value, error, onChange }: { id: string; field: FormField; value: string | boolean; error: string | null; onChange: (value: string | boolean) => void }) {
+function Field({ id, field, value, error, disabled = false, onChange }: { id: string; field: FormField; value: string | boolean; error: string | null; disabled?: boolean; onChange: (value: string | boolean) => void }) {
   const described = [field.description ? `${id}-help` : "", error ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined;
-  const common = { id, name: field.name, "aria-required": field.required, "aria-invalid": error ? true : undefined, "aria-describedby": described };
+  const common = { id, name: field.name, "aria-required": field.required, "aria-invalid": error ? true : undefined, "aria-describedby": described, disabled };
   const control = field.kind === "boolean" ? <input {...common} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
-    : field.kind === "enum" ? <EnumListbox id={common.id} name={common.name} required={common["aria-required"]} value={String(value)} options={["", ...field.options.map((option) => JSON.stringify(option))]} onChange={onChange} label={`${field.name}${field.required ? " *" : ""}`} aria-describedby={described} invalid={Boolean(error)} />
-    : field.kind === "string" ? <input {...common} type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} />
+    : field.kind === "enum" ? <EnumListbox id={common.id} name={common.name} required={common["aria-required"]} value={String(value)} options={["", ...field.options.map((option) => JSON.stringify(option))]} onChange={onChange} label={`${field.name}${field.required ? " *" : ""}`} aria-describedby={described} invalid={Boolean(error)} disabled={disabled} />
+    : field.kind === "string" ? <input {...common} placeholder={disabled ? "—" : undefined} type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} />
     // a phone keypad without a minus key only when the schema rules out negatives
-    : <input {...common} type="number" step={field.multipleOf ?? (field.kind === "integer" ? 1 : "any")} min={field.minimum} inputMode={field.minimum !== undefined && field.minimum >= 0 ? (field.kind === "integer" ? "numeric" : "decimal") : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
+    : <input {...common} placeholder={disabled ? "—" : undefined} type="number" step={field.multipleOf ?? (field.kind === "integer" ? 1 : "any")} min={field.minimum} inputMode={field.minimum !== undefined && field.minimum >= 0 ? (field.kind === "integer" ? "numeric" : "decimal") : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />;
   return <div className={`record-field${field.kind === "boolean" ? " record-field-check" : ""}`}>
     {field.kind !== "enum" && <label htmlFor={id}>{field.name}{field.required && <span className="required-mark" aria-hidden="true"> *</span>}</label>}
     {control}
