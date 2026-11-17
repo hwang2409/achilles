@@ -220,6 +220,41 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
+  const captureBlockState = async (state: string, target: Locator) => {
+    if (!screenshotDir) return;
+    for (const width of [390, 1280, 1440, 1920]) {
+      await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+      if (width === 390) {
+        const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
+        if (await pageChatClose.count() && await pageChatClose.isVisible()) await pageChatClose.click({ force: true });
+        const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
+        if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
+        await waitFor(async () => {
+          const sidebar = await page.locator(".sidebar").evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { transform: style.transform, right: element.getBoundingClientRect().right };
+          });
+          const sheet = await page.locator(".page-chat-surface").evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { transform: style.transform, visibility: style.visibility };
+          });
+          return sidebar.right <= 0 && sidebar.transform !== "matrix(1, 0, 0, 1, 0, 0)" && sheet.visibility === "hidden" && sheet.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+        }, "mobile overlays settled");
+        await waitFor(async () => await target.evaluate((element) => {
+          element.scrollIntoView({ block: "center", inline: "nearest" });
+          const box = element.getBoundingClientRect();
+          if (![box.top, box.right, box.bottom, box.left].every(Number.isFinite)) return false;
+          if (box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth) return false;
+          const x = Math.max(box.left + 1, Math.min(box.right - 1, innerWidth / 2));
+          const y = Math.max(box.top + 1, Math.min(box.bottom - 1, innerHeight / 2));
+          const hit = document.elementFromPoint(x, y);
+          return Boolean(hit && (hit === element || element.contains(hit)));
+        }), `state ${state} target visible and unobscured`);
+      }
+      await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
   const pageChatLayout = () => page.evaluate(() => {
     const describe = (element: Element | null) => {
       if (!element) return null;
@@ -715,8 +750,8 @@ try {
       throw new Error(`mcp ${method} failed: ${response.status} ${redact(await response.text())}`);
     return response.json();
   };
-  const homeMcp = (id: number, method: string, params: object) =>
-    mcp(credential, id, method, params);
+  const homeMcp = (id: number, method: string, params: object, token = credential) =>
+    mcp(token, id, method, params);
   const pageIndexRequests: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -916,6 +951,92 @@ try {
     throw new Error(`long metric did not render its full label and value: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())}`);
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
+  const booksList = page.locator('.record-list[data-collection="books"]');
+  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (await booksList.locator("header .record-count").innerText() !== "0" || await booksList.getByText("sorted by updated", { exact: true }).count())
+    throw new Error("empty books state showed the wrong count or sort label");
+  const addBook = booksList.getByRole("button", { name: "add a book", exact: true });
+  await addBook.click();
+  if (!(await page.locator('.record-form[data-collection="books"][data-operation="insert"] input[name="title"]').evaluate((element) => document.activeElement === element)))
+    throw new Error("empty books add action did not focus the insert form");
+  const desktopComposer = page.locator('#message-composer textarea[aria-label="message"], #message-composer [role="textbox"]');
+  await booksList.getByRole("button", { name: "ask the chat", exact: true }).click();
+  await waitFor(async () => (await desktopComposer.inputValue()) === "add a book to this page", "desktop empty-state chat draft");
+  if (!(await desktopComposer.evaluate((element) => document.activeElement === element))) throw new Error("empty-state chat action did not focus the composer");
+  if ((JSON.parse(await Bun.file(control).text()).requests ?? []).some((request: { method?: string; params?: { text?: string } }) => request.method === "send" && request.params?.text === "add a book to this page")) throw new Error("empty-state chat action sent a message");
+  await desktopComposer.fill("");
+  await captureBlockState("a-empty", booksList.locator(".record-list-empty"));
+
+  const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
+  await page.route(recordsPattern, async (route) => {
+    try {
+      const response = await route.fetch();
+      if (new URL(route.request().url()).searchParams.get("limit") === "100") await new Promise((resolve) => setTimeout(resolve, 5000));
+      await route.fulfill({ response });
+    } catch (error) {
+      if (!String(error).includes("already handled")) throw error;
+    }
+  });
+  await page.reload();
+  await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (await booksList.getByText("no books yet", { exact: true }).count()) throw new Error("loading state flashed the empty state");
+  await captureBlockState("b-loading", booksList.locator('[role="status"]'));
+  await page.unroute(recordsPattern);
+
+  let failRecords = true;
+  await page.route(recordsPattern, async (route) => {
+    if (new URL(route.request().url()).searchParams.get("limit") === "100" && failRecords) {
+      failRecords = false;
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+  await page.reload();
+  await gateWait.playwright(booksList.getByText("books request failed: Failed to fetch. your data is safe; nothing was changed.", { exact: true }), "waitFor", { timeout: 20_000 });
+  await captureBlockState("c-failed", booksList.locator('[role="alert"]'));
+  await booksList.getByRole("button", { name: "try again", exact: true }).click();
+  await gateWait.playwright(booksList.getByText("no books yet", { exact: true }), "waitFor", { timeout: 20_000 });
+  await page.unroute(recordsPattern);
+
+  await page.getByRole("button", { name: "create mode off", exact: true }).click();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode on", exact: true }), "waitFor");
+  const readingPageCredential = (await Bun.file(join(achillesHome, "credentials", createdPage.id)).text()).trim();
+  secrets.push(readingPageCredential);
+  await homeMcp(29, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "block-state-gate", version: "1" },
+  }, readingPageCredential);
+  const updateLayoutSchema = await homeMcp(30, "tools/list", {}, readingPageCredential);
+  const updateLayoutTool = updateLayoutSchema.result?.tools?.find((tool: { name: string }) => tool.name === "update_layout") as { inputSchema?: { properties?: Record<string, { type?: string }>; required?: string[] } } | undefined;
+  const updateLayoutProperties = updateLayoutTool?.inputSchema?.properties;
+  if (
+    !updateLayoutTool ||
+    updateLayoutProperties?.layout?.type !== "object" ||
+    updateLayoutProperties.expected_version?.type !== "integer" ||
+    JSON.stringify(Object.keys(updateLayoutProperties).sort()) !== JSON.stringify(["expected_version", "layout"]) ||
+    JSON.stringify([...updateLayoutTool.inputSchema.required ?? []].sort()) !== JSON.stringify(["expected_version", "layout"])
+  ) throw new Error(`reading page exposed an unexpected update_layout schema: ${JSON.stringify(updateLayoutSchema)}`);
+  const dLayout = structuredClone(homeInspectValue.layout) as { blocks: Array<Record<string, unknown>> };
+  dLayout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
+  const updatedD = await homeMcp(31, "tools/call", { name: "update_layout", arguments: { layout: dLayout, expected_version: homeInspectValue.layout_version } }, readingPageCredential);
+  if (updatedD.result?.isError) throw new Error(`real D update_layout failed: ${JSON.stringify(updatedD)}`);
+  await page.reload();
+  const updateHeading = page.getByRole("heading", { name: /update book/ });
+  await gateWait.playwright(updateHeading, "waitFor", { timeout: 20_000 });
+  const disabledTitle = page.locator('.record-form[data-operation="update"] input[name="title"]');
+  if (!(await disabledTitle.isDisabled()) || (await disabledTitle.getAttribute("placeholder")) !== "—") throw new Error("no-selection update form did not disable its real field with a placeholder");
+  if (!(await page.getByRole("button", { name: "add", exact: true }).last().isDisabled())) throw new Error("no-selection update form save was not disabled");
+  if (screenshotDir) {
+    await captureBlockState("d-no-selection", page.locator('.record-form[data-operation="update"]'));
+    const proofPath = join(screenshotDir, "run-proof.txt");
+    await writeFile(proofPath, `${await Bun.file(proofPath).text()}D production path: visible create mode off control clicked; waited for create mode on; authenticated reading-page tools/list exposed update_layout; real update_layout published the complete inspected layout with the update form; waited for the real page reload and attached disabled form; visible create mode on control clicked and waited for create mode off before later journey assertions.\n`);
+  }
+  // D temporarily enables create mode to publish the real layout update. restore it before the later gate journey even when screenshots are disabled.
+  await page.getByRole("button", { name: "create mode on", exact: true }).click();
+  await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
+
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 760 });
   const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
@@ -1500,7 +1621,7 @@ try {
   const nextTurnCatalog = JSON.parse(await Bun.file(control).text());
   if (!nextTurnCatalog.schemas.includes("achilles__annotate_trace"))
     throw new Error(`backend did not receive generated tool catalog: ${JSON.stringify(nextTurnCatalog.schemas)}`);
-  const emptyRecords = page.getByText("no records yet", { exact: true });
+  const emptyRecords = page.locator(".record-list-empty").first();
   await gateWait.playwright(emptyRecords, "waitFor", { state: "visible" });
   await waitFor(async () => (await annotationApproval.count()) > annotationApprovalBefore, "annotation approval").catch(async (error) => {
     throw new Error(

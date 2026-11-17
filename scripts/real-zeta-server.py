@@ -398,7 +398,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 {"type": "form", "title": "edit book", "tool": "update_book"},
                             ]
                         },
-                        "expected_version": 1,
+                        "expected_version": 2,
                     },
                 ),
                 ToolCall(
@@ -414,7 +414,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 ToolCall(
                     "stale-reading-layout",
                     "achilles__update_layout",
-                    {"layout": {"blocks": []}, "expected_version": 1},
+                    {"layout": {"blocks": []}, "expected_version": 2},
                 )
             ]
         ),
@@ -441,7 +441,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 }
                             ]
                         },
-                        "expected_version": 2,
+                        "expected_version": 3,
                     },
                 )
             ]
