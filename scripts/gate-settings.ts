@@ -124,6 +124,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control escaped the sidebar (last control: the palette button)");
   await page.keyboard.press("Shift+Tab");
   if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, the palette button");
+  await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   await page.getByRole("button", { name: "settings" }).click();
   const drawerSettings = page.getByRole("dialog", { name: "settings" });
   await gateWait.playwright(drawerSettings, "waitFor", { state: "visible" });
