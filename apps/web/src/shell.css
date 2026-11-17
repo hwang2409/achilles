@@ -110,7 +110,7 @@
   .page-chat-docked .page-chat-surface {
     position: fixed; inset: auto 0 0; z-index: 3; display: flex; flex-direction: column;
     height: min(66.666dvh, 640px); min-height: 320px; color: var(--fulcrum-fg); background: var(--fulcrum-bg);
-    box-shadow: 0 -8px 24px color-mix(in srgb, var(--fulcrum-bg) 75%, transparent); pointer-events: auto;
+    pointer-events: auto;
     transform: translateY(100%); visibility: hidden; transition: transform 160ms ease, visibility 160ms ease;
   }
   .page-chat-docked .page-chat-backdrop { position: fixed; inset: 0; z-index: 1; border: 0; background: color-mix(in srgb, var(--fulcrum-bg) 62%, transparent); pointer-events: auto; }
