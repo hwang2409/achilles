@@ -53,6 +53,7 @@
 .run-state { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 
 .page-chat { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+.page-chat-surface { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
 .transcript { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 0; }
 .transcript > [data-part="timeline-frame"] { width: 100%; max-width: none; height: 100%; margin: 0; }
 .transcript [data-part="timeline-scroll"] { scroll-behavior: auto; }

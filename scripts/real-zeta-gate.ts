@@ -219,6 +219,30 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const pageChatLayout = () => page.evaluate(() => {
+    const describe = (element: Element | null) => {
+      if (!element) return null;
+      const node = element as HTMLElement;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const ancestors: { tag: string; className: string; display: string; visibility: string; ariaHidden: string | null; rect: { width: number; height: number } }[] = [];
+      for (let current: Element | null = node.parentElement; current; current = current.parentElement) {
+        const currentNode = current as HTMLElement;
+        const currentStyle = getComputedStyle(currentNode);
+        const currentRect = currentNode.getBoundingClientRect();
+        ancestors.push({ tag: current.tagName, className: currentNode.className, display: currentStyle.display, visibility: currentStyle.visibility, ariaHidden: current.getAttribute("aria-hidden"), rect: { width: currentRect.width, height: currentRect.height } });
+      }
+      return { display: style.display, visibility: style.visibility, rect: { width: rect.width, height: rect.height }, ariaHidden: element.getAttribute("aria-hidden"), ancestors };
+    };
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches,
+      pageChat: describe(document.querySelector(".page-chat")),
+      surface: describe(document.querySelector(".page-chat-surface")),
+      transcript: describe(document.querySelector(".transcript")),
+    };
+  });
   await page.goto(origin);
   const setupAlert = page.getByRole("alert");
   await gateWait.playwright(setupAlert, "waitFor", { timeout: 20000 });
@@ -239,7 +263,9 @@ try {
     );
   });
   if (await setupAlert.count()) throw new Error("mcp setup alert remained after a successful attach");
-  await gateWait.playwright(page.locator(".transcript"), "waitFor", { state: "visible" });
+  await gateWait.playwright(page.locator(".transcript"), "waitFor", { state: "visible" }).catch(async (error) => {
+    throw new Error(`${error}; page-chat layout=${JSON.stringify(await pageChatLayout())}`);
+  });
   const homeSessionId = async () =>
     page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 }).catch(async (error) => {
       throw new Error(`${error}\nhome session id missing at ${page.url()}: ${redact(await page.locator("body").innerText({ timeout: 10_000 }))}`);
