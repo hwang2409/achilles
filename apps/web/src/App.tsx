@@ -263,7 +263,6 @@ export function App() {
     };
     scroll.addEventListener("keydown", arrows);
     const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
-    if (scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 4) setShowJumpToLatest(true);
     return () => { scroll.removeEventListener("keydown", arrows); stop(); };
   }, [store, transcript]);
   const lastState = activeLastState(waiting, outcome, turn);

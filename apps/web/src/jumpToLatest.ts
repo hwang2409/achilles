@@ -34,7 +34,7 @@ export function watchJumpToLatest(store: Store, scroll: HTMLElement, setShown: (
   };
   let seen = tail();
   let bottomTop = atBottom() ? scroll.scrollTop : Number.NaN;
-  setShown(false);
+  setShown(scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 4);
   const unsubscribe = store.subscribe(() => {
     const next = tail();
     if (next.length === seen.length && next.last === seen.last) return;
