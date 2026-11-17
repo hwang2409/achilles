@@ -261,7 +261,7 @@ export async function gateTranscript(
   };
   const assertJumpLane = async (width: number) => {
     await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
-    await waitFor(async () => await page.evaluate((narrow) => {
+    await waitForJump(async () => await page.evaluate((narrow) => {
       const shell = document.querySelector<HTMLElement>(".app-shell");
       const main = document.querySelector<HTMLElement>(".main-pane");
       const sidebar = document.querySelector<HTMLElement>(".sidebar");
