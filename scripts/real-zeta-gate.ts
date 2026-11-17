@@ -955,6 +955,20 @@ try {
   await pageChatBar.click();
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
+  const preTabFocus = await page.evaluate(() => ({
+    inside: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')),
+    close: document.activeElement?.getAttribute("aria-label") === "close page chat",
+  }));
+  if (!preTabFocus.inside || !preTabFocus.close)
+    throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify(preTabFocus)}`);
+  const backdropTabIndex = await page.locator(".page-chat-backdrop").evaluate((element) => (element as HTMLElement).tabIndex);
+  if (backdropTabIndex >= 0) throw new Error(`page chat backdrop is in sequential focus order: tabIndex=${backdropTabIndex}`);
+  await page.keyboard.press("Tab");
+  if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement)))
+    throw new Error("390px page chat real Tab escaped the modal sheet");
+  if (await page.locator(".page-chat-backdrop").evaluate((element) => element === document.activeElement))
+    throw new Error("390px page chat real Tab focused the backdrop");
   const firstFrameTabPrevented = await page.evaluate(() => {
     const state = (window as typeof window & { __pageChatFirstFrame?: { result: { prevented: boolean; inside: boolean }; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame;
     if (!state) return false;
