@@ -997,12 +997,9 @@ try {
   await toolRow.locator('[data-part="tool-raw"] summary').click();
   await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
   const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
-  const transcriptItem = toolRow.locator("xpath=ancestor::*[@data-part='item'][1]");
-  const nextTranscriptItem = transcriptItem.locator("xpath=following-sibling::*[1]");
-  const nextBox = await nextTranscriptItem.count() ? await nextTranscriptItem.boundingBox() : null;
-  const itemBox = await transcriptItem.boundingBox();
-  if (!rawBox || (nextBox ? nextBox.y < rawBox.y + rawBox.height : !itemBox || itemBox.y + itemBox.height < rawBox.y + rawBox.height))
-    throw new Error(`raw disclosure overlaps the next transcript item: raw=${JSON.stringify(rawBox)} next=${JSON.stringify(nextBox)} item=${JSON.stringify(itemBox)}`);
+  const rowBox = await toolRow.boundingBox();
+  if (!rawBox || !rowBox || rowBox.y + rowBox.height < rawBox.y + rawBox.height)
+    throw new Error(`raw disclosure escaped the tool row flow: raw=${JSON.stringify(rawBox)} row=${JSON.stringify(rowBox)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
   await waitFor(async () => {
     const blocks = await page.locator(".layout-blocks").locator(":scope > *").allTextContents();
