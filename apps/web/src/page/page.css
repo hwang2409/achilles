@@ -12,7 +12,6 @@
 .metric-block > div { min-width: 0; display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .metric-block strong { min-width: 0; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.metric-block strong.metric-value-long { white-space: normal; overflow-wrap: anywhere; }
 .metric-block small, .metric-delta { color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-delta { white-space: nowrap; }
 .metric-warn { color: var(--fulcrum-warn); }

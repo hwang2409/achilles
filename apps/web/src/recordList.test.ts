@@ -204,6 +204,17 @@ test("record list reveal projection keeps loaded rows and one reachable tab stop
   }
 });
 
+test("long page metric values stay readable without breaking digit groups", () => {
+  const fullValue = "9,999,999,999,999,999";
+  const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "legacy total", value: fullValue }] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
+  const value = result.container.querySelector(".metric-value")!;
+  expect(value.classList.contains("metric-value-long")).toBe(false);
+  expect(value.textContent).toBe("10,000T");
+  expect(value.getAttribute("title")).toBe(fullValue);
+  expect(value.getAttribute("aria-label")).toBe(`legacy total: ${fullValue}`);
+});
+
 test("page metrics render a live static layout value", () => {
   const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "score", value: "1" }] } };
   const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
