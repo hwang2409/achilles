@@ -1,4 +1,9 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-GlobalRegistrator.register();
+const registrationKey = Symbol.for("achilles.happy-dom.registered");
+const processState = globalThis as typeof globalThis & { [registrationKey]?: boolean };
+if (!processState[registrationKey]) {
+  GlobalRegistrator.register();
+  processState[registrationKey] = true;
+}
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
