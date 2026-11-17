@@ -258,8 +258,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .record-form-actions .primary { min-height: 36px; padding: 6px 18px; color: var(--fulcrum-bg); background: var(--fulcrum-fg); }
 .record-form-actions button:not(.primary) { min-height: 36px; padding: 6px 12px; }
 .record-form-actions button:disabled, .record-form-actions button[aria-disabled="true"] { opacity: .6; cursor: default; }
-
-/* slice 5a: pure enum listbox; keep the control sharp and token-only until form integration. */
 .menu-button, .drawer-scrim, .drawer-scrim[hidden] { display: none; }
 /* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px), (max-height: 500px) below) */
 @media (min-width: 761px) and (min-height: 501px) {
