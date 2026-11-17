@@ -2,8 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import React from "react";
-import { cleanup, render, type RenderResult } from "@testing-library/react";
-import { LayoutBlock, RecordList } from "./App";
+import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
+import { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
 import type { PageTool } from "./page/usePageTools";
 
@@ -181,4 +181,126 @@ describe("list columns", () => {
     await act(async () => {});
     expect(headers(result)).toEqual(["title", "status", "pages", "author"]);
   });
+});
+
+
+test("record list reveal projection keeps loaded rows and one reachable tab stop", () => {
+  const rows = Array.from({ length: 8 }, (_, index) => ({ record_id: `book-${index + 1}`, title: `book ${index + 1}` }));
+  const cases = [
+    { name: "collapsed", total: 8, expanded: false, expectedRows: 5, expectedAction: "show 3 more", expectedCount: "5 of 8" },
+    { name: "expanded", total: 8, expanded: true, initialAction: "show 3 more", expectedRows: 8, expectedAction: "show less", expectedCount: "8 of 8" },
+    { name: "loaded less than server total", total: 1000, expanded: false, records: Array.from({ length: 100 }, (_, index) => ({ record_id: `loaded-${index}`, title: `loaded ${index}` })), expectedRows: 5, expectedAction: "show 95 more", expectedCount: "5 of 1000" },
+    { name: "expanded loaded less than server total", total: 1000, expanded: true, initialAction: "show 95 more", records: Array.from({ length: 100 }, (_, index) => ({ record_id: `loaded-${index}`, title: `loaded ${index}` })), expectedRows: 100, expectedAction: "show less", expectedCount: "100 of 1000" },
+  ];
+  for (const scenario of cases) {
+    const result = render(React.createElement(RecordListView, { title: "reading", collection: "books", records: scenario.records ?? rows, columns: ["title"], total: scenario.total, error: null, selectedId: undefined, onSelect: () => {} }));
+    if (scenario.expanded) fireEvent.click(result.getByRole("button", { name: scenario.initialAction }));
+    expect(result.getAllByRole("row")).toHaveLength(scenario.expectedRows + 1);
+    expect(result.getByRole("button").textContent).toBe(scenario.expectedAction);
+    expect(result.getByText(scenario.expectedCount)).toBeTruthy();
+    if (scenario.name === "collapsed") {
+      fireEvent.click(result.getByRole("button", { name: "show 3 more" }));
+      fireEvent.focus(result.getAllByRole("row")[6]);
+      fireEvent.click(result.getByRole("button", { name: "show less" }));
+      const visibleTabStops = result.getAllByRole("row").slice(1).filter((row) => row.getAttribute("tabindex") === "0");
+      expect(visibleTabStops).toHaveLength(1);
+      expect(visibleTabStops[0]?.getAttribute("data-record-id")).toBe("book-1");
+      expect(result.getByRole("button").textContent).toBe("show 3 more");
+    }
+    cleanup();
+  }
+});
+
+test("page metrics render a live static layout value", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "score", value: "1" }] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(result.getByText("1")).toBeTruthy();
+  result.rerender(React.createElement(PageView, { page: { ...page, active_layout_version: 2, layout: { blocks: [{ type: "metric", label: "score", value: "2" }] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(result.getByText("2")).toBeTruthy();
+});
+
+test("page-owned metric counts keep unchanged values across layout lifecycles", async () => {
+  const metric = (label: string) => ({ type: "metric", label, count: true, collection: `books-${label}` });
+  const value = (result: RenderResult, label: string) => [...result.container.querySelectorAll(".metric-label")].find((node) => node.textContent === label)?.closest(".metric-block")?.querySelector(".metric-value")?.textContent;
+  const cases = [
+    { name: "prepend", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
+    { name: "remove settled", initial: [metric("one"), metric("two")], next: [metric("one")], extra: 0 },
+    { name: "remove and re-add in flight", initial: [metric("one"), metric("two")], next: [metric("one")], readd: [metric("one"), metric("two")] },
+    { name: "lone metric gains a neighbour", initial: [metric("one")], next: [metric("one"), metric("two")], extra: 1 },
+    { name: "strip inserted above", initial: [metric("one"), metric("two")], next: [metric("new"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("one"), metric("two")], extra: 2 },
+    { name: "list inserted between metrics", initial: [metric("one"), metric("two")], next: [metric("one"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("two")], extra: 1 },
+    { name: "append metric", initial: [metric("one"), metric("two")], next: [metric("one"), metric("two"), metric("new")], extra: 1 },
+    { name: "replace removed metric", initial: [metric("one"), metric("two")], next: [metric("one"), metric("new")], extra: 1 },
+  ];
+  for (const scenario of cases) {
+    holdFetches();
+    const page = { title: scenario.name, route: "/page", layout: { blocks: scenario.initial } };
+    const result = render(React.createElement(PageView, { page, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+    const initialCount = scenario.initial.filter((block) => block.type === "metric").length;
+    expect(calls).toHaveLength(initialCount);
+    for (let index = 0; index < initialCount; index++) {
+      if (scenario.readd && index === 1) continue;
+      await settle(calls[index], [{ record_id: `${index}-one` }, ...(index ? [{ record_id: `${index}-two` }] : [])]);
+    }
+    expect(value(result, "one")).toBe("1");
+    if (scenario.initial.length > 1 && !scenario.readd) expect(value(result, "two")).toBe("2");
+    result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.next } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+    if (scenario.readd) {
+      expect(calls).toHaveLength(initialCount);
+      result.rerender(React.createElement(PageView, { page: { ...page, layout: { blocks: scenario.readd } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+      expect(calls).toHaveLength(initialCount + 1);
+      await settle(calls[initialCount], [{ record_id: "new-value" }, { record_id: "new-value-2" }]);
+      expect(value(result, "two")).toBe("2");
+      await settle(calls[1], [{ record_id: "stale" }]);
+      expect(value(result, "two")).toBe("2");
+    } else {
+      expect(calls).toHaveLength(initialCount + scenario.extra!);
+      for (const call of calls.slice(initialCount)) await settle(call, [{ record_id: "new" }]);
+    }
+    expect(value(result, "one")).toBe("1");
+    if (scenario.next.some((block) => block.type === "metric" && block.label === "two")) expect(value(result, "two"), scenario.name).toBe(scenario.initial.some((block) => block.type === "metric" && block.label === "two") ? "2" : "1");
+    expect(value(result, "one")).not.toBe("…");
+    if (scenario.next.some((block) => block.type === "metric" && block.label === "two")) expect(value(result, "two")).not.toBe("…");
+  }
+});
+
+test("page-owned counts refresh for a new generation", async () => {
+  holdFetches();
+  const metric = { type: "metric", label: "total", count: true, collection: "books" };
+  const page = { title: "page", route: "/page", layout: { blocks: [metric] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-refresh", credential: "secret", refreshKey: "0" }));
+  await settle(calls[0], [{ record_id: "one" }]);
+  expect(result.getByText("1")).toBeTruthy();
+  result.rerender(React.createElement(PageView, { page, pageId: "metric-refresh", credential: "secret", refreshKey: "0:1" }));
+  expect(calls).toHaveLength(2);
+  await settle(calls[1], [{ record_id: "one" }, { record_id: "two" }]);
+  expect(result.getByText("2")).toBeTruthy();
+});
+
+test("keyboard and click selection update the row and detail without auto-scroll", async () => {
+  holdFetches();
+  const page = { title: "reading", route: "/reading", layout: { blocks: [
+    { type: "list", title: "books", collection: "books", fields: ["title", "status"] },
+    { type: "detail", title: "selected book", collection: "books", fields: ["title"], filter: { field: "status", equals: "reading" } },
+  ] } };
+  const result = render(React.createElement(PageView, { page, pageId: "selection-page", credential: "secret", refreshKey: "0" }));
+  const scrollIntoView = HTMLElement.prototype.scrollIntoView;
+  let scrolls = 0;
+  HTMLElement.prototype.scrollIntoView = () => { scrolls += 1; };
+  const first = { record_id: "book-1", title: "first book", status: "reading" };
+  const second = { record_id: "book-2", title: "second book", status: "reading" };
+  await settle(calls[0], [first, second]);
+  await settle(calls[1], [first]);
+  const rows = result.getAllByRole("row");
+  await act(async () => {
+    rows[1].focus();
+    fireEvent.keyDown(rows[1], { key: "Enter" });
+  });
+  expect(rows[1].getAttribute("aria-selected")).toBe("true");
+  expect(result.getAllByText("first book").length).toBeGreaterThan(1);
+  await act(async () => fireEvent.click(rows[2]));
+  expect(rows[2].getAttribute("aria-selected")).toBe("true");
+  expect(result.getAllByText("second book").length).toBeGreaterThan(1);
+  expect(scrolls).toBe(0);
+  HTMLElement.prototype.scrollIntoView = scrollIntoView;
 });
