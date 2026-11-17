@@ -44,7 +44,7 @@ const nativeModal = (event: KeyboardEvent) => {
     return focusIsUnassigned && document.querySelector<HTMLDialogElement>("dialog:modal") !== null;
   } catch {
     // older engines have no :modal selector; every app-native dialog uses showModal().
-    return focusIsUnassigned && document.querySelector<HTMLDialogElement>("dialog[open]") !== null;
+    return pathDialog?.open === true || (focusIsUnassigned && document.querySelector<HTMLDialogElement>("dialog[open]") !== null);
   }
 };
 
