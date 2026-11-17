@@ -1,14 +1,17 @@
-import type { ReactNode } from "react";
-import { ToolBody, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
+import { useState, type ReactNode } from "react";
+import { ToolBody, type ItemState, type ToolBodyProps, type ToolItem } from "@fulcrum/react";
 import "./tool-summary.css";
 
 const MAX_INPUT = 64_000;
 const MAX_TEXT = 180;
 const MAX_ROWS = 3;
+const MAX_ARG_KEYS = 12;
+const MAX_ARRAY_ITEMS = 8;
 const HIDDEN_KEYS = new Set(["record_id", "revision"]);
 const preferred = ["title", "name", "label", "status", "state"];
 
-type Summary = { lines: string[]; raw: string };
+type Summary = { lines: string[]; raw: string; fallback: boolean };
+type OutputRead = { text: string; overflow: boolean };
 
 const text = (value: unknown, limit = MAX_TEXT): string => {
   const result = typeof value === "string" ? value : String(value);
@@ -16,81 +19,121 @@ const text = (value: unknown, limit = MAX_TEXT): string => {
   return oneLine.length > limit ? `${oneLine.slice(0, limit - 1)}…` : oneLine;
 };
 
-function outputText(output: ToolBodyProps["output"]): string {
+function outputText(output: ToolBodyProps["output"]): OutputRead {
   let result = "";
   for (const chunk of output.chunks()) {
     result += chunk.text;
-    if (result.length > MAX_INPUT) return result.slice(0, MAX_INPUT + 1);
+    if (result.length > MAX_INPUT) return { text: result.slice(0, MAX_INPUT), overflow: true };
   }
-  return result;
+  return { text: result, overflow: false };
+}
+
+function isScalar(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function dateLike(key: string): boolean {
+  return /(?:date|at|on|time|updated|created|finished|due)/i.test(key);
 }
 
 function scalarEntries(record: Record<string, unknown>): [string, unknown][] {
-  const entries = Object.entries(record).filter(([key, value]) => !HIDDEN_KEYS.has(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean"));
-  return [...entries].sort(([a], [b]) => {
-    const ai = preferred.indexOf(a);
-    const bi = preferred.indexOf(b);
-    return (ai < 0 ? preferred.length : ai) - (bi < 0 ? preferred.length : bi);
+  const entries: [string, unknown][] = [];
+  for (const key in record) {
+    if (entries.length >= 32) break;
+    const value = record[key];
+    if (!HIDDEN_KEYS.has(key) && isScalar(value)) entries.push([key, value]);
+  }
+  return entries.sort(([a], [b]) => {
+    const priority = (key: string) => {
+      const index = preferred.indexOf(key);
+      return index >= 0 ? index : dateLike(key) ? preferred.length : preferred.length + 1;
+    };
+    return priority(a) - priority(b);
   });
 }
 
 function recordLine(record: Record<string, unknown>): string {
   const entries = scalarEntries(record).slice(0, 3);
-  return entries.length ? entries.map(([key, value]) => `${key} ${text(value, 72)}`).join(" · ") : "record";
+  return entries.length ? entries.map(([, value]) => text(value, 72)).join(" · ") : "record";
+}
+
+function parseJson(raw: string): unknown | undefined {
+  if (!raw || raw.length > MAX_INPUT) return undefined;
+  try { return JSON.parse(raw); } catch { return undefined; }
+}
+
+function errorLines(value: unknown, raw: string): string[] {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const message = record.message ?? record.error ?? record.code;
+    if (isScalar(message)) return [`failed: ${text(message)}`];
+  }
+  return [`failed: ${text(raw)}`];
+}
+
+function arrayLines(value: unknown[]): string[] {
+  const records = value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row));
+  if (records.length !== value.length) return [];
+  const statusKey = records.length && records.every((row) => typeof row.status === "string") ? "status" : records.length && records.every((row) => typeof row.state === "string") ? "state" : undefined;
+  const counts = new Map<string, number>();
+  if (statusKey) for (const record of records) counts.set(String(record[statusKey]), (counts.get(String(record[statusKey])) ?? 0) + 1);
+  const head = `${records.length} rows${counts.size ? ` · ${[...counts].map(([key, count]) => `${count} ${text(key, 40)}`).join(", ")}` : ""}`;
+  const lines = records.slice(0, MAX_ROWS).map(recordLine);
+  if (records.length > MAX_ROWS) lines.push(`+ ${records.length - MAX_ROWS} more`);
+  return [head, ...lines];
 }
 
 function parseSummary(raw: string, error: boolean): string[] {
-  let value: unknown;
-  try {
-    if (!raw || raw.length > MAX_INPUT) return [text(raw || "no result")];
-    value = JSON.parse(raw);
-  } catch {
-    return [text(raw || "no result")];
-  }
-  if (error) {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const record = value as Record<string, unknown>;
-      const message = record.message ?? record.error ?? record.code;
-      if (typeof message === "string" || typeof message === "number") return [`failed: ${text(message)}`];
-    }
-    return [`failed: ${text(raw)}`];
-  }
+  const value = parseJson(raw);
+  if (value === undefined) return [text(raw || "no result")];
+  if (error) return errorLines(value, raw);
   if (value === null) return ["no record"];
   if (Array.isArray(value)) {
-    const records = value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row));
-    if (records.length !== value.length) return [text(raw)];
-    const statusKey = records.length && records.every((row) => typeof row.status === "string") ? "status" : records.length && records.every((row) => typeof row.state === "string") ? "state" : undefined;
-    const counts = new Map<string, number>();
-    if (statusKey) for (const record of records) counts.set(String(record[statusKey]), (counts.get(String(record[statusKey])) ?? 0) + 1);
-    const head = `${records.length} rows${counts.size ? ` · ${[...counts].map(([key, count]) => `${count} ${text(key, 40)}`).join(", ")}` : ""}`;
-    const lines = records.slice(0, MAX_ROWS).map(recordLine);
-    if (records.length > MAX_ROWS) lines.push(`+ ${records.length - MAX_ROWS} more`);
-    return [head, ...lines];
+    const lines = arrayLines(value);
+    return lines.length ? lines : [text(raw)];
   }
   if (typeof value === "object") return [recordLine(value as Record<string, unknown>)];
   return [text(raw)];
 }
 
+function argValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    const values: string[] = [];
+    for (const entry of value) {
+      if (values.length >= MAX_ARRAY_ITEMS || !isScalar(entry)) break;
+      values.push(text(entry, 32));
+    }
+    if (values.length && values.length === Math.min(value.length, MAX_ARRAY_ITEMS)) return `in [${values.join(", ")}]`;
+  }
+  return isScalar(value) ? text(value, 48) : "…";
+}
+
 function argsText(item: ToolItem): string {
   const args = item.tool_call.arguments;
   if (!args || typeof args !== "object" || Array.isArray(args)) return "";
-  const parts = Object.entries(args as Record<string, unknown>).slice(0, 6).map(([key, value]) => {
-    if (Array.isArray(value) && value.every((entry) => ["string", "number", "boolean"].includes(typeof entry))) return `${key} in [${value.map((entry) => text(entry, 32)).join(", ")}]`;
-    if (["string", "number", "boolean"].includes(typeof value)) return `${key} ${text(value, 48)}`;
-    return `${key} …`;
-  });
-  return text(parts.join(" · "), 260);
+  const parts: string[] = [];
+  let length = 0;
+  for (const key in args as Record<string, unknown>) {
+    if (parts.length >= MAX_ARG_KEYS || length >= 260) break;
+    const part = `${key} ${argValue((args as Record<string, unknown>)[key])}`;
+    const next = parts.length ? `${parts.join(" · ")} · ${part}` : part;
+    if (next.length > 260) break;
+    parts.push(part);
+    length = next.length;
+  }
+  return parts.join(" · ");
 }
 
-export function toolArgumentSummary(item: ToolItem): string {
-  return argsText(item);
-}
+export function toolArgumentSummary(item: ToolItem): string { return argsText(item); }
 
-export function summarizeToolOutput(output: ToolBodyProps["output"], error = false): Summary {
-  const raw = outputText(output);
-  const incomplete = Boolean(output.omission || output.protocolTruncated);
-  const lines = incomplete ? [text(raw || "output was truncated or omitted")] : parseSummary(raw, error);
-  return { lines, raw: incomplete ? `${raw}\n(output was truncated or omitted)` : raw || "no retained result" };
+export function summarizeToolOutput(output: ToolBodyProps["output"], error = false, state: ItemState = "done"): Summary {
+  const read = outputText(output);
+  const incomplete = Boolean(output.omission || output.protocolTruncated || read.overflow || !["done", "error"].includes(state));
+  if (incomplete) {
+    const reason = state === "streaming" ? "output still streaming" : "output truncated or omitted";
+    return { lines: [reason], raw: read.text, fallback: true };
+  }
+  return { lines: parseSummary(read.text, error), raw: read.text || "no retained result", fallback: false };
 }
 
 function json(value: unknown): string {
@@ -98,13 +141,16 @@ function json(value: unknown): string {
 }
 
 export function ToolSummaryBody({ item, output, state }: ToolBodyProps): ReactNode {
-  const summary = summarizeToolOutput(output, item.is_error || state === "error");
-  const showPreview = summary.lines.length > 1 || text(summary.raw) !== summary.lines[0];
+  const [rawOpen, setRawOpen] = useState(false);
+  const summary = summarizeToolOutput(output, item.is_error || state === "error", state);
+  const useFulcrumBody = summary.fallback;
+  const showPreview = !useFulcrumBody && (summary.lines.length > 1 || text(summary.raw) !== summary.lines[0]);
   return <>
-    {showPreview ? <div data-part="tool-output"><div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div></div> : <ToolBody item={item} output={output} state={state} />}
-    <details data-part="tool-raw">
+    {useFulcrumBody ? <ToolBody item={item} output={output} state={state} /> : showPreview ? <div data-part="tool-output"><div data-part="tool-summary-preview">{summary.lines.map((line, index) => <div key={`${line}-${index}`}>{line}</div>)}</div></div> : <ToolBody item={item} output={output} state={state} />}
+    <details data-part="tool-raw" onToggle={(event) => setRawOpen(event.currentTarget.open)}>
       <summary>raw</summary>
-      <pre>{`arguments\n${json(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre>
+      {rawOpen && !useFulcrumBody ? <pre>{`arguments\n${json(item.tool_call.arguments)}\n\nresult\n${summary.raw}`}</pre> : null}
+      {rawOpen && useFulcrumBody ? <p>fulcrum shows the complete retained result above.</p> : null}
     </details>
   </>;
 }
