@@ -118,13 +118,13 @@
   .page-chat-docked .page-chat-sheet-head { display: flex; align-items: center; justify-content: space-between; flex: 0 0 48px; padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border); }
   .page-chat-docked .page-chat-sheet-head strong { font-size: 14px; }
   .page-chat-docked .page-chat-sheet-head button { width: 44px; height: 44px; padding: 0; border: 0; background: transparent; font-size: 24px; }
-  .page-chat-docked .page-chat-surface .transcript { flex: 1 1 0; min-height: 0; padding: 0; }
+  .page-chat-docked .page-chat-surface .transcript { flex: 1 1 0; min-height: 0; padding: 0 16px; }
   .page-chat-docked .page-chat-surface .transcript > [data-part="timeline-frame"] { height: 100%; }
   .page-chat-docked:not(.mobile-chat-open) .page-chat-surface { pointer-events: none; }
 }
 
 @media (max-width: 760px) and (min-height: 501px) {
-  .page-chat-docked .page-chat-surface .transcript [data-part="timeline"] { padding: 14px 12px 8px; }
+  .page-chat-docked .page-chat-surface .transcript [data-part="timeline"] { padding: 14px 0 8px; }
 }
 @media (max-width: 760px), (max-height: 500px) {
   .chat-header { padding-left: 64px; padding-right: 12px; }
