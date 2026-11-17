@@ -970,7 +970,7 @@ try {
     if (url.pathname !== `/api/pages/${createdPage.id}`) return route.fallback();
     const response = await route.fetch();
     const document = await response.json() as { layout: { blocks: Array<Record<string, unknown>> } };
-    document.layout.blocks.push({ type: "form", title: "update book", tool: "update_book" });
+    document.layout.blocks.push({ type: "form", title: "update book", tool: "update_book", collection: "books" });
     await route.fulfill({ status: response.status(), headers: response.headers(), body: JSON.stringify(document) });
   });
   await page.goto(page.url(), { waitUntil: "domcontentloaded" });
