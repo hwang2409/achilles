@@ -345,6 +345,12 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 {"type": "text", "text": "layout updated without reload"},
                                 {
                                     "type": "metric",
+                                    "label": "all books",
+                                    "collection": "books",
+                                    "count": True,
+                                },
+                                {
+                                    "type": "metric",
                                     "label": (
                                         "legacy total with an unusually long descriptive label"
                                     ),
@@ -365,6 +371,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                     "fields": ["title"],
                                     "filter": {"field": "status", "equals": "reading"},
                                 },
+                                {"type": "form", "title": "edit book", "tool": "update_book"},
                             ]
                         },
                         "expected_version": 1,

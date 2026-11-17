@@ -51,31 +51,19 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const tool = shown === null ? undefined : shown.find((item) => item.name === toolName) ?? null;
   const selected = useSelectedRow(pageId);
   const row = tool && selected?.collection === tool.collection ? selected.record : null;
-  const section = useRef<HTMLElement>(null);
-  // a row picked far below the form (or at 390 px) would change a form the user cannot see
-  const picked = tool?.operation === "update" && row ? selected?.opener : undefined;
-  useEffect(() => { if (picked) section.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [picked]);
   const onReloadTool = () => setReload((value) => value + 1);
   // without block fields, a form lists its inputs in the table's column order (data schema required first), not the
   // tool input's own required list: an update tool requires only record_id/revision, which would sort title last
   const order = fields ?? (tool && shown ? schemaColumns(shown, tool.collection) : undefined);
-  const label = tool && tool.operation === "update" && row ? editingLabel(tool, order, row) : "";
-  const heading = label ? `${title} · ${label}` : title;
+  const heading = title;
+  const headingNote = tool?.operation === "update" ? `runs ${toolName} on the selected row` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
     : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
     : row ? <RecordForm key={String(row.record_id)} tool={tool} order={order} row={row} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} />
     : <p aria-disabled="true">select a row in the table to edit it</p>;
-  return <section ref={section} className="record-form"><h2>{heading}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
-}
-
-// Names which record a form edits by its first listed field, in the form heading.
-function editingLabel(tool: PageTool, order: string[] | undefined, row: Record<string, unknown>): string {
-  const mapped = formFields(tool.input_schema, order);
-  const first = ("fields" in mapped ? mapped.fields : []).find((field) => field.name !== "record_id" && field.name !== "revision");
-  const value = first ? row[first.name] : undefined;
-  return value === null || value === undefined ? "" : String(value);
+  return <section className="record-form"><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
