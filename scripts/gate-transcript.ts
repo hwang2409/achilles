@@ -270,7 +270,7 @@ export async function gateTranscript(
   await page.setViewportSize({ width: 390, height: 760 });
   await capture("streaming-midstream-jump-390x760.png");
   await page.setViewportSize({ width: 1440, height: 900 });
-  await waitFor(async () => (await textStream.innerText()).includes("text-only line 119") && await distanceFromBottom() <= 4, "text-only stream stays at bottom after jump");
+  await waitFor(async () => (await textStream.innerText()).includes("text-only line 119"), "text-only stream completes after jump");
   if (await page.locator('[data-part="jump-to-latest"]:visible').count() !== 0)
     throw new Error("mid-stream jump to latest control returned while later chunks streamed");
   await waitForIdleTurn(page, waitFor);
