@@ -1,3 +1,5 @@
+/* fulcrum's timeline rows use content-visibility for long logs; disclosures must remeasure in normal flow. */
+.transcript [data-part="tool"] { content-visibility: visible; contain: none; }
 .transcript [data-part="tool-summary-preview"] {
   padding: 8px 12px 8px 12px;
   color: var(--fulcrum-fg);
