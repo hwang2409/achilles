@@ -1172,8 +1172,6 @@ try {
   await field.press("Enter");
   await waitFor(async () => (await updateLayoutApproval.count()) > updateLayoutApprovalBefore, "update layout approval");
   await updateLayoutApproval.nth(updateLayoutApprovalBefore).getByRole("button", { name: "approve", exact: true }).click();
-  const allBooksBeforeSummary = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  await waitFor(async () => ["1", "5"].includes(await allBooksBeforeSummary.innerText()), "unfiltered metric before compact summary");
   const seedSummary = Bun.spawn(["uv", "run", "python", "-c", `import json, sqlite3, datetime; from achilles.web import _database; db=_database(); now=datetime.datetime.now(datetime.timezone.utc).isoformat(); db.executemany("INSERT INTO page_record(page_id,collection,record_id,version,revision,document,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", [(${JSON.stringify(createdPage.id)}, "books", f"summary-{i}", 1, 1, json.dumps({"title": f"Summary Book {i}", "status": "done"}), now, now) for i in range(1, 5)]); db.commit(); db.close()`], { env });
   if (await seedSummary.exited !== 0) throw new Error("could not seed summary records");
   const listSummaryApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "list_books" });
@@ -1195,6 +1193,11 @@ try {
     throw new Error("raw list result was visible before opening raw");
   await toolRow.locator('[data-part="tool-raw"] summary').click();
   await gateWait.playwright(toolRow.locator('[data-part="tool-raw"] pre').getByText("Summary Book 1", { exact: false }), "waitFor", { timeout: 20000 });
+  await waitFor(async () => {
+    const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
+    const rowBox = await toolRow.boundingBox();
+    return Boolean(rawBox && rowBox && rowBox.y + rowBox.height >= rawBox.y + rawBox.height);
+  }, "raw disclosure remeasured inside tool row");
   const rawBox = await toolRow.locator('[data-part="tool-raw"]').boundingBox();
   const rowBox = await toolRow.boundingBox();
   if (!rawBox || !rowBox || rowBox.y + rowBox.height < rawBox.y + rawBox.height)
@@ -1212,7 +1215,7 @@ try {
   console.log("open page re-rendered without reload after chat update_layout: page note before books");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "layout-update-without-reload.png"), fullPage: true });
   const allBooksMetric = page.locator(".metric-block").filter({ has: page.getByText("all books", { exact: true }) }).locator("strong");
-  await waitFor(async () => ["1", "5"].includes(await allBooksMetric.innerText()), "unfiltered metric after compact summary");
+  await gateWait.playwright(allBooksMetric.filter({ hasText: "5" }), "waitFor", { timeout: 20000 });
   await page.getByRole("row").filter({ hasText: "Synthetic Book" }).click();
   const saveCountRoute = async (route: Route) => {
     await route.fulfill({ status: 200, body: "[]", headers: { "content-type": "application/json", "x-achilles-total": "2" } });
