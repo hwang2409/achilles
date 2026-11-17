@@ -934,10 +934,9 @@ try {
 
   const recordsPattern = `**/api/pages/${createdPage.id}/records/books?*`;
   await page.route(recordsPattern, async (route) => {
-    if (new URL(route.request().url()).searchParams.get("limit") === "100") {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    await route.continue();
+    const response = await route.fetch();
+    if (new URL(route.request().url()).searchParams.get("limit") === "100") await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.fulfill({ response });
   });
   await page.reload();
   await gateWait.playwright(page.getByText("books loading…", { exact: true }), "waitFor", { timeout: 20_000 });
