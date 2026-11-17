@@ -944,7 +944,7 @@ try {
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x760.png"), fullPage: true });
   await field.fill("sb7 page stream");
   await field.press("Enter");
-  await gateWait.playwright(page.getByText("sb7 stream line 119", { exact: true }), "waitFor", { timeout: 20000 });
+  await gateWait.waitFor(async () => (await page.locator(".page-chat-surface").innerText()).includes("sb7 stream line 119"), "sb7 stream line 119", 20000);
   const streamProof = await page.locator(".page-chat-surface").evaluate((surface) => {
     const text = surface.textContent ?? "";
     const lines = text.match(/sb7 stream line \d{3}/g) ?? [];
