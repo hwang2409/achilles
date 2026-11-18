@@ -15,7 +15,7 @@
   font: var(--achilles-ui-size, 14px) / 1.5 var(--tm-mono);
   -webkit-font-smoothing: antialiased;
 }
-.telemetry-module :focus-visible { outline: 2px solid var(--fulcrum-warn); outline-offset: 2px; }
+.telemetry-module :focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
 .telemetry-module .tm-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .telemetry-module .tm-dim { color: var(--fulcrum-muted); }
 .telemetry-module .tm-ok { color: var(--fulcrum-ok); }
@@ -58,7 +58,8 @@
 .tm-banner h2 { margin: 0 0 2px; font-size: 1em; color: var(--fulcrum-danger); }
 .tm-banner p { margin: 0; }
 .tm-danger-button { margin-left: auto; border-color: var(--fulcrum-danger); color: var(--fulcrum-danger); }
-.tm-stale { opacity: .55; }
+/* dim the cells, not the rows, so a focused row keeps a full-strength ring over stale data */
+.tm-stale > :not(.tm-sessions), .tm-stale .tm-sessions > :not(.tm-table), .tm-stale .tm-table :is(caption, th, td) { opacity: .55; }
 .tm-skeleton i, .tm-skeleton b { display: block; background: var(--fulcrum-surface); }
 .tm-skeleton-metrics { display: flex; flex-wrap: wrap; gap: 24px 40px; margin-bottom: 40px; }
 .tm-skeleton-metrics i { width: 100px; height: 12px; margin-bottom: 12px; }
@@ -157,7 +158,7 @@
 .tm-row-link { color: inherit; }
 .tm-row-link::after { content: ""; position: absolute; inset: 0; }
 .tm-row-link:focus-visible { outline: none; }
-.tm-row:has(.tm-row-link:focus-visible) { outline: 2px solid var(--fulcrum-warn); outline-offset: -2px; }
+.tm-row:has(.tm-row-link:focus-visible) { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 .tm-table .tm-profile { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; }
 .tm-id-heading { overflow-wrap: anywhere; }
 .tm-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 24px 0 0; color: var(--fulcrum-muted); }
@@ -201,6 +202,8 @@
   .tm-table tr::before { order: 4; }
   .tm-table tr::after { order: 8; }
   .tm-table tbody tr:hover { background: none; }
+  /* cards have no side padding: keep the ring off the text */
+  .tm-row:has(.tm-row-link:focus-visible) { outline-offset: 2px; }
   .tm-table td { display: block; padding: 0; border: 0; white-space: nowrap; font-size: 12px; }
   .tm-table td.tm-profile, .tm-table td.tm-id, .tm-table td.tm-time { font-size: 13px; }
   .tm-table td.tm-num { text-align: left; }

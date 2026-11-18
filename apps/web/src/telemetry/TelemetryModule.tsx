@@ -59,18 +59,29 @@ function TelemetryPages({ client, tab, tabs, go, openTelemetrySettings }: { clie
   if (problem?.kind === "off" || status?.enabled === false) return <TelemetryOff openSettings={openTelemetrySettings} />;
 
   const banner = problem && <FailedBanner problem={problem} updatedAt={shown ? reads.updatedAt : undefined} retry={reads.refresh} />;
-  let body: ReactNode;
-  if (shown) {
-    // Labels come from the ask the shown reply answers; while a newer ask loads, the old reply stays, dimmed.
-    const empty = <NoTelemetryYet rangeLabel={shown.label} widen={range === "24h" ? () => reads.chooseRange("7d") : undefined} />;
-    const view = shown.data.tab === "overview"
-      ? <Overview overview={shown.data.overview} bucket={shown.bucket} chart={chart} setChart={setChart} empty={empty} />
-      : <Sessions page={shown.data.page} total={shown.data.total} open={go} query={reads.query} shown={shown.data.ask.query} rangeLabel={shown.label} profiles={seen.profiles} models={seen.models} setFilters={reads.setFilters} next={reads.next} previous={reads.previous} empty={empty} />;
-    body = <>{banner}<div className={shown.stale ? "tm-stale" : undefined} aria-busy={shown.stale && !problem ? true : undefined}>{view}</div></>;
-  } else {
-    body = <>{banner}{!problem && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {RANGES[range].label}…</p>}{tab === "overview" && <OverviewSkeleton />}</>;
-  }
-  return <Frame tools={<Tools status={status} refreshing={reads.phase === "refreshing"} range={range} chooseRange={reads.chooseRange} refresh={reads.refresh} />} tabs={tabs}>{body}</Frame>;
+  return (
+    <Frame tools={<Tools status={status} refreshing={reads.phase === "refreshing"} range={range} chooseRange={reads.chooseRange} refresh={reads.refresh} />} tabs={tabs}>
+      {banner}
+      {shown
+        ? <ShownView reads={reads} shown={shown} busy={!problem} chart={chart} setChart={setChart} seen={seen} go={go} />
+        : <Loading tab={tab} range={range} quiet={!!problem} />}
+    </Frame>
+  );
+}
+
+type Reads = ReturnType<typeof useTelemetryReads>;
+
+/** Labels come from the ask the shown reply answers; while a newer ask loads, the old reply stays, dimmed. */
+function ShownView({ reads, shown, busy, chart, setChart, seen, go }: { reads: Reads; shown: NonNullable<Reads["shown"]>; busy: boolean; chart: "calls" | "tokens"; setChart: (chart: "calls" | "tokens") => void; seen: ReturnType<typeof useSeenFilters>; go: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
+  const empty = <NoTelemetryYet rangeLabel={shown.label} widen={reads.range === "24h" ? () => reads.chooseRange("7d") : undefined} />;
+  const view = shown.data.tab === "overview"
+    ? <Overview overview={shown.data.overview} bucket={shown.bucket} chart={chart} setChart={setChart} empty={empty} />
+    : <Sessions page={shown.data.page} total={shown.data.total} open={go} query={reads.query} shown={shown.data.ask.query} rangeLabel={shown.label} profiles={seen.profiles} models={seen.models} setFilters={reads.setFilters} next={reads.next} previous={reads.previous} empty={empty} />;
+  return <div className={shown.stale ? "tm-stale" : undefined} aria-busy={shown.stale && busy ? true : undefined}>{view}</div>;
+}
+
+function Loading({ tab, range, quiet }: { tab: Tab; range: Range; quiet: boolean }) {
+  return <>{!quiet && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {RANGES[range].label}…</p>}{tab === "overview" && <OverviewSkeleton />}</>;
 }
 
 /** Filter choices come from the sessions seen so far; zeta has no list of profiles or models yet. */
