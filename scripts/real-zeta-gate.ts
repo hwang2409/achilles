@@ -2475,6 +2475,8 @@ try {
     undefined,
     { timeout: 20_000 },
   );
+  const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
+  if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
   const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
   const observerHttp: { method: string; path: string }[] = [];
@@ -2512,46 +2514,69 @@ try {
   if (observerHttp.some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer issued mutating HTTP request");
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
   if (screenshotDir) {
+    const observerMarker = "prove chat";
     await observerPage.setViewportSize({ width: 390, height: 760 });
     const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
     if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
-    const pageChatClose = observerPage.locator('.page-chat-surface button[aria-label="close page chat"]');
-    if (await pageChatClose.isVisible().catch(() => false)) await pageChatClose.click({ force: true });
+    for (const dialog of await observerPage.locator('[role="dialog"][aria-modal="true"]').all()) {
+      const close = dialog.getByRole("button", { name: /close/i }).first();
+      if (await close.isVisible().catch(() => false)) await close.click({ force: true });
+    }
+    const pageChatBar = observerPage.locator(".page-chat-bar");
+    const pageChatDialog = observerPage.getByRole("dialog", { name: "page chat" });
     await waitFor(async () => await observerPage.locator(".sidebar").evaluate((element) => {
       const style = getComputedStyle(element);
       return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
     }), "observer drawer settled");
-    await waitFor(async () => await observerPage.locator(".page-chat-surface").evaluate((element) => {
-      const style = getComputedStyle(element);
-      return style.visibility === "hidden" && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
-    }), "observer page-chat settled");
-    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    const markerCandidates = observerPage.locator('[data-part="timeline"] > [data-id], [data-part="timeline"] > [data-virtual-id]');
-    const jumpToLatest = observerPage.locator('[data-part="jump-to-latest"]');
-    if (await jumpToLatest.isVisible().catch(() => false)) await jumpToLatest.click({ force: true });
-    await observerPage.locator('[data-part="timeline-scroll"]').evaluateAll((elements) => elements.forEach((element) => { const scroll = element as HTMLElement; scroll.scrollTop = scroll.scrollHeight; }));
-    await markerCandidates.last().evaluate((element) => element.scrollIntoView({ block: "center" }));
-    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    const markerIndex = await markerCandidates.evaluateAll((elements) => elements.findIndex((element) => {
-      const rect = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-    }));
-    if (markerIndex < 0) {
-      const geometry = await markerCandidates.evaluateAll((elements) => elements.map((element) => ({ rect: element.getBoundingClientRect().toJSON(), display: getComputedStyle(element).display, visibility: getComputedStyle(element).visibility, transform: getComputedStyle(element).transform })));
-      throw new Error(`observer active-chat marker is not visible; candidates=${JSON.stringify(geometry)}`);
+    if (await pageChatBar.getAttribute("aria-expanded") !== "false") {
+      const close = pageChatDialog.getByRole("button", { name: "close page chat" });
+      await close.click({ force: true });
+      await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
     }
-    const marker = markerCandidates.nth(markerIndex);
-    await marker.scrollIntoViewIfNeeded();
-    const unobscured = await marker.evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const point = document.elementFromPoint(box.left + Math.min(8, box.width / 2), box.top + Math.min(8, box.height / 2));
-      return Boolean(point && (point === element || element.contains(point)));
+    const routeUnderneath = new URL(observerPage.url()).pathname;
+    if (routeUnderneath !== "/") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
+    await pageChatBar.click();
+    await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer page chat expanded");
+    await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    await waitFor(async () => await pageChatDialog.evaluate((dialog) => {
+      const surface = dialog.querySelector<HTMLElement>(".page-chat-surface") ?? dialog;
+      const style = getComputedStyle(surface);
+      return style.visibility === "visible" && style.display !== "none";
+    }), "observer page chat settled");
+    await pageChatDialog.getByRole("button", { name: "close page chat" }).evaluate((element) => {
+      if (document.activeElement !== element) (element as HTMLElement).focus();
     });
-    if (!unobscured) throw new Error("observer active-chat marker is obscured");
+    if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement))) throw new Error("observer page chat did not focus inside the open sheet");
+    const transcript = pageChatDialog.locator('[data-part="timeline-scroll"]');
+    const marker = pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
+    const jumpToLatest = pageChatDialog.locator('[data-part="jump-to-latest"]');
+    if (await jumpToLatest.isVisible().catch(() => false)) await jumpToLatest.click({ force: true });
+    await waitFor(async () => (await marker.count()) > 0 || (await pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerLatestSource }).count()) > 0, "observer source marker or latest");
+    const evidence = (await marker.count()) > 0 ? marker : pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerLatestSource }).last();
+    await transcript.evaluate((element, text) => {
+      const scroll = element as HTMLElement;
+      const row = [...document.querySelectorAll<HTMLElement>('[data-part="message"]')].find((candidate) => candidate.textContent?.includes(text));
+      if (!row) throw new Error(`missing source-derived observer evidence: ${text}`);
+      row.scrollIntoView({ block: "center", inline: "nearest" });
+      scroll.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }, (await marker.count()) > 0 ? observerMarker : observerLatestSource);
+    await gateWait.playwright(evidence, "waitFor", { state: "visible" });
+    const mobileMarker = await evidence.evaluate((element, expected) => {
+      const rect = element.getBoundingClientRect();
+      const transcriptRect = element.closest('[data-part="timeline-scroll"]')?.getBoundingClientRect();
+      const point = document.elementFromPoint(rect.left + Math.min(8, rect.width / 2), rect.top + Math.min(8, rect.height / 2));
+      return { text: element.textContent ?? "", rect: rect.toJSON(), transcriptRect: transcriptRect?.toJSON() ?? null, hit: Boolean(point && (point === element || element.contains(point))), expected };
+    }, (await marker.count()) > 0 ? observerMarker : latestSourceText);
+    const expectedEvidence = (await marker.count()) > 0 ? observerMarker : observerLatestSource;
+    if (!mobileMarker.text.includes(expectedEvidence) || !mobileMarker.transcriptRect || mobileMarker.rect.top < mobileMarker.transcriptRect.top || mobileMarker.rect.bottom > mobileMarker.transcriptRect.bottom || !mobileMarker.hit)
+      throw new Error(`observer active chat evidence is not readable in open sheet: ${JSON.stringify(mobileMarker)}`);
+    if (new URL(observerPage.url()).pathname !== routeUnderneath) throw new Error("observer active chat changed the route");
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
     await observerPage.setViewportSize({ width: 1440, height: 900 });
-    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer desktop page chat expanded");
+    await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    await gateWait.playwright(marker, "waitFor", { state: "visible" });
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
