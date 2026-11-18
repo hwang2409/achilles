@@ -20,6 +20,14 @@ const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
 if (!/^[0-9a-f]{40}$/.test(zetaRef))
   throw new Error("zeta.rev must contain one sha");
+const pinnedProtocol = await readFile(join(zeta, "src/zeta/server/protocol.py"), "utf8");
+const protocolMutationMethods = new Set<string>();
+for (const declaration of pinnedProtocol.matchAll(/\b[A-Z_]+\s*=\s*\(([^)]*)\)/g)) {
+  const body = declaration[1]!;
+  const wire = body.match(/^\s*"([^"]+)"/s)?.[1];
+  if (wire && /Access\.(?:SESSION_MUTATION|DELIVERY|CONTROLLER_WRITE)/.test(body)) protocolMutationMethods.add(wire);
+}
+if (!protocolMutationMethods.size) throw new Error(`pinned zeta ${zetaRef} has no mutation declarations`);
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));
 const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
@@ -2523,7 +2531,7 @@ try {
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
   await waitFor(async () => (await observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').count()) > 0, "observer transcript rows");
-  const observerMutationMethods = new Set(["send", "steer", "new_session", "approve", "deny", "interrupt", "set_settings", "set_page_create_mode", "create_page", "update_layout", "restore_version", "mcp_refresh_tools"]);
+  const observerMutationMethods = protocolMutationMethods;
   const observerStorageAtActions = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   const observerFrameCountAtActions = observerFrames.length;
   const observerHttpCountAtActions = observerHttp.length;
