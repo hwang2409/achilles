@@ -2490,7 +2490,7 @@ try {
 
   // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
   if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
-  await page.goto(`${origin}/?chat=${first}`);
+  await page.goto(`${origin}/reading?chat=${first}`);
   const controllerChat = await page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 });
   if (controllerChat !== first) throw new Error(`known controller chat did not attach: expected ${first}, got ${controllerChat}`);
   await gateWait.playwright(page, "waitForFunction", () =>
@@ -2599,7 +2599,7 @@ try {
       await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
     }
     const routeUnderneath = new URL(observerPage.url()).pathname;
-    if (routeUnderneath !== "/") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
+    if (routeUnderneath !== "/reading") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
     await pageChatBar.click();
     await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
     await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer page chat expanded");

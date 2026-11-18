@@ -46,6 +46,7 @@ async function renderEmptyChat(props: {
     toggleCreateMode: props.toggleCreateMode,
     credential: `cred-${Math.random()}`,
     refreshKey: "0:0",
+    canWrite: true,
   }));
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return result;
