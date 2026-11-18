@@ -157,8 +157,12 @@ export async function attachPage(
     if (selectedId && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
     const serverApprovalMode = page.approval_mode ?? null;
 
+    const observer = (client as ZetaClient & { authority?: string }).authority === "observer";
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
-      const session = await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token)); requireCurrent(owner, token);
+      const session = observer
+        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode, pending: false, rebind: false }
+        : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
+      requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
@@ -167,10 +171,10 @@ export async function attachPage(
       const userTitled = Boolean(storedChat?.titled_by_user);
       // a chat whose first-message record was lost (a failed PATCH, a closed tab) is repaired from its history
       const historyTitle = storedChat && !userTitled && !(storedChat.message_sent && (storedChat.title || storedChat.first_title)) ? cutTitle(firstUserText(lease.store)) : "";
-      if (historyTitle) persistFirstMessage(session.id, historyTitle, () => {});
+      if (historyTitle && !observer) persistFirstMessage(session.id, historyTitle, () => {});
       const autoTitle = session.name?.trim() || (userTitled ? "" : storedChat?.title?.trim()) || storedChat?.first_title?.trim() || historyTitle || "new chat";
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
-      if (!userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
+      if (!observer && !userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
       return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind };
     };

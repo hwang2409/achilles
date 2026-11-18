@@ -12,14 +12,14 @@ export type ConnectionState =
   | { phase: "not_running"; attempt: number; retryAt: number; lost: boolean }
   | { phase: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; attempt: number; retryAt: number; lost: boolean }
   | { phase: "dropped"; attempt: number; retryAt: number; lost: true }
-  | { phase: "unresponsive" | "incompatible" | "controller_taken"; attempt: number; retryAt: number; lost: boolean };
+  | { phase: "unresponsive" | "incompatible" | "controller_taken" | "observer_limit"; attempt: number; retryAt: number; lost: boolean };
 
 export type ConnectionEvent =
-  | { type: "attempt" }
+  | { type: "attempt" | "reconnect" }
   | { type: "connected"; authority: ZetaRole }
   | { type: "not_running"; now: number }
   | { type: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; now: number }
-  | { type: "unresponsive" | "incompatible" | "controller_taken"; now: number }
+  | { type: "unresponsive" | "incompatible" | "controller_taken" | "observer_limit"; now: number }
   | { type: "closed"; now: number };
 
 /** The command that starts a server this page may connect to. The origin is exact: localhost and 127.0.0.1 differ. */
@@ -37,6 +37,8 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
   switch (event.type) {
     case "attempt":
       return state.phase === "connected" ? state : { phase: "connecting", attempt: attemptOf(state), lost, ...(state.phase === "unresponsive" || (state.phase === "connecting" && state.lastFailure === "unresponsive") ? { lastFailure: "unresponsive" as const } : {}) };
+    case "reconnect":
+      return { phase: "connecting", attempt: attemptOf(state), lost };
     case "connected":
       return { phase: "connected", authority: event.authority };
     case "closed":
@@ -75,10 +77,12 @@ export type Connection = {
   subscribe(listener: () => void): () => void;
   /** Skips the wait before the next automatic try. */
   retryNow(): void;
+  /** Reopens this page as controller, or keeps it as a live observer if the slot is still occupied. */
+  takeControl(): Promise<void>;
   stop(): void;
 };
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
@@ -129,6 +133,7 @@ export function createConnection({
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
+  let desiredRole: ZetaRole = "controller";
   const listeners = new Set<() => void>();
   const send = (event: ConnectionEvent) => {
     const next = reduceConnection(state, event);
@@ -176,11 +181,16 @@ export function createConnection({
         return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
       } finally { clearTimeout(connectTimeout); }
     };
-    const authority = "controller" as const;
-    const opened = await openRole(authority);
+    let authority = desiredRole;
+    let opened = await openRole(authority);
     if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    // -32001 "connection_capacity": zeta already has a controller (another tab). Not a version problem.
-    if (opened.kind === "busy") return send({ type: "controller_taken", now: now() });
+    // -32001 means the controller slot is occupied. Retry with the observer credential.
+    if (opened.kind === "busy" && authority === "controller") {
+      desiredRole = authority = "observer";
+      opened = await openRole(authority);
+      if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
+    }
+    if (opened.kind === "busy") return send({ type: authority === "observer" ? "observer_limit" : "controller_taken", now: now() });
     if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
     // -32002 "protocol_mismatch": the only case that is a real version mismatch.
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
@@ -189,6 +199,7 @@ export function createConnection({
     const next = opened.client;
     if (!current()) return next.close();
     client = next;
+    (next as ZetaClient & { authority?: ZetaRole }).authority = authority;
     next.onClose(() => {
       if (client !== next) return;
       client = null;
@@ -207,6 +218,16 @@ export function createConnection({
       if (timer !== null) { clearTimer(timer); timer = null; }
       // A slot may have freed since both roles were refused: start again as a fresh open does, controller first.
       void attempt();
+    },
+    async takeControl() {
+      if (stopped || state.phase !== "connected" || !client) return;
+      const open = client;
+      client = null;
+      generation++;
+      desiredRole = "controller";
+      send({ type: "reconnect" });
+      open.close();
+      await attempt();
     },
     stop() {
       stopped = true;

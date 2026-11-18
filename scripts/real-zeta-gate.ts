@@ -200,7 +200,7 @@ try {
     "achilles",
   );
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  let page = await browser.newPage();
   const errors: string[] = [];
   const requestFailures: string[] = [];
   const consoleErrors: string[] = [];
@@ -291,7 +291,7 @@ try {
     throw new Error("zeta shutdown timeout after 15 seconds");
   }
   await restartZeta("restarted zeta");
-  const field = page.getByRole("textbox", { name: "message" });
+  let field = page.getByRole("textbox", { name: "message" });
   await gateWait.playwright(field, "waitFor", { timeout: 20000 }).catch(async () => {
     throw new Error(
       `composer missing: ${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
@@ -2220,6 +2220,35 @@ try {
     await page.unroute("**/api/pages**", hold);
     await page.unroute("**/api/chats**", hold);
   }
+
+  // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
+  if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
+  const observerPage = await browser.newPage();
+  const controllerChat = await homeSessionId();
+  if (!controllerChat) throw new Error("controller chat id missing before observer journey");
+  await observerPage.goto(`${origin}/?chat=${controllerChat}`);
+  const observerBanner = observerPage.locator(".observer-banner");
+  await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
+  if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
+  const observerComposerReason = observerPage.locator('[data-part="composer-reason"]');
+  const observerBody = await observerPage.locator("body").innerText();
+  if ((await observerComposerReason.count()) && !(await observerComposerReason.first().innerText()).includes("read-only")) throw new Error("observer composer did not explain its disabled state");
+  if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
+  const observerNewChat = observerPage.locator("button.new-chat");
+  if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
+  if (screenshotDir) {
+    await observerPage.setViewportSize({ width: 390, height: 760 });
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-read-only-390x760.png"), fullPage: true });
+    await observerPage.setViewportSize({ width: 1440, height: 900 });
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-read-only-1440x900.png"), fullPage: true });
+  }
+  await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
+  await gateWait.playwright(observerBanner.getByText("stayed live and read-only", { exact: false }), "waitFor", { state: "visible" });
+  await page.close();
+  await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
+  await gateWait.playwright(observerBanner, "waitFor", { state: "hidden" });
+  if (await observerComposerReason.count()) throw new Error("observer remained read-only after controller closed");
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-controller-restored-1440x900.png"), fullPage: true });
 
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
