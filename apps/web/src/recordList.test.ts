@@ -5,7 +5,10 @@ import React from "react";
 import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
 import { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
+import { formatMetricValue } from "./page/metricValue";
 import type { PageTool } from "./page/usePageTools";
+
+const metricBoundaryMatrix = JSON.parse(await Bun.file(new URL("./metric-boundary-matrix.json", import.meta.url)).text()) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 
 const originalFetch = globalThis.fetch;
 
@@ -241,30 +244,45 @@ test("record list reveal projection keeps loaded rows and one reachable tab stop
   }
 });
 
-test("ten-character metric values compact before they can overflow a mobile cell", () => {
-  const metrics = [
-    ["unmarked eight digits", "99999999", "99999999"],
-    ["marked eight digits", "99999999", "99999999", "done"],
-    ["unmarked nine digits", "999999999", "999999999"],
-    ["marked nine digits", "999999999", "1B", "done"],
-    ["unmarked ten digits", "9999999999", "10B"],
-    ["marked ten digits", "9999999999", "10B", "done"],
-    ["decimal", "1234567890.5", "1.2B"],
-    ["unmarked nonnumeric", "9999999999 items", "9999999999 items"],
-    ["marked nonnumeric", "9999999999 items", "9999999999 items", "done"],
-  ] as const;
-  const page = { title: "page", route: "/page", layout: { blocks: metrics.map(([label, value, , status]) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
-  const result = render(React.createElement(PageView, { page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
-  for (const [label, fullValue, displayValue] of metrics) {
-    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === label)!;
-    const value = block.querySelector(".metric-value")!;
-    expect(value.textContent, label).toBe(displayValue);
-    expect(value.getAttribute("title"), label).toBe(fullValue);
-    if (displayValue !== fullValue) {
-      expect(value.querySelector('[aria-hidden="true"]')?.textContent, label).toBe(displayValue);
-      expect(block.querySelector(".metric-value-accessible")?.textContent, label).toBe(fullValue);
-    }
+for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["marked seven digit", "9999999", "10M"], ["huge exponent", "1.0e+307", "1e307"]] as const) {
+  test(`numeric metric boundary: ${label}`, () => {
+    const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label, value, status: "done" }] } };
+    const result = render(React.createElement(PageView, { page, pageId: `metric-fail-first-${label}`, credential: "secret", refreshKey: "0" }));
+    expect(result.container.querySelector(".metric-value")?.textContent, label).toBe(expected);
+  });
+}
+
+test("metric formatter matches every declared numeric matrix expectation", () => {
+  for (const entry of metricBoundaryMatrix.filter((item) => item.classification !== "text")) {
+    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero", scientific: /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.expectedText) });
   }
+});
+
+test("numeric metric displays stay within the declared matrix boundary", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: metricBoundaryMatrix.map(({ label, value, status }) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
+  for (const entry of metricBoundaryMatrix) {
+    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === entry.label)!;
+    const value = block.querySelector(".metric-value")!;
+    expect(value.textContent, entry.label).toBe(entry.expectedText);
+    expect(value.getAttribute("title"), entry.label).toBe(entry.value);
+    expect(value.getAttribute("aria-label"), entry.label).toBe(entry.value);
+  }
+});
+
+test("metric values keep words intact and expose long values once", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: [
+    { type: "metric", label: "description", value: "intentionally editorial text" },
+    { type: "metric", label: "single token", value: "supercalifragilisticexpialidocious" },
+  ] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-text-boundary", credential: "secret", refreshKey: "0" }));
+  const values = [...result.container.querySelectorAll(".metric-value")];
+  expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
+  expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
+  expect(values[1]?.classList.contains("metric-value-text-single")).toBe(true);
+  expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
+  expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
+  expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");
 });
 
 test("page metrics render a live static layout value", () => {
