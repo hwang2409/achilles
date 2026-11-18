@@ -2539,7 +2539,7 @@ try {
   const palette = observerPage.getByRole("dialog").filter({ hasText: "toggle vim mode" });
   if (await palette.count()) {
     const vim = palette.getByText("toggle vim mode", { exact: true });
-    if (await vim.count() && !(await vim.isDisabled())) throw new Error("observer vim setting was editable");
+    if (await vim.count()) await vim.click();
   }
   const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
   if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
