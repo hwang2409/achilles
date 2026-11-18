@@ -2224,7 +2224,7 @@ try {
   // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
   if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
   const observerPage = await browser.newPage();
-  const controllerChat = await homeSessionId();
+  const controllerChat = first;
   if (!controllerChat) throw new Error("controller chat id missing before observer journey");
   await observerPage.goto(`${origin}/?chat=${controllerChat}`);
   const observerBanner = observerPage.locator(".observer-banner");
