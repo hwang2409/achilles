@@ -221,8 +221,7 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900) => {
-    if (!screenshotDir) return;
+  const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
     for (const width of [390, 1280, 1440, 1920]) {
       await page.setViewportSize({ width, height: width === 390 ? mobileHeight : desktopHeight });
       if (width === 390) {
@@ -252,13 +251,10 @@ try {
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
         await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
-        if (state === "metric-boundary") {
-          const missing = await page.locator(".metric-block").evaluateAll((blocks) => blocks.flatMap((block) => { const box = block.getBoundingClientRect(); return box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth ? [block.querySelector(".metric-label")?.textContent ?? "<missing>"] : []; }));
-          if (missing.length) throw new Error(`metric capture at 390px did not show every unobscured matrix box: ${JSON.stringify(missing)}`);
-        }
+        if (assertFrame) await assertFrame(`${width}px`);
       }
       const captureName = state === "metric-boundary" ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png` : `state-${state}-${width}.png`;
-      await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
+      if (screenshotDir) await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
   };
@@ -1054,71 +1050,64 @@ try {
   const desktopViewport = page.viewportSize();
   const matrixStrip = page.locator(".metric-strip").first();
   const matrixBlocks = matrixStrip.locator(".metric-block");
-  const assertMetricMatrix = async (viewport: string, ax: boolean) => {
+  const assertMetricMatrix = async (viewport: string) => {
     const entries = await matrixBlocks.evaluateAll((elements, expected) => expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
       const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
       const block = element as HTMLElement | undefined;
+      const labelNode = element?.querySelector<HTMLElement>(".metric-label");
       const rendered = element?.querySelector<HTMLElement>(".metric-value");
       const blockBox = block?.getBoundingClientRect();
+      const labelBox = labelNode?.getBoundingClientRect();
       const valueBox = rendered?.getBoundingClientRect();
       const style = block ? getComputedStyle(block) : null;
       const renderedStyle = rendered ? getComputedStyle(rendered) : null;
-      const numeric = Number(value.replaceAll(",", ""));
-      const isNumeric = Number.isFinite(numeric);
-      const painted = valueBox && rendered ? { top: valueBox.top, right: valueBox.right, bottom: valueBox.bottom, left: valueBox.left } : null;
-      const contained = Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left);
-      const labelBox = element?.querySelector<HTMLElement>(".metric-label")?.getBoundingClientRect();
-      const point = labelBox ? { x: labelBox.left + labelBox.width / 2, y: labelBox.top + labelBox.height / 2 } : null;
-      const hit = point ? document.elementFromPoint(point.x, point.y) : null;
+      const clip = document.querySelector<HTMLElement>(".page-content")?.getBoundingClientRect();
+      const points = [
+        ...(blockBox ? [{ name: "top-left", x: blockBox.left + 1, y: blockBox.top + 1 }, { name: "top-right", x: blockBox.right - 1, y: blockBox.top + 1 }, { name: "bottom-left", x: blockBox.left + 1, y: blockBox.bottom - 1 }, { name: "bottom-right", x: blockBox.right - 1, y: blockBox.bottom - 1 }] : []),
+        ...(labelBox ? [{ name: "label-center", x: labelBox.left + labelBox.width / 2, y: labelBox.top + labelBox.height / 2 }] : []),
+        ...(valueBox ? [{ name: "value-center", x: valueBox.left + valueBox.width / 2, y: valueBox.top + valueBox.height / 2 }] : []),
+      ];
+      const stacks = points.map((point) => ({ ...point, stack: document.elementsFromPoint(point.x, point.y).slice(0, 5).map((node) => ({ tag: node.tagName, id: (node as HTMLElement).id, className: (node as HTMLElement).className })) }));
+      const hits = points.every((point) => { const hit = document.elementFromPoint(point.x, point.y); return Boolean(hit && block && (hit === block || block.contains(hit))); });
       const expectedMark = expectedStatus ? `record-mark-${expectedStatus.toLowerCase().replace(/\s+/g, "-")}` : "";
-      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, isNumeric, textOverflow: renderedStyle?.textOverflow ?? "", overflow: renderedStyle?.overflow ?? "", whiteSpace: renderedStyle?.whiteSpace ?? "", scrollWidth: rendered?.scrollWidth ?? -1, clientWidth: rendered?.clientWidth ?? -1, fontSize: renderedStyle?.fontSize ?? "", title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1, contained, painted, hit: Boolean(hit && element && (hit === element || element.contains(hit))), hitClass: hit?.className ?? "none" };
+      const painted = valueBox && rendered ? { top: valueBox.top, right: valueBox.right, bottom: valueBox.bottom, left: valueBox.left } : null;
+      const numeric = ["finite", "zero", "signed-zero"].includes(classification);
+      const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
+      const numericFit = !numeric || Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && renderedStyle?.textOverflow !== "ellipsis" && renderedStyle?.overflow !== "hidden" && renderedStyle?.whiteSpace === "nowrap" && rendered.innerText.length <= (scientific ? 7 : 5) && (!scientific || renderedStyle.fontSize === "20px"));
+      const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48)));
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
+      const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+      const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
     }), metricBoundaryMatrix);
     const failures = entries.flatMap((entry) => {
-      const found = entry.found && entry.text === entry.expectedText;
-      const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.text ?? "");
-      const numericFit = !entry.isNumeric || (entry.scrollWidth <= entry.clientWidth && entry.textOverflow !== "ellipsis" && entry.overflow !== "hidden" && entry.whiteSpace === "nowrap" && (entry.text?.length ?? -1) <= (scientific ? 7 : 5) && (!scientific || entry.fontSize === "20px"));
-      const parsed = Number(entry.value.replaceAll(",", ""));
-      const actualClass = entry.value.trim().toLowerCase() === "nan" ? "nan" : parsed === Infinity ? "infinity" : parsed === -Infinity ? "-infinity" : Number.isFinite(parsed) && parsed === 0 && entry.value.trim().startsWith("-") ? "signed-zero" : Number.isFinite(parsed) && parsed === 0 ? "zero" : Number.isFinite(parsed) ? "finite" : "text";
-      const expectedMark = entry.expectedStatus ? entry.expectedMark : "";
-      const marker = entry.expectedStatus ? entry.mark.includes(expectedMark) : !entry.mark;
-      const accessibility = Boolean(entry.title && entry.title === entry.aria);
-      const geometry = entry.contained && entry.rightGap >= entry.padding;
-      return found && numericFit && actualClass === entry.classification && marker && accessibility && geometry ? [] : [`${entry.label}: ${JSON.stringify({ found, numericFit, actualClass, expectedClass: entry.classification, marker, accessibility, geometry, hit: entry.hit, hitClass: entry.hitClass, contained: entry.contained, painted: entry.painted })}`];
+      const marker = entry.expectedStatus ? entry.mark.includes(entry.expectedMark) : !entry.mark;
+      const exact = entry.found && entry.text === entry.expectedText && entry.title === entry.value && entry.aria === entry.value;
+      const geometry = entry.contained && entry.clipContained && entry.hits && !entry.overlayHit && entry.rightGap >= entry.padding && entry.textFit;
+      return exact && marker && entry.numericFit && geometry ? [] : [`${entry.label}: ${JSON.stringify({ exact, marker, numericFit: entry.numericFit, geometry, entry })}`];
     });
-    for (const block of await matrixBlocks.all()) {
-      await block.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
-      const label = block.locator(".metric-label");
-      const hit = await label.evaluate((node) => { const box = node.getBoundingClientRect(); const target = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); return { visible: box.top >= 0 && box.bottom <= innerHeight && node.getClientRects().length > 0, unobscured: Boolean(target && (target === node || node.contains(target))), target: target?.className ?? "none" }; });
-      if (!hit.visible) failures.push(`${await label.innerText()}: metric hit-test failed at ${viewport}: ${JSON.stringify(hit)}`);
-    }
     for (let index = 0; index < entries.length; index += 1) for (let next = index + 1; next < entries.length; next += 1) {
       const left = entries[index].painted;
       const right = entries[next].painted;
-      if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}`);
+      if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}: ${JSON.stringify({ left, right })}`);
     }
-    if (ax) for (const entry of entries) {
+    for (const entry of entries) {
+      const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
+      if (counterpart && entry.text !== counterpart.text) failures.push(`${entry.label}: marker parity differs from ${counterpart.label}`);
+    }
+    if (viewport === "390px") for (const entry of entries) {
       const metricObject = await accessibility.send("Runtime.evaluate", { expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify(entry.label)})?.querySelector('.metric-value')` });
       const tree = await accessibility.send("Accessibility.getPartialAXTree", { objectId: metricObject.result.objectId, fetchRelatives: false });
       const names = tree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
       if (names.filter((name) => name === entry.value).length !== 1 || (entry.text !== entry.value && names.includes(entry.text ?? ""))) failures.push(`${entry.label}: chromium AX names=${JSON.stringify(names)}`);
     }
-    const parity = entries.flatMap((entry) => { const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined; return counterpart && entry.text !== counterpart.text ? [`${entry.label}: marker parity differs from ${counterpart.label}`] : []; });
-    failures.push(...parity);
-    if (failures.length) throw new Error(`metric boundary matrix failed at ${viewport}: ${JSON.stringify(failures)}\nentries=${JSON.stringify(entries)}`);
+    if (failures.length) throw new Error(`metric boundary matrix failed at ${viewport}: ${JSON.stringify(failures)}`);
   };
-  await assertMetricMatrix(`${desktopViewport?.width ?? "unknown"}px`, false);
-  if (screenshotDir) await captureBlockState("metric-boundary", matrixStrip, 2400, 1400);
-  await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
-  await page.setViewportSize({ width: 390, height: 2400 });
-  await assertMetricMatrix("390px", true);
+  await captureBlockState("metric-boundary", matrixStrip, 2400, 1400, assertMetricMatrix);
   await page.setViewportSize({ width: 390, height: 760 });
   const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
-  const pageChatCloseButton = page.getByRole("button", { name: "close page chat", exact: true });
-  if (await pageChatBar.getAttribute("aria-expanded") === "true") {
-    await pageChatCloseButton.click({ force: true });
-    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "false", "page chat close after matrix");
-  }
+  if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
   await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
@@ -1144,11 +1133,18 @@ try {
       }
     }) as typeof window.addEventListener;
   });
+  const preChatClick = await page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>(".page-chat-surface");
+    const close = document.querySelector<HTMLElement>('.page-chat-surface button[aria-label="close page chat"]');
+    const style = surface && getComputedStyle(surface);
+    return { barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), close: { connected: Boolean(close?.isConnected), visible: Boolean(close && style && style.visibility !== "hidden"), disabled: close instanceof HTMLButtonElement && close.disabled }, surface: style && { visibility: style.visibility, transform: style.transform, transition: style.transition }, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop };
+  });
   await pageChatBar.click();
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
-  await waitFor(async () => await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]') && document.activeElement?.getAttribute("aria-label") === "close page chat")), "page chat close focus");
+  const focusAfterChatClick = await page.evaluate(() => ({ active: { tag: document.activeElement?.tagName, id: (document.activeElement as HTMLElement | null)?.id, className: (document.activeElement as HTMLElement | null)?.className, aria: document.activeElement?.getAttribute("aria-label"), insideModal: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')) }, barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), layout: { mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop, surface: (() => { const node = document.querySelector<HTMLElement>(".page-chat-surface"); const style = node && getComputedStyle(node); return node && style ? { connected: node.isConnected, visibility: style.visibility, transform: style.transform, transition: style.transition } : null; })() } }));
+  if (!focusAfterChatClick.active.insideModal || focusAfterChatClick.active.aria !== "close page chat") throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify({ preChatClick, focusAfterChatClick, chat: await pageChatLayout() })}`);
   const preTabFocus = await page.evaluate(() => ({
     inside: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')),
     close: document.activeElement?.getAttribute("aria-label") === "close page chat",

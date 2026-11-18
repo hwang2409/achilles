@@ -304,7 +304,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                         **{
                                             key: value
                                             for key, value in metric.items()
-                                            if key != "expectedText"
+                                            if key not in {"expectedText", "classification"}
                                         },
                                     }
                                     for metric in METRIC_BOUNDARY_MATRIX
