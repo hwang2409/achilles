@@ -2488,6 +2488,7 @@ try {
   if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
+  await gateWait.playwright(observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').first(), "waitFor", { state: "visible" });
   const observerMutationMethods = new Set(["send", "steer", "new_session", "approve", "deny", "interrupt", "set_settings", "set_page_create_mode", "create_page", "update_layout", "restore_version", "mcp_refresh_tools"]);
   const observerRequests = observerFrames.flatMap(({ direction, payload }) => {
     if (direction !== "sent") return [];
