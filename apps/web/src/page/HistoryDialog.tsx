@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { wrapTab } from "../keyboard";
 import { layoutSummary } from "./layoutSummary";
+import { READ_ONLY_REASON, WRITE_SURFACE } from "../writeSurfaces";
 import "../settings-dialog.css";
 
 type LayoutVersion = { version: number; created_at: string; block_types: string[]; summary: string | null; active: boolean; action: string | null; restored_from: number | null };
@@ -12,7 +13,7 @@ const when = (stamp: string) => new Date(stamp).toLocaleString(undefined, { mont
 
 // the page's layout and tool versions; restore goes through the same guarded store paths as the agent's restore_version
 // onChanged refreshes the page behind the dialog: after a restore, and after a 409 or 403 that means the page changed elsewhere
-export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged, canWrite = true, disabledReason }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
+export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged, canWrite = false, disabledReason = READ_ONLY_REASON }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
@@ -77,11 +78,11 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
   const button = (key: string, row: { active: boolean }, blocked = false) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" disabled={busy || blocked || !canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
+    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || blocked || !canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
   // the row in its confirm state; only "confirm" sends the restore
   const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
     <span id={`${key}-ask`}>restore version {version}? the current {kind} stays in history</span>
-    <button type="button" aria-describedby={`${key}-ask`} onClick={run}>confirm</button>
+    <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={!canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={`${key}-ask`} onClick={run}>confirm</button>
     <button type="button" onClick={cancelPending}>cancel</button>
   </li>;
   return <dialog

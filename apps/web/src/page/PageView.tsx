@@ -7,6 +7,7 @@ import { usePageTools, type PageTool } from "./usePageTools";
 import "./page.css";
 import { RecordMark } from "./RecordMark";
 import { formatMetricValue } from "./metricValue";
+import { WRITE_SURFACE } from "../writeSurfaces";
 
 type PageLike = { title: string; route: string; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
 type InsertCapability = { collection: string; focusFirst: () => void };
@@ -85,7 +86,7 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat, canW
     return () => setInsertCapabilities((current) => current.filter((item) => item.id !== id || item.capability !== capability));
   }, []);
   const addFor = (collection: string) => insertCapabilities.find((item) => item.capability.collection === collection)?.capability;
-  return <main className="page-content">
+  return <main className="page-content" data-write-surface={WRITE_SURFACE.pageChat}>
     <header className="page-head">
       <div><h1>{page.title}</h1>{lead && <p className="page-lead">{lead}</p>}</div>
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>

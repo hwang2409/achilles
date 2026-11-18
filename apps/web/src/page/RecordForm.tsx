@@ -3,6 +3,7 @@ import { fieldError, formArguments, formErrors, formFields, keepValues, recordVa
 import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
 import { EnumListbox } from "./EnumListbox";
+import { WRITE_SURFACE } from "../writeSurfaces";
 
 export type { PageTool };
 type FieldError = { path: string; expected: string };
@@ -70,7 +71,7 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
     : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} disabled={!canWrite} disabledReason={disabledReason} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
     : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row || !canWrite} disabledReason={disabledReason} formRef={formRef} />;
-  return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+  return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-write-surface={tool?.operation === "update" ? WRITE_SURFACE.recordUpdate : WRITE_SURFACE.recordInsert} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
