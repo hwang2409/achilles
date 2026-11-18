@@ -2528,7 +2528,7 @@ try {
     const url = new URL(request.url());
     if (url.origin === origin) observerHttp.push({ method: request.method(), path: url.pathname, body: request.postData() });
   });
-  await observerPage.goto(`${origin}/?chat=${controllerChat}`);
+  await observerPage.goto(`${origin}/reading?chat=${controllerChat}`);
   const observerStorageBefore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   const observerBanner = observerPage.locator(".observer-banner");
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
