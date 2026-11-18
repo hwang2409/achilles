@@ -159,6 +159,7 @@ export async function attachPage(
     const serverApprovalMode = page.approval_mode ?? null;
 
     const observer = !canMutate;
+
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
       const session = observer
         ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode, pending: false, rebind: false }
@@ -536,7 +537,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token);
       else setState(shownCreateMode(modeToggle.current, next));
-    }, canMutate).then((next) => {
+    }, undefined, canMutate).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
       if (next.phase === "busy") void showBusy(next.busySessionId, "attach");
