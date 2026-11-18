@@ -2512,6 +2512,7 @@ try {
     const marker = observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').first();
     await gateWait.playwright(marker, "waitFor", { state: "visible" });
     if (!(await marker.isVisible())) throw new Error("observer active-chat marker is not visible");
+    await marker.scrollIntoViewIfNeeded();
     const unobscured = await marker.evaluate((element) => {
       const box = element.getBoundingClientRect();
       const point = document.elementFromPoint(box.left + Math.min(8, box.width / 2), box.top + Math.min(8, box.height / 2));
