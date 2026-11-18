@@ -2458,9 +2458,11 @@ try {
 
   // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
   if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
-  await page.reload();
+  await page.goto(`${origin}/?chat=${first}`);
   const controllerChat = await page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 });
-  if (!controllerChat) throw new Error("controller chat id missing before observer journey");
+  if (controllerChat !== first) throw new Error(`known controller chat did not attach: expected ${first}, got ${controllerChat}`);
+  const observerMarker = page.getByText("prove chat", { exact: true }).first();
+  await gateWait.playwright(observerMarker, "waitFor", { timeout: 20_000 });
   const observerPage = await browser.newPage();
   await observerPage.goto(`${origin}/?chat=${controllerChat}`);
   const observerBanner = observerPage.locator(".observer-banner");
@@ -2474,9 +2476,9 @@ try {
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
   if (screenshotDir) {
     await observerPage.setViewportSize({ width: 390, height: 760 });
-    await observerPage.screenshot({ path: join(screenshotDir, "observer-read-only-390x760.png"), fullPage: true });
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
     await observerPage.setViewportSize({ width: 1440, height: 900 });
-    await observerPage.screenshot({ path: join(screenshotDir, "observer-read-only-1440x900.png"), fullPage: true });
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
   await gateWait.playwright(observerBanner.getByText("stayed live and read-only", { exact: false }), "waitFor", { state: "visible" });
@@ -2484,7 +2486,11 @@ try {
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
   await gateWait.playwright(observerBanner, "waitFor", { state: "hidden" });
   if (await observerComposerReason.count()) throw new Error("observer remained read-only after controller closed");
-  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-controller-restored-1440x900.png"), fullPage: true });
+  if (screenshotDir) {
+    await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-controller-restored-1440x900.png"), fullPage: true });
+  }
 
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
