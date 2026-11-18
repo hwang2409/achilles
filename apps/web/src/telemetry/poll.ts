@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 export const POLL_MS = 5_000;
 
-/** The newest read. `data` stays after a failed or running refresh, so the page keeps showing it. */
-export type PollState<T> = { data?: T; error?: unknown; refreshing: boolean };
+/** The newest read. `data` (read at `updatedAt`, epoch ms) stays after a failed or running refresh, so the page keeps showing it. */
+export type PollState<T> = { data?: T; updatedAt?: number; error?: unknown; refreshing: boolean };
 
 export type PollEnv = {
   visible(): boolean;
@@ -43,7 +43,7 @@ export function createPoller<T>(load: () => Promise<T>, onChange: (state: PollSt
     const mine = ++generation;
     set({ refreshing: true });
     let result: Partial<PollState<T>>;
-    try { result = { data: await load(), error: undefined }; }
+    try { result = { data: await load(), updatedAt: Date.now(), error: undefined }; }
     catch (error) { result = { error }; }
     if (stopped || mine !== generation) return;
     set({ ...result, refreshing: false });

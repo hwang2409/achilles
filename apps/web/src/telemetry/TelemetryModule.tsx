@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { formatAgo } from "./format";
-import { Overview } from "./Overview";
+import { formatAgo, formatHour } from "./format";
+import { Overview, OverviewSkeleton } from "./Overview";
 import { usePoll } from "./poll";
 import { Sessions, type SessionsQuery } from "./Sessions";
-import { telemetryClient, telemetryNegotiated, telemetryProblem, type Window } from "./telemetry-client";
+import { telemetryClient, telemetryNegotiated, telemetryProblem, type TelemetryProblem, type Window } from "./telemetry-client";
 import type { Page, TelemetryOverview, TelemetrySession, TelemetryStatus } from "./telemetry-types";
 import "./telemetry.css";
 
 type Tab = "overview" | "sessions";
-const TABS: { tab: Tab; href: string; label: string }[] = [
-  { tab: "overview", href: "/telemetry", label: "Overview" },
-  { tab: "sessions", href: "/telemetry/sessions", label: "Sessions" },
+const TABS: { tab: Tab; href: string }[] = [
+  { tab: "overview", href: "/telemetry" },
+  { tab: "sessions", href: "/telemetry/sessions" },
 ];
 const tabOf = (path: string): Tab => (path === "/telemetry/sessions" || path.startsWith("/telemetry/sessions/") ? "sessions" : "overview");
 
 export type Range = "24h" | "7d";
 const RANGES: Record<Range, { label: string; ms: number; bucket: "hour" | "day" }> = {
-  "24h": { label: "24 hours", ms: 24 * 3600_000, bucket: "hour" },
-  "7d": { label: "7 days", ms: 7 * 24 * 3600_000, bucket: "day" },
+  "24h": { label: "last 24 hours", ms: 24 * 3600_000, bucket: "hour" },
+  "7d": { label: "last 7 days", ms: 7 * 24 * 3600_000, bucket: "day" },
 };
 const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (nowMs - RANGES[range].ms) * 1e6, end_ns: nowMs * 1e6 });
 
@@ -45,12 +45,12 @@ export function TelemetryModule({ client, pathname }: { client: ZetaClient | nul
     setPath(href);
   };
   const tabs = (
-    <nav className="tm-tabs" aria-label="Telemetry views">
-      {TABS.map((item) => <a key={item.tab} href={item.href} aria-current={item.tab === tab ? "page" : undefined} onClick={(event) => go(event, item.href)}>{item.label}</a>)}
+    <nav className="tm-tabs" aria-label="telemetry views">
+      {TABS.map((item) => <a key={item.tab} href={item.href} aria-current={item.tab === tab ? "page" : undefined} onClick={(event) => go(event, item.href)}>{item.tab}</a>)}
     </nav>
   );
-  if (!client) return <Frame tabs={tabs}><Notice role="status" title="Connecting to zeta…" /></Frame>;
-  if (!telemetryNegotiated(client)) return <Frame tabs={tabs}><NeedsNewerZeta /></Frame>;
+  if (!client) return <Frame><Notice role="status" title="connecting to zeta…" /></Frame>;
+  if (!telemetryNegotiated(client)) return <NeedsNewerZeta protocol={client.protocolVersion} />;
   return <TelemetryPages client={client} tab={tab} tabs={tabs} />;
 }
 
@@ -78,82 +78,107 @@ function TelemetryPages({ client, tab, tabs }: { client: ZetaClient; tab: Tab; t
     if (session.model) seen.current.models.add(session.model);
   }
 
+  const chooseRange = (next: Range) => { setRange(next); setPagedWindow(null); setQuery({ ...query, cursors: [null] }); };
   const setFilters = (next: Partial<SessionsQuery>) => { setPagedWindow(null); setQuery({ ...query, ...next, cursors: [null] }); };
   const status = poll.data?.status;
   const problem = poll.error === undefined ? null : telemetryProblem(poll.error);
+  const rangeLabel = RANGES[range].label;
+  if (problem?.kind === "not_negotiated") return <NeedsNewerZeta protocol={client.protocolVersion} />;
+  if (problem?.kind === "off" || status?.enabled === false) return <TelemetryOff />;
+
   const tools = (
     <div className="tm-tools">
       {status && <ReceiverMark status={status} />}
       {poll.refreshing && poll.data && <span className="tm-refreshing" role="status">refreshing…</span>}
-      <button type="button" className="tm-button" onClick={poll.refresh} aria-label="Refresh telemetry"><span aria-hidden="true">↻</span><span className="tm-refresh-text"> Refresh</span></button>
       <label className="tm-range">
-        <span className="tm-visually-hidden">Time range, last</span>
-        <select value={range} onChange={(event) => { setRange(event.target.value as Range); setPagedWindow(null); setQuery({ ...query, cursors: [null] }); }}>
+        <span className="tm-visually-hidden">time range</span>
+        <select value={range} onChange={(event) => chooseRange(event.target.value as Range)}>
           {(Object.keys(RANGES) as Range[]).map((value) => <option key={value} value={value}>{RANGES[value].label}</option>)}
         </select>
       </label>
+      <button type="button" className="tm-button tm-refresh" onClick={poll.refresh}><span aria-hidden="true">↻</span>refresh</button>
     </div>
   );
 
+  const data = poll.data?.tab === tab ? poll.data : undefined;
+  const banner = problem && <FailedBanner problem={problem} updatedAt={data ? poll.updatedAt : undefined} retry={poll.refresh} />;
   let body: ReactNode;
-  if (problem?.kind === "not_negotiated") body = <NeedsNewerZeta />;
-  else if (problem?.kind === "off" || status?.enabled === false) body = <TelemetryOff />;
-  else if (!poll.data || poll.data.tab !== tab) {
-    body = problem ? <LoadFailed message={problem.message} retry={poll.refresh} /> : <Notice role="status" title="Loading telemetry…" />;
-  } else {
-    const stale = problem && <p className="tm-stale" role="alert">Refresh failed: {problem.message}. Showing the last result. <button type="button" className="tm-link" onClick={poll.refresh}>Retry</button></p>;
-    const data = poll.data;
+  if (!data) body = <>{banner}{!problem && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {rangeLabel}…</p>}{tab === "overview" ? <OverviewSkeleton /> : null}</>;
+  else {
+    const empty = <NoTelemetryYet rangeLabel={rangeLabel} widen={range === "24h" ? () => chooseRange("7d") : undefined} />;
     body = <>
-      {stale}
-      {data.tab === "overview"
-        ? <Overview overview={data.overview} rangeLabel={`last ${RANGES[range].label}`} bucket={RANGES[range].bucket} chart={chart} setChart={setChart} empty={<NoTelemetryYet rangeLabel={`last ${RANGES[range].label}`} />} />
-        : <Sessions
-            page={data.page}
-            query={query}
-            rangeLabel={`last ${RANGES[range].label}`}
-            profiles={[...seen.current.profiles].sort()}
-            models={[...seen.current.models].sort()}
-            setFilters={setFilters}
-            next={() => { setPagedWindow(data.window); setQuery({ ...query, cursors: [...query.cursors, data.page.next_cursor] }); }}
-            previous={() => { const cursors = query.cursors.slice(0, -1); if (cursors.length === 1) setPagedWindow(null); setQuery({ ...query, cursors }); }}
-            empty={<NoTelemetryYet rangeLabel={`last ${RANGES[range].label}`} />}
-          />}
+      {banner}
+      <div className={problem ? "tm-stale" : undefined}>
+        {data.tab === "overview"
+          ? <Overview overview={data.overview} bucket={RANGES[range].bucket} chart={chart} setChart={setChart} empty={empty} />
+          : <Sessions
+              page={data.page}
+              query={query}
+              rangeLabel={rangeLabel}
+              profiles={[...seen.current.profiles].sort()}
+              models={[...seen.current.models].sort()}
+              setFilters={setFilters}
+              next={() => { setPagedWindow(data.window); setQuery({ ...query, cursors: [...query.cursors, data.page.next_cursor] }); }}
+              previous={() => { const cursors = query.cursors.slice(0, -1); if (cursors.length === 1) setPagedWindow(null); setQuery({ ...query, cursors }); }}
+              empty={empty}
+            />}
+      </div>
     </>;
   }
-  return <Frame tabs={tabs} tools={tools}>{body}</Frame>;
+  return <Frame tools={tools} tabs={tabs}>{body}</Frame>;
 }
 
-function Frame({ tabs, tools, children }: { tabs: ReactNode; tools?: ReactNode; children: ReactNode }) {
+/** Only the interior: the achilles shell draws the sidebar, top bar, and route title around it. */
+function Frame({ tools, tabs, children }: { tools?: ReactNode; tabs?: ReactNode; children: ReactNode }) {
   return (
     <div className="telemetry-module" data-fulcrum-theme="gruvbox-dark">
-      <header className="tm-bar">
-        <a className="tm-brand" href="/telemetry" aria-label="zeta telemetry">zeta <span>telemetry</span></a>
-        {tabs}
-        {tools}
-      </header>
+      {tabs && <div className="tm-tabs-row">{tabs}{tools}</div>}
       <main className="tm-main">{children}</main>
-      <p className="tm-privacy">Telemetry is metadata only: no prompts, outputs, tool arguments, or results.</p>
     </div>
   );
 }
 
-const RECEIVER: Record<TelemetryStatus["receiver"], { mark: string; text: string; tone: string }> = {
-  ready: { mark: "●", text: "Receiving", tone: "ok" },
-  starting: { mark: "○", text: "Receiver starting", tone: "warn" },
-  stopped: { mark: "■", text: "Receiver stopped", tone: "muted" },
-  error: { mark: "▲", text: "Receiver error", tone: "danger" },
+const RECEIVER: Record<TelemetryStatus["receiver"], { text: string; tone: string }> = {
+  ready: { text: "receiving", tone: "ok" },
+  starting: { text: "receiver starting", tone: "warn" },
+  stopped: { text: "receiver stopped", tone: "muted" },
+  error: { text: "receiver error", tone: "danger" },
 };
 
 function ReceiverMark({ status }: { status: TelemetryStatus }) {
-  const receiver = RECEIVER[status.receiver];
   const failing = status.receiver === "ready" && status.last_export === "error";
-  const tone = failing ? "danger" : receiver.tone;
+  const { text, tone } = failing ? { text: "export failing", tone: "danger" } : RECEIVER[status.receiver];
   return (
-    <span className={`tm-receiver tm-${tone}`}>
-      <span aria-hidden="true" className="tm-mark">{failing ? "▲" : receiver.mark}</span>
-      <span className="tm-receiver-text">{failing ? "Export failing" : receiver.text}</span>
-      {status.last_export_ns !== null && <span className="tm-dim" title="Last export">{formatAgo(status.last_export_ns)}</span>}
+    <span className="tm-receiver">
+      <span aria-hidden="true" className={`tm-mark tm-${tone}`}>{tone === "danger" ? "▲" : "■"}</span>
+      <span className="tm-receiver-text">{text}</span>
+      {status.last_export_ns !== null && <span className="tm-dim" title="last export"><span className="tm-receiver-text"> · </span>{formatAgo(status.last_export_ns)}</span>}
     </span>
+  );
+}
+
+const FAILURE_TITLES: Record<string, string> = {
+  receiver_unavailable: "telemetry receiver stopped",
+  state_unavailable: "zeta is busy",
+  stale_state_snapshot: "telemetry changed while reading",
+  corrupt_state: "stored telemetry is invalid",
+  result_too_large: "too much telemetry for one read",
+};
+
+/** One failure rule: keep the last good numbers, dim them, and say how old they are. */
+function FailedBanner({ problem, updatedAt, retry }: { problem: TelemetryProblem; updatedAt?: number; retry: () => void }) {
+  const title = (problem.code && FAILURE_TITLES[problem.code]) ?? "telemetry could not be read";
+  return (
+    <section className="tm-banner" role="alert">
+      <div>
+        <h2>{title}</h2>
+        <p>
+          {updatedAt !== undefined ? <>showing data from {formatHour(updatedAt * 1e6)} · {formatAgo(updatedAt * 1e6).replace(" ago", " old")} · </> : <>{problem.message} · </>}
+          retrying every 5 s
+        </p>
+      </div>
+      <button type="button" className="tm-button tm-danger-button" onClick={retry}>retry now</button>
+    </section>
   );
 }
 
@@ -165,37 +190,60 @@ const SETTING = '[otel]\nendpoint = "http://127.0.0.1:4323/v1/traces"';
 
 function TelemetryOff() {
   return (
-    <Notice title="Telemetry is off">
-      <p>Zeta is not recording telemetry. To turn it on, add this to <code>settings.toml</code> in your zeta home, then restart zeta:</p>
-      <pre>{SETTING}</pre>
-      <p className="tm-dim">Zeta starts its built-in receiver on this computer. It keeps 14 days of detail, 90 days of hourly totals, and at most 1 GiB.</p>
-    </Notice>
+    <Frame>
+      <section className="tm-intro">
+        <p className="tm-eyebrow">telemetry</p>
+        <h1>see each step your agents take</h1>
+        <p className="tm-lead">turn it on and zeta records the timing of every turn, model call and tool call, with token counts. you get totals per hour and a list of sessions, with more views to come.</p>
+        <div className="tm-records">
+          <div><h2 className="tm-ok">records</h2><ul><li>durations and status</li><li>model, provider, tokens</li><li>tool names and sizes</li><li>error types</li></ul></div>
+          <div><h2 className="tm-danger">never records</h2><ul><li>prompts or replies</li><li>reasoning</li><li>tool arguments or results</li><li>error messages, env values</li></ul></div>
+        </div>
+        <div className="tm-turn-on">
+          <h2>turn on telemetry</h2>
+          <p>add this to <code>settings.toml</code> in your zeta home, then restart zeta:</p>
+          <pre>{SETTING}</pre>
+          <p className="tm-dim">built-in receiver on 127.0.0.1:4323 · keeps 14 days raw, 90 days hourly, at most 1 GiB</p>
+        </div>
+      </section>
+    </Frame>
   );
 }
 
-function NoTelemetryYet({ rangeLabel }: { rangeLabel: string }) {
+function NoTelemetryYet({ rangeLabel, widen }: { rangeLabel: string; widen?: () => void }) {
   return (
-    <Notice title="No telemetry yet">
-      <p>Telemetry is on, but zeta recorded nothing in the {rangeLabel}. Run one zeta turn; it shows here within a few seconds.</p>
-      <p className="tm-dim">If nothing appears, check that <code>settings.toml</code> in your zeta home has:</p>
-      <pre>{SETTING}</pre>
-    </Notice>
+    <section className="tm-empty">
+      <h1>no telemetry in the {rangeLabel}</h1>
+      <p>sessions send spans when a turn ends. start a chat or wait for a running agent to finish its turn; it shows here within a few seconds.</p>
+      <div className="tm-actions">
+        <a className="tm-button tm-primary" href="/">+ new chat</a>
+        {widen && <button type="button" className="tm-button" onClick={widen}>last 7 days</button>}
+      </div>
+    </section>
   );
 }
 
-function NeedsNewerZeta() {
+function NeedsNewerZeta({ protocol }: { protocol: string }) {
   return (
-    <Notice title="Telemetry needs a newer zeta">
-      <p>This zeta does not offer telemetry reads (<code>telemetry_read_v1</code>). Update zeta, restart <code>zeta serve</code>, then reload this page.</p>
-    </Notice>
-  );
-}
-
-function LoadFailed({ message, retry }: { message: string; retry: () => void }) {
-  return (
-    <Notice title="Telemetry could not be loaded" role="alert">
-      <p>{message}</p>
-      <button type="button" className="tm-button" onClick={retry}>Retry</button>
-    </Notice>
+    <Frame>
+      <section className="tm-intro">
+        <p className="tm-eyebrow">telemetry</p>
+        <h1>telemetry needs a newer zeta</h1>
+        <p className="tm-lead">achilles reads telemetry from zeta through <code>telemetry_read_v1</code>. the zeta that achilles talks to did not offer it. chats, pages and agents still work.</p>
+        <dl className="tm-facts">
+          <dt>zeta serve</dt><dd>connected{protocol && ` · protocol ${protocol}`}</dd>
+          <dt><code>telemetry_read_v1</code></dt><dd className="tm-warn"><span aria-hidden="true">■ </span>not offered</dd>
+        </dl>
+        <h2>to fix it</h2>
+        <ol>
+          <li>update zeta to a version that offers <code>telemetry_read_v1</code></li>
+          <li>restart <code>zeta serve</code> · achilles connects again by itself</li>
+        </ol>
+        <div className="tm-actions">
+          <button type="button" className="tm-button tm-primary" onClick={() => location.reload()}>check again</button>
+          <a className="tm-button" href="/">back to chats</a>
+        </div>
+      </section>
+    </Frame>
   );
 }

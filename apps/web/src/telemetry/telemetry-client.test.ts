@@ -40,6 +40,6 @@ test("rejected reads become off, old zeta, or retryable failure", () => {
   const rpc = (code: number, message: string, data?: object) => Object.assign(new Error(message), { code, data });
   expect(telemetryProblem(rpc(-32005, "state unavailable", { code: "telemetry_off", retryable: true })).kind).toBe("off");
   expect(telemetryProblem(rpc(-32601, "method not found: telemetry_overview")).kind).toBe("not_negotiated");
-  expect(telemetryProblem(rpc(-32005, "state unavailable", { code: "receiver_unavailable", retryable: true }))).toEqual({ kind: "failed", message: "state unavailable" });
+  expect(telemetryProblem(rpc(-32005, "state unavailable", { code: "receiver_unavailable", retryable: true }))).toEqual({ kind: "failed", message: "state unavailable", code: "receiver_unavailable" });
   expect(telemetryProblem(new Error("closed")).kind).toBe("failed");
 });

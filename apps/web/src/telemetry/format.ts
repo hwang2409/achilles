@@ -26,7 +26,8 @@ export function formatTime(ns: number, now = new Date()) {
   return `${formatDay(ns)} ${clock}`;
 }
 
-export const formatDay = (ns: number) => new Date(ns / NS_PER_MS).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+/** `nov 4`: lowercase, like the rest of the telemetry pages. */
+export const formatDay = (ns: number) => new Date(ns / NS_PER_MS).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toLowerCase();
 
 export const formatHour = (ns: number) => new Date(ns / NS_PER_MS).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 

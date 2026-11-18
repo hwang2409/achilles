@@ -11,7 +11,7 @@ test("a connected zeta whose hello did not grant telemetry_read_v1 shows the upd
   let requests = 0;
   const client = { features: ["delivery_id", "served_turn_end"], request: async () => { requests++; return {}; } } as unknown as ZetaClient;
   const view = render(createElement(TelemetryModule, { client, pathname: "/telemetry" }));
-  expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Telemetry needs a newer zeta");
+  expect(view.getByRole("heading", { level: 1 }).textContent).toBe("telemetry needs a newer zeta");
   expect(view.queryByText(/connecting/i)).toBeNull();
   expect(requests).toBe(0);
 });

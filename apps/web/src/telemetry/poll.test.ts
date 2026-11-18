@@ -24,10 +24,10 @@ test("polls every 5 s while visible and keeps data, marked refreshing, during a 
   const states: PollState<number>[] = [];
   const poller = createPoller(async () => ++reads, (state) => states.push(state), env);
   await flush();
-  expect(states.at(-1)).toEqual({ data: 1, error: undefined, refreshing: false });
+  expect(states.at(-1)).toMatchObject({ data: 1, error: undefined, refreshing: false });
   expect(timers.size).toBe(1);
   fire();
-  expect(states.at(-1)).toEqual({ data: 1, error: undefined, refreshing: true });
+  expect(states.at(-1)).toMatchObject({ data: 1, error: undefined, refreshing: true });
   await flush();
   expect(states.at(-1)?.data).toBe(2);
   poller.stop();
@@ -81,7 +81,7 @@ test("only the newest read changes the state, and a failure keeps the last data"
   pending[1](2);
   pending[0](1);
   await flush();
-  expect(states.at(-1)).toEqual({ data: 2, error: undefined, refreshing: false });
+  expect(states.at(-1)).toMatchObject({ data: 2, error: undefined, refreshing: false });
   fail = true;
   poller.refresh();
   await flush();

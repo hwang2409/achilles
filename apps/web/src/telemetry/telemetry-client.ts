@@ -34,7 +34,8 @@ export function telemetryClient(client: Rpc) {
   };
 }
 
-export type TelemetryProblem = { kind: "off" | "not_negotiated" | "failed"; message: string };
+/** `code` is zeta's `data.code` (`receiver_unavailable`, `state_unavailable`, ...) when it sent one. */
+export type TelemetryProblem = { kind: "off" | "not_negotiated" | "failed"; message: string; code?: string };
 
 /** Sorts a rejected read into what the page shows: telemetry off, an old zeta, or a failure the user can retry. */
 export function telemetryProblem(error: unknown): TelemetryProblem {
@@ -42,5 +43,5 @@ export function telemetryProblem(error: unknown): TelemetryProblem {
   const message = typeof rpc?.message === "string" ? rpc.message : "telemetry could not be read";
   if (rpc?.data?.code === "telemetry_off") return { kind: "off", message };
   if (rpc?.code === -32601) return { kind: "not_negotiated", message };
-  return { kind: "failed", message };
+  return typeof rpc?.data?.code === "string" ? { kind: "failed", message, code: rpc.data.code } : { kind: "failed", message };
 }
