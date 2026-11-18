@@ -2527,6 +2527,8 @@ try {
     }), "observer page-chat settled");
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const markerCandidates = observerPage.locator('[data-part="timeline"] > [data-id], [data-part="timeline"] > [data-virtual-id]');
+    await markerCandidates.last().evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const markerIndex = await markerCandidates.evaluateAll((elements) => elements.findIndex((element) => {
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
