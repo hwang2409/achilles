@@ -72,4 +72,13 @@ describe("createConnection controller capacity vs version mismatch", () => {
     expect(connection.state.phase).toBe("incompatible");
     connection.stop();
   });
+
+  test("role matrix keeps observer fallback limited to capacity busy", async () => {
+    const roles: string[] = [];
+    const connection = createConnection({ origin: "http://localhost", discover: async () => discovery, connect: async (_d, role) => { roles.push(role); throw new ZetaError("version_mismatch", -32002); } });
+    await flush();
+    expect(connection.state.phase).toBe("incompatible");
+    expect(roles).toEqual(["controller"]);
+    connection.stop();
+  });
 });
