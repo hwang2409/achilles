@@ -1109,8 +1109,8 @@ try {
         const originalStrip = strip ? { cssText: strip.style.cssText } : null;
         const mutationStyle = document.createElement("style");
         const mutations: Array<[string, () => void]> = [
-          ["cell missing its right separator", () => { if (cell) cell.style.boxShadow = "inset 0 -1px var(--fulcrum-border)"; }],
-          ["cell missing its bottom separator", () => { if (cell) cell.style.boxShadow = "inset -1px 0 var(--fulcrum-border)"; }],
+          ["cell missing its right separator", () => { if (cell) cell.style.setProperty("box-shadow", "none", "important"); }],
+          ["cell missing its bottom separator", () => { if (cell) cell.style.setProperty("box-shadow", "none", "important"); }],
           ["strip missing its top owner", () => { if (strip) strip.style.borderTop = "0"; }],
           ["strip missing its left owner", () => { if (strip) strip.style.borderLeft = "0"; }],
           ["strip right border paint", () => { if (strip) strip.style.borderRight = "1px solid red"; }],
