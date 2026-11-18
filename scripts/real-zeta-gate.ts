@@ -2526,9 +2526,14 @@ try {
       return style.visibility === "hidden" && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
     }), "observer page-chat settled");
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    const marker = observerPage.locator('[data-part="timeline"] [data-part="message"]:visible, [data-part="timeline"] [data-id]:visible, [data-part="timeline"] [data-virtual-id]:visible').first();
-    await gateWait.playwright(marker, "waitFor", { state: "visible" });
-    if (!(await marker.isVisible())) throw new Error("observer active-chat marker is not visible");
+    const markerCandidates = observerPage.locator('[data-part="timeline"] > [data-id], [data-part="timeline"] > [data-virtual-id]');
+    const markerIndex = await markerCandidates.evaluateAll((elements) => elements.findIndex((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    }));
+    if (markerIndex < 0) throw new Error(`observer active-chat marker is not visible; candidates=${await markerCandidates.count()}`);
+    const marker = markerCandidates.nth(markerIndex);
     await marker.scrollIntoViewIfNeeded();
     const unobscured = await marker.evaluate((element) => {
       const box = element.getBoundingClientRect();
