@@ -150,7 +150,9 @@ export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
-  const active = useActiveChat(client, connectionState.phase === "connected");
+  const canMutate = connectionState.phase === "connected" && connectionState.authority === "controller";
+  const readOnlyReason = "this tab is read-only; take control to make changes";
+  const active = useActiveChat(client, connectionState.phase === "connected", undefined, canMutate);
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
@@ -198,6 +200,7 @@ export function App() {
   // after every composer of this commit has attached to its chat's queue owner
   useLayoutEffect(() => chatQueues.settle());
   const send: typeof active.send = (text, intent, track) => {
+    if (!canMutate) return Promise.reject(new Error(readOnlyReason));
     setFollowRequest((value) => value + 1);
     return trackQueuedSteer(
       (queue) => active.send(text, intent, queue),
@@ -285,7 +288,7 @@ export function App() {
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
-  const observer = connected && connectionState.authority === "observer";
+  const observer = !canMutate;
   const shownToggleError = useRef(active.toggleError);
   useEffect(() => {
     // a successful retry removes the notice and its focused button; give focus back to the visible header control
@@ -304,10 +307,10 @@ export function App() {
     return () => removeEventListener("beforeunload", warn);
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={observer ? "this tab is read-only; take control to decide" : !approval ? "zeta is offline" : undefined} onApprove={observer ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={observer ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!canMutate ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canMutate ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canMutate ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
-  const composerProps: ComposerProps = observer ? { state: "read-only", reason: "this tab is read-only; take control to send", onSubmit: send, placeholder: "message zeta" }
+  const composerProps: ComposerProps = !canMutate ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "message zeta" }
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder: "message zeta" }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
@@ -317,15 +320,15 @@ export function App() {
   // a failed create keeps the message typed for it in the page's new-chat box: show it, so the user sees it is safe
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
   const content = <>
-    {(observer || connectionState.phase === "connecting") && <ObserverBanner connection={connection} />}
-    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || observer} toggle={active.toggle} onRename={observer ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}
-    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} />}
+    {observer && <ObserverBanner connection={connection} />}
+    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canMutate} toggle={active.toggle} onRename={!canMutate ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}
+    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canMutate={canMutate} disabledReason={readOnlyReason} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}
-    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" autoFocus onClick={(event) => { event.currentTarget.focus(); active.retrySaving(); }}>retry creating chat</button><button type="button" onClick={active.discardCreation}>start over</button></div></div>
-      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
+    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" autoFocus onClick={(event) => { event.currentTarget.focus(); if (canMutate) active.retrySaving(); }} disabled={!canMutate}>retry creating chat</button><button type="button" onClick={active.discardCreation} disabled={!canMutate}>start over</button></div></div>
+      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat} disabled={!canMutate}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} />}</>
@@ -333,13 +336,13 @@ export function App() {
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={observer ? undefined : askPageChat} />}
+        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canMutate ? askPageChat : undefined} canMutate={canMutate} disabledReason={readOnlyReason} />}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetOpen ? " mobile-chat-open" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{pageChatSheetOpen ? "⌃" : "⌃"}</span></button>}
         {hasBlocks && pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
         <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={hasBlocks && pageChatSheetOpen ? "dialog" : undefined} aria-modal={hasBlocks && pageChatSheetOpen ? "true" : undefined} aria-labelledby={hasBlocks && pageChatSheetOpen ? "page-chat-title" : undefined} aria-hidden={mobilePageChat && hasBlocks && !pageChatSheetOpen ? "true" : undefined}>
         {hasBlocks && <div className="page-chat-sheet-head"><strong id="page-chat-title">page chat</strong><button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button></div>}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canMutate={canMutate} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -353,7 +356,7 @@ export function App() {
         </div>
       </RunProvider>}
   </>;
-  return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} readOnly={observer || connectionState.phase === "connecting"} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (!observer) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} readOnly={observer} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (!observer) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {

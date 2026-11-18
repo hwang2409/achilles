@@ -254,7 +254,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
     ...loading || readOnly ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
     ...loading || !page || readOnly ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
     { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
-    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
+    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => { if (!readOnly) updateSettings({ vim: !settings.vim }); } },
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
   ];
   // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.
@@ -351,7 +351,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
       <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
       {children}
     </main>
-    <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} />
+    <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canMutate={!readOnly} disabledReason="this tab is read-only; take control to make changes" />
     {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
   </div>;

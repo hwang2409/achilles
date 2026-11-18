@@ -11,7 +11,7 @@ import { formatMetricValue } from "./metricValue";
 type PageLike = { title: string; route: string; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
 type InsertCapability = { collection: string; focusFirst: () => void };
 type InsertRegistration = { id: string; capability: InsertCapability };
-type PageViewProps = { page: PageLike; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void };
+type PageViewProps = { page: PageLike; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; canMutate?: boolean; disabledReason?: string };
 
 function groupBlocks(blocks: Array<Record<string, unknown>>): Array<Array<Record<string, unknown>>> {
   const groups: Array<Array<Record<string, unknown>>> = [];
@@ -73,7 +73,7 @@ function useMetricCounts(blocks: Array<Record<string, unknown>>, pageId: string,
   return new Map(queries.map(({ key }) => [key, entries.current.get(key)?.value ?? "…"]));
 }
 
-export function PageView({ page, pageId, credential, refreshKey, onAskChat }: PageViewProps) {
+export function PageView({ page, pageId, credential, refreshKey, onAskChat, canMutate = true, disabledReason }: PageViewProps) {
   const blocks = page.layout.blocks;
   const leadIndex = blocks.findIndex((block) => block.type === "text");
   const lead = leadIndex >= 0 ? String(blocks[leadIndex].text ?? "") : "";
@@ -92,7 +92,7 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat }: Pa
     </header>
     <div className="page-blocks">{groupBlocks(content).map((group, index) => {
       if (group[0].type === "metric") return <div className="metric-strip" key={`metric-strip:${index}`}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} value={counts.get(metricQueryKey(block, pageId, credential) ?? "")} />)}</div>;
-      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} insertCapability={addFor(String(group[0].collection ?? ""))} onRegisterInsert={registerInsert} />;
+      return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} insertCapability={addFor(String(group[0].collection ?? ""))} onRegisterInsert={registerInsert} canMutate={canMutate} disabledReason={disabledReason} />;
     })}</div>
   </main>;
 }
@@ -104,7 +104,7 @@ function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<stri
   return `${type}:${signature}:${ordinal}`;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (id: string, capability: InsertCapability) => () => void }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert, canMutate = true, disabledReason }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (id: string, capability: InsertCapability) => () => void; canMutate?: boolean; disabledReason?: string }) {
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
@@ -116,7 +116,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
     if (filter && typeof block.collection === "string") return <DetailRecord title={String(block.title)} collection={block.collection} fields={fields} filter={filter} pageId={pageId} credential={credential} refreshKey={refreshKey} selected={selected?.collection === block.collection ? selected.record : undefined} />;
     return <section className="record-detail"><h2>{String(block.title)}</h2><p>{fields.join(", ")}</p></section>;
   }
-  if (block.type === "form") return <FormBlock title={String(block.title)} toolName={String(block.tool)} fields={Array.isArray(block.fields) ? block.fields.map(String) : undefined} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} onRegisterInsert={onRegisterInsert} />;
+  if (block.type === "form") return <FormBlock title={String(block.title)} toolName={String(block.tool)} fields={Array.isArray(block.fields) ? block.fields.map(String) : undefined} pageId={pageId} credential={credential} refreshKey={chatRefreshKey} onRegisterInsert={onRegisterInsert} canMutate={canMutate} disabledReason={disabledReason} />;
   return null;
 }
 

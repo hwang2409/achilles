@@ -26,7 +26,7 @@ function Swatch({ theme }: { theme: ThemeChoice }) {
   </span>;
 }
 
-function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: ThemeChoice): void }) {
+function ThemeList({ value, onChange, disabled = false }: { value: ThemeChoice; onChange(value: ThemeChoice): void; disabled?: boolean }) {
   const options = useRef<Array<HTMLButtonElement | null>>([]);
   const focus = (index: number) => options.current[index]?.focus();
   const onKeyDown = (event: KeyboardEvent, index: number) => {
@@ -51,6 +51,7 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
       tabIndex={theme === value ? 0 : -1}
       data-selected={theme === value || undefined}
       onKeyDown={(event) => onKeyDown(event, index)}
+      disabled={disabled}
       onClick={() => onChange(theme)}
     >
       <span>{theme}</span><Swatch theme={theme} />
@@ -58,23 +59,24 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
   </div>;
 }
 
-function Segments<T extends string | number>({ label, value, choices, onChange }: { label: string; value: T; choices: Array<[T, string]>; onChange(value: T): void }) {
+function Segments<T extends string | number>({ label, value, choices, onChange, disabled = false }: { label: string; value: T; choices: Array<[T, string]>; onChange(value: T): void; disabled?: boolean }) {
   return <div className="settings-segments" role="group" aria-label={label}>
-    {choices.map(([choice, text]) => <button key={choice} type="button" aria-pressed={choice === value} onClick={() => onChange(choice)}>{text}</button>)}
+    {choices.map(([choice, text]) => <button key={choice} type="button" disabled={disabled} aria-pressed={choice === value} onClick={() => onChange(choice)}>{text}</button>)}
   </div>;
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange(value: boolean): void }) {
-  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
+function Toggle({ label, checked, onChange, disabled = false }: { label: string; checked: boolean; onChange(value: boolean): void; disabled?: boolean }) {
+  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button>;
 }
 
 function Row({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return <section className="settings-row"><div className="settings-row-label"><h3>{title}</h3><p>{description}</p></div><div>{children}</div></section>;
 }
 
-export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { open: boolean; onClose(): void; serverForcesAsk?: boolean }) {
+export function SettingsDialog({ open, onClose, serverForcesAsk = false, canMutate = true, disabledReason }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canMutate?: boolean; disabledReason?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
+  const change = <T extends Partial<Settings>>(next: T) => { if (canMutate) updateSettings(next); };
   useLayoutEffect(() => {
     const node = dialog.current;
     if (!node) return;
@@ -92,13 +94,13 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false }: { ope
     <div className="settings-panel">
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="settings-title">settings</h2></div><div><span>saved in this browser</span><button type="button" onClick={onClose}>esc</button></div></div>
       <div className="settings-content">
-        <Row title="theme" description="fulcrum palettes. auto follows the OS."><ThemeList value={settings.theme} onChange={(theme) => updateSettings({ theme })} /></Row>
-        <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} onChange={(uiFont) => updateSettings({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
-        <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} onChange={(size) => updateSettings({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} onChange={(density) => updateSettings({ density })} /></div></Row>
-        <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
-        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} onChange={(autoApproveDefault) => updateSettings({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
+        <Row title="theme" description="fulcrum palettes. auto follows the OS."><ThemeList value={settings.theme} disabled={!canMutate} onChange={(theme) => change({ theme })} /></Row>
+        <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} onChange={(uiFont) => change({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} onChange={(codeFont) => change({ codeFont })} /></div></Row>
+        <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} onChange={(size) => change({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} onChange={(density) => change({ density })} /></div></Row>
+        <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} onChange={(vim) => change({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
+        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} onChange={(autoApproveDefault) => change({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
       </div>
-      <footer><button type="button" className="settings-link" onClick={() => resetSettings()} disabled={JSON.stringify(settings) === JSON.stringify(defaultSettings)}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+      <footer><button type="button" className="settings-link" onClick={() => { if (canMutate) resetSettings(); }} disabled={!canMutate || JSON.stringify(settings) === JSON.stringify(defaultSettings)} title={!canMutate ? disabledReason : undefined}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
     </div>
   </dialog>;
 }
