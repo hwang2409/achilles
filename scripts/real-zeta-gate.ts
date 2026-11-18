@@ -2674,6 +2674,8 @@ try {
     await observerPage.screenshot({ path: join(screenshotDir, "observer-controller-restored-1440x900.png"), fullPage: true });
   }
 
+  const connectionHelloRoles = connectionRows.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role);
+  if (!connectionHelloRoles.includes("controller")) throw new Error(`controller websocket role was not captured: ${connectionHelloRoles.join(",")}`);
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
