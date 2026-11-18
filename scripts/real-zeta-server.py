@@ -299,16 +299,16 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 {"type": "text", "text": "reading list layout"},
                                 {"type": "form", "title": "add book", "tool": "add_book"},
                                 *[
-                                    {"type": "metric", **metric}
+                                    {
+                                        "type": "metric",
+                                        **{
+                                            key: value
+                                            for key, value in metric.items()
+                                            if key != "expectedText"
+                                        },
+                                    }
                                     for metric in METRIC_BOUNDARY_MATRIX
                                 ],
-                                {
-                                    "type": "metric",
-                                    "label": (
-                                        "legacy total with an unusually long descriptive label"
-                                    ),
-                                    "value": "9,999,999,999,999,999",
-                                },
                                 {
                                     "type": "metric",
                                     "label": "review status",
@@ -385,13 +385,6 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                     "label": "all books",
                                     "collection": "books",
                                     "count": True,
-                                },
-                                {
-                                    "type": "metric",
-                                    "label": (
-                                        "legacy total with an unusually long descriptive label"
-                                    ),
-                                    "value": "9,999,999,999,999,999",
                                 },
                                 {
                                     "type": "metric",

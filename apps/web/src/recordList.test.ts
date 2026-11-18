@@ -5,6 +5,7 @@ import React from "react";
 import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
 import { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
+import { formatMetricValue } from "./page/metricValue";
 import type { PageTool } from "./page/usePageTools";
 
 const originalFetch = globalThis.fetch;
@@ -249,6 +250,19 @@ for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["
   });
 }
 
+test("metric formatter preserves finite nonzero values at the compact zero boundary", () => {
+  const cases = [
+    ["0", "0", false],
+    ["0.0001", "1e-4", true],
+    ["-0.0001", "-1e-4", true],
+    ["1e-307", "1e-307", true],
+    ["-1e-307", "-1e-307", true],
+    ["1.0e+307", "1e307", true],
+    ["-1.0e+307", "-1e307", true],
+  ] as const;
+  for (const [source, expected, scientific] of cases) expect(formatMetricValue(source), source).toMatchObject({ display: expected, numeric: true, scientific });
+});
+
 test("numeric metric displays stay within the five-character boundary", () => {
   const metrics = [
     ["unmarked five digits", "99999", "99999"],
@@ -263,6 +277,10 @@ test("numeric metric displays stay within the five-character boundary", () => {
     ["rounded", "99999999", "100M"],
     ["negative huge exponent", "-1.0e+307", "-1e307"],
     ["huge exponent", "1.0e+307", "1e307"],
+    ["small positive", "0.0001", "1e-4"],
+    ["small negative", "-0.0001", "-1e-4"],
+    ["tiny positive", "1e-307", "1e-307"],
+    ["tiny negative", "-1e-307", "-1e-307"],
     ["unmarked nonnumeric", "9999999999 items", "9999999999 items"],
     ["marked nonnumeric", "9999999999 items", "9999999999 items", "done"],
   ] as const;

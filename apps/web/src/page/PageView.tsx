@@ -6,6 +6,7 @@ import { extendWithRecordKeys, recordColumns, schemaColumns } from "./listColumn
 import { usePageTools, type PageTool } from "./usePageTools";
 import "./page.css";
 import { RecordMark } from "./RecordMark";
+import { formatMetricValue } from "./metricValue";
 
 type PageLike = { title: string; route: string; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
 type InsertCapability = { collection: string; focusFirst: () => void };
@@ -119,26 +120,15 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
-const METRIC_VALUE_BOUND = 5;
-const compactNumber = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
-
-function boundedMetricValue(value: string): string {
-  const numeric = Number(value.replaceAll(",", ""));
-  if (!Number.isFinite(numeric) || value.length <= METRIC_VALUE_BOUND) return value;
-  const compact = compactNumber.format(numeric);
-  if (compact.length <= METRIC_VALUE_BOUND) return compact;
-  const scientific = numeric.toExponential(0).replace("e+", "e");
-  return scientific;
-}
-
 function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
   const fullValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  const isNumeric = Number.isFinite(Number(fullValue.replaceAll(",", "")));
-  const displayValue = isNumeric ? boundedMetricValue(fullValue) : fullValue;
+  const formatted = formatMetricValue(fullValue);
+  const displayValue = formatted.display;
   const isCompacted = displayValue !== fullValue;
-  const isScientific = isNumeric && /^-?\d(?:\.\d+)?e-?\d+$/.test(displayValue);
+  const isScientific = formatted.scientific;
+  const isNumeric = formatted.numeric;
   const textClass = !isNumeric ? ` metric-value-text${/\s/.test(fullValue.trim()) ? "" : " metric-value-text-single"}` : "";
   const numericClass = isScientific ? " metric-value-scientific" : "";
   return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}${numericClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
