@@ -947,13 +947,22 @@ try {
   await gateWait.playwright(longMetric, "waitFor");
   const longMetricLabel = longMetric.locator(".metric-label");
   const longMetricValue = longMetric.locator("strong");
+  const accessibility = await page.context().newCDPSession(page);
+  const metricObject = await accessibility.send("Runtime.evaluate", {
+    expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify("legacy total with an unusually long descriptive label")})`,
+  });
+  const metricAxTree = await accessibility.send("Accessibility.getPartialAXTree", {
+    objectId: metricObject.result.objectId,
+    fetchRelatives: true,
+  });
+  const metricAxNames = metricAxTree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
   const longMetricGeometry = await longMetricValue.evaluate((element) => {
     const value = element.getBoundingClientRect();
     const block = element.closest<HTMLElement>(".metric-block")?.getBoundingClientRect();
     return { valueHeight: value.height, blockHeight: block?.height ?? 0, blockScrollWidth: element.closest<HTMLElement>(".metric-block")?.scrollWidth ?? 0, blockClientWidth: element.closest<HTMLElement>(".metric-block")?.clientWidth ?? 0 };
   });
-  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "10,000T" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || await longMetricValue.getAttribute("aria-label") !== "legacy total with an unusually long descriptive label: 9,999,999,999,999,999" || longMetricGeometry.valueHeight > 34 || longMetricGeometry.blockScrollWidth > longMetricGeometry.blockClientWidth)
-    throw new Error(`long metric did not retain its full value accessibly or fit on one line: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())} geometry=${JSON.stringify(longMetricGeometry)}`);
+  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "10,000T" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || !metricAxNames.includes("9,999,999,999,999,999") || metricAxNames.includes("10,000T") || longMetricGeometry.valueHeight > 34 || longMetricGeometry.blockScrollWidth > longMetricGeometry.blockClientWidth)
+    throw new Error(`long metric did not retain its full value in Chromium's accessibility tree or fit on one line: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())} axNames=${JSON.stringify(metricAxNames)} geometry=${JSON.stringify(longMetricGeometry)}`);
   await page.setViewportSize({ width: 390, height: 760 });
   const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
   const textMetricGeometry = await textMetric.evaluate((element) => ({

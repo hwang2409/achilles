@@ -256,7 +256,10 @@ test("ten-character metric values compact before they can overflow a mobile cell
     const value = block.querySelector(".metric-value")!;
     expect(value.textContent, label).toBe(displayValue);
     expect(value.getAttribute("title"), label).toBe(fullValue);
-    expect(value.getAttribute("aria-label"), label).toBe(`${label}: ${fullValue}`);
+    if (displayValue !== fullValue) {
+      expect(value.querySelector('[aria-hidden="true"]')?.textContent, label).toBe(displayValue);
+      expect(block.querySelector(".metric-value-accessible")?.textContent, label).toBe(fullValue);
+    }
   }
 });
 
