@@ -1078,8 +1078,9 @@ try {
         return continuousRows && continuousColumns;
       };
       const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => {
-        const shadow = getComputedStyle(cell).boxShadow;
-        return shadow.includes("inset") && /-1px 0px/.test(shadow) && /0px -1px/.test(shadow);
+        const shadows = getComputedStyle(cell).boxShadow.split(",");
+        const visibleInset = (pattern: RegExp) => shadows.some((shadow) => /inset/.test(shadow) && pattern.test(shadow) && !/transparent|rgba\(0, 0, 0, 0\)/.test(shadow));
+        return visibleInset(/-1px 0px/) && visibleInset(/0px -1px/);
       });
       const hasUnusedTrackPaint = ({ strip, rows }: ReturnType<typeof snapshotGrid>) => {
         if (!strip) return false;
