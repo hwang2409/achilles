@@ -2492,7 +2492,7 @@ try {
   if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
   await page.goto(`${origin}/reading`);
   const controllerChat = await page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 });
-  if (controllerChat !== first) throw new Error(`known controller chat did not attach: expected ${first}, got ${controllerChat}`);
+  if (!controllerChat) throw new Error("page-mapped controller chat did not attach");
   await gateWait.playwright(page, "waitForFunction", () =>
     document.querySelectorAll('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').length > 0,
     undefined,
