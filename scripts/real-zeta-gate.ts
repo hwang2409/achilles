@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -226,7 +226,7 @@ try {
       await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
       if (width === 390) {
         const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
-        if (await pageChatClose.count() && await pageChatClose.isVisible()) await pageChatClose.click({ force: true });
+        await clickOptionalDetachedLocator(pageChatClose);
         const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
         if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
         await waitFor(async () => {

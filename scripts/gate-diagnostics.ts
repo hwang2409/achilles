@@ -6,6 +6,29 @@ import { basename, dirname, join } from "node:path";
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
 export const appShortcut = (key: string) => `ControlOrMeta+${key}`;
 
+export type ClickableLocator = {
+  count(): Promise<number>;
+  click(options?: { timeout?: number }): Promise<void>;
+};
+
+const locatorDetach = (error: unknown) => {
+  const message = String(error);
+  return /not attached|detached|not found/i.test(message);
+};
+
+export async function clickOptionalDetachedLocator(locator: ClickableLocator): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (!await locator.count()) return false;
+    try {
+      await locator.click({ timeout: 1000 });
+      return true;
+    } catch (error) {
+      if (!locatorDetach(error) && await locator.count() > 0) throw error;
+    }
+  }
+  return false;
+}
+
 // the python server polls control.json while it holds zeta's turn: a reader must never see a partial file
 export async function writeControl(path: string, document: unknown): Promise<void> {
   const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
