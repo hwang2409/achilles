@@ -1078,9 +1078,8 @@ try {
         return continuousRows && continuousColumns;
       };
       const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => {
-        const shadows = getComputedStyle(cell).boxShadow.split(",");
-        const visibleInset = (pattern: RegExp) => shadows.some((shadow) => /inset/.test(shadow) && pattern.test(shadow) && !/transparent|rgba\(0, 0, 0, 0\)/.test(shadow));
-        return visibleInset(/-1px 0px/) && visibleInset(/0px -1px/);
+        const shadow = getComputedStyle(cell).boxShadow;
+        return shadow.includes("inset") && /-1px 0px/.test(shadow) && /0px -1px/.test(shadow);
       });
       const hasUnusedTrackPaint = ({ strip, rows }: ReturnType<typeof snapshotGrid>) => {
         if (!strip) return false;
@@ -1110,8 +1109,8 @@ try {
         const originalStrip = strip ? { cssText: strip.style.cssText } : null;
         const mutationStyle = document.createElement("style");
         const mutations: Array<[string, () => void]> = [
-          ["cell missing its right separator", () => { if (cell) cell.style.boxShadow = "inset -1px 0 transparent, inset 0 -1px var(--fulcrum-border)"; }],
-          ["cell missing its bottom separator", () => { if (cell) cell.style.boxShadow = "inset -1px 0 var(--fulcrum-border), inset 0 -1px transparent"; }],
+          ["cell missing its right separator", () => { if (cell) cell.style.boxShadow = "inset 0 -1px var(--fulcrum-border)"; }],
+          ["cell missing its bottom separator", () => { if (cell) cell.style.boxShadow = "inset -1px 0 var(--fulcrum-border)"; }],
           ["strip missing its top owner", () => { if (strip) strip.style.borderTop = "0"; }],
           ["strip missing its left owner", () => { if (strip) strip.style.borderLeft = "0"; }],
           ["strip right border paint", () => { if (strip) strip.style.borderRight = "1px solid red"; }],
