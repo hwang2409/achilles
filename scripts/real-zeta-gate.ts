@@ -2534,6 +2534,8 @@ try {
     await observerSettingsButton.click();
     const reset = observerPage.getByRole("button", { name: "reset to defaults", exact: true });
     if (await reset.count() && !(await reset.isDisabled())) throw new Error("observer settings reset was editable");
+    const closeSettings = observerPage.getByRole("button", { name: "esc", exact: true });
+    if (await closeSettings.count()) await closeSettings.click();
   }
   await observerPage.keyboard.press(appShortcut("k"));
   const palette = observerPage.getByRole("dialog").filter({ hasText: "toggle vim mode" });
