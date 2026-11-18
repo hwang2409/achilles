@@ -1452,10 +1452,20 @@ try {
     process.exit(0);
   }
   await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
-  await waitFor(async () => {
-    const metrics = page.locator(".metric-strip");
-    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("all books", { exact: true }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
-  }, "open page layout after chat tool completion");
+  const layoutContract = () => page.evaluate(() => {
+    const visible = (element: Element) => { const node = element as HTMLElement; const box = node.getBoundingClientRect(); const style = getComputedStyle(node); return Boolean(box.width && box.height && style.display !== "none" && style.visibility !== "hidden"); };
+    const labelState = (label: string) => Array.from(document.querySelectorAll(".metric-label")).filter((element) => element.textContent === label).map((element) => ({ visible: visible(element), owner: element.closest(".metric-block")?.outerHTML.slice(0, 240) }));
+    return { route: location.pathname, lead: Array.from(document.querySelectorAll(".page-lead")).map((element) => ({ text: element.textContent, visible: visible(element) })), legacy: labelState("legacy total with an unusually long descriptive label"), allBooks: labelState("all books"), reading: labelState("reading"), review: labelState("review status"), tables: Array.from(document.querySelectorAll('.record-list table[data-collection="books"]')).map((element) => ({ visible: visible(element), owner: element.closest(".page-block")?.outerHTML.slice(0, 240) })), detail: Array.from(document.querySelectorAll('.record-detail')).map((element) => ({ visible: visible(element) })), forms: Array.from(document.querySelectorAll('.record-form')).map((element) => ({ visible: visible(element) })), layoutVersion: document.querySelector(".page-layout-version")?.textContent };
+  });
+  const layoutDiagnostics = async () => ({ contract: await layoutContract(), control: JSON.parse(await Bun.file(control).text()) });
+  try {
+    await gateWait.playwright(page.locator(".metric-label", { hasText: "all books" }), "waitFor", { state: "visible", timeout: 20000 });
+    const contract = await layoutContract();
+    if (contract.legacy.length !== 0 || contract.allBooks.length !== 1 || !contract.allBooks[0].visible || contract.reading.length !== 1 || !contract.reading[0].visible || contract.review.length !== 1 || !contract.review[0].visible || contract.tables.length !== 1 || !contract.tables[0].visible || contract.detail.length !== 1 || !contract.detail[0].visible || contract.forms.length !== 1 || !contract.forms[0].visible)
+      throw new Error(`replacement layout contract failed: ${JSON.stringify(contract)}`);
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: layout diagnostics=${JSON.stringify(await layoutDiagnostics())}`);
+  }
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
   if (!updateLayoutResult || updateLayoutResult.is_error)
