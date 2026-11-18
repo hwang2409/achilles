@@ -241,15 +241,28 @@ test("record list reveal projection keeps loaded rows and one reachable tab stop
   }
 });
 
-test("ten-character metric values compact before they can overflow a mobile cell", () => {
+for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["marked seven digit", "9999999", "10M"], ["huge exponent", "1.0e+307", "1e307"]] as const) {
+  test(`numeric metric boundary: ${label}`, () => {
+    const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label, value, status: "done" }] } };
+    const result = render(React.createElement(PageView, { page, pageId: `metric-fail-first-${label}`, credential: "secret", refreshKey: "0" }));
+    expect(result.container.querySelector(".metric-value")?.textContent, label).toBe(expected);
+  });
+}
+
+test("numeric metric displays stay within the five-character boundary", () => {
   const metrics = [
-    ["unmarked eight digits", "99999999", "100M"],
-    ["marked eight digits", "99999999", "100M", "done"],
-    ["unmarked nine digits", "999999999", "1B"],
-    ["marked nine digits", "999999999", "1B", "done"],
-    ["unmarked ten digits", "9999999999", "10B"],
-    ["marked ten digits", "9999999999", "10B", "done"],
-    ["decimal", "1234567890.5", "1.2B"],
+    ["unmarked five digits", "99999", "99999"],
+    ["marked five digits", "99999", "99999", "done"],
+    ["unmarked six digits", "999999", "1M"],
+    ["marked six digits", "999999", "1M", "done"],
+    ["unmarked seven digits", "9999999", "10M"],
+    ["marked seven digits", "9999999", "10M", "done"],
+    ["signed", "-99999", "-100K"],
+    ["decimal", "999.99", "1K"],
+    ["comma-formatted", "99,999", "100K"],
+    ["rounded", "99999999", "100M"],
+    ["negative huge exponent", "-1.0e+307", "-1e307"],
+    ["huge exponent", "1.0e+307", "1e307"],
     ["unmarked nonnumeric", "9999999999 items", "9999999999 items"],
     ["marked nonnumeric", "9999999999 items", "9999999999 items", "done"],
   ] as const;

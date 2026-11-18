@@ -119,10 +119,16 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
-function compactMetricValue(value: string): string {
+const METRIC_VALUE_BOUND = 5;
+const compactNumber = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+function boundedMetricValue(value: string): string {
   const numeric = Number(value.replaceAll(",", ""));
-  if (!Number.isFinite(numeric)) return value;
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric);
+  if (!Number.isFinite(numeric) || value.length <= METRIC_VALUE_BOUND) return value;
+  const compact = compactNumber.format(numeric);
+  if (compact.length <= METRIC_VALUE_BOUND) return compact;
+  const scientific = numeric.toExponential(0).replace("e+", "e");
+  return scientific;
 }
 
 function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
@@ -130,10 +136,12 @@ function MetricBlock({ block, value }: { block: Record<string, unknown>; value?:
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
   const isNumeric = Number.isFinite(Number(fullValue.replaceAll(",", "")));
-  const displayValue = fullValue.length >= 8 && isNumeric ? compactMetricValue(fullValue) : fullValue;
+  const displayValue = isNumeric ? boundedMetricValue(fullValue) : fullValue;
   const isCompacted = displayValue !== fullValue;
+  const isScientific = isNumeric && /^-?\d(?:\.\d+)?e-?\d+$/.test(displayValue);
   const textClass = !isNumeric ? ` metric-value-text${/\s/.test(fullValue.trim()) ? "" : " metric-value-text-single"}` : "";
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  const numericClass = isScientific ? " metric-value-scientific" : "";
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}${numericClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {

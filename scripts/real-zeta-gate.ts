@@ -15,6 +15,15 @@ import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
 const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; status?: string }>;
+const metricValueBound = 5;
+const compactMetric = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+function expectedMetricValue(value: string): string {
+  const numeric = Number(value.replaceAll(",", ""));
+  if (!Number.isFinite(numeric) || value.length <= metricValueBound) return value;
+  const compact = compactMetric.format(numeric);
+  if (compact.length <= metricValueBound) return compact;
+  return numeric.toExponential(0).replace("e+", "e");
+}
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -964,7 +973,7 @@ try {
     const block = element.closest<HTMLElement>(".metric-block")?.getBoundingClientRect();
     return { valueHeight: value.height, blockHeight: block?.height ?? 0, blockScrollWidth: element.closest<HTMLElement>(".metric-block")?.scrollWidth ?? 0, blockClientWidth: element.closest<HTMLElement>(".metric-block")?.clientWidth ?? 0 };
   });
-  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "10,000T" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || !metricAxNames.includes("9,999,999,999,999,999") || metricAxNames.includes("10,000T") || longMetricGeometry.valueHeight > 34 || longMetricGeometry.blockScrollWidth > longMetricGeometry.blockClientWidth)
+  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "1e16" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || !metricAxNames.includes("9,999,999,999,999,999") || metricAxNames.includes("10,000T") || longMetricGeometry.valueHeight > 34 || longMetricGeometry.blockScrollWidth > longMetricGeometry.blockClientWidth)
     throw new Error(`long metric did not retain its full value in Chromium's accessibility tree or fit on one line: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())} axNames=${JSON.stringify(metricAxNames)} geometry=${JSON.stringify(longMetricGeometry)}`);
   await page.setViewportSize({ width: 390, height: 760 });
   const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
@@ -1084,7 +1093,7 @@ try {
   if (screenshotDir) await captureBlockState("metric-boundary", matrixStrip, 1800, 1400);
   await page.evaluate(() => scrollTo(0, 0));
   await page.setViewportSize({ width: 390, height: 844 });
-  const boundaryValues = await page.locator(".metric-block").evaluateAll((elements, expected) => expected.map(({ label, value }) => {
+  const boundaryValues = await page.locator(".metric-block").evaluateAll((elements, expected) => expected.map(({ label, value, expectedText }) => {
     const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
     const rendered = element?.querySelector(".metric-value") as HTMLElement | null;
     const box = element?.getBoundingClientRect();
@@ -1092,11 +1101,33 @@ try {
     const style = element ? getComputedStyle(element) : null;
     const numeric = Number(value.replaceAll(",", ""));
     const isNumeric = Number.isFinite(numeric);
-    const expectedText = isNumeric && value.length >= 8 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric) : value;
-    return { label, value, found: Boolean(element), text: rendered?.innerText, expectedText, isNumeric, textOverflow: rendered ? getComputedStyle(rendered).textOverflow : "", title: rendered?.title, aria: rendered?.getAttribute("aria-label"), rightGap: box && valueBox ? box.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1 };
-  }), metricBoundaryMatrix);
-  if (boundaryValues.some(({ found, text, expectedText, isNumeric, textOverflow, title, aria, rightGap, padding }) => !found || text !== expectedText || (isNumeric && textOverflow === "ellipsis") || !title || title !== aria || rightGap < padding))
-    throw new Error(`metric boundary matrix failed display/title/aria/right-padding checks: ${JSON.stringify(boundaryValues)}`);
+    const renderedStyle = rendered ? getComputedStyle(rendered) : null;
+    return { label, value, found: Boolean(element), text: rendered?.innerText, expectedText, isNumeric, textOverflow: renderedStyle?.textOverflow ?? "", overflow: renderedStyle?.overflow ?? "", whiteSpace: renderedStyle?.whiteSpace ?? "", scrollWidth: rendered?.scrollWidth ?? -1, clientWidth: rendered?.clientWidth ?? -1, fontSize: renderedStyle?.fontSize ?? "", title: rendered?.title, aria: rendered?.getAttribute("aria-label"), rightGap: box && valueBox ? box.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1 };
+  }), metricBoundaryMatrix.map((entry) => ({ ...entry, expectedText: expectedMetricValue(entry.value) })));
+  const matrixFailures = boundaryValues.flatMap((entry) => {
+    const failures: string[] = [];
+    if (!entry.found || entry.text !== entry.expectedText) failures.push(`display=${JSON.stringify(entry.text)} expected=${JSON.stringify(entry.expectedText)}`);
+    if (entry.isNumeric && (entry.scrollWidth > entry.clientWidth || entry.textOverflow === "ellipsis" || entry.overflow === "hidden" || entry.whiteSpace !== "nowrap" || (entry.text?.length ?? -1) > (/^-?\d(?:\.\d+)?e-?\d+$/.test(entry.text ?? "") ? 7 : metricValueBound) || (/^-?\d(?:\.\d+)?e-?\d+$/.test(entry.text ?? "") && entry.fontSize !== "20px"))) failures.push(`numeric-fit=${JSON.stringify({ scrollWidth: entry.scrollWidth, clientWidth: entry.clientWidth, fontSize: entry.fontSize, textOverflow: entry.textOverflow, overflow: entry.overflow, whiteSpace: entry.whiteSpace, length: entry.text?.length ?? -1 })}`);
+    if (!entry.title || entry.title !== entry.aria) failures.push(`exact-accessibility=${JSON.stringify({ title: entry.title, aria: entry.aria })}`);
+    if (entry.rightGap < entry.padding) failures.push(`right-padding=${JSON.stringify({ rightGap: entry.rightGap, padding: entry.padding })}`);
+    return failures.length ? [`${entry.label}: ${failures.join(", ")}`] : [];
+  });
+  for (const entry of boundaryValues.filter(({ isNumeric }) => isNumeric)) {
+    const metricObject = await accessibility.send("Runtime.evaluate", {
+      expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify(entry.label)})?.querySelector('.metric-value')`,
+    });
+    const metricAxTree = await accessibility.send("Accessibility.getPartialAXTree", { objectId: metricObject.result.objectId, fetchRelatives: false });
+    const metricAxNames = metricAxTree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
+    const exactCount = metricAxNames.filter((name) => name === entry.value).length;
+    const displayCount = metricAxNames.filter((name) => name === entry.text).length;
+    if (exactCount !== 1 || (entry.text !== entry.value && displayCount !== 0)) matrixFailures.push(`${entry.label}: chromium AX names=${JSON.stringify({ exactCount, displayCount, value: entry.value, text: entry.text, names: metricAxNames })}`);
+  }
+  const parityFailures = boundaryValues.flatMap((entry) => {
+    const counterpart = entry.label.startsWith("marked ") ? boundaryValues.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? boundaryValues.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
+    return counterpart && entry.text !== counterpart.text ? [`${entry.label}: marker parity differs from ${counterpart.label}`] : [];
+  });
+  matrixFailures.push(...parityFailures);
+  if (matrixFailures.length) throw new Error(`metric boundary matrix failed independently: ${JSON.stringify(matrixFailures)}\\nentries=${JSON.stringify(boundaryValues)}`);
   const longText = page.locator('.metric-block').filter({ has: page.locator('.metric-label', { hasText: 'long text' }) }).locator('.metric-value');
   const singleToken = page.locator('.metric-block').filter({ has: page.locator('.metric-label', { hasText: 'single long token' }) }).locator('.metric-value');
   const textStyles = await longText.evaluate((element) => { const style = getComputedStyle(element); return { fontSize: style.fontSize, whiteSpace: style.whiteSpace, overflowWrap: style.overflowWrap }; });

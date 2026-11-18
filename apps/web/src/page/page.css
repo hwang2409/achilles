@@ -11,9 +11,10 @@
 .metric-block + .metric-block { border-left: 1px solid var(--fulcrum-border); }
 .metric-block > div { min-width: 0; padding-inline-end: 6px; display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
-.metric-block strong { min-width: 0; overflow: hidden; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: clip; }
+.metric-block strong { min-width: 0; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.metric-block strong.metric-value-scientific { font-size: 20px; line-height: 34px; }
 .metric-block strong.metric-value-text { font-size: 16px; line-height: 24px; font-weight: 400; white-space: normal; overflow-wrap: normal; word-break: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.metric-block strong.metric-value-text-single { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.metric-block strong.metric-value-text-single { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 .metric-block small, .metric-delta { color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-delta { white-space: nowrap; }
