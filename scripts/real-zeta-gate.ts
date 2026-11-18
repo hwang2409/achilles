@@ -2567,7 +2567,7 @@ try {
       const transcriptRect = element.closest('[data-part="timeline-scroll"]')?.getBoundingClientRect();
       const point = document.elementFromPoint(rect.left + Math.min(8, rect.width / 2), rect.top + Math.min(8, rect.height / 2));
       return { text: element.textContent ?? "", rect: rect.toJSON(), transcriptRect: transcriptRect?.toJSON() ?? null, hit: Boolean(point && (point === element || element.contains(point))), expected };
-    }, (await marker.count()) > 0 ? observerMarker : latestSourceText);
+    }, (await marker.count()) > 0 ? observerMarker : observerLatestSource);
     const expectedEvidence = (await marker.count()) > 0 ? observerMarker : observerLatestSource;
     if (!mobileMarker.text.includes(expectedEvidence) || !mobileMarker.transcriptRect || mobileMarker.rect.top < mobileMarker.transcriptRect.top || mobileMarker.rect.bottom > mobileMarker.transcriptRect.bottom || !mobileMarker.hit)
       throw new Error(`observer active chat evidence is not readable in open sheet: ${JSON.stringify(mobileMarker)}`);
