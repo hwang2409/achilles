@@ -130,8 +130,9 @@ function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: C
           })}
           <span className="tm-tick tm-tick-now" aria-hidden="true">now</span>
         </div>
-        <div className="tm-tooltip" aria-live="polite" hidden={!shown} style={shown ? { left: `${((active! + 0.5) / series.length) * 100}%` } : undefined} data-side={active !== null && active > series.length / 2 ? "left" : "right"}>
-          {shown && <>
+        {/* the live region stays mounted: screen readers skip a region that appears in the same change as its text */}
+        <div aria-live="polite">
+          {shown && <div className="tm-tooltip" style={{ left: `${((active! + 0.5) / series.length) * 100}%` }} data-side={active! > series.length / 2 ? "left" : "right"}>
             <b>{bucketLabel(shown, bucket)}</b>
             <dl>
               <dt>model calls</dt><dd>{formatCount(shown.model_calls)}</dd>
@@ -139,7 +140,7 @@ function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: C
               <dt>tool calls</dt><dd>{formatCount(shown.tool_calls)}</dd>
               <dt>tokens</dt><dd>{formatTokens(shown.total_tokens)}</dd>
             </dl>
-          </>}
+          </div>}
         </div>
       </div>
     </figure>
