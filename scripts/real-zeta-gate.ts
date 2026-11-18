@@ -1078,11 +1078,50 @@ try {
       const numeric = ["finite", "zero", "signed-zero"].includes(classification);
       const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
       const numericFit = !numeric || Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && renderedStyle?.textOverflow !== "ellipsis" && renderedStyle?.overflow !== "hidden" && renderedStyle?.whiteSpace === "nowrap" && rendered.innerText.length <= (scientific ? 7 : 5) && (!scientific || renderedStyle.fontSize === "20px"));
-      const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48)));
+      const tokenClipping = !numeric && rendered ? (() => {
+        const walker = document.createTreeWalker(rendered, NodeFilter.SHOW_TEXT);
+        const tokens: Range[] = [];
+        let node: Node | null;
+        while ((node = walker.nextNode())) for (const match of (node.textContent ?? "").matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, match.index ?? 0);
+          range.setEnd(node, (match.index ?? 0) + match[0].length);
+          tokens.push(range);
+        }
+        const renderedStyle = getComputedStyle(rendered);
+        return tokens.some((range) => {
+          const owner = range.startContainer.parentElement?.closest<HTMLElement>(".metric-value-text-token");
+          const measure = document.createElement("span");
+          measure.textContent = range.toString();
+          measure.style.cssText = `position:absolute; visibility:hidden; white-space:nowrap; font:${renderedStyle.font}; letter-spacing:${renderedStyle.letterSpacing};`;
+          document.body.append(measure);
+          const naturalWidth = measure.getBoundingClientRect().width;
+          measure.remove();
+          const ownerStyle = owner && getComputedStyle(owner);
+          return naturalWidth > rendered.clientWidth + 0.5 && (!owner || ownerStyle?.overflow !== "hidden" || ownerStyle.textOverflow !== "ellipsis" || ownerStyle.whiteSpace !== "nowrap");
+        });
+      })() : false;
+      const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48))) && !tokenClipping;
+      const gridEdges = (() => {
+        const cells = [...document.querySelectorAll<HTMLElement>(".metric-strip")[0]?.querySelectorAll<HTMLElement>(".metric-block") ?? []].map((cell) => cell.getBoundingClientRect()).sort((a, b) => a.top - b.top || a.left - b.left);
+        const rows: DOMRect[][] = [];
+        for (const cell of cells) {
+          const row = rows.find((candidate) => Math.abs(candidate[0]!.top - cell.top) <= 0.5);
+          if (row) row.push(cell); else rows.push([cell]);
+        }
+        const continuous = rows.every((row) => row.sort((a, b) => a.left - b.left).every((cell, index) => index === 0 || Math.abs(cell.left - row[index - 1]!.right - 1) <= 0.5));
+        const columns = new Map<number, DOMRect[]>();
+        for (const cell of cells) {
+          const key = Math.round(cell.left * 2) / 2;
+          columns.set(key, [...(columns.get(key) ?? []), cell]);
+        }
+        const vertical = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom - 1) <= 0.5));
+        return continuous && vertical;
+      })();
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
-      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, tokenClipping, painted, gridEdges, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
     }), metricBoundaryMatrix);
     const failures = entries.flatMap((entry) => {
       const marker = entry.expectedStatus ? entry.mark.includes(entry.expectedMark) : !entry.mark;
@@ -1095,6 +1134,8 @@ try {
       const right = entries[next].painted;
       if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}: ${JSON.stringify({ left, right })}`);
     }
+    if (entries.some((entry) => entry.tokenClipping)) failures.push("overlong word clipped without ellipsis");
+    if (entries.some((entry) => !entry.gridEdges)) failures.push("row/column edge assertion: metric grid separators are not continuous");
     for (const entry of entries) {
       const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
       if (counterpart && entry.text !== counterpart.text) failures.push(`${entry.label}: marker parity differs from ${counterpart.label}`);
