@@ -28,6 +28,8 @@ import "./jumpToLatest.css";
 
 export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 
+export const canWriteForState = (state: ConnectionState) => state.phase === "connected" && state.authority === "controller";
+
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
 const fences: Fences = new Proxy({}, { get: () => CodeFence });
@@ -150,7 +152,7 @@ export function App() {
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
-  const canWrite = connectionState.phase === "connected" && connectionState.authority === "controller";
+  const canWrite = canWriteForState(connectionState);
   const readOnlyReason = "this tab is read-only; take control to make changes";
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite);
   const ready = active.state.phase === "ready" ? active.state : null;

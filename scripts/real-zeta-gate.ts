@@ -209,11 +209,22 @@ try {
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
+  const connectionRows: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; params?: unknown; payload?: string }> = [];
   let nextSocket = 0;
   page.on("websocket", (socket) => {
     const socketId = nextSocket++;
-    socket.on("framesent", (event) => { const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "sent", payload]); frameRing.record(socketId, "sent", payload); });
-    socket.on("framereceived", (event) => { const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "received", payload]); frameRing.record(socketId, "received", payload); });
+    const attempt = socketId + 1;
+    const row = { socketId, attempt, role: null as string | null, lifecycle: "open" as const };
+    connectionRows.push(row);
+    socket.on("framesent", (event) => {
+      const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "sent", payload]); frameRing.record(socketId, "sent", payload);
+      try { const frame = JSON.parse(payload) as { method?: unknown; params?: { role?: unknown } }; if (typeof frame.params?.role === "string") row.role = frame.params.role; connectionRows.push({ ...row, lifecycle: "open", direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* raw protocol payload remains in frameLog */ }
+    });
+    socket.on("framereceived", (event) => {
+      const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "received", payload]); frameRing.record(socketId, "received", payload);
+      try { const frame = JSON.parse(payload) as { method?: unknown; params?: unknown }; connectionRows.push({ ...row, lifecycle: "open", direction: "received", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* raw protocol payload remains in frameLog */ }
+    });
+    socket.on("close", () => connectionRows.push({ ...row, lifecycle: "closed" }));
   });
   page.on("pageerror", (e) => errors.push(`${e.message}${requestFailures.length ? `; latest request failure: ${requestFailures.at(-1)}` : ""}${consoleErrors.length ? `; latest console error: ${consoleErrors.at(-1)}` : ""}`));
   page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${requestPath(request.url())}: ${request.failure()?.errorText ?? "unknown failure"}`));
@@ -2479,14 +2490,26 @@ try {
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
   const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
-  const observerHttp: { method: string; path: string }[] = [];
+  const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; params?: unknown; payload?: string }> = [];
+  const observerHttp: { method: string; path: string; body: string | null }[] = [];
+  let observerSocketId = 0;
   observerPage.on("websocket", (socket) => {
-    socket.on("framesent", (event) => observerFrames.push({ direction: "sent", payload: String(event.payload) }));
-    socket.on("framereceived", (event) => observerFrames.push({ direction: "received", payload: String(event.payload) }));
+    const socketId = observerSocketId++;
+    const row = { socketId, attempt: socketId + 1, role: null as string | null, lifecycle: "open" as const };
+    observerSockets.push(row);
+    socket.on("framesent", (event) => {
+      const payload = String(event.payload); observerFrames.push({ direction: "sent", payload });
+      try { const frame = JSON.parse(payload) as { method?: unknown; params?: { role?: unknown } }; if (typeof frame.params?.role === "string") row.role = frame.params.role; observerSockets.push({ ...row, direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* retain raw frame */ }
+    });
+    socket.on("framereceived", (event) => {
+      const payload = String(event.payload); observerFrames.push({ direction: "received", payload });
+      try { const frame = JSON.parse(payload) as { method?: unknown; params?: unknown }; observerSockets.push({ ...row, direction: "received", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* retain raw frame */ }
+    });
+    socket.on("close", () => observerSockets.push({ ...row, lifecycle: "closed" }));
   });
   observerPage.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.origin === origin) observerHttp.push({ method: request.method(), path: url.pathname });
+    if (url.origin === origin) observerHttp.push({ method: request.method(), path: url.pathname, body: request.postData() });
   });
   await observerPage.goto(`${origin}/?chat=${controllerChat}`);
   const observerStorageBefore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
@@ -2501,6 +2524,28 @@ try {
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
   await waitFor(async () => (await observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').count()) > 0, "observer transcript rows");
   const observerMutationMethods = new Set(["send", "steer", "new_session", "approve", "deny", "interrupt", "set_settings", "set_page_create_mode", "create_page", "update_layout", "restore_version", "mcp_refresh_tools"]);
+  const observerStorageAtActions = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  const observerFrameCountAtActions = observerFrames.length;
+  const observerHttpCountAtActions = observerHttp.length;
+  const observerComposer = observerPage.getByRole("textbox", { name: "message", exact: true });
+  if (await observerComposer.count()) { await observerComposer.fill("observer must not send"); await observerComposer.press("Enter"); }
+  const observerSettingsButton = observerPage.locator(".settings-button");
+  if (await observerSettingsButton.count()) {
+    await observerSettingsButton.click();
+    const reset = observerPage.getByRole("button", { name: "reset to defaults", exact: true });
+    if (await reset.count() && !(await reset.isDisabled())) throw new Error("observer settings reset was editable");
+  }
+  await observerPage.keyboard.press(appShortcut("k"));
+  const palette = observerPage.getByRole("dialog").filter({ hasText: "toggle vim mode" });
+  if (await palette.count()) {
+    const vim = palette.getByText("toggle vim mode", { exact: true });
+    if (await vim.count() && !(await vim.isDisabled())) throw new Error("observer vim setting was editable");
+  }
+  const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
+  if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
+  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
+  if (observerFrames.slice(observerFrameCountAtActions).some(({ direction, payload }) => direction === "sent" && observerMutationMethods.has((JSON.parse(payload) as { method?: string }).method ?? ""))) throw new Error("observer action matrix sent a mutating websocket request");
+  if (observerHttp.slice(observerHttpCountAtActions).some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer action matrix issued mutating HTTP");
   const observerRequests = observerFrames.flatMap(({ direction, payload }) => {
     if (direction !== "sent") return [];
     try { const frame = JSON.parse(payload) as { method?: unknown }; return typeof frame.method === "string" ? [frame.method] : []; }
@@ -2607,6 +2652,22 @@ try {
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
+  const restoredControllerSockets = observerSockets.filter((row) => row.role === "controller" && row.lifecycle === "open");
+  const replacementObserverSockets = observerSockets.filter((row) => row.role === "observer" && row.lifecycle === "open");
+  if (restoredControllerSockets.length < 1 || replacementObserverSockets.length < 2) throw new Error(`takeover socket matrix incomplete: ${JSON.stringify(observerSockets)}`);
+  const helloRoles = observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").sort((a, b) => a.socketId - b.socketId).map((row) => row.role);
+  if (helloRoles.length !== 4 || helloRoles.join(",") !== "observer,controller,observer,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles.join(",")}`);
+  const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  const restoredSettingsButton = observerPage.locator(".settings-button");
+  await restoredSettingsButton.click();
+  const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
+  if (await restoredVim.count()) {
+    const before = await restoredVim.getAttribute("aria-checked");
+    await restoredVim.click();
+    await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
+    await restoredVim.click();
+  }
+  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== settingsBeforeRestore) throw new Error("restored controller settings did not restore reversibly");
   if (screenshotDir) {
     await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
