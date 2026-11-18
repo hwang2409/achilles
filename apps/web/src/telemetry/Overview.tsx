@@ -46,6 +46,7 @@ export function Overview({ overview, bucket, chart, setChart, empty }: { overvie
           </div>
         </div>
         <TrendChart series={series} chart={chart} bucket={bucket} />
+        <ComingNext />
       </>}
     </div>
   );
@@ -61,6 +62,19 @@ function Metric({ label, value, detail, detailSuffix, mark, markClass, tone, cla
         {detail && <span className="tm-metric-detail">{detail}{detailSuffix && <span className="tm-metric-suffix">{detailSuffix}</span>}</span>}
       </span>
     </div>
+  );
+}
+
+/** The T1 sections zeta does not serve yet, each with the zeta read that brings it. */
+function ComingNext() {
+  return (
+    <section className="tm-coming" aria-label="coming next">
+      <h2>coming next</h2>
+      <ul>
+        <li>recent errors, top models, top tools <span>— with zeta telemetry slice 4 (<code>telemetry_errors</code>, <code>telemetry_models</code>, <code>telemetry_tools</code>)</span></li>
+        <li>running now <span>— with zeta state slice 6c (<code>state_sessions</code>, <code>state_agents</code>)</span></li>
+      </ul>
+    </section>
   );
 }
 

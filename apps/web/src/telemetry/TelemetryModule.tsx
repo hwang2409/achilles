@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { formatAgo, formatHour } from "./format";
+import { EnumListbox } from "../page/EnumListbox";
 import { Overview, OverviewSkeleton } from "./Overview";
 import { RANGES, useTelemetryReads, type Loaded, type Range, type Tab } from "./reads";
 import { Sessions } from "./Sessions";
@@ -94,17 +95,17 @@ function useSeenFilters(data: Loaded | undefined) {
   return { profiles: [...seen.current.profiles].sort(), models: [...seen.current.models].sort() };
 }
 
+const RANGE_KEYS = Object.keys(RANGES) as Range[];
+const RANGE_LABELS = RANGE_KEYS.map((key) => RANGES[key].label);
+
 function Tools({ status, refreshing, range, chooseRange, refresh }: { status?: TelemetryStatus; refreshing: boolean; range: Range; chooseRange: (range: Range) => void; refresh: () => void }) {
   return (
     <div className="tm-tools">
       {status && <ReceiverMark status={status} />}
       {refreshing && <span className="tm-refreshing" role="status">refreshing…</span>}
-      <label className="tm-range">
-        <span className="tm-visually-hidden">time range</span>
-        <select value={range} onChange={(event) => chooseRange(event.target.value as Range)}>
-          {(Object.keys(RANGES) as Range[]).map((value) => <option key={value} value={value}>{RANGES[value].label}</option>)}
-        </select>
-      </label>
+      <div className="tm-range">
+        <EnumListbox label="time range" value={RANGES[range].label} options={RANGE_LABELS} onChange={(label) => chooseRange(RANGE_KEYS.find((key) => RANGES[key].label === label)!)} />
+      </div>
       <button type="button" className="tm-button tm-refresh" onClick={refresh}><span aria-hidden="true">↻</span>refresh</button>
     </div>
   );

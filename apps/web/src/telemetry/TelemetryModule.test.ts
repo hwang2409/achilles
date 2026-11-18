@@ -50,3 +50,31 @@ test("a filter change turns paging off until its first page arrives, so the old 
     releaseFiltered();
   }
 });
+
+test("the profile listbox sends the chosen profile, and its any row clears it even when a profile is named any", async () => {
+  const sessions: Record<string, unknown>[] = [];
+  const client = {
+    features: ["telemetry_read_v1"],
+    protocolVersion: "1",
+    request: async (method: string, params: Record<string, unknown>) => {
+      if (method === "telemetry_overview") return { status, totals: point, series: [], active_models: 0, active_tools: 0, next_cursor: null };
+      sessions.push(params);
+      return { items: [{ ...session("s1"), profile: "any" }, { ...session("s2"), profile: "worker" }], next_cursor: null, as_of_ns: 1 };
+    },
+  } as unknown as ZetaClient;
+  const view = render(createElement(TelemetryModule, { client, pathname: "/telemetry/sessions" }));
+  const pick = async (index: number) => {
+    await act(async () => { fireEvent.click(view.getByRole("button", { name: "profile" })); });
+    await act(async () => { fireEvent.click(view.getAllByRole("option")[index]); });
+  };
+  await waitFor(() => expect(view.getAllByRole("row").length).toBeGreaterThan(1));
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "profile" })); });
+  expect(view.getAllByRole("option").map((option) => option.textContent?.replace("✓", ""))).toEqual(["any", "any", "worker"]);
+  await act(async () => { fireEvent.keyDown(view.getByRole("listbox"), { key: "Escape" }); });
+  await pick(1);
+  await waitFor(() => expect(sessions.at(-1)).toMatchObject({ profile: "any" }));
+  await pick(2);
+  await waitFor(() => expect(sessions.at(-1)).toMatchObject({ profile: "worker" }));
+  await pick(0);
+  await waitFor(() => expect(sessions.at(-1)?.profile ?? null).toBeNull());
+});

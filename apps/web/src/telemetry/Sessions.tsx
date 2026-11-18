@@ -1,4 +1,5 @@
 import type { MouseEvent, ReactNode } from "react";
+import { EnumListbox } from "../page/EnumListbox";
 import { formatCount, formatDuration, formatFullTime, formatTime, formatTokens, shortId } from "./format";
 import type { Page, TelemetrySession } from "./telemetry-types";
 
@@ -7,6 +8,7 @@ export type SessionsQuery = { cursors: (string | null)[]; errorsOnly: boolean; p
 
 export const PAGE_SIZE = 50;
 const isFiltered = (query: SessionsQuery) => query.errorsOnly || query.profile !== null || query.model !== null;
+const ANY = "any";
 const NUMERIC = ["duration", "turns", "model calls", "tool calls", "errors", "tokens in / out"];
 
 /**
@@ -76,16 +78,13 @@ export function Sessions({ page, total, query, shown, rangeLabel, profiles, mode
   );
 }
 
+/** Options follow EnumListbox's convention: real values are JSON-encoded, so a profile named "any" never reads as no filter. */
 function Choice({ label, value, options, set }: { label: string; value: string | null; options: string[]; set: (value: string | null) => void }) {
   const choices = value !== null && !options.includes(value) ? [value, ...options] : options;
   return (
-    <label className={`tm-select${value !== null ? " tm-select-on" : ""}`}>
-      <span>{label}</span>
-      <select value={value ?? ""} onChange={(event) => set(event.target.value || null)}>
-        <option value="">any</option>
-        {choices.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
-    </label>
+    <div className={`tm-select${value !== null ? " tm-select-on" : ""}`}>
+      <EnumListbox label={label} value={value === null ? ANY : JSON.stringify(value)} options={[ANY, ...choices.map((option) => JSON.stringify(option))]} onChange={(next) => set(next === ANY ? null : JSON.parse(next))} />
+    </div>
   );
 }
 

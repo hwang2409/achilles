@@ -46,7 +46,11 @@
 .tm-button:disabled { color: var(--fulcrum-muted); opacity: .6; cursor: default; }
 .tm-primary { border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
 .tm-link { min-height: 36px; padding: 0 4px; border: 0; background: none; color: var(--fulcrum-accent); cursor: pointer; font: inherit; }
-.tm-range select, .tm-select select { min-height: 36px; padding: 0 10px; border: 1px solid var(--fulcrum-border); border-radius: 0; background: var(--fulcrum-bg); color: var(--fulcrum-fg); font: inherit; }
+/* achilles' EnumListbox, fitted to the boards: range is a bare bordered button; a filter shows its label inside the frame */
+.telemetry-module .enum-listbox-button { width: auto; min-height: 36px; gap: 10px; padding: 0 12px; background: none; }
+.telemetry-module .enum-listbox-menu { right: auto; width: max-content; min-width: 100%; max-width: min(44ch, 90vw); }
+.tm-range .enum-listbox-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tm-range .enum-listbox-menu { left: auto; right: 0; }
 
 .tm-main { flex: 1 0 auto; box-sizing: border-box; width: 100%; min-width: 0; max-width: 1920px; padding: 24px var(--tm-pad) 40px 24px; }
 
@@ -128,6 +132,10 @@
 .tm-tooltip b { display: block; margin-bottom: 4px; }
 .tm-tooltip dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 24px; margin: 0; }
 .tm-tooltip dt { color: var(--fulcrum-muted); }
+.tm-coming { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--tm-line); color: var(--fulcrum-muted); font-size: 12px; }
+.tm-coming h2 { margin: 0; font-size: inherit; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
+.tm-coming ul { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 0; padding: 0; list-style: none; }
+.tm-coming code { color: var(--fulcrum-muted); }
 .tm-tooltip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* sessions */
@@ -135,11 +143,16 @@
 .tm-heading h1 { margin: 0; font-size: 32px; font-weight: 700; }
 .tm-heading p { margin: 0; }
 .tm-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 22px; }
-.tm-select { display: flex; align-items: center; gap: 8px; min-height: 44px; padding-left: 12px; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-muted); }
-.tm-select select { min-height: 44px; max-width: 28ch; border: 0; text-overflow: ellipsis; }
+.tm-select { border: 1px solid var(--fulcrum-border); }
+.tm-select .enum-listbox { display: flex; align-items: center; }
+.tm-select .enum-listbox-label { margin: 0; padding-left: 12px; font-size: inherit; line-height: inherit; }
+.tm-select .enum-listbox-button { min-height: 44px; max-width: 28ch; padding-left: 8px; border: 0; }
+.tm-select .enum-listbox-menu { left: -1px; }
 .tm-select-on { border-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .tm-check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
-.tm-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--fulcrum-accent); }
+/* the native box drawn as the board's square: an inner accent square when on */
+.tm-check input { appearance: none; flex: none; width: 18px; height: 18px; margin: 0; border: 1px solid var(--fulcrum-muted); border-radius: 0; background: none; cursor: pointer; }
+.tm-check input:checked { border-color: var(--fulcrum-accent); background: var(--fulcrum-accent); box-shadow: inset 0 0 0 3px var(--fulcrum-bg); }
 .tm-none { color: var(--fulcrum-muted); padding: 24px 0; }
 
 .tm-table { width: 100%; border-collapse: collapse; }
@@ -183,7 +196,7 @@
   .tm-m-sessions { order: 1; } .tm-m-errors { order: 2; } .tm-m-calls { order: 3; } .tm-m-tokens { order: 4; }
   .tm-receiver-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .tm-tools { gap: 10px; }
-  .tm-range select, .tm-link, .tm-button { min-height: 44px; }
+  .telemetry-module .enum-listbox-button, .tm-link, .tm-button { min-height: 44px; }
   .tm-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 16px; }
   .tm-metric-value { font-size: 30px; }
   .tm-plot { height: 180px; gap: 3px; }
@@ -226,7 +239,9 @@
   .tm-heading h1 { font-size: 30px; }
   .tm-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .tm-filters .tm-select { min-width: 0; }
-  .tm-filters .tm-select select { min-width: 0; width: 100%; }
+  .tm-filters .tm-select .enum-listbox-button { flex: 1; min-width: 0; max-width: none; }
+  /* a half-width filter would push a content-wide menu off screen: the menu takes the frame's width */
+  .tm-filters .tm-select .enum-listbox-menu { left: -1px; right: -1px; width: auto; min-width: 0; }
   .tm-check { grid-column: 1 / -1; }
   .tm-filters .tm-link { grid-column: 1 / -1; justify-self: start; padding: 0; }
   .tm-pager-buttons { flex: 1; }
