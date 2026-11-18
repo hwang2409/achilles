@@ -1055,7 +1055,87 @@ try {
   const matrixStrip = page.locator(".metric-strip").first();
   const matrixBlocks = matrixStrip.locator(".metric-block");
   const assertMetricMatrix = async (viewport: string) => {
-    const entries = await matrixBlocks.evaluateAll((elements, expected) => expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
+    const entries = await matrixBlocks.evaluateAll((elements, expected) => {
+      const snapshotGrid = (elements: Element[]) => {
+        const strip = document.querySelector<HTMLElement>(".metric-strip");
+        const cellElements = [...(strip?.querySelectorAll<HTMLElement>(".metric-block") ?? [])];
+        const cells = cellElements.map((cell) => cell.getBoundingClientRect()).sort((a, b) => a.top - b.top || a.left - b.left);
+        const rows: DOMRect[][] = [];
+        for (const cell of cells) {
+          const row = rows.find((candidate) => Math.abs(candidate[0]!.top - cell.top) <= 0.5);
+          if (row) row.push(cell); else rows.push([cell]);
+        }
+        return { strip, cellElements, cells, rows };
+      };
+      const hasContinuousTopology = ({ cells, rows }: ReturnType<typeof snapshotGrid>) => {
+        const continuousRows = rows.every((row) => row.sort((a, b) => a.left - b.left).every((cell, index) => index === 0 || Math.abs(cell.left - row[index - 1]!.right) <= 0.5));
+        const columns = new Map<number, DOMRect[]>();
+        for (const cell of cells) {
+          const key = Math.round(cell.left * 2) / 2;
+          columns.set(key, [...(columns.get(key) ?? []), cell]);
+        }
+        const continuousColumns = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom) <= 0.5));
+        return continuousRows && continuousColumns;
+      };
+      const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => {
+        const shadow = getComputedStyle(cell).boxShadow;
+        return shadow.includes("inset") && /-1px 0px/.test(shadow) && /0px -1px/.test(shadow);
+      });
+      const hasUnusedTrackPaint = ({ strip, rows }: ReturnType<typeof snapshotGrid>) => {
+        if (!strip) return false;
+        const stripStyle = getComputedStyle(strip);
+        const finalRow = rows.at(-1) ?? [];
+        const lastFilledCell = finalRow.at(-1);
+        const stripBox = strip.getBoundingClientRect();
+        const emptyTrackPoint = lastFilledCell && lastFilledCell.right < stripBox.right - 1 ? { x: lastFilledCell.right + 1, y: lastFilledCell.top + lastFilledCell.height / 2 } : null;
+        const noCellInUnusedTrack = !emptyTrackPoint || !document.elementFromPoint(emptyTrackPoint.x, emptyTrackPoint.y)?.closest(".metric-block");
+        const transparent = (color: string) => color === "rgba(0, 0, 0, 0)" || color === "transparent";
+        const pseudoPaint = (["::before", "::after"] as const).some((pseudo) => {
+          const style = getComputedStyle(strip, pseudo);
+          return style.content !== "none" || style.backgroundImage !== "none" || !transparent(style.backgroundColor) || style.borderTopWidth !== "0px" || style.borderRightWidth !== "0px" || style.borderBottomWidth !== "0px" || style.borderLeftWidth !== "0px" || style.boxShadow !== "none";
+        });
+        return stripStyle.boxShadow === "none" && stripStyle.borderRightWidth === "0px" && stripStyle.borderBottomWidth === "0px" && !pseudoPaint && noCellInUnusedTrack && (!lastFilledCell || lastFilledCell.right <= stripBox.right + 0.5);
+      };
+      const hasStripOwnedEdges = ({ strip }: ReturnType<typeof snapshotGrid>) => {
+        if (!strip) return false;
+        const style = getComputedStyle(strip);
+        return style.borderTopWidth === "1px" && style.borderLeftWidth === "1px" && style.borderRightWidth === "0px" && style.borderBottomWidth === "0px";
+      };
+      const checkGrid = (grid: ReturnType<typeof snapshotGrid>) => hasContinuousTopology(grid) && hasStripOwnedEdges(grid) && hasCellOwnedSeparators(grid) && hasUnusedTrackPaint(grid);
+      const proveMutations = (grid: ReturnType<typeof snapshotGrid>) => {
+        const cell = grid.cellElements[0];
+        const strip = grid.strip;
+        const originalCellShadow = cell?.style.boxShadow ?? "";
+        const originalStrip = strip ? { cssText: strip.style.cssText } : null;
+        const mutationStyle = document.createElement("style");
+        const mutations: Array<[string, () => void]> = [
+          ["cell missing its right separator", () => { if (cell) cell.style.boxShadow = "inset -1px 0 transparent, inset 0 -1px var(--fulcrum-border)"; }],
+          ["cell missing its bottom separator", () => { if (cell) cell.style.boxShadow = "inset -1px 0 var(--fulcrum-border), inset 0 -1px transparent"; }],
+          ["strip missing its top owner", () => { if (strip) strip.style.borderTop = "0"; }],
+          ["strip missing its left owner", () => { if (strip) strip.style.borderLeft = "0"; }],
+          ["strip right border paint", () => { if (strip) strip.style.borderRight = "1px solid red"; }],
+          ["strip bottom border paint", () => { if (strip) strip.style.borderBottom = "1px solid red"; }],
+          ["strip shadow paint", () => { if (strip) strip.style.boxShadow = "0 0 0 1px red"; }],
+          ["strip pseudo paint", () => { mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }"; document.head.append(mutationStyle); }],
+        ];
+        try {
+          for (const [message, mutate] of mutations) {
+            mutate();
+            if (checkGrid(snapshotGrid(elements))) throw new Error(`grid gate accepted ${message}`);
+            if (cell) cell.style.boxShadow = originalCellShadow;
+            if (strip && originalStrip) strip.style.cssText = originalStrip.cssText;
+            mutationStyle.remove();
+          }
+        } finally {
+          if (cell) cell.style.boxShadow = originalCellShadow;
+          if (strip && originalStrip) strip.style.cssText = originalStrip.cssText;
+          mutationStyle.remove();
+        }
+      };
+      const grid = snapshotGrid(elements);
+      const gridEdges = checkGrid(grid);
+      if (gridEdges && innerWidth === 390) proveMutations(grid);
+      return expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
       const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
       const block = element as HTMLElement | undefined;
       const labelNode = element?.querySelector<HTMLElement>(".metric-label");
@@ -1102,77 +1182,13 @@ try {
         });
       })() : false;
       const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48))) && !tokenClipping;
-      const gridEdgeResult = (() => {
-        const strip = document.querySelector<HTMLElement>(".metric-strip");
-        const cellElements = [...strip?.querySelectorAll<HTMLElement>(".metric-block") ?? []];
-        const cells = cellElements.map((cell) => cell.getBoundingClientRect()).sort((a, b) => a.top - b.top || a.left - b.left);
-        const rows: DOMRect[][] = [];
-        for (const cell of cells) {
-          const row = rows.find((candidate) => Math.abs(candidate[0]!.top - cell.top) <= 0.5);
-          if (row) row.push(cell); else rows.push([cell]);
-        }
-        const hasContinuousTopology = () => {
-          const continuous = rows.every((row) => row.sort((a, b) => a.left - b.left).every((cell, index) => index === 0 || Math.abs(cell.left - row[index - 1]!.right) <= 0.5));
-          const columns = new Map<number, DOMRect[]>();
-          for (const cell of cells) {
-            const key = Math.round(cell.left * 2) / 2;
-            columns.set(key, [...(columns.get(key) ?? []), cell]);
-          }
-          return continuous && [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom) <= 0.5));
-        };
-        const hasCellOwnedSeparators = () => cellElements.every((cell) => {
-          const shadow = getComputedStyle(cell).boxShadow;
-          return shadow.includes("inset") && /-1px 0px/.test(shadow) && /0px -1px/.test(shadow);
-        });
-        const hasUnusedTrackPaint = () => {
-          if (!strip) return true;
-          const stripStyle = getComputedStyle(strip);
-          const finalRow = rows.at(-1) ?? [];
-          const lastFilledCell = finalRow.at(-1);
-          const emptyTrackPoint = lastFilledCell && lastFilledCell.right < strip.getBoundingClientRect().right - 1 ? { x: lastFilledCell.right + 1, y: lastFilledCell.top + lastFilledCell.height / 2 } : null;
-          const noCellInUnusedTrack = !emptyTrackPoint || !document.elementFromPoint(emptyTrackPoint.x, emptyTrackPoint.y)?.closest(".metric-block");
-          const transparent = (color: string) => color === "rgba(0, 0, 0, 0)" || color === "transparent";
-          const pseudoPaint = (["::before", "::after"] as const).some((pseudo) => {
-            const style = getComputedStyle(strip, pseudo);
-            return style.content !== "none" || style.backgroundImage !== "none" || !transparent(style.backgroundColor) || style.borderTopWidth !== "0px" || style.borderRightWidth !== "0px" || style.borderBottomWidth !== "0px" || style.borderLeftWidth !== "0px" || style.boxShadow !== "none";
-          });
-          return stripStyle.boxShadow === "none" && stripStyle.borderRightWidth === "0px" && stripStyle.borderBottomWidth === "0px" && !pseudoPaint && noCellInUnusedTrack && (!lastFilledCell || lastFilledCell.right <= strip.getBoundingClientRect().right + 0.5);
-        };
-        const gridEdges = () => hasContinuousTopology() && hasCellOwnedSeparators() && hasUnusedTrackPaint();
-        const baseline = gridEdges();
-        if (baseline && viewport === "390px") {
-          const originalShadow = cellElements[0]?.style.boxShadow ?? "";
-          const originalStripShadow = strip?.style.boxShadow ?? "";
-          const mutationStyle = document.createElement("style");
-          try {
-            if (cellElements[0]) {
-              for (const [shadow, direction] of [["inset 0 -1px var(--fulcrum-border)", "right"], ["inset -1px 0 var(--fulcrum-border)", "bottom"]] as const) {
-                cellElements[0].style.boxShadow = shadow;
-                if (gridEdges()) throw new Error(`grid gate accepted a cell missing its ${direction} separator`);
-              }
-              cellElements[0].style.boxShadow = originalShadow;
-            }
-            if (strip) {
-              strip.style.boxShadow = "0 0 0 1px red";
-              if (gridEdges()) throw new Error("grid gate accepted strip shadow paint");
-              strip.style.boxShadow = originalStripShadow;
-              mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }";
-              document.head.append(mutationStyle);
-              if (gridEdges()) throw new Error("grid gate accepted strip pseudo paint");
-            }
-          } finally {
-            if (cellElements[0]) cellElements[0].style.boxShadow = originalShadow;
-            if (strip) strip.style.boxShadow = originalStripShadow;
-            mutationStyle.remove();
-          }
-        }
-        return baseline;
-      })();
+      const gridEdgeResult = gridEdges;
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
       return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, tokenClipping, painted, gridEdges: gridEdgeResult, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
-    }), metricBoundaryMatrix);
+      });
+    }, metricBoundaryMatrix);
     const failures = entries.flatMap((entry) => {
       const marker = entry.expectedStatus ? entry.mark.includes(entry.expectedMark) : !entry.mark;
       const exact = entry.found && entry.text === entry.expectedText && entry.title === entry.value && entry.aria === entry.value;
