@@ -2658,7 +2658,7 @@ try {
   const replacementObserverSockets = observerSockets.filter((row) => row.role === "observer" && row.lifecycle === "open");
   if (restoredControllerSockets.length < 1 || replacementObserverSockets.length < 2) throw new Error(`takeover socket matrix incomplete: ${JSON.stringify(observerSockets)}`);
   const helloRoles = observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").sort((a, b) => a.socketId - b.socketId).map((row) => row.role);
-  if (helloRoles.length !== 4 || helloRoles.join(",") !== "observer,controller,observer,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles.join(",")}`);
+  if (helloRoles.length !== 5 || helloRoles.join(",") !== "controller,observer,controller,observer,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles.join(",")}`);
   const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   const restoredSettingsButton = observerPage.locator(".settings-button");
   await restoredSettingsButton.click();
