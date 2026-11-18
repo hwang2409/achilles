@@ -14,6 +14,7 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
+const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; status?: string }>;
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -220,10 +221,10 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const captureBlockState = async (state: string, target: Locator) => {
+  const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900) => {
     if (!screenshotDir) return;
     for (const width of [390, 1280, 1440, 1920]) {
-      await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+      await page.setViewportSize({ width, height: width === 390 ? mobileHeight : desktopHeight });
       if (width === 390) {
         const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
         await clickOptionalDetachedLocator(pageChatClose);
@@ -250,8 +251,10 @@ try {
           const hit = document.elementFromPoint(x, y);
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
+        await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
       }
-      await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
+      const captureName = state === "metric-boundary" ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png` : `state-${state}-${width}.png`;
+      await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
   };
@@ -971,10 +974,11 @@ try {
     documentScrollWidth: document.documentElement.scrollWidth,
     viewportWidth: innerWidth,
   }));
-  if (await textMetric.locator("strong").innerText() !== "waiting on legal review" || textMetricGeometry.blockScrollWidth > textMetricGeometry.blockClientWidth || textMetricGeometry.documentScrollWidth > textMetricGeometry.viewportWidth)
+  if (await textMetric.locator("strong").innerText() !== "waiting on an intentionally long legal and editorial review" || textMetricGeometry.blockScrollWidth > textMetricGeometry.blockClientWidth || textMetricGeometry.documentScrollWidth > textMetricGeometry.viewportWidth)
     throw new Error(`long nonnumeric metric overflowed at 390px: ${JSON.stringify(textMetricGeometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-nonnumeric-390x760.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-boundary-after-390x844.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-boundary-after-1440x900.png"), fullPage: true });
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const booksList = page.locator('.record-list[data-collection="books"]');
@@ -1064,6 +1068,40 @@ try {
   await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
 
   const desktopViewport = page.viewportSize();
+  const matrixStrip = page.locator(".metric-strip").first();
+  const matrixBlocks = matrixStrip.locator(".metric-block");
+  await matrixBlocks.evaluateAll((elements) => {
+    for (const element of elements) {
+      element.scrollIntoView({ block: "center", inline: "nearest" });
+      const box = element.getBoundingClientRect();
+      if (box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth) throw new Error("metric matrix box is outside the viewport");
+      const x = Math.max(box.left + 1, Math.min(box.right - 1, innerWidth / 2));
+      const y = Math.max(box.top + 1, Math.min(box.bottom - 1, innerHeight / 2));
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || (hit !== element && !element.contains(hit))) throw new Error("metric matrix box is obscured");
+    }
+  });
+  if (screenshotDir) await captureBlockState("metric-boundary", matrixStrip, 1800, 1400);
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.setViewportSize({ width: 390, height: 844 });
+  const boundaryValues = await page.locator(".metric-block").evaluateAll((elements, expected) => expected.map(({ label, value }) => {
+    const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
+    const rendered = element?.querySelector(".metric-value") as HTMLElement | null;
+    const box = element?.getBoundingClientRect();
+    const valueBox = rendered?.getBoundingClientRect();
+    const style = element ? getComputedStyle(element) : null;
+    const numeric = Number(value.replaceAll(",", ""));
+    const expectedText = Number.isFinite(numeric) && value.length >= 9 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric) : value;
+    return { label, value, found: Boolean(element), text: rendered?.innerText, expectedText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), rightGap: box && valueBox ? box.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1 };
+  }), metricBoundaryMatrix);
+  if (boundaryValues.some(({ found, text, expectedText, title, aria, rightGap, padding }) => !found || text !== expectedText || !title || title !== aria || rightGap < padding))
+    throw new Error(`metric boundary matrix failed display/title/aria/right-padding checks: ${JSON.stringify(boundaryValues)}`);
+  const longText = page.locator('.metric-block').filter({ has: page.locator('.metric-label', { hasText: 'long text' }) }).locator('.metric-value');
+  const singleToken = page.locator('.metric-block').filter({ has: page.locator('.metric-label', { hasText: 'single long token' }) }).locator('.metric-value');
+  const textStyles = await longText.evaluate((element) => { const style = getComputedStyle(element); return { fontSize: style.fontSize, whiteSpace: style.whiteSpace, overflowWrap: style.overflowWrap }; });
+  const singleStyles = await singleToken.evaluate((element) => { const style = getComputedStyle(element); return { textOverflow: style.textOverflow, whiteSpace: style.whiteSpace, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }; });
+  if (textStyles.fontSize !== '16px' || textStyles.whiteSpace !== 'normal' || textStyles.overflowWrap !== 'normal' || singleStyles.textOverflow !== 'ellipsis' || singleStyles.whiteSpace !== 'nowrap' || singleStyles.scrollWidth <= singleStyles.clientWidth)
+    throw new Error(`metric text boundary failed body/wrap/ellipsis checks: ${JSON.stringify({ textStyles, singleStyles })}`);
   await page.setViewportSize({ width: 390, height: 760 });
   const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
     elements.map((element) => {
@@ -1077,7 +1115,7 @@ try {
     }),
   );
   if (
-    metricBoxes.length !== 3 ||
+    metricBoxes.length < 3 ||
     metricBoxes[0].top !== metricBoxes[1].top ||
     metricBoxes[2].top <= metricBoxes[0].top ||
     metricBoxes.some(

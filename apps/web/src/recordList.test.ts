@@ -245,7 +245,7 @@ test("ten-character metric values compact before they can overflow a mobile cell
   const metrics = [
     ["unmarked eight digits", "99999999", "99999999"],
     ["marked eight digits", "99999999", "99999999", "done"],
-    ["unmarked nine digits", "999999999", "999999999"],
+    ["unmarked nine digits", "999999999", "1B"],
     ["marked nine digits", "999999999", "1B", "done"],
     ["unmarked ten digits", "9999999999", "10B"],
     ["marked ten digits", "9999999999", "10B", "done"],
@@ -260,11 +260,24 @@ test("ten-character metric values compact before they can overflow a mobile cell
     const value = block.querySelector(".metric-value")!;
     expect(value.textContent, label).toBe(displayValue);
     expect(value.getAttribute("title"), label).toBe(fullValue);
-    if (displayValue !== fullValue) {
-      expect(value.querySelector('[aria-hidden="true"]')?.textContent, label).toBe(displayValue);
-      expect(block.querySelector(".metric-value-accessible")?.textContent, label).toBe(fullValue);
-    }
+    expect(value.getAttribute("aria-label"), label).toBe(fullValue);
+    if (displayValue !== fullValue) expect(value.querySelector('[aria-hidden="true"]')?.textContent, label).toBe(displayValue);
   }
+});
+
+test("metric values keep words intact and expose long values once", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: [
+    { type: "metric", label: "description", value: "intentionally editorial text" },
+    { type: "metric", label: "single token", value: "supercalifragilisticexpialidocious" },
+  ] } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-text-boundary", credential: "secret", refreshKey: "0" }));
+  const values = [...result.container.querySelectorAll(".metric-value")];
+  expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
+  expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
+  expect(values[1]?.classList.contains("metric-value-text-single")).toBe(true);
+  expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
+  expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
+  expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");
 });
 
 test("page metrics render a live static layout value", () => {
