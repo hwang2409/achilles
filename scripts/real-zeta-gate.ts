@@ -1079,6 +1079,43 @@ try {
   const desktopViewport = page.viewportSize();
   const matrixStrip = page.locator(".metric-strip").first();
   const matrixBlocks = matrixStrip.locator(".metric-block");
+  const assertMetricGeometry = async (viewport: string) => {
+    const failures = await matrixBlocks.evaluateAll((elements) => {
+      const values = elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        const value = element.querySelector<HTMLElement>(".metric-value");
+        const valueBox = value?.getBoundingClientRect();
+        const painted = valueBox && value && { top: valueBox.top, right: valueBox.right, bottom: valueBox.top + (getComputedStyle(value).overflow === "visible" ? Math.max(value.clientHeight, value.scrollHeight) : value.clientHeight), left: valueBox.left };
+        const contained = Boolean(valueBox && value && valueBox.top >= box.top && valueBox.right <= box.right && valueBox.bottom <= box.bottom && valueBox.left >= box.left);
+        return {
+          label: element.querySelector(".metric-label")?.textContent ?? "<missing>",
+          box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left },
+          value: value ? { clientHeight: value.clientHeight, scrollHeight: value.scrollHeight, contained, painted } : null,
+        };
+      });
+      const failures: string[] = [];
+      for (const entry of values) {
+        const painted = entry.value?.painted;
+        if (!entry.value || !painted) {
+          failures.push(`${entry.label}: missing metric value`);
+        } else {
+          if (entry.value.scrollHeight > entry.value.clientHeight && !entry.value.contained)
+            failures.push(`${entry.label}: value escaped metric box=${JSON.stringify(entry.value)}`);
+        }
+      }
+      for (let index = 0; index < values.length; index += 1) {
+        const left = values[index].value?.painted;
+        if (!left) continue;
+        for (let next = index + 1; next < values.length; next += 1) {
+          const right = values[next].value?.painted;
+          if (right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top)
+            failures.push(`${values[index].label} overlaps ${values[next].label}: ${JSON.stringify({ left, right })}`);
+        }
+      }
+      return failures;
+    });
+    if (failures.length) throw new Error(`metric boundary geometry failed at ${viewport}: ${JSON.stringify(failures)}`);
+  };
   await matrixBlocks.evaluateAll((elements) => {
     for (const element of elements) {
       element.scrollIntoView({ block: "center", inline: "nearest" });
@@ -1090,9 +1127,11 @@ try {
       if (!hit || (hit !== element && !element.contains(hit))) throw new Error("metric matrix box is obscured");
     }
   });
+  await assertMetricGeometry(`${desktopViewport?.width ?? "unknown"}px`);
   if (screenshotDir) await captureBlockState("metric-boundary", matrixStrip, 1800, 1400);
   await page.evaluate(() => scrollTo(0, 0));
   await page.setViewportSize({ width: 390, height: 844 });
+  await assertMetricGeometry("390px");
   const boundaryValues = await page.locator(".metric-block").evaluateAll((elements, expected) => expected.map(({ label, value, expectedText }) => {
     const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
     const rendered = element?.querySelector(".metric-value") as HTMLElement | null;
