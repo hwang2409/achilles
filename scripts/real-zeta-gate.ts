@@ -954,6 +954,18 @@ try {
   });
   if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "10,000T" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || await longMetricValue.getAttribute("aria-label") !== "legacy total with an unusually long descriptive label: 9,999,999,999,999,999" || longMetricGeometry.valueHeight > 34 || longMetricGeometry.blockScrollWidth > longMetricGeometry.blockClientWidth)
     throw new Error(`long metric did not retain its full value accessibly or fit on one line: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())} geometry=${JSON.stringify(longMetricGeometry)}`);
+  await page.setViewportSize({ width: 390, height: 760 });
+  const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
+  const textMetricGeometry = await textMetric.evaluate((element) => ({
+    blockScrollWidth: element.scrollWidth,
+    blockClientWidth: element.clientWidth,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: innerWidth,
+  }));
+  if (await textMetric.locator("strong").innerText() !== "waiting on legal review" || textMetricGeometry.blockScrollWidth > textMetricGeometry.blockClientWidth || textMetricGeometry.documentScrollWidth > textMetricGeometry.viewportWidth)
+    throw new Error(`long nonnumeric metric overflowed at 390px: ${JSON.stringify(textMetricGeometry)}`);
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-nonnumeric-390x760.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const booksList = page.locator('.record-list[data-collection="books"]');

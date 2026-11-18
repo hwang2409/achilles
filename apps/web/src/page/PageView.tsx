@@ -127,10 +127,11 @@ function compactMetricValue(value: string): string {
 
 function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
   const fullValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
-  const displayValue = fullValue.length >= 10 ? compactMetricValue(fullValue) : fullValue;
+  const isNumeric = Number.isFinite(Number(fullValue.replaceAll(",", "")));
+  const displayValue = fullValue.length >= 10 && isNumeric ? compactMetricValue(fullValue) : fullValue;
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className="metric-value" title={fullValue} aria-label={`${label}: ${fullValue}`}>{displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${isNumeric ? "" : " metric-value-text"}`} title={fullValue} aria-label={`${label}: ${fullValue}`}>{displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
