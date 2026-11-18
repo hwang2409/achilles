@@ -113,3 +113,39 @@ describe("createConnection controller capacity vs version mismatch", () => {
     connection.stop();
   });
 });
+
+describe("connection role and terminal matrix", () => {
+  const terminalCases = [
+    { name: "discovery failure", discover: async () => null, connect: undefined, phase: "not_running", roles: [] },
+    { name: "known origin rejection", discovery: { ...discovery, origins: ["https://other.example"] }, connect: undefined, phase: "auth_failed", roles: [] },
+    { name: "rejected controller only", discovery, connect: async (_d: ZetaDiscovery, role: "controller" | "observer") => { expect(role).toBe("controller"); throw new ZetaError("connect_failed"); }, phase: "auth_failed", roles: ["controller"] },
+    { name: "controller success", discovery, connect: async (_d: ZetaDiscovery, role: "controller" | "observer") => { expect(role).toBe("controller"); return { onClose() {}, close() {} } as never; }, phase: "connected", roles: ["controller"] },
+    { name: "controller busy then observer success", discovery, connect: async (_d: ZetaDiscovery, role: "controller" | "observer") => role === "controller" ? Promise.reject(new ZetaError("busy", -32001)) : ({ onClose() {}, close() {} } as never), phase: "connected", roles: ["controller", "observer"] },
+  ] as const;
+
+  for (const row of terminalCases) test(row.name, async () => {
+    const roles: string[] = [];
+    const connection = createConnection({
+      origin: "http://localhost",
+      discover: row.discovery ? async () => row.discovery : row.discover,
+      connect: row.connect ? async (discovery, role) => { roles.push(role); return row.connect(discovery, role); } : undefined,
+    });
+    await flush();
+    expect(connection.state.phase).toBe(row.phase);
+    expect(roles).toEqual(row.roles);
+    connection.stop();
+  });
+
+  test("observer limit is terminal for the attempt and does not settle a later role", async () => {
+    const roles: string[] = [];
+    const connection = createConnection({
+      origin: "http://localhost",
+      discover: async () => discovery,
+      connect: async (_d, role) => { roles.push(role); throw new ZetaError("busy", -32001); },
+    });
+    await flush();
+    expect(connection.state.phase).toBe("observer_limit");
+    expect(roles).toEqual(["controller", "observer"]);
+    connection.stop();
+  });
+});

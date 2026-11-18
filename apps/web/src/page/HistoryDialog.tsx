@@ -12,7 +12,7 @@ const when = (stamp: string) => new Date(stamp).toLocaleString(undefined, { mont
 
 // the page's layout and tool versions; restore goes through the same guarded store paths as the agent's restore_version
 // onChanged refreshes the page behind the dialog: after a restore, and after a 409 or 403 that means the page changed elsewhere
-export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged, canMutate = true, disabledReason }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canMutate?: boolean; disabledReason?: string }) {
+export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged, canWrite = true, disabledReason }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
@@ -50,7 +50,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   }, [pageId, credential, loads]);
 
   const restore = async (label: string, url: string, version: number, expected: number) => {
-    if (!canMutate) return;
+    if (!canWrite) return;
     setPending(null);
     setBusy(true);
     try {
@@ -77,7 +77,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
   const button = (key: string, row: { active: boolean }, blocked = false) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" disabled={busy || blocked || !canMutate} title={!canMutate ? disabledReason : undefined} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
+    : <button type="button" disabled={busy || blocked || !canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
   // the row in its confirm state; only "confirm" sends the restore
   const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
     <span id={`${key}-ask`}>restore version {version}? the current {kind} stays in history</span>
@@ -96,7 +96,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="history-title">history</h2></div><div><span>restore adds a new version</span><button type="button" onClick={onClose}>{touchOnly ? "close" : "esc"}</button></div></div>
       <div className="settings-content">
         <p ref={noteRef} tabIndex={-1} className={note?.error ? "history-note history-error" : "history-note"} role={note?.error ? "alert" : "status"}>{note?.text ?? (versions ? "" : "loading history…")}</p>
-        {!canMutate && <p className="history-hint" role="note">{disabledReason ?? "this tab is read-only; take control to make changes"}</p>}
+        {!canWrite && <p className="history-hint" role="note">{disabledReason ?? "this tab is read-only; take control to make changes"}</p>}
         {versions && <>
           <section className="history-group" aria-labelledby="history-layout">
             <h3 id="history-layout">layout</h3>

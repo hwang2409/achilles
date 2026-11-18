@@ -42,7 +42,7 @@ function useHasWaitingChat(): boolean {
   return hasWaiting;
 }
 
-export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreateMode, credential, refreshKey, canMutate = true, disabledReason }: { page: Page; sessionId: string | null; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void>; toggleCreateMode: () => Promise<void>; credential: string; refreshKey: string; canMutate?: boolean; disabledReason?: string }) {
+export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreateMode, credential, refreshKey, canWrite = true, disabledReason }: { page: Page; sessionId: string | null; send: (text: string, intent: { steer: boolean }, track: (id: string) => void) => Promise<void>; continueWaiting: () => Promise<void>; toggleCreateMode: () => Promise<void>; credential: string; refreshKey: string; canWrite?: boolean; disabledReason?: string }) {
   const { tools, error } = usePageTools(page.id, credential, refreshKey);
   const hasWaitingChat = useHasWaitingChat();
   const send1 = async (text: string) => {
@@ -82,7 +82,7 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   const sendingRef = useRef(false);
   const [sending, setSending] = useState(false);
   const select = async (onSelect: () => void | Promise<void>) => {
-    if (!canMutate) return;
+    if (!canWrite) return;
     if (sendingRef.current) return;
     sendingRef.current = true; setSending(true);
     try { await onSelect(); } finally { sendingRef.current = false; setSending(false); }
@@ -90,6 +90,6 @@ export function EmptyChat({ page, sessionId, send, continueWaiting, toggleCreate
   return <div className="empty-chat">
     <h1 title={`new chat on ${page.title}`}>new chat on {page.title}</h1>
     <p>create mode is only for making or changing pages and tools; tools already assigned to this page work with it on or off.</p>
-    <div className="chat-starters">{starters.map((starter, index) => <button key={index} title={!canMutate ? disabledReason : undefined} aria-describedby={!canMutate ? "read-only-reason" : undefined} disabled={sending || !canMutate} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><b>{index + 1}</b><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
+    <div className="chat-starters">{starters.map((starter, index) => <button key={index} title={!canWrite ? disabledReason : undefined} aria-describedby={!canWrite ? "read-only-reason" : undefined} disabled={sending || !canWrite} onClick={(event) => { keyboardFocusToComposer(event); void select(starter.onSelect); }}><b>{index + 1}</b><span title={starter.detail ?? starter.text}>{starter.text}</span>{starter.tag ? <i>{starter.tag}</i> : null}</button>)}</div>
   </div>;
 }

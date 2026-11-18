@@ -35,7 +35,7 @@ function serve(tool: { version: number; input_schema: unknown }) {
   return calls;
 }
 
-const block = (refreshKey: string, canMutate = true) => createElement(FormBlock, { title: "add book", toolName: "add_book", pageId: "books", credential: "c", refreshKey, canMutate, disabledReason: "this tab is read-only; take control to make changes" });
+const block = (refreshKey: string, canWrite = true) => createElement(FormBlock, { title: "add book", toolName: "add_book", pageId: "books", credential: "c", refreshKey, canWrite, disabledReason: "this tab is read-only; take control to make changes" });
 const done = JSON.stringify("done");
 const statusButton = () => view().getByRole("button", { name: /status/ });
 const chooseStatus = async (value: string) => { const button = await view().findByRole("button", { name: /status/ }); fireEvent.click(button); fireEvent.click(view().getByRole("option", { name: value })); };

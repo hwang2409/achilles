@@ -40,7 +40,7 @@ export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
-export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert, canMutate = true, disabledReason }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void; canMutate?: boolean; disabledReason?: string }) {
+export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert, canWrite = true, disabledReason }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void; canWrite?: boolean; disabledReason?: string }) {
   const [reload, setReload] = useState(0);
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
@@ -67,9 +67,9 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const headingNote = tool?.operation === "update" ? row ? `runs ${toolName} on the selected row` : `select a ${tool.collection.replace(/s$/, "")} in the list to edit it` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
-    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} disabled={!canMutate} disabledReason={disabledReason} />
+    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} disabled={!canWrite} disabledReason={disabledReason} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row || !canMutate} disabledReason={disabledReason} formRef={formRef} />;
+    : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row || !canWrite} disabledReason={disabledReason} formRef={formRef} />;
   return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 

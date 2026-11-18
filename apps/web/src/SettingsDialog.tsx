@@ -73,10 +73,10 @@ function Row({ title, description, children }: { title: string; description: str
   return <section className="settings-row"><div className="settings-row-label"><h3>{title}</h3><p>{description}</p></div><div>{children}</div></section>;
 }
 
-export function SettingsDialog({ open, onClose, serverForcesAsk = false, canMutate = true, disabledReason }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canMutate?: boolean; disabledReason?: string }) {
+export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite = true, disabledReason }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite?: boolean; disabledReason?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
-  const change = <T extends Partial<Settings>>(next: T) => { if (canMutate) updateSettings(next); };
+  const change = <T extends Partial<Settings>>(next: T) => { if (canWrite) updateSettings(next); };
   useLayoutEffect(() => {
     const node = dialog.current;
     if (!node) return;
@@ -94,13 +94,13 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canMuta
     <div className="settings-panel">
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="settings-title">settings</h2></div><div><span>saved in this browser</span><button type="button" onClick={onClose}>esc</button></div></div>
       <div className="settings-content">
-        <Row title="theme" description="fulcrum palettes. auto follows the OS."><ThemeList value={settings.theme} disabled={!canMutate} onChange={(theme) => change({ theme })} /></Row>
+        <Row title="theme" description="fulcrum palettes. auto follows the OS."><ThemeList value={settings.theme} disabled={!canWrite} onChange={(theme) => change({ theme })} /></Row>
         <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} onChange={(uiFont) => change({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} onChange={(codeFont) => change({ codeFont })} /></div></Row>
         <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} onChange={(size) => change({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} onChange={(density) => change({ density })} /></div></Row>
         <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} onChange={(vim) => change({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
         <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} onChange={(autoApproveDefault) => change({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
       </div>
-      <footer><button type="button" className="settings-link" onClick={() => { if (canMutate) resetSettings(); }} disabled={!canMutate || JSON.stringify(settings) === JSON.stringify(defaultSettings)} title={!canMutate ? disabledReason : undefined}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+      <footer><button type="button" className="settings-link" onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(defaultSettings)} title={!canWrite ? disabledReason : undefined}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
     </div>
   </dialog>;
 }

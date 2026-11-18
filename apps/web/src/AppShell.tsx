@@ -27,7 +27,7 @@ type Props = {
   sessionId: string | null;
   waiting: number;
   serverForcesAsk?: boolean;
-  readOnly?: boolean;
+  canWrite?: boolean;
   hasComposer: boolean;
   children: ReactNode;
   onNewChat: () => Promise<void>;
@@ -105,7 +105,7 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 // short heights use the drawer too: a phone on its side cannot spare 288px for the sidebar. matches style.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, readOnly = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, canWrite = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -224,11 +224,11 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
       } else if (event.shiftKey && key === "o") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading && !readOnly) void onNewChat();
+        if (!loading && canWrite) void onNewChat();
       } else if (event.key === ".") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading && !readOnly) void onToggleCreateMode();
+        if (!loading && canWrite) void onToggleCreateMode();
       }
     };
     addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
@@ -251,10 +251,10 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
   }, [chats]);
   const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
   const commands: PaletteEntry[] = [
-    ...loading || readOnly ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
-    ...loading || !page || readOnly ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
+    ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
+    ...loading || !page || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
     { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
-    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => { if (!readOnly) updateSettings({ vim: !settings.vim }); } },
+    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => { if (canWrite) updateSettings({ vim: !settings.vim }); } },
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
   ];
   // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.
@@ -331,7 +331,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong></div>
-      <button className="new-chat" disabled={readOnly} title={readOnly ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (!readOnly) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
+      <button className="new-chat" disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (canWrite) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className={`page-list ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`} data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
@@ -342,7 +342,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={readOnly ? undefined : onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={readOnly ? undefined : onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={!canWrite ? undefined : onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={!canWrite ? undefined : onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
       <footer><SettingsControl onOpen={openSettings} className="settings-button" /><button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
@@ -351,7 +351,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, re
       <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
       {children}
     </main>
-    <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canMutate={!readOnly} disabledReason="this tab is read-only; take control to make changes" />
+    <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} disabledReason="this tab is read-only; take control to make changes" />
     {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
   </div>;

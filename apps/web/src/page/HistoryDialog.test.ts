@@ -26,7 +26,7 @@ test("read-only history loads but disables restore without a POST", async () => 
   }) as typeof fetch;
   mounted = render(createElement(HistoryDialog, {
     pageId: "p1", credential: "c", createMode: true, opener, onClose: () => {}, onChanged: () => {},
-    canMutate: false, disabledReason: "this tab is read-only; take control to make changes",
+    canWrite: false, disabledReason: "this tab is read-only; take control to make changes",
   }));
   await waitFor(() => expect(mounted?.getByText("this tab is read-only; take control to make changes")).toBeTruthy());
   expect((mounted?.getByRole("button", { name: "restore" }) as HTMLButtonElement).disabled).toBe(true);
