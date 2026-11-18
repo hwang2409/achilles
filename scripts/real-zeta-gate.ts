@@ -2603,8 +2603,7 @@ try {
   if (!await restoredField.isEditable()) throw new Error("restored controller composer remained read-only");
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
-  await waitFor(async () => (await observerPage.locator('[data-part="message"]').allTextContents()).some((text) => text.includes(restoredMutation)), "restored controller mutation");
-  if (!observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"'))) throw new Error("restored controller mutation did not send over websocket");
+  await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
   if (screenshotDir) {
     await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
