@@ -2505,9 +2505,9 @@ try {
   if (screenshotDir) {
     await observerPage.setViewportSize({ width: 390, height: 760 });
     const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
-    await clickOptionalDetachedLocator(drawerClose);
+    if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
     const pageChatClose = observerPage.locator('.page-chat-surface button[aria-label="close page chat"]');
-    await clickOptionalDetachedLocator(pageChatClose);
+    if (await pageChatClose.isVisible().catch(() => false)) await pageChatClose.click({ force: true });
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const marker = observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').first();
     await gateWait.playwright(marker, "waitFor", { state: "visible" });
