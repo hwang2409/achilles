@@ -2587,7 +2587,7 @@ try {
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
     await observerPage.setViewportSize({ width: 1440, height: 900 });
     await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer desktop page chat expanded");
-    await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await gateWait.playwright(evidence, "waitFor", { state: "visible" });
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
