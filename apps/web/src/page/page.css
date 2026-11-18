@@ -6,7 +6,7 @@
 .page-layout-version { flex: 0 0 auto; align-self: flex-end; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; white-space: nowrap; }
 .page-blocks { display: grid; gap: 32px; }
 .page-text { margin: 0; color: var(--fulcrum-muted); font-size: 14px; line-height: 22px; }
-.metric-strip { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border-top: 1px solid var(--fulcrum-border); border-left: 1px solid var(--fulcrum-border); }
+.metric-strip { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 0; border-top: 1px solid var(--fulcrum-border); border-left: 1px solid var(--fulcrum-border); background: transparent; }
 .metric-block { min-width: 0; display: flex; align-items: flex-start; gap: 10px; min-height: 86px; padding: 14px 16px; background: var(--fulcrum-surface); box-shadow: inset -1px 0 var(--fulcrum-border), inset 0 -1px var(--fulcrum-border); }
 .metric-block > div { min-width: 0; padding-inline-end: 6px; display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }

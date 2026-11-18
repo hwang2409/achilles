@@ -1119,8 +1119,14 @@ try {
         }
         const vertical = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom) <= 0.5));
         const ownedSeparators = cellElements.every((cell) => getComputedStyle(cell).boxShadow.includes("inset"));
-        const noPhantomTrackPaint = strip ? [getComputedStyle(strip).backgroundColor, ...cellElements.map((cell) => getComputedStyle(cell).backgroundColor)].every((color, index) => index === 0 ? color === "rgba(0, 0, 0, 0)" || color === "transparent" : Boolean(color)) : false;
-        return continuous && vertical && ownedSeparators && noPhantomTrackPaint;
+        const stripStyle = strip && getComputedStyle(strip);
+        const finalRow = rows.at(-1) ?? [];
+        const lastFilledCell = finalRow.at(-1);
+        const emptyTrackPoint = strip && lastFilledCell && lastFilledCell.right < strip.getBoundingClientRect().right - 1 ? { x: lastFilledCell.right + 1, y: lastFilledCell.top + lastFilledCell.height / 2 } : null;
+        const noCellInUnusedTrack = !emptyTrackPoint || !document.elementFromPoint(emptyTrackPoint.x, emptyTrackPoint.y)?.closest(".metric-block");
+        const noPhantomTrackPaint = stripStyle ? stripStyle.backgroundColor === "rgba(0, 0, 0, 0)" || stripStyle.backgroundColor === "transparent" : false;
+        const noPhantomBorderOwner = stripStyle ? stripStyle.borderRightWidth === "0px" && stripStyle.borderBottomWidth === "0px" && noCellInUnusedTrack && (!lastFilledCell || lastFilledCell.right <= (strip?.getBoundingClientRect().right ?? 0) + 0.5) : false;
+        return continuous && vertical && ownedSeparators && noPhantomTrackPaint && noPhantomBorderOwner;
       })();
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
