@@ -37,8 +37,6 @@ export const WRITE_SURFACE = {
   passiveFirstMessage: "passive.first-message",
   passiveTitle: "passive.title",
   passiveAttachment: "passive.attachment",
-  passiveRebind: "passive.rebind",
-  passiveResume: "passive.resume",
   passiveRepair: "passive.repair",
 } as const;
 
@@ -51,7 +49,7 @@ export const WRITE_SURFACES: readonly WriteSurfaceMetadata[] = [
   ["approvalApprove", "websocket", "visible"], ["approvalDeny", "websocket", "visible"], ["composerSend", "websocket", "visible"], ["composerSteer", "websocket", "visible"], ["composerAbort", "websocket", "visible"], ["deliveryRetry", "websocket", "visible"],
   ["headerCreate", "http", "visible"], ["headerRename", "http", "visible"], ["sidebarRename", "http", "visible"], ["shellNewChat", "http", "visible"], ["keyboardCommands", "http", "command"], ["paletteCommands", "http", "command"], ["pageChat", "websocket", "visible"], ["historyRestore", "http", "visible"], ["recordInsert", "http", "visible"], ["recordUpdate", "http", "visible"], ["recordAdd", "http", "visible"],
   ["settingsTheme", "storage", "visible"], ["settingsUiFont", "storage", "visible"], ["settingsCodeFont", "storage", "visible"], ["settingsSize", "storage", "visible"], ["settingsDensity", "storage", "visible"], ["settingsVim", "storage", "visible"], ["settingsAutoApprove", "storage", "visible"], ["settingsReset", "storage", "visible"],
-  ["passiveLastState", "persistence", "passive"], ["passiveFirstMessage", "persistence", "passive"], ["passiveTitle", "persistence", "passive"], ["passiveAttachment", "persistence", "passive"], ["passiveRebind", "persistence", "passive"], ["passiveResume", "persistence", "passive"], ["passiveRepair", "persistence", "passive"],
+  ["passiveLastState", "persistence", "passive"], ["passiveFirstMessage", "persistence", "passive"], ["passiveTitle", "persistence", "passive"], ["passiveAttachment", "persistence", "passive"], ["passiveRepair", "persistence", "passive"],
 ].map(([key, channel, visibility]) => ({ id: WRITE_SURFACE[key as keyof typeof WRITE_SURFACE], channel: channel as WriteSurfaceMetadata["channel"], visibility: visibility as WriteSurfaceMetadata["visibility"] }));
 
 export const writeSurfaceIds: readonly WriteSurfaceId[] = WRITE_SURFACES.map(({ id }) => id);

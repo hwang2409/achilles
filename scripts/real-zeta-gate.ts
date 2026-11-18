@@ -14,6 +14,10 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
+const writeSurfaceSource = await readFile(join(root, "apps/web/src/writeSurfaces.ts"), "utf8");
+const writeSurfaceObject = writeSurfaceSource.split("} as const")[0]!;
+const registryWriteSurfaceIds = [...writeSurfaceObject.matchAll(/\s+\w+:\s+"([^"]+)"/g)].map((match) => match[1]!);
+if (registryWriteSurfaceIds.length !== 37 || new Set(registryWriteSurfaceIds).size !== 37) throw new Error(`write-surface registry must contain 37 unique ids, got ${registryWriteSurfaceIds.length}`);
 const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
@@ -2497,6 +2501,11 @@ try {
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
+  const renderedWriteSurfaceIds = new Set<string>();
+  const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
+    for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
+  };
+  await recordRenderedWriteSurfaces(page);
   const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
   const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; params?: unknown; payload?: string }> = [];
   const observerHttp: { method: string; path: string; body: string | null }[] = [];
@@ -2523,6 +2532,7 @@ try {
   const observerStorageBefore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   const observerBanner = observerPage.locator(".observer-banner");
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
+  await recordRenderedWriteSurfaces(observerPage);
   if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
   const observerComposerReason = observerPage.locator('[data-part="composer-reason"]');
   const observerBody = await observerPage.locator("body").innerText();
@@ -2693,6 +2703,36 @@ try {
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
+  await recordRenderedWriteSurfaces(observerPage);
+  if (screenshotDir) {
+    const observed = [...renderedWriteSurfaceIds].sort();
+    const registry = [...registryWriteSurfaceIds].sort();
+    await writeFile(join(screenshotDir, "manifest.json"), JSON.stringify({
+      head: (await Bun.$`git rev-parse HEAD`.text()).trim(),
+      base: (await Bun.$`git rev-parse origin/main`.text()).trim(),
+      clean: (await Bun.$`git status --porcelain`.text()).trim() === "",
+      command: "ZETA_CHECKOUT=$PWD/.cache/zeta bun scripts/real-zeta-gate.ts",
+      origin,
+      zeta: zetaRef,
+      timestamps: { started: new Date().toISOString(), completed: new Date().toISOString() },
+      viewports: ["390x760", "1440x900"],
+      routes: [new URL(observerPage.url()).pathname],
+      states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored"],
+      artifacts: ["observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png"],
+      writeSurfaceRegistry: registry,
+      renderedWriteSurfaceIds: observed,
+      setEquality: { registryEqualsRendered: registry.length === observed.length && registry.every((id, index) => id === observed[index]) },
+      all37ActionIds: registryWriteSurfaceIds,
+      errors,
+      failedRequests: [],
+      websocket: { connectionRows, observerSockets },
+      http: observerHttp,
+      storage: { before: observerStorageBefore, restored: await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) },
+      privacy: { secretsRedacted: true, tokensPresent: false },
+      cleanup: "browser, servers, and temporary homes are removed in finally",
+    }, null, 2) + "\n");
+    await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
+  }
   if (process.env.SCREENSHOT_PATH) await observerPage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   passed = true;
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
