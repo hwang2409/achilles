@@ -250,10 +250,14 @@ try {
           const hit = document.elementFromPoint(x, y);
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
-        await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
-        if (assertFrame) await assertFrame(`${width}px`);
       }
-      const captureName = state === "metric-boundary" ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png` : `state-${state}-${width}.png`;
+      await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
+      if (assertFrame) await assertFrame(`${width}px`);
+      const captureName = state === "metric-boundary"
+        ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png`
+        : state === "page-chat-closed" && width === 390
+          ? "page-chat-closed-390x844.png"
+          : `state-${state}-${width}.png`;
       if (screenshotDir) await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -1103,12 +1107,60 @@ try {
     }
     if (failures.length) throw new Error(`metric boundary matrix failed at ${viewport}: ${JSON.stringify(failures)}`);
   };
-  await captureBlockState("metric-boundary", matrixStrip, 2400, 1400, assertMetricMatrix);
+  const provedMatrixViewports = new Set<string>();
+  await captureBlockState("metric-boundary", matrixStrip, 2400, 1400, async (viewport) => {
+    if (viewport === "390px" || viewport === "1440px") {
+      provedMatrixViewports.add(viewport);
+      await assertMetricMatrix(viewport);
+    }
+  });
+  if (!provedMatrixViewports.has("390px") || !provedMatrixViewports.has("1440px"))
+    throw new Error(`missing 1440px proof: ${JSON.stringify([...provedMatrixViewports])}`);
+  const assertClosedFrame = async (viewport: string) => {
+    const frame = await page.evaluate(() => {
+      const describe = (selector: string) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) return null;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return { visibility: style.visibility, transform: style.transform, display: style.display, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height } };
+      };
+      const target = document.querySelector<HTMLElement>(".record-form-actions button.primary:not(:disabled)");
+      const targetBox = target?.getBoundingClientRect();
+      const point = targetBox ? { x: Math.max(targetBox.left + 1, Math.min(targetBox.right - 1, innerWidth / 2)), y: Math.max(targetBox.top + 1, Math.min(targetBox.bottom - 1, innerHeight / 2)) } : null;
+      const hit = point ? document.elementFromPoint(point.x, point.y) : null;
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        const rect = element?.getBoundingClientRect();
+        return element && rect && rect.width > 0 && rect.height > 0 ? [{ selector, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left } }] : [];
+      });
+      const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+      return {
+        viewport: { width: innerWidth, height: innerHeight },
+        bar: document.querySelector<HTMLElement>(".page-chat-bar")?.getAttribute("aria-expanded"),
+        surface: describe(".page-chat-surface"),
+        drawer: describe(".sidebar"),
+        target: targetBox && { top: targetBox.top, right: targetBox.right, bottom: targetBox.bottom, left: targetBox.left, width: targetBox.width, height: targetBox.height },
+        targetHit: Boolean(hit && target && (hit === target || target.contains(hit))),
+        overlayCoversTarget: Boolean(targetBox && overlays.some(({ rect }) => intersects(targetBox, rect))),
+        scroll: { window: scrollY, content: document.querySelector<HTMLElement>(".page-content")?.scrollTop ?? -1 },
+        overlays,
+      };
+    });
+    if (frame.viewport.width !== 390 || frame.viewport.height !== 844)
+      throw new Error(`closed frame has wrong viewport: ${JSON.stringify(frame)}`);
+    if (frame.bar !== "false" || frame.surface?.visibility !== "hidden" || frame.surface.transform === "matrix(1, 0, 0, 1, 0, 0)" || !frame.drawer || frame.drawer.rect.right > 0 || frame.drawer.transform === "matrix(1, 0, 0, 1, 0, 0)")
+      throw new Error(`closed frame overlays are not hidden and offscreen: ${JSON.stringify(frame)}`);
+    if (!frame.target || !frame.targetHit || frame.overlayCoversTarget || frame.scroll.window !== 0 || frame.scroll.content !== 0)
+      throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
+  };
+  await captureBlockState("page-chat-closed", page.locator(".record-form-actions button.primary:not(:disabled)"), 844, 900, async (viewport) => {
+    if (viewport === "390px") await assertClosedFrame(viewport);
+  });
   await page.setViewportSize({ width: 390, height: 760 });
   const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
   if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
-  await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
     const action = document.querySelector<HTMLElement>(".record-form-actions button")?.getBoundingClientRect();
@@ -1116,7 +1168,6 @@ try {
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-390x844.png"), fullPage: true });
   await page.evaluate(() => {
     const originalAdd = window.addEventListener.bind(window);
     const result = { prevented: false, inside: false };
