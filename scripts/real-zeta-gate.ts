@@ -2548,11 +2548,12 @@ try {
       if (document.activeElement !== element) (element as HTMLElement).focus();
     });
     if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement))) throw new Error("observer page chat did not focus inside the open sheet");
-    const transcript = pageChatDialog.locator('[data-part="timeline-scroll"]');
-    const marker = pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
-    const jumpToLatest = pageChatDialog.locator('[data-part="jump-to-latest"]');
+    const surface = observerPage.locator(".page-chat-surface");
+    const transcript = surface.locator('[data-part="timeline-scroll"]');
+    const marker = surface.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
+    const jumpToLatest = surface.locator('[data-part="jump-to-latest"]');
     if (await jumpToLatest.isVisible().catch(() => false)) await jumpToLatest.click({ force: true });
-    const rows = pageChatDialog.locator('[data-part="message"]');
+    const rows = surface.locator('[data-part="message"]');
     await waitFor(async () => {
       if (await marker.isVisible().catch(() => false)) return true;
       for (let index = 0, count = await rows.count(); index < count; index++) if (await rows.nth(index).isVisible().catch(() => false)) return true;
