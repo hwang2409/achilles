@@ -2508,6 +2508,14 @@ try {
     if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
     const pageChatClose = observerPage.locator('.page-chat-surface button[aria-label="close page chat"]');
     if (await pageChatClose.isVisible().catch(() => false)) await pageChatClose.click({ force: true });
+    await waitFor(async () => await observerPage.locator(".sidebar").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+    }), "observer drawer settled");
+    await waitFor(async () => await observerPage.locator(".page-chat-surface").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return style.visibility === "hidden" && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+    }), "observer page-chat settled");
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const marker = observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').first();
     await gateWait.playwright(marker, "waitFor", { state: "visible" });
