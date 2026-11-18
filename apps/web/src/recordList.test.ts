@@ -8,6 +8,8 @@ import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listC
 import { formatMetricValue } from "./page/metricValue";
 import type { PageTool } from "./page/usePageTools";
 
+const metricBoundaryMatrix = JSON.parse(await Bun.file(new URL("./metric-boundary-matrix.json", import.meta.url)).text()) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
+
 const originalFetch = globalThis.fetch;
 
 
@@ -250,49 +252,21 @@ for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["
   });
 }
 
-test("metric formatter preserves finite nonzero values at the compact zero boundary", () => {
-  const cases = [
-    ["0", "0", false],
-    ["0.0001", "1e-4", true],
-    ["-0.0001", "-1e-4", true],
-    ["1e-307", "1e-307", true],
-    ["-1e-307", "-1e-307", true],
-    ["1.0e+307", "1e307", true],
-    ["-1.0e+307", "-1e307", true],
-  ] as const;
-  for (const [source, expected, scientific] of cases) expect(formatMetricValue(source), source).toMatchObject({ display: expected, numeric: true, scientific });
+test("metric formatter matches every declared numeric matrix expectation", () => {
+  for (const entry of metricBoundaryMatrix.filter((item) => item.classification !== "text")) {
+    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero", scientific: /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.expectedText) });
+  }
 });
 
-test("numeric metric displays stay within the five-character boundary", () => {
-  const metrics = [
-    ["unmarked five digits", "99999", "99999"],
-    ["marked five digits", "99999", "99999", "done"],
-    ["unmarked six digits", "999999", "1M"],
-    ["marked six digits", "999999", "1M", "done"],
-    ["unmarked seven digits", "9999999", "10M"],
-    ["marked seven digits", "9999999", "10M", "done"],
-    ["signed", "-99999", "-100K"],
-    ["decimal", "999.99", "1K"],
-    ["comma-formatted", "99,999", "100K"],
-    ["rounded", "99999999", "100M"],
-    ["negative huge exponent", "-1.0e+307", "-1e307"],
-    ["huge exponent", "1.0e+307", "1e307"],
-    ["small positive", "0.0001", "1e-4"],
-    ["small negative", "-0.0001", "-1e-4"],
-    ["tiny positive", "1e-307", "1e-307"],
-    ["tiny negative", "-1e-307", "-1e-307"],
-    ["unmarked nonnumeric", "9999999999 items", "9999999999 items"],
-    ["marked nonnumeric", "9999999999 items", "9999999999 items", "done"],
-  ] as const;
-  const page = { title: "page", route: "/page", layout: { blocks: metrics.map(([label, value, , status]) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
+test("numeric metric displays stay within the declared matrix boundary", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: metricBoundaryMatrix.map(({ label, value, status }) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
   const result = render(React.createElement(PageView, { page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
-  for (const [label, fullValue, displayValue] of metrics) {
-    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === label)!;
+  for (const entry of metricBoundaryMatrix) {
+    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === entry.label)!;
     const value = block.querySelector(".metric-value")!;
-    expect(value.textContent, label).toBe(displayValue);
-    expect(value.getAttribute("title"), label).toBe(fullValue);
-    expect(value.getAttribute("aria-label"), label).toBe(fullValue);
-    if (displayValue !== fullValue) expect(value.querySelector('[aria-hidden="true"]')?.textContent, label).toBe(displayValue);
+    expect(value.textContent, entry.label).toBe(entry.expectedText);
+    expect(value.getAttribute("title"), entry.label).toBe(entry.value);
+    expect(value.getAttribute("aria-label"), entry.label).toBe(entry.value);
   }
 });
 

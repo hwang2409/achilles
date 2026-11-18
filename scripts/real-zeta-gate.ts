@@ -14,7 +14,7 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
-const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; status?: string }>;
+const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -252,6 +252,10 @@ try {
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
         await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
+        if (state === "metric-boundary") {
+          const missing = await page.locator(".metric-block").evaluateAll((blocks) => blocks.flatMap((block) => { const box = block.getBoundingClientRect(); return box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth ? [block.querySelector(".metric-label")?.textContent ?? "<missing>"] : []; }));
+          if (missing.length) throw new Error(`metric capture at 390px did not show every unobscured matrix box: ${JSON.stringify(missing)}`);
+        }
       }
       const captureName = state === "metric-boundary" ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png` : `state-${state}-${width}.png`;
       await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
@@ -1046,107 +1050,76 @@ try {
   await page.getByRole("button", { name: "create mode on", exact: true }).click();
   await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
 
+  await page.setViewportSize({ width: 1440, height: 1400 });
   const desktopViewport = page.viewportSize();
   const matrixStrip = page.locator(".metric-strip").first();
   const matrixBlocks = matrixStrip.locator(".metric-block");
-  const assertMetricGeometry = async (viewport: string) => {
-    const failures = await matrixBlocks.evaluateAll((elements) => {
-      const values = elements.map((element) => {
-        const box = element.getBoundingClientRect();
-        const value = element.querySelector<HTMLElement>(".metric-value");
-        const valueBox = value?.getBoundingClientRect();
-        const painted = valueBox && value && { top: valueBox.top, right: valueBox.right, bottom: valueBox.top + (getComputedStyle(value).overflow === "visible" ? Math.max(value.clientHeight, value.scrollHeight) : value.clientHeight), left: valueBox.left };
-        const contained = Boolean(valueBox && value && valueBox.top >= box.top && valueBox.right <= box.right && valueBox.bottom <= box.bottom && valueBox.left >= box.left);
-        return {
-          label: element.querySelector(".metric-label")?.textContent ?? "<missing>",
-          box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left },
-          value: value ? { clientHeight: value.clientHeight, scrollHeight: value.scrollHeight, contained, painted } : null,
-        };
-      });
-      const failures: string[] = [];
-      for (const entry of values) {
-        const painted = entry.value?.painted;
-        if (!entry.value || !painted) {
-          failures.push(`${entry.label}: missing metric value`);
-        } else {
-          if (!entry.value.contained)
-            failures.push(`${entry.label}: value escaped metric box=${JSON.stringify(entry.value)}`);
-        }
-      }
-      for (let index = 0; index < values.length; index += 1) {
-        const left = values[index].value?.painted;
-        if (!left) continue;
-        for (let next = index + 1; next < values.length; next += 1) {
-          const right = values[next].value?.painted;
-          if (right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top)
-            failures.push(`${values[index].label} overlaps ${values[next].label}: ${JSON.stringify({ left, right })}`);
-        }
-      }
-      return failures;
+  const assertMetricMatrix = async (viewport: string, ax: boolean) => {
+    const entries = await matrixBlocks.evaluateAll((elements, expected) => expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
+      const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
+      const block = element as HTMLElement | undefined;
+      const rendered = element?.querySelector<HTMLElement>(".metric-value");
+      const blockBox = block?.getBoundingClientRect();
+      const valueBox = rendered?.getBoundingClientRect();
+      const style = block ? getComputedStyle(block) : null;
+      const renderedStyle = rendered ? getComputedStyle(rendered) : null;
+      const numeric = Number(value.replaceAll(",", ""));
+      const isNumeric = Number.isFinite(numeric);
+      const painted = valueBox && rendered ? { top: valueBox.top, right: valueBox.right, bottom: valueBox.bottom, left: valueBox.left } : null;
+      const contained = Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left);
+      const labelBox = element?.querySelector<HTMLElement>(".metric-label")?.getBoundingClientRect();
+      const point = labelBox ? { x: labelBox.left + labelBox.width / 2, y: labelBox.top + labelBox.height / 2 } : null;
+      const hit = point ? document.elementFromPoint(point.x, point.y) : null;
+      const expectedMark = expectedStatus ? `record-mark-${expectedStatus.toLowerCase().replace(/\s+/g, "-")}` : "";
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, isNumeric, textOverflow: renderedStyle?.textOverflow ?? "", overflow: renderedStyle?.overflow ?? "", whiteSpace: renderedStyle?.whiteSpace ?? "", scrollWidth: rendered?.scrollWidth ?? -1, clientWidth: rendered?.clientWidth ?? -1, fontSize: renderedStyle?.fontSize ?? "", title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1, contained, painted, hit: Boolean(hit && element && (hit === element || element.contains(hit))), hitClass: hit?.className ?? "none" };
+    }), metricBoundaryMatrix);
+    const failures = entries.flatMap((entry) => {
+      const found = entry.found && entry.text === entry.expectedText;
+      const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.text ?? "");
+      const numericFit = !entry.isNumeric || (entry.scrollWidth <= entry.clientWidth && entry.textOverflow !== "ellipsis" && entry.overflow !== "hidden" && entry.whiteSpace === "nowrap" && (entry.text?.length ?? -1) <= (scientific ? 7 : 5) && (!scientific || entry.fontSize === "20px"));
+      const parsed = Number(entry.value.replaceAll(",", ""));
+      const actualClass = entry.value.trim().toLowerCase() === "nan" ? "nan" : parsed === Infinity ? "infinity" : parsed === -Infinity ? "-infinity" : Number.isFinite(parsed) && parsed === 0 && entry.value.trim().startsWith("-") ? "signed-zero" : Number.isFinite(parsed) && parsed === 0 ? "zero" : Number.isFinite(parsed) ? "finite" : "text";
+      const expectedMark = entry.expectedStatus ? entry.expectedMark : "";
+      const marker = entry.expectedStatus ? entry.mark.includes(expectedMark) : !entry.mark;
+      const accessibility = Boolean(entry.title && entry.title === entry.aria);
+      const geometry = entry.contained && entry.rightGap >= entry.padding;
+      return found && numericFit && actualClass === entry.classification && marker && accessibility && geometry ? [] : [`${entry.label}: ${JSON.stringify({ found, numericFit, actualClass, expectedClass: entry.classification, marker, accessibility, geometry, hit: entry.hit, hitClass: entry.hitClass, contained: entry.contained, painted: entry.painted })}`];
     });
-    if (failures.length) throw new Error(`metric boundary geometry failed at ${viewport}: ${JSON.stringify(failures)}`);
-  };
-  const assertMatrixVisibility = async (viewport: string) => {
     for (const block of await matrixBlocks.all()) {
-      await block.scrollIntoViewIfNeeded();
-      const box = await block.boundingBox();
-      if (!box || box.y + box.height <= 0 || box.y >= (await page.evaluate(() => innerHeight)) || box.x + box.width <= 0 || box.x >= (await page.evaluate(() => innerWidth))) throw new Error(`matrix box is outside the ${viewport} viewport`);
-      const point = await block.locator(".metric-label").boundingBox() ?? box;
-      const hit = await block.evaluate((element, { x, y }) => {
-        const target = document.elementFromPoint(x, y);
-        return { visible: Boolean(target && (target === element || element.contains(target))), className: target?.className ?? "none" };
-      }, { x: point.x + point.width / 2, y: point.y + point.height / 2 });
-      if (!hit.visible) throw new Error(`${await block.locator(".metric-label").innerText()}: metric matrix box is obscured at ${viewport}; hit=${hit.className}`);
+      await block.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
+      const label = block.locator(".metric-label");
+      const hit = await label.evaluate((node) => { const box = node.getBoundingClientRect(); const target = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); return { visible: box.top >= 0 && box.bottom <= innerHeight && node.getClientRects().length > 0, unobscured: Boolean(target && (target === node || node.contains(target))), target: target?.className ?? "none" }; });
+      if (!hit.visible) failures.push(`${await label.innerText()}: metric hit-test failed at ${viewport}: ${JSON.stringify(hit)}`);
     }
+    for (let index = 0; index < entries.length; index += 1) for (let next = index + 1; next < entries.length; next += 1) {
+      const left = entries[index].painted;
+      const right = entries[next].painted;
+      if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}`);
+    }
+    if (ax) for (const entry of entries) {
+      const metricObject = await accessibility.send("Runtime.evaluate", { expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify(entry.label)})?.querySelector('.metric-value')` });
+      const tree = await accessibility.send("Accessibility.getPartialAXTree", { objectId: metricObject.result.objectId, fetchRelatives: false });
+      const names = tree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
+      if (names.filter((name) => name === entry.value).length !== 1 || (entry.text !== entry.value && names.includes(entry.text ?? ""))) failures.push(`${entry.label}: chromium AX names=${JSON.stringify(names)}`);
+    }
+    const parity = entries.flatMap((entry) => { const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined; return counterpart && entry.text !== counterpart.text ? [`${entry.label}: marker parity differs from ${counterpart.label}`] : []; });
+    failures.push(...parity);
+    if (failures.length) throw new Error(`metric boundary matrix failed at ${viewport}: ${JSON.stringify(failures)}\nentries=${JSON.stringify(entries)}`);
   };
-  await assertMatrixVisibility(`${desktopViewport?.width ?? "unknown"}px`);
-  await assertMetricGeometry(`${desktopViewport?.width ?? "unknown"}px`);
-  if (screenshotDir) await captureBlockState("metric-boundary", matrixStrip, 1800, 1400);
-  await page.evaluate(() => scrollTo(0, 0));
-  await page.setViewportSize({ width: 390, height: 844 });
-  await assertMatrixVisibility("390px");
-  await assertMetricGeometry("390px");
-  const boundaryValues = await page.locator(".metric-block").evaluateAll((elements, expected) => expected.map(({ label, value, expectedText, status: expectedStatus }) => {
-    const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
-    const rendered = element?.querySelector(".metric-value") as HTMLElement | null;
-    const box = element?.getBoundingClientRect();
-    const valueBox = rendered?.getBoundingClientRect();
-    const style = element ? getComputedStyle(element) : null;
-    const numeric = Number(value.replaceAll(",", ""));
-    const isNumeric = Number.isFinite(numeric);
-    const renderedStyle = rendered ? getComputedStyle(rendered) : null;
-    return { label, value, expectedText, expectedStatus, found: Boolean(element), text: rendered?.innerText, isNumeric, textOverflow: renderedStyle?.textOverflow ?? "", overflow: renderedStyle?.overflow ?? "", whiteSpace: renderedStyle?.whiteSpace ?? "", scrollWidth: rendered?.scrollWidth ?? -1, clientWidth: rendered?.clientWidth ?? -1, fontSize: renderedStyle?.fontSize ?? "", title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", rightGap: box && valueBox ? box.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1 };
-  }), metricBoundaryMatrix);
-  const matrixFailures = boundaryValues.flatMap((entry) => {
-    const failures: string[] = [];
-    if (!entry.found || entry.text !== entry.expectedText) failures.push(`display=${JSON.stringify(entry.text)} expected=${JSON.stringify(entry.expectedText)}`);
-    if (entry.isNumeric && (entry.scrollWidth > entry.clientWidth || entry.textOverflow === "ellipsis" || entry.overflow === "hidden" || entry.whiteSpace !== "nowrap" || (entry.text?.length ?? -1) > (/^-?\d(?:\.\d+)?e-?\d+$/.test(entry.text ?? "") ? 7 : 5) || (/^-?\d(?:\.\d+)?e-?\d+$/.test(entry.text ?? "") && entry.fontSize !== "20px"))) failures.push(`numeric-fit=${JSON.stringify({ scrollWidth: entry.scrollWidth, clientWidth: entry.clientWidth, fontSize: entry.fontSize, textOverflow: entry.textOverflow, overflow: entry.overflow, whiteSpace: entry.whiteSpace, length: entry.text?.length ?? -1 })}`);
-    const expectedMark = entry.expectedStatus ? `record-mark-${entry.expectedStatus.toLowerCase().replace(/\s+/g, "-")}` : "";
-    if (entry.expectedStatus ? !entry.mark.includes(expectedMark) : Boolean(entry.mark)) failures.push(`mark=${JSON.stringify({ mark: entry.mark, expectedStatus: entry.expectedStatus })}`);
-    if (!entry.title || entry.title !== entry.aria) failures.push(`exact-accessibility=${JSON.stringify({ title: entry.title, aria: entry.aria })}`);
-    if (entry.rightGap < entry.padding) failures.push(`right-padding=${JSON.stringify({ rightGap: entry.rightGap, padding: entry.padding })}`);
-    return failures.length ? [`${entry.label}: ${failures.join(", ")}`] : [];
-  });
-  for (const entry of boundaryValues) {
-    const metricObject = await accessibility.send("Runtime.evaluate", {
-      expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify(entry.label)})?.querySelector('.metric-value')`,
-    });
-    const metricAxTree = await accessibility.send("Accessibility.getPartialAXTree", { objectId: metricObject.result.objectId, fetchRelatives: false });
-    const metricAxNames = metricAxTree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
-    const exactCount = metricAxNames.filter((name) => name === entry.value).length;
-    const displayCount = metricAxNames.filter((name) => name === entry.text).length;
-    if (exactCount !== 1 || (entry.text !== entry.value && displayCount !== 0)) matrixFailures.push(`${entry.label}: chromium AX names=${JSON.stringify({ exactCount, displayCount, value: entry.value, text: entry.text, names: metricAxNames })}`);
-  }
-  const parityFailures = boundaryValues.flatMap((entry) => {
-    const counterpart = entry.label.startsWith("marked ") ? boundaryValues.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? boundaryValues.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
-    return counterpart && entry.text !== counterpart.text ? [`${entry.label}: marker parity differs from ${counterpart.label}`] : [];
-  });
-  matrixFailures.push(...parityFailures);
-  if (matrixFailures.length) throw new Error(`metric boundary matrix failed independently: ${JSON.stringify(matrixFailures)}\\nentries=${JSON.stringify(boundaryValues)}`);
+  await assertMetricMatrix(`${desktopViewport?.width ?? "unknown"}px`, false);
+  if (screenshotDir) await captureBlockState("metric-boundary", matrixStrip, 2400, 1400);
+  await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
+  await page.setViewportSize({ width: 390, height: 2400 });
+  await assertMetricMatrix("390px", true);
   await page.setViewportSize({ width: 390, height: 760 });
-  await page.evaluate(() => scrollTo(0, 0));
   const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
+  const pageChatCloseButton = page.getByRole("button", { name: "close page chat", exact: true });
+  if (await pageChatBar.getAttribute("aria-expanded") === "true") {
+    await pageChatCloseButton.click({ force: true });
+    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "false", "page chat close after matrix");
+  }
+  await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
     const action = document.querySelector<HTMLElement>(".record-form-actions button")?.getBoundingClientRect();
