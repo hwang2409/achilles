@@ -15,7 +15,7 @@ const ENDPOINT = { builtin: "built-in · 127.0.0.1:4323", external: "external co
 export function Overview({ overview, bucket, chart, setChart, empty }: { overview: TelemetryOverview; bucket: "hour" | "day"; chart: Chart; setChart: (chart: Chart) => void; empty: ReactNode }) {
   const { status, totals, series } = overview;
   const receiver = RECEIVER[status.receiver];
-  const calls = totals.model_calls + totals.tool_calls;
+  const rate = formatPercent(totals.errors, totals.model_calls);
   return (
     <div className="tm-overview">
       <h1 className="tm-visually-hidden">telemetry overview</h1>
@@ -36,11 +36,11 @@ export function Overview({ overview, bucket, chart, setChart, empty }: { overvie
       </ul>
       {totals.spans === 0 ? empty : <>
         <div className="tm-metrics">
-          <Metric label="sessions" value={formatCount(totals.sessions)} />
-          <Metric label="model calls" mark="■" markClass="tm-accent" value={formatCount(totals.model_calls)} />
-          <Metric label="tool calls" mark="■" markClass="tm-tool" value={formatCount(totals.tool_calls)} className="tm-metric-tools" />
-          <Metric label="errors" mark="▲" markClass="tm-danger" tone="danger" value={formatCount(totals.errors)} detail={formatPercent(totals.errors, calls) && `${formatPercent(totals.errors, calls)} of calls`} />
-          <Metric label="tokens" value={formatTokens(totals.total_tokens)} detail={`in ${formatTokens(totals.input_tokens)} · out ${formatTokens(totals.output_tokens)}`} />
+          <Metric label="sessions" value={formatCount(totals.sessions)} className="tm-m-sessions" />
+          <Metric label="model calls" mark="■" markClass="tm-accent" value={formatCount(totals.model_calls)} className="tm-m-calls" />
+          <Metric label="tool calls" mark="■" markClass="tm-tool" value={formatCount(totals.tool_calls)} className="tm-m-tools" />
+          <Metric label="errors" mark="▲" markClass="tm-danger" tone="danger" value={formatCount(totals.errors)} detail={rate} detailSuffix=" of model calls" className="tm-m-errors" />
+          <Metric label="tokens" value={formatTokens(totals.total_tokens)} detail={`in ${formatTokens(totals.input_tokens)} · out ${formatTokens(totals.output_tokens)}`} className="tm-m-tokens" />
           <div className="tm-toggle" role="group" aria-label="chart shows">
             {(["calls", "tokens"] as Chart[]).map((value) => <button key={value} type="button" aria-pressed={chart === value} onClick={() => setChart(value)}>{value}</button>)}
           </div>
@@ -51,13 +51,14 @@ export function Overview({ overview, bucket, chart, setChart, empty }: { overvie
   );
 }
 
-function Metric({ label, value, detail, mark, markClass, tone, className }: { label: string; value: string; detail?: string | null; mark?: string; markClass?: string; tone?: "danger"; className?: string }) {
+/** `detailSuffix` is dropped on narrow screens, as the T1m board shows the rate alone. */
+function Metric({ label, value, detail, detailSuffix, mark, markClass, tone, className }: { label: string; value: string; detail?: string | null; detailSuffix?: string; mark?: string; markClass?: string; tone?: "danger"; className?: string }) {
   return (
     <div className={`tm-metric${className ? ` ${className}` : ""}`}>
-      <span className="tm-metric-label">{mark && <span aria-hidden="true" className={markClass}>{mark} </span>}{label}</span>
+      <span className="tm-metric-label">{mark && <span aria-hidden="true" className={`tm-metric-mark ${markClass}`}>{mark} </span>}{label}</span>
       <span className="tm-metric-value-line">
         <span className={`tm-metric-value${tone ? ` tm-${tone}` : ""}`}>{value}</span>
-        {detail && <span className="tm-metric-detail">{detail}</span>}
+        {detail && <span className="tm-metric-detail">{detail}{detailSuffix && <span className="tm-metric-suffix">{detailSuffix}</span>}</span>}
       </span>
     </div>
   );
@@ -85,6 +86,7 @@ function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: C
   const value = (point: SeriesPoint) => (chart === "calls" ? point.model_calls : point.total_tokens);
   const max = Math.max(1, ...series.map(value));
   const step = Math.max(1, Math.ceil(series.length / 8));
+  const middle = Math.floor(series.length / 2); // narrow screens keep only the first, the middle, and "now"
   const shown = active !== null && active < series.length ? series[active] : null;
   const nowNs = Date.now() * 1e6;
   const keys = (event: KeyboardEvent) => {
@@ -122,10 +124,11 @@ function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: C
                 <div className="tm-bar-fill" style={{ height: `${(value(point) / max) * 100}%` }}>
                   {errors > 0 && <div className="tm-bar-error" style={{ height: `${Math.max(4, (errors / Math.max(1, point.model_calls)) * 100)}%` }} />}
                 </div>
-                {index % step === 0 && <span className={`tm-tick${(index / step) % 2 ? " tm-tick-minor" : ""}`} aria-hidden="true">{bucket === "hour" ? formatHour(point.start_ns) : formatDay(point.start_ns)}</span>}
+                {(index % step === 0 || index === middle) && <span className={`tm-tick${index === 0 || index === middle ? " tm-tick-key" : ""}`} aria-hidden="true">{bucket === "hour" ? formatHour(point.start_ns) : formatDay(point.start_ns)}</span>}
               </div>
             );
           })}
+          <span className="tm-tick tm-tick-now" aria-hidden="true">now</span>
         </div>
         <div className="tm-tooltip" aria-live="polite" hidden={!shown} style={shown ? { left: `${((active! + 0.5) / series.length) * 100}%` } : undefined} data-side={active !== null && active > series.length / 2 ? "left" : "right"}>
           {shown && <>

@@ -81,8 +81,8 @@
 .tm-records ul { margin: 0; padding: 0; list-style: none; line-height: 1.8; }
 .tm-turn-on { padding: 18px 20px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-surface); }
 .tm-turn-on p { margin: 0 0 12px; }
-.tm-turn-on p:last-child { margin: 0; }
-.tm-turn-on pre { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tm-after { margin: 24px 0 0; }
+.tm-turn-on pre { margin: 0; padding: 12px 14px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tm-facts { display: grid; grid-template-columns: auto 1fr; margin: 0 0 28px; border-top: 1px solid var(--fulcrum-border); }
 .tm-facts dt, .tm-facts dd { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--fulcrum-border); }
 .tm-facts dt { color: var(--fulcrum-muted); }
@@ -116,6 +116,7 @@
 .tm-bar-error { flex: none; width: 100%; max-height: 100%; background: var(--fulcrum-danger); }
 .tm-tick { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 .tm-col:first-child .tm-tick { left: 0; transform: none; }
+.tm-tick-now { display: none; left: auto; right: 0; transform: none; }
 .tm-tooltip { position: absolute; top: 12px; z-index: 1; min-width: 210px; padding: 10px 14px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); box-shadow: 0 6px 20px rgb(0 0 0 / .35); pointer-events: none; }
 .tm-tooltip[data-side="right"] { transform: translateX(12px); }
 .tm-tooltip[data-side="left"] { transform: translateX(calc(-100% - 12px)); }
@@ -163,14 +164,15 @@
   .telemetry-module { --tm-pad: 16px; }
   .tm-tabs-row, .tm-main { padding-left: 16px; padding-right: 16px; }
   .tm-tabs-row { gap: 0 12px; }
-  .tm-refresh, .tm-strip, .tm-toggle, .tm-metric-tools, .tm-chart-now { display: none; }
+  .tm-refresh, .tm-strip, .tm-toggle, .tm-m-tools, .tm-m-tokens .tm-metric-detail, .tm-metric-suffix, .tm-metric-mark, .tm-chart-now, .tm-tick:not(.tm-tick-key) { display: none; }
+  .tm-tick.tm-tick-now { display: block; }
+  .tm-m-sessions { order: 1; } .tm-m-errors { order: 2; } .tm-m-calls { order: 3; } .tm-m-tokens { order: 4; }
   .tm-receiver-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .tm-tools { gap: 10px; }
   .tm-range select, .tm-link, .tm-button { min-height: 44px; }
   .tm-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 16px; }
   .tm-metric-value { font-size: 30px; }
   .tm-plot { height: 180px; gap: 3px; }
-  .tm-tick-minor { display: none; }
   .tm-tooltip { min-width: 170px; }
   .tm-banner { flex-wrap: wrap; }
   .tm-danger-button { margin-left: 0; }

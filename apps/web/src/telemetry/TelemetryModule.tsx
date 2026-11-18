@@ -194,17 +194,18 @@ function TelemetryOff() {
       <section className="tm-intro">
         <p className="tm-eyebrow">telemetry</p>
         <h1>see each step your agents take</h1>
-        <p className="tm-lead">turn it on and zeta records the timing of every turn, model call and tool call, with token counts. you get totals per hour and a list of sessions, with more views to come.</p>
+        <p className="tm-lead">turn it on and zeta records the timing of every turn, model call and tool call, with token counts. you get an agent tree and a waterfall for each session, plus totals per model and tool.</p>
         <div className="tm-records">
           <div><h2 className="tm-ok">records</h2><ul><li>durations and status</li><li>model, provider, tokens</li><li>tool names and sizes</li><li>error types</li></ul></div>
           <div><h2 className="tm-danger">never records</h2><ul><li>prompts or replies</li><li>reasoning</li><li>tool arguments or results</li><li>error messages, env values</li></ul></div>
         </div>
         <div className="tm-turn-on">
-          <h2>turn on telemetry</h2>
+          <h2>turn it on in settings</h2>
+          <p className="tm-dim">built-in receiver on 127.0.0.1:4323 · keeps 14 days raw, 90 days hourly, at most 1 GiB</p>
           <p>add this to <code>settings.toml</code> in your zeta home, then restart zeta:</p>
           <pre>{SETTING}</pre>
-          <p className="tm-dim">built-in receiver on 127.0.0.1:4323 · keeps 14 days raw, 90 days hourly, at most 1 GiB</p>
         </div>
+        <p className="tm-dim tm-after">this page only reads telemetry. the <code>otel</code> setting lives in zeta settings; after you turn it on, running sessions send telemetry on their next turn.</p>
       </section>
     </Frame>
   );
@@ -227,8 +228,8 @@ function NeedsNewerZeta({ protocol }: { protocol: string }) {
   return (
     <Frame>
       <section className="tm-intro">
-        <p className="tm-eyebrow">telemetry</p>
-        <h1>telemetry needs a newer zeta</h1>
+        <p className="tm-eyebrow">telemetry · needs a newer zeta</p>
+        <h1>this zeta can't show telemetry yet</h1>
         <p className="tm-lead">achilles reads telemetry from zeta through <code>telemetry_read_v1</code>. the zeta that achilles talks to did not offer it. chats, pages and agents still work.</p>
         <dl className="tm-facts">
           <dt>zeta serve</dt><dd>connected{protocol && ` · protocol ${protocol}`}</dd>
