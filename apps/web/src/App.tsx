@@ -210,6 +210,7 @@ export function App() {
   };
 
   useEffect(() => {
+    setClient(connection.client);
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
