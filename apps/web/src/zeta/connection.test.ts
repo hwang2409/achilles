@@ -25,6 +25,20 @@ test("observer presentation is server-derived, not a synonym for read-only", () 
   expect(isObserverPresentation({ phase: "connected", authority: "observer" }, true)).toBe(true);
 });
 
+test("startup and offline failures never retain observer presentation", async () => {
+  const offline = createConnection({ origin: "http://localhost", discover: async () => null });
+  await flush();
+  expect(offline.state.phase).toBe("not_running");
+  expect(offline.observerPresentation).toBe(false);
+  offline.stop();
+
+  const rejected = createConnection({ origin: "http://localhost", discover: async () => discovery, connect: async () => { throw new ZetaError("connect_failed"); } });
+  await flush();
+  expect(rejected.state.phase).toBe("auth_failed");
+  expect(rejected.observerPresentation).toBe(false);
+  rejected.stop();
+});
+
 describe("createConnection controller capacity vs version mismatch", () => {
   test("falls back to a live observer and remains live when take-control is still busy", async () => {
     const roles: string[] = [];

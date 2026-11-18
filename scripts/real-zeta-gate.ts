@@ -2467,7 +2467,18 @@ try {
     { timeout: 20_000 },
   );
   const observerPage = await browser.newPage();
+  const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
+  const observerHttp: { method: string; path: string }[] = [];
+  observerPage.on("websocket", (socket) => {
+    socket.on("framesent", (event) => observerFrames.push({ direction: "sent", payload: String(event.payload) }));
+    socket.on("framereceived", (event) => observerFrames.push({ direction: "received", payload: String(event.payload) }));
+  });
+  observerPage.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin === origin) observerHttp.push({ method: request.method(), path: url.pathname });
+  });
   await observerPage.goto(`${origin}/?chat=${controllerChat}`);
+  const observerStorageBefore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   const observerBanner = observerPage.locator(".observer-banner");
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
   if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
@@ -2477,6 +2488,19 @@ try {
   if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
+  const observerMutationMethods = new Set(["send", "steer", "new_session", "approve", "deny", "interrupt", "set_settings", "set_page_create_mode", "create_page", "update_layout", "restore_version", "mcp_refresh_tools"]);
+  const observerRequests = observerFrames.flatMap(({ direction, payload }) => {
+    if (direction !== "sent") return [];
+    try { const frame = JSON.parse(payload) as { method?: unknown }; return typeof frame.method === "string" ? [frame.method] : []; }
+    catch { return []; }
+  });
+  const unexpectedObserverReads = observerRequests.filter((method) => observerMutationMethods.has(method));
+  if (unexpectedObserverReads.length) throw new Error(`observer websocket mutation leak: ${unexpectedObserverReads.join(", ")}`);
+  const expectedObserverReads = new Set(["hello", "session_history_and_subscribe", "session_history", "status"]);
+  if (!observerRequests.includes("hello") || !observerRequests.includes("session_history_and_subscribe")) throw new Error(`observer websocket read projection incomplete: ${observerRequests.join(", ")}`);
+  if (observerRequests.some((method) => !expectedObserverReads.has(method))) throw new Error(`observer websocket unexpected read: ${observerRequests.join(", ")}`);
+  if (observerHttp.some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer issued mutating HTTP request");
+  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
   if (screenshotDir) {
     await observerPage.setViewportSize({ width: 390, height: 760 });
     const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
