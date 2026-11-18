@@ -4,6 +4,7 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView } from "@codemirror/view";
 import { getCM, Vim, vim } from "@replit/codemirror-vim";
 import { isEditableTarget } from "../keyboard";
+import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, submitAction, type ComposerModel } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
 import { ComposerHint } from "./hint";
@@ -164,7 +165,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
     return () => { if (document.activeElement === button) viewRef.current?.focus(); };
   }, []);
 
-  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
+  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
     <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
@@ -176,8 +177,8 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
         </p>
       </div>
       <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
-      {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
-      <button type="submit" data-part="composer-submit" data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</button>
+      {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-write-surface={WRITE_SURFACE.composerAbort} data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
+      <button type="submit" data-part="composer-submit" data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend} data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</button>
     </div>}
   </form>;
 }
