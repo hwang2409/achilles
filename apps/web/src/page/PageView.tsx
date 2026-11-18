@@ -130,7 +130,7 @@ function MetricBlock({ block, value }: { block: Record<string, unknown>; value?:
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
   const isNumeric = Number.isFinite(Number(fullValue.replaceAll(",", "")));
-  const displayValue = fullValue.length >= 9 && isNumeric ? compactMetricValue(fullValue) : fullValue;
+  const displayValue = fullValue.length >= 8 && isNumeric ? compactMetricValue(fullValue) : fullValue;
   const isCompacted = displayValue !== fullValue;
   const textClass = !isNumeric ? ` metric-value-text${/\s/.test(fullValue.trim()) ? "" : " metric-value-text-single"}` : "";
   return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;

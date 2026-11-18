@@ -1091,10 +1091,11 @@ try {
     const valueBox = rendered?.getBoundingClientRect();
     const style = element ? getComputedStyle(element) : null;
     const numeric = Number(value.replaceAll(",", ""));
-    const expectedText = Number.isFinite(numeric) && value.length >= 9 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric) : value;
-    return { label, value, found: Boolean(element), text: rendered?.innerText, expectedText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), rightGap: box && valueBox ? box.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1 };
+    const isNumeric = Number.isFinite(numeric);
+    const expectedText = isNumeric && value.length >= 8 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric) : value;
+    return { label, value, found: Boolean(element), text: rendered?.innerText, expectedText, isNumeric, textOverflow: rendered ? getComputedStyle(rendered).textOverflow : "", title: rendered?.title, aria: rendered?.getAttribute("aria-label"), rightGap: box && valueBox ? box.right - valueBox.right : -1, padding: style ? parseFloat(style.paddingInlineEnd) : -1 };
   }), metricBoundaryMatrix);
-  if (boundaryValues.some(({ found, text, expectedText, title, aria, rightGap, padding }) => !found || text !== expectedText || !title || title !== aria || rightGap < padding))
+  if (boundaryValues.some(({ found, text, expectedText, isNumeric, textOverflow, title, aria, rightGap, padding }) => !found || text !== expectedText || (isNumeric && textOverflow === "ellipsis") || !title || title !== aria || rightGap < padding))
     throw new Error(`metric boundary matrix failed display/title/aria/right-padding checks: ${JSON.stringify(boundaryValues)}`);
   const longText = page.locator('.metric-block').filter({ has: page.locator('.metric-label', { hasText: 'long text' }) }).locator('.metric-value');
   const singleToken = page.locator('.metric-block').filter({ has: page.locator('.metric-label', { hasText: 'single long token' }) }).locator('.metric-value');

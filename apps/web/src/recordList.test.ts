@@ -243,8 +243,8 @@ test("record list reveal projection keeps loaded rows and one reachable tab stop
 
 test("ten-character metric values compact before they can overflow a mobile cell", () => {
   const metrics = [
-    ["unmarked eight digits", "99999999", "99999999"],
-    ["marked eight digits", "99999999", "99999999", "done"],
+    ["unmarked eight digits", "99999999", "100M"],
+    ["marked eight digits", "99999999", "100M", "done"],
     ["unmarked nine digits", "999999999", "1B"],
     ["marked nine digits", "999999999", "1B", "done"],
     ["unmarked ten digits", "9999999999", "10B"],
