@@ -2527,6 +2527,7 @@ try {
     }), "observer page-chat settled");
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const markerCandidates = observerPage.locator('[data-part="timeline"] > [data-id], [data-part="timeline"] > [data-virtual-id]');
+    await observerPage.locator('[data-part="timeline-scroll"]').evaluateAll((elements) => elements.forEach((element) => { const scroll = element as HTMLElement; scroll.scrollTop = scroll.scrollHeight; }));
     await markerCandidates.last().evaluate((element) => element.scrollIntoView({ block: "center" }));
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const markerIndex = await markerCandidates.evaluateAll((elements) => elements.findIndex((element) => {
