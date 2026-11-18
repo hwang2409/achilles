@@ -175,18 +175,18 @@ export function createConnection({
     const openRole = async (role: ZetaRole): Promise<OpenResult> => {
       let timedOut = false;
       let closePending = () => {};
-      let connectTimeout: ReturnType<typeof setTimeout> | undefined;
+      let connectTimeout: unknown = null;
       try {
         const opened = await Promise.race([
           connect(discovery, role, (close) => { closePending = close; }).then((value) => { if (timedOut) value.close(); return value; }),
-          new Promise<never>((_, reject) => { connectTimeout = setTimeout(() => { timedOut = true; closePending(); reject(new Error("hello timeout")); }, helloTimeoutMs); }),
+          new Promise<never>((_, reject) => { connectTimeout = setTimer(() => { timedOut = true; closePending(); reject(new Error("hello timeout")); }, helloTimeoutMs); }),
         ]);
         return { kind: "connected", client: opened };
       } catch (error) {
         if (timedOut) return { kind: "unresponsive" };
         const kind = error instanceof ZetaError ? error.kind : "connect_failed";
         return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
-      } finally { clearTimeout(connectTimeout); }
+      } finally { if (connectTimeout !== null) clearTimer(connectTimeout); }
     };
     let authority = desiredRole;
     let opened = await openRole(authority);

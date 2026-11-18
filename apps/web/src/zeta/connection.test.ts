@@ -114,6 +114,35 @@ describe("createConnection controller capacity vs version mismatch", () => {
   });
 });
 
+test("settles discovery throw and start hints as not running", async () => {
+  for (const discover of [async () => { throw new Error("offline"); }, async () => ({ start: "zeta serve" })]) {
+    const connection = createConnection({ origin: "http://localhost", discover });
+    await flush();
+    expect(connection.state.phase).toBe("not_running");
+    expect(connection.state).toHaveProperty("attempt", 1);
+    connection.stop();
+  }
+});
+
+test("settles a controller hello timeout with injected timers", async () => {
+  const timers: Array<() => void> = [];
+  const connection = createConnection({
+    origin: "http://localhost",
+    discover: async () => discovery,
+    connect: async () => await new Promise<never>(() => {}),
+    helloTimeoutMs: 25,
+    setTimer: (callback) => { timers.push(callback); return callback; },
+    clearTimer: () => {},
+  });
+  await flush();
+  expect(timers).toHaveLength(1);
+  timers[0]!();
+  await flush();
+  expect(connection.state.phase).toBe("unresponsive");
+  expect(connection.state).toMatchObject({ attempt: 1, lost: false });
+  connection.stop();
+});
+
 describe("connection role and terminal matrix", () => {
   const terminalCases = [
     { name: "discovery failure", discover: async () => null, connect: undefined, phase: "not_running", roles: [] },

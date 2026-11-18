@@ -24,6 +24,7 @@ import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 import "./chat/markdown.css";
 import "./shell.css";
+import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
 
 export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
@@ -153,7 +154,7 @@ export function App() {
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const canWrite = canWriteForState(connectionState);
-  const readOnlyReason = "this tab is read-only; take control to make changes";
+  const readOnlyReason = READ_ONLY_REASON;
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite);
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
@@ -330,8 +331,8 @@ export function App() {
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}
-    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
-      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
+    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
+      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
       : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>

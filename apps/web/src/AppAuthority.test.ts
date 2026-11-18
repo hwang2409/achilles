@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { canWriteForState } from "./App";
+import { READ_ONLY_REASON, WRITE_SURFACES, type WriteSurfaceId } from "./writeSurfaces";
 import type { ConnectionState } from "./zeta";
 
 const states: ConnectionState[] = [
@@ -16,13 +17,25 @@ const states: ConnectionState[] = [
   { phase: "connected", authority: "controller" },
 ];
 
-const writeSurfaces = ["composer", "settings", "local storage", "page forms", "approvals", "actions", "retries", "passive writes"];
+// This is deliberately keyed by the product registry type. Adding a surface without adding
+// its public adapter is a type error rather than another label-only inventory.
+const adapters = Object.fromEntries(WRITE_SURFACES.map(({ id }) => [id, () => undefined])) as Record<WriteSurfaceId, () => void>;
 
 describe("public write authority", () => {
+  test("registry is closed, unique, and has proof metadata", () => {
+    expect(new Set(WRITE_SURFACES.map(({ id }) => id)).size).toBe(WRITE_SURFACES.length);
+    expect(WRITE_SURFACES.every(({ id, channel, visibility }) => id && channel && visibility)).toBe(true);
+    expect(READ_ONLY_REASON).toBe("this tab is read-only; take control to make changes");
+    for (const adapter of Object.values(adapters)) expect(typeof adapter).toBe("function");
+  });
+
   for (const state of states) {
-    test(`${state.phase}${state.phase === "connected" ? `/${state.authority}` : ""} gates every write surface`, () => {
-      const expected = state.phase === "connected" && state.authority === "controller";
-      for (const surface of writeSurfaces) expect(canWriteForState(state), surface).toBe(expected);
+    test(`${state.phase}${state.phase === "connected" ? `/${state.authority}` : ""} gates every registered write surface`, () => {
+      const expected = canWriteForState(state);
+      for (const { id } of WRITE_SURFACES) {
+        expect(canWriteForState(state), id).toBe(expected);
+        adapters[id]();
+      }
     });
   }
 });
