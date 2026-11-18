@@ -241,6 +241,32 @@ test("record list reveal projection keeps loaded rows and one reachable tab stop
   }
 });
 
+test("ten-character metric values compact before they can overflow a mobile cell", () => {
+  const metrics = [
+    ["unmarked eight digits", "99999999", "99999999"],
+    ["marked eight digits", "99999999", "99999999", "done"],
+    ["unmarked nine digits", "999999999", "999999999"],
+    ["marked nine digits", "999999999", "1B", "done"],
+    ["unmarked ten digits", "9999999999", "10B"],
+    ["marked ten digits", "9999999999", "10B", "done"],
+    ["decimal", "1234567890.5", "1.2B"],
+    ["unmarked nonnumeric", "9999999999 items", "9999999999 items"],
+    ["marked nonnumeric", "9999999999 items", "9999999999 items", "done"],
+  ] as const;
+  const page = { title: "page", route: "/page", layout: { blocks: metrics.map(([label, value, , status]) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
+  const result = render(React.createElement(PageView, { page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
+  for (const [label, fullValue, displayValue] of metrics) {
+    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === label)!;
+    const value = block.querySelector(".metric-value")!;
+    expect(value.textContent, label).toBe(displayValue);
+    expect(value.getAttribute("title"), label).toBe(fullValue);
+    if (displayValue !== fullValue) {
+      expect(value.querySelector('[aria-hidden="true"]')?.textContent, label).toBe(displayValue);
+      expect(block.querySelector(".metric-value-accessible")?.textContent, label).toBe(fullValue);
+    }
+  }
+});
+
 test("page metrics render a live static layout value", () => {
   const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "score", value: "1" }] } };
   const result = render(React.createElement(PageView, { page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));

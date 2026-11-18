@@ -304,6 +304,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 },
                                 {
                                     "type": "metric",
+                                    "label": "review status",
+                                    "value": "waiting on legal review",
+                                },
+                                {
+                                    "type": "metric",
                                     "label": "reading",
                                     "collection": "books",
                                     "count": True,
@@ -379,6 +384,11 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                         "legacy total with an unusually long descriptive label"
                                     ),
                                     "value": "9,999,999,999,999,999",
+                                },
+                                {
+                                    "type": "metric",
+                                    "label": "review status",
+                                    "value": "waiting on legal review",
                                 },
                                 {
                                     "type": "metric",

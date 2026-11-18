@@ -119,11 +119,21 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
+function compactMetricValue(value: string): string {
+  const numeric = Number(value.replaceAll(",", ""));
+  if (!Number.isFinite(numeric)) return value;
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric);
+}
+
 function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
-  const displayValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
+  const fullValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${String(displayValue).length > 10 ? " metric-value-long" : ""}`}>{displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  const isNumeric = Number.isFinite(Number(fullValue.replaceAll(",", "")));
+  const compactAt = status ? 9 : 10;
+  const displayValue = fullValue.length >= compactAt && isNumeric ? compactMetricValue(fullValue) : fullValue;
+  const isCompacted = displayValue !== fullValue;
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${isNumeric ? "" : " metric-value-text"}`} title={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{isCompacted && <span className="metric-value-accessible">{fullValue}</span>}{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
