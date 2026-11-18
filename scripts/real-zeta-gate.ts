@@ -2224,9 +2224,8 @@ try {
   // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
   if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
   const observerPage = await browser.newPage();
-  const controllerChat = first;
-  if (!controllerChat) throw new Error("controller chat id missing before observer journey");
-  await observerPage.goto(`${origin}/?chat=${controllerChat}`);
+  await observerPage.goto(origin);
+  await gateWait.playwright(observerPage.locator(".chat-row").first(), "click");
   const observerBanner = observerPage.locator(".observer-banner");
   await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
   if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
