@@ -2670,6 +2670,9 @@ try {
     await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
     await restoredVim.click();
   }
+  const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
+  await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== settingsBeforeRestore) throw new Error("restored controller settings did not restore reversibly");
   if (screenshotDir) {
     await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
