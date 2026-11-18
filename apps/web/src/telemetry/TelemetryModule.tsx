@@ -17,8 +17,8 @@ const tabOf = (path: string): Tab => (path === "/telemetry/sessions" || path.sta
 
 export type Range = "24h" | "7d";
 const RANGES: Record<Range, { label: string; ms: number; bucket: "hour" | "day" }> = {
-  "24h": { label: "Last 24 hours", ms: 24 * 3600_000, bucket: "hour" },
-  "7d": { label: "Last 7 days", ms: 7 * 24 * 3600_000, bucket: "day" },
+  "24h": { label: "24 hours", ms: 24 * 3600_000, bucket: "hour" },
+  "7d": { label: "7 days", ms: 7 * 24 * 3600_000, bucket: "day" },
 };
 const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (nowMs - RANGES[range].ms) * 1e6, end_ns: nowMs * 1e6 });
 
@@ -85,9 +85,9 @@ function TelemetryPages({ client, tab, tabs }: { client: ZetaClient; tab: Tab; t
     <div className="tm-tools">
       {status && <ReceiverMark status={status} />}
       {poll.refreshing && poll.data && <span className="tm-refreshing" role="status">refreshing…</span>}
-      <button type="button" className="tm-button" onClick={poll.refresh} aria-label="Refresh telemetry">Refresh</button>
+      <button type="button" className="tm-button" onClick={poll.refresh} aria-label="Refresh telemetry"><span aria-hidden="true">↻</span><span className="tm-refresh-text"> Refresh</span></button>
       <label className="tm-range">
-        <span className="tm-visually-hidden">Time range</span>
+        <span className="tm-visually-hidden">Time range, last</span>
         <select value={range} onChange={(event) => { setRange(event.target.value as Range); setPagedWindow(null); setQuery({ ...query, cursors: [null] }); }}>
           {(Object.keys(RANGES) as Range[]).map((value) => <option key={value} value={value}>{RANGES[value].label}</option>)}
         </select>
@@ -106,17 +106,17 @@ function TelemetryPages({ client, tab, tabs }: { client: ZetaClient; tab: Tab; t
     body = <>
       {stale}
       {data.tab === "overview"
-        ? <Overview overview={data.overview} rangeLabel={RANGES[range].label.toLowerCase()} bucket={RANGES[range].bucket} chart={chart} setChart={setChart} empty={<NoTelemetryYet rangeLabel={RANGES[range].label.toLowerCase()} />} />
+        ? <Overview overview={data.overview} rangeLabel={`last ${RANGES[range].label}`} bucket={RANGES[range].bucket} chart={chart} setChart={setChart} empty={<NoTelemetryYet rangeLabel={`last ${RANGES[range].label}`} />} />
         : <Sessions
             page={data.page}
             query={query}
-            rangeLabel={RANGES[range].label.toLowerCase()}
+            rangeLabel={`last ${RANGES[range].label}`}
             profiles={[...seen.current.profiles].sort()}
             models={[...seen.current.models].sort()}
             setFilters={setFilters}
             next={() => { setPagedWindow(data.window); setQuery({ ...query, cursors: [...query.cursors, data.page.next_cursor] }); }}
             previous={() => { const cursors = query.cursors.slice(0, -1); if (cursors.length === 1) setPagedWindow(null); setQuery({ ...query, cursors }); }}
-            empty={<NoTelemetryYet rangeLabel={RANGES[range].label.toLowerCase()} />}
+            empty={<NoTelemetryYet rangeLabel={`last ${RANGES[range].label}`} />}
           />}
     </>;
   }

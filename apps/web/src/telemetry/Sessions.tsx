@@ -73,9 +73,9 @@ function Choice({ label, value, options, set }: { label: string; value: string |
   );
 }
 
-/** Each cell carries its label, so the narrow layout can show it next to the value. */
+/** Narrow screens show each row as a two-line card; `unit` is the word printed after a number there, so every value keeps a label. */
 function SessionRow({ session }: { session: TelemetrySession }) {
-  const cell = (label: string, content: ReactNode, className?: string) => <td data-label={label} className={className}>{content}</td>;
+  const cell = (label: string, content: ReactNode, className?: string, unit?: string) => <td data-label={label} data-unit={unit} className={className}>{content}</td>;
   return (
     <tr>
       {cell("Last activity", <time dateTime={new Date(session.last_ns / 1e6).toISOString()} title={formatFullTime(session.last_ns)}>{formatTime(session.last_ns)}</time>, "tm-time")}
@@ -83,13 +83,14 @@ function SessionRow({ session }: { session: TelemetrySession }) {
       {cell("Session", <span title={session.session_id} aria-label={`session ${session.session_id}`}>{shortId(session.session_id)}</span>, "tm-id")}
       {cell("Model", session.model ?? <span className="tm-dim">not reported</span>, "tm-model")}
       {cell("Duration", formatDuration(session.last_ns - session.first_ns), "tm-num tm-duration")}
-      {cell("Turns", formatCount(session.turn_count), "tm-num")}
-      {cell("Model calls", formatCount(session.model_count), "tm-num")}
+      {cell("Turns", formatCount(session.turn_count), "tm-num tm-turns", "turns")}
+      {cell("Model calls", formatCount(session.model_count), "tm-num tm-calls", "model calls")}
       {cell("Tool calls", formatCount(session.tool_count), "tm-num")}
       {cell("Spans", formatCount(session.span_count), "tm-num")}
-      {cell("Errors", session.error_count > 0 ? <span className="tm-danger"><span aria-hidden="true">▲ </span>{formatCount(session.error_count)}</span> : <span className="tm-dim">0</span>, "tm-num tm-errors")}
+      {cell("Errors", session.error_count > 0 ? <span className="tm-danger"><span aria-hidden="true">▲ </span>{formatCount(session.error_count)}</span> : <span className="tm-dim">0</span>, "tm-num tm-errors", "errors")}
       {cell("Input", <span title={`${formatCount(session.input_tokens)} input tokens`}>{formatTokens(session.input_tokens)}</span>, "tm-num")}
       {cell("Output", <span title={`${formatCount(session.output_tokens)} output tokens`}>{formatTokens(session.output_tokens)}</span>, "tm-num")}
+      {cell("Tokens", <span title={`${formatCount(session.total_tokens)} tokens`}>{formatTokens(session.total_tokens)}</span>, "tm-num tm-total", "tok")}
     </tr>
   );
 }
