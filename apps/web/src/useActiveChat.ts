@@ -554,7 +554,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (owner.current.current(token)) setAttachSlow(false);
     });
     return () => { clock.clearTimeout(slowTimer); owner.current.clear(token); };
-  }, [applyPendingCreateMode, client, clock, connected, publishReady, routeRefresh, selectedId, showBusy]);
+  }, [applyPendingCreateMode, canMutate, client, clock, connected, publishReady, routeRefresh, selectedId, showBusy]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
