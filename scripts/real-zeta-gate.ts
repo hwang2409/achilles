@@ -1068,8 +1068,9 @@ try {
     }),
   );
   if (
-    metricBoxes.length !== 2 ||
+    metricBoxes.length !== 3 ||
     metricBoxes[0].top !== metricBoxes[1].top ||
+    metricBoxes[2].top <= metricBoxes[0].top ||
     metricBoxes.some(
       (box) => box.width > 172 || box.scrollWidth > box.clientWidth,
     )
