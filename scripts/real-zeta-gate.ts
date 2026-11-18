@@ -2598,9 +2598,9 @@ try {
   await page.close();
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
   await gateWait.playwright(observerBanner, "waitFor", { state: "hidden" });
-  if (await observerComposerReason.isVisible().catch(() => false)) throw new Error("observer remained read-only after controller closed");
   const restoredMutation = "restored controller mutation";
   const restoredField = observerPage.getByRole("textbox", { name: "message", exact: true });
+  if (!await restoredField.isEditable()) throw new Error("restored controller composer remained read-only");
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
   await waitFor(async () => (await observerPage.locator('[data-part="message"]').allTextContents()).some((text) => text.includes(restoredMutation)), "restored controller mutation");
