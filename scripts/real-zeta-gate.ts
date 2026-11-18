@@ -1103,20 +1103,24 @@ try {
       })() : false;
       const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48))) && !tokenClipping;
       const gridEdges = (() => {
-        const cells = [...document.querySelectorAll<HTMLElement>(".metric-strip")[0]?.querySelectorAll<HTMLElement>(".metric-block") ?? []].map((cell) => cell.getBoundingClientRect()).sort((a, b) => a.top - b.top || a.left - b.left);
+        const strip = document.querySelector<HTMLElement>(".metric-strip");
+        const cellElements = [...strip?.querySelectorAll<HTMLElement>(".metric-block") ?? []];
+        const cells = cellElements.map((cell) => cell.getBoundingClientRect()).sort((a, b) => a.top - b.top || a.left - b.left);
         const rows: DOMRect[][] = [];
         for (const cell of cells) {
           const row = rows.find((candidate) => Math.abs(candidate[0]!.top - cell.top) <= 0.5);
           if (row) row.push(cell); else rows.push([cell]);
         }
-        const continuous = rows.every((row) => row.sort((a, b) => a.left - b.left).every((cell, index) => index === 0 || Math.abs(cell.left - row[index - 1]!.right - 1) <= 0.5));
+        const continuous = rows.every((row) => row.sort((a, b) => a.left - b.left).every((cell, index) => index === 0 || Math.abs(cell.left - row[index - 1]!.right) <= 0.5));
         const columns = new Map<number, DOMRect[]>();
         for (const cell of cells) {
           const key = Math.round(cell.left * 2) / 2;
           columns.set(key, [...(columns.get(key) ?? []), cell]);
         }
-        const vertical = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom - 1) <= 0.5));
-        return continuous && vertical;
+        const vertical = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom) <= 0.5));
+        const ownedSeparators = cellElements.every((cell) => getComputedStyle(cell).boxShadow.includes("inset"));
+        const noPhantomTrackPaint = strip ? [getComputedStyle(strip).backgroundColor, ...cellElements.map((cell) => getComputedStyle(cell).backgroundColor)].every((color, index) => index === 0 ? color === "rgba(0, 0, 0, 0)" || color === "transparent" : Boolean(color)) : false;
+        return continuous && vertical && ownedSeparators && noPhantomTrackPaint;
       })();
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
