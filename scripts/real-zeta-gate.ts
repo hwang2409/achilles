@@ -2490,7 +2490,7 @@ try {
 
   // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
   if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
-  await page.goto(`${origin}/reading?chat=${first}`);
+  await page.goto(`${origin}/reading`);
   const controllerChat = await page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 });
   if (controllerChat !== first) throw new Error(`known controller chat did not attach: expected ${first}, got ${controllerChat}`);
   await gateWait.playwright(page, "waitForFunction", () =>
