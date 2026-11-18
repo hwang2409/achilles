@@ -71,17 +71,40 @@ test("stop (unmount) cancels the timer, unsubscribes, and drops a reply in fligh
   expect(watching()).toBe(false);
 });
 
-test("only the newest read changes the state, and a failure keeps the last data", async () => {
-  const { env } = fakeEnv();
+test("focus or refresh during a read never overlaps it; they coalesce into one follow-up read", async () => {
+  const { env, emit } = fakeEnv();
   const pending: ((value: number) => void)[] = [];
-  let fail = false;
+  let active = 0;
+  let maxActive = 0;
   const states: PollState<number>[] = [];
-  const poller = createPoller(() => fail ? Promise.reject(new Error("down")) : new Promise<number>((resolve) => { pending.push(resolve); }), (state) => states.push(state), env);
-  poller.refresh(); // focus or the refresh button while the first read is in flight
-  pending[1](2);
+  const load = () => new Promise<number>((resolve) => {
+    maxActive = Math.max(maxActive, ++active);
+    pending.push((value) => { active--; resolve(value); });
+  });
+  const poller = createPoller(load, (state) => states.push(state), env);
+  emit("focus");
+  poller.refresh(); // the refresh button while the first read is in flight
+  poller.refresh();
+  expect(maxActive).toBe(1);
+  expect(pending.length).toBe(1);
   pending[0](1);
   await flush();
+  expect(pending.length).toBe(2); // one follow-up read for all three requests
+  expect(states.at(-1)).toMatchObject({ data: 1, refreshing: true });
+  pending[1](2);
+  await flush();
+  expect(maxActive).toBe(1);
+  expect(pending.length).toBe(2);
   expect(states.at(-1)).toMatchObject({ data: 2, error: undefined, refreshing: false });
+  poller.stop();
+});
+
+test("a failure keeps the last data", async () => {
+  const { env } = fakeEnv();
+  let fail = false;
+  const states: PollState<number>[] = [];
+  const poller = createPoller(() => fail ? Promise.reject(new Error("down")) : Promise.resolve(2), (state) => states.push(state), env);
+  await flush();
   fail = true;
   poller.refresh();
   await flush();

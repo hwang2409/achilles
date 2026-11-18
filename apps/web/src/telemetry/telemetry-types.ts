@@ -54,4 +54,6 @@ export type TelemetryOverview = {
   series: SeriesPoint[];
   active_models: number;
   active_tools: number;
+  /** More series points; null for the 24-hour and 7-day views, which fit in one page. */
+  next_cursor: string | null;
 };

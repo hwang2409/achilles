@@ -1,7 +1,9 @@
 import type { ZetaClient } from "@fulcrum/zeta";
-import type { Page, TelemetryOverview, TelemetrySession, TelemetryStatus } from "./telemetry-types";
+import type { Page, TelemetryOverview, TelemetrySession } from "./telemetry-types";
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
+/** Shown on the needs-a-newer-zeta page only: the projects views read through it. */
+export const STATE_FEATURE = "state_read_v1";
 
 type Rpc = Pick<ZetaClient, "request" | "features">;
 
@@ -20,7 +22,6 @@ function params(values: Record<string, unknown>) {
 /** Read-only telemetry calls over the page's one negotiated zeta connection. */
 export function telemetryClient(client: Rpc) {
   return {
-    status: () => client.request("telemetry_status", {}) as Promise<TelemetryStatus>,
     overview: (window: Window, bucket: "hour" | "day") => client.request("telemetry_overview", { ...window, bucket }) as Promise<TelemetryOverview>,
     sessions: ({ cursor, limit = 50, errorsOnly, profile, model, ...window }: SessionQuery) =>
       client.request("telemetry_sessions", params({
@@ -35,13 +36,15 @@ export function telemetryClient(client: Rpc) {
 }
 
 /** `code` is zeta's `data.code` (`receiver_unavailable`, `state_unavailable`, ...) when it sent one. */
-export type TelemetryProblem = { kind: "off" | "not_negotiated" | "failed"; message: string; code?: string };
+export type TelemetryProblem = { kind: "off" | "failed"; message: string; code?: string };
 
-/** Sorts a rejected read into what the page shows: telemetry off, an old zeta, or a failure the user can retry. */
+/**
+ * Sorts a rejected read into what the page shows: telemetry off, or a failure the user can retry. An old zeta is known
+ * from the hello (`telemetryNegotiated`), so a `-32601` after the feature was granted is a failure too.
+ */
 export function telemetryProblem(error: unknown): TelemetryProblem {
   const rpc = error as { code?: unknown; message?: unknown; data?: { code?: unknown } } | null;
   const message = typeof rpc?.message === "string" ? rpc.message : "telemetry could not be read";
   if (rpc?.data?.code === "telemetry_off") return { kind: "off", message };
-  if (rpc?.code === -32601) return { kind: "not_negotiated", message };
   return typeof rpc?.data?.code === "string" ? { kind: "failed", message, code: rpc.data.code } : { kind: "failed", message };
 }

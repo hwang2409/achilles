@@ -20,14 +20,12 @@ test("sessions sends only chosen filters, the cursor, and a limit inside zeta's 
   ]);
 });
 
-test("overview and status send their exact params", async () => {
+test("overview sends its exact params", async () => {
   const { client, calls } = fakeClient();
   const reads = telemetryClient(client);
   await reads.overview({ start_ns: 1, end_ns: 2 }, "day");
-  await reads.status();
   expect(calls).toEqual([
     { method: "telemetry_overview", params: { start_ns: 1, end_ns: 2, bucket: "day" } },
-    { method: "telemetry_status", params: {} },
   ]);
 });
 
@@ -36,10 +34,10 @@ test("negotiation is read from the hello's granted features", () => {
   expect(telemetryNegotiated(fakeClient(["delivery_id"]).client)).toBe(false);
 });
 
-test("rejected reads become off, old zeta, or retryable failure", () => {
+test("rejected reads become off or a retryable failure, -32601 included", () => {
   const rpc = (code: number, message: string, data?: object) => Object.assign(new Error(message), { code, data });
   expect(telemetryProblem(rpc(-32005, "state unavailable", { code: "telemetry_off", retryable: true })).kind).toBe("off");
-  expect(telemetryProblem(rpc(-32601, "method not found: telemetry_overview")).kind).toBe("not_negotiated");
+  expect(telemetryProblem(rpc(-32601, "method not found: telemetry_overview")).kind).toBe("failed");
   expect(telemetryProblem(rpc(-32005, "state unavailable", { code: "receiver_unavailable", retryable: true }))).toEqual({ kind: "failed", message: "state unavailable", code: "receiver_unavailable" });
   expect(telemetryProblem(new Error("closed")).kind).toBe("failed");
 });

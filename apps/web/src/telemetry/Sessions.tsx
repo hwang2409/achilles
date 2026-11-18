@@ -6,29 +6,33 @@ import type { Page, TelemetrySession } from "./telemetry-types";
 export type SessionsQuery = { cursors: (string | null)[]; errorsOnly: boolean; profile: string | null; model: string | null };
 
 export const PAGE_SIZE = 50;
+const isFiltered = (query: SessionsQuery) => query.errorsOnly || query.profile !== null || query.model !== null;
 const NUMERIC = ["duration", "turns", "model calls", "tool calls", "errors", "tokens in / out"];
 
 /**
  * `total` is the session count of the whole range (overview totals). It ignores the filters, so it shows only while
  * no filter is on. `open` follows a row's link inside the module.
  */
-export function Sessions({ page, total, query, rangeLabel, profiles, models, setFilters, next, previous, open, empty }: {
+export function Sessions({ page, total, query, shown, rangeLabel, profiles, models, setFilters, next, previous, open, empty }: {
   page: Page<TelemetrySession>;
   total: number;
+  /** The choice in the filter controls. */
   query: SessionsQuery;
+  /** The query that `page` answers; it differs from `query` until the reply for a new choice arrives. */
+  shown: SessionsQuery;
   rangeLabel: string;
   profiles: string[];
   models: string[];
   setFilters: (next: Partial<SessionsQuery>) => void;
-  next: () => void;
-  previous: () => void;
+  /** Absent while paging is off: on the first page, at the end, or until the reply for the shown choice arrives. */
+  next?: () => void;
+  previous?: () => void;
   open: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   empty: ReactNode;
 }) {
-  const filtered = query.errorsOnly || query.profile !== null || query.model !== null;
-  const firstPage = query.cursors.length === 1;
-  if (page.items.length === 0 && firstPage && !filtered) return empty;
-  const from = (query.cursors.length - 1) * PAGE_SIZE + 1;
+  const filtered = isFiltered(shown);
+  if (page.items.length === 0 && shown.cursors.length === 1 && !filtered) return empty;
+  const from = (shown.cursors.length - 1) * PAGE_SIZE + 1;
   const to = from + page.items.length - 1;
   const sum = (key: "input_tokens" | "output_tokens" | "total_tokens") => page.items.reduce((sum, session) => sum + session[key], 0);
   const count = filtered ? null : `${formatCount(total)} ${total === 1 ? "session" : "sessions"}`;
@@ -49,7 +53,7 @@ export function Sessions({ page, total, query, rangeLabel, profiles, models, set
           <input type="checkbox" checked={query.errorsOnly} onChange={(event) => setFilters({ errorsOnly: event.target.checked })} />
           <span><span className="tm-wide-only">with </span>errors only</span>
         </label>
-        {filtered && <button type="button" className="tm-link" onClick={() => setFilters({ errorsOnly: false, profile: null, model: null })}>clear filters</button>}
+        {isFiltered(query) && <button type="button" className="tm-link" onClick={() => setFilters({ errorsOnly: false, profile: null, model: null })}>clear filters</button>}
       </div>
       {page.items.length === 0
         ? <p className="tm-none">no sessions match these filters.</p>
@@ -64,8 +68,8 @@ export function Sessions({ page, total, query, rangeLabel, profiles, models, set
         <p>these {formatCount(page.items.length)} used <b className="tm-num">{formatTokens(sum("total_tokens"))}</b> tokens · in <b className="tm-num">{formatTokens(sum("input_tokens"))}</b> · out <b className="tm-num">{formatTokens(sum("output_tokens"))}</b></p>
         <div className="tm-pager-buttons">
           <span className="tm-num tm-dim">{from}–{to}{count && ` of ${formatCount(total)}`}</span>
-          <button type="button" className="tm-button" disabled={firstPage} onClick={previous} aria-label="newer sessions">‹ newer</button>
-          <button type="button" className="tm-button" disabled={!page.next_cursor} onClick={next} aria-label="older sessions">older ›</button>
+          <button type="button" className="tm-button" disabled={!previous} onClick={previous} aria-label="newer sessions">‹ newer</button>
+          <button type="button" className="tm-button" disabled={!next} onClick={next} aria-label="older sessions">older ›</button>
         </div>
       </footer>}
     </div>

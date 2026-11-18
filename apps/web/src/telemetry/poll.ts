@@ -28,11 +28,13 @@ export const browserEnv: PollEnv = {
 
 /**
  * Reads now, then every `POLL_MS` while the page is visible, and again on focus or `refresh()`. A hidden page or
- * `stop()` schedules nothing. Only the newest read may change the state, so a slow old reply cannot replace a new one.
+ * `stop()` schedules nothing. One read runs at a time: a refresh asked for during a read waits, and all such asks
+ * become one follow-up read when it ends.
  */
 export function createPoller<T>(load: () => Promise<T>, onChange: (state: PollState<T>) => void, env: PollEnv = browserEnv, initial: PollState<T> = { refreshing: false }) {
   let state = initial;
-  let generation = 0;
+  let reading = false;
+  let again = false;
   let timer: unknown = null;
   let stopped = false;
   const set = (patch: Partial<PollState<T>>) => { state = { ...state, ...patch }; onChange(state); };
@@ -40,12 +42,15 @@ export function createPoller<T>(load: () => Promise<T>, onChange: (state: PollSt
   const refresh = async () => {
     if (stopped) return;
     clear();
-    const mine = ++generation;
+    if (reading) { again = true; return; }
+    reading = true;
     set({ refreshing: true });
     let result: Partial<PollState<T>>;
     try { result = { data: await load(), updatedAt: Date.now(), error: undefined }; }
     catch (error) { result = { error }; }
-    if (stopped || mine !== generation) return;
+    reading = false;
+    if (stopped) return;
+    if (again) { again = false; set(result); void refresh(); return; }
     set({ ...result, refreshing: false });
     if (env.visible()) timer = env.setTimer(() => { timer = null; void refresh(); }, POLL_MS);
   };
