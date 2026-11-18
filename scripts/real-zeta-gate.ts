@@ -2552,23 +2552,24 @@ try {
     const marker = pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
     const jumpToLatest = pageChatDialog.locator('[data-part="jump-to-latest"]');
     if (await jumpToLatest.isVisible().catch(() => false)) await jumpToLatest.click({ force: true });
-    await waitFor(async () => (await marker.count()) > 0 || (await pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerLatestSource }).count()) > 0, "observer source marker or latest");
-    const evidence = (await marker.count()) > 0 ? marker : pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerLatestSource }).last();
+    await waitFor(async () => (await marker.isVisible().catch(() => false)) || (await pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerLatestSource }).count()) > 0, "observer source marker or latest");
+    const useMarker = await marker.isVisible().catch(() => false);
+    const evidence = useMarker ? marker : pageChatDialog.locator('[data-part="message"]').filter({ hasText: observerLatestSource }).last();
     await transcript.evaluate((element, text) => {
       const scroll = element as HTMLElement;
       const row = [...document.querySelectorAll<HTMLElement>('[data-part="message"]')].find((candidate) => candidate.textContent?.includes(text));
       if (!row) throw new Error(`missing source-derived observer evidence: ${text}`);
       row.scrollIntoView({ block: "center", inline: "nearest" });
       scroll.dispatchEvent(new Event("scroll", { bubbles: true }));
-    }, (await marker.count()) > 0 ? observerMarker : observerLatestSource);
+    }, useMarker ? observerMarker : observerLatestSource);
     await gateWait.playwright(evidence, "waitFor", { state: "visible" });
     const mobileMarker = await evidence.evaluate((element, expected) => {
       const rect = element.getBoundingClientRect();
       const transcriptRect = element.closest('[data-part="timeline-scroll"]')?.getBoundingClientRect();
       const point = document.elementFromPoint(rect.left + Math.min(8, rect.width / 2), rect.top + Math.min(8, rect.height / 2));
       return { text: element.textContent ?? "", rect: rect.toJSON(), transcriptRect: transcriptRect?.toJSON() ?? null, hit: Boolean(point && (point === element || element.contains(point))), expected };
-    }, (await marker.count()) > 0 ? observerMarker : observerLatestSource);
-    const expectedEvidence = (await marker.count()) > 0 ? observerMarker : observerLatestSource;
+    }, useMarker ? observerMarker : observerLatestSource);
+    const expectedEvidence = useMarker ? observerMarker : observerLatestSource;
     if (!mobileMarker.text.includes(expectedEvidence) || !mobileMarker.transcriptRect || mobileMarker.rect.top < mobileMarker.transcriptRect.top || mobileMarker.rect.bottom > mobileMarker.transcriptRect.bottom || !mobileMarker.hit)
       throw new Error(`observer active chat evidence is not readable in open sheet: ${JSON.stringify(mobileMarker)}`);
     if (new URL(observerPage.url()).pathname !== routeUnderneath) throw new Error("observer active chat changed the route");
@@ -2576,7 +2577,7 @@ try {
     await observerPage.setViewportSize({ width: 1440, height: 900 });
     await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer desktop page chat expanded");
     await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
-    await gateWait.playwright(marker, "waitFor", { state: "visible" });
+    await gateWait.playwright(evidence, "waitFor", { state: "visible" });
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
