@@ -1077,30 +1077,50 @@ try {
         const continuousColumns = [...columns.values()].every((column) => column.sort((a, b) => a.top - b.top).every((cell, index) => index === 0 || Math.abs(cell.top - column[index - 1]!.bottom) <= 0.5));
         return continuousRows && continuousColumns;
       };
-      const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => {
-        const shadow = getComputedStyle(cell).boxShadow;
-        return shadow.includes("inset") && /-1px 0px/.test(shadow) && /0px -1px/.test(shadow);
-      });
+      const hasVisibleInsetShadow = (shadow: string, xOffset: number, yOffset: number) => {
+        const shadows = [...shadow.matchAll(/((rgba?\([^)]*\)|hsla?\([^)]*\)|#[\da-f]+|[a-z]+)\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px(?:\s+(-?\d+(?:\.\d+)?)px)?\s+inset)/gi)];
+        return shadows.some(([, , color, x, y, blur, spread]) => {
+          const alpha = color?.startsWith("rgba") || color?.startsWith("hsla") ? Number(color.match(/,\s*([\d.]+)\s*\)$/)?.[1] ?? 1) : color === "transparent" ? 0 : 1;
+          return alpha > 0 && Number(x) === xOffset && Number(y) === yOffset && Number(blur) === 0 && Number(spread ?? 0) === 0;
+        });
+      };
+      const hasCellRightSeparator = (cell: HTMLElement) => hasVisibleInsetShadow(getComputedStyle(cell).boxShadow, -1, 0);
+      const hasCellBottomSeparator = (cell: HTMLElement) => hasVisibleInsetShadow(getComputedStyle(cell).boxShadow, 0, -1);
+      const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => hasCellRightSeparator(cell) && hasCellBottomSeparator(cell));
       const hasUnusedTrackPaint = ({ strip, rows }: ReturnType<typeof snapshotGrid>) => {
         if (!strip) return false;
         const stripStyle = getComputedStyle(strip);
         const finalRow = rows.at(-1) ?? [];
-        const lastFilledCell = finalRow.at(-1);
         const stripBox = strip.getBoundingClientRect();
-        const emptyTrackPoint = lastFilledCell && lastFilledCell.right < stripBox.right - 1 ? { x: lastFilledCell.right + 1, y: lastFilledCell.top + lastFilledCell.height / 2 } : null;
-        const noCellInUnusedTrack = !emptyTrackPoint || !document.elementFromPoint(emptyTrackPoint.x, emptyTrackPoint.y)?.closest(".metric-block");
+        const trackSizes = stripStyle.gridTemplateColumns.split(/\s+/).map(Number.parseFloat);
+        const trackCount = trackSizes.length;
+        const usedTrackCount = finalRow.length;
+        const finalRowHeight = finalRow[0]?.height ?? 0;
+        const finalRowTop = finalRow[0]?.top ?? stripBox.bottom;
         const transparent = (color: string) => color === "rgba(0, 0, 0, 0)" || color === "transparent";
         const pseudoPaint = (["::before", "::after"] as const).some((pseudo) => {
           const style = getComputedStyle(strip, pseudo);
           return style.content !== "none" || style.backgroundImage !== "none" || !transparent(style.backgroundColor) || style.borderTopWidth !== "0px" || style.borderRightWidth !== "0px" || style.borderBottomWidth !== "0px" || style.borderLeftWidth !== "0px" || style.boxShadow !== "none";
         });
-        return stripStyle.boxShadow === "none" && stripStyle.borderRightWidth === "0px" && stripStyle.borderBottomWidth === "0px" && !pseudoPaint && noCellInUnusedTrack && (!lastFilledCell || lastFilledCell.right <= stripBox.right + 0.5);
+        const unusedTracks = trackSizes.slice(usedTrackCount).map((width, index) => {
+          const left = stripBox.left + strip.clientLeft + trackSizes.slice(0, usedTrackCount + index).reduce((sum, size) => sum + size, 0);
+          const rect = { left, right: left + width, top: finalRowTop, bottom: finalRowTop + finalRowHeight };
+          const point = { x: left + Math.min(width / 2, width - 1), y: rect.top + Math.min(finalRowHeight / 2, finalRowHeight - 1) };
+          const hit = document.elementFromPoint(point.x, point.y);
+          const occupied = grid.cellElements.some((cell) => {
+            const cellBox = cell.getBoundingClientRect();
+            return cellBox.left < rect.right && cellBox.right > rect.left && cellBox.top < rect.bottom && cellBox.bottom > rect.top;
+          });
+          return hit === strip && !occupied;
+        });
+        return stripStyle.backgroundImage === "none" && transparent(stripStyle.backgroundColor) && stripStyle.boxShadow === "none" && stripStyle.borderRightWidth === "0px" && stripStyle.borderBottomWidth === "0px" && !pseudoPaint && (trackCount === usedTrackCount || unusedTracks.length === trackCount - usedTrackCount && unusedTracks.every(Boolean));
       };
-      const hasStripOwnedEdges = ({ strip }: ReturnType<typeof snapshotGrid>) => {
-        if (!strip) return false;
-        const style = getComputedStyle(strip);
-        return style.borderTopWidth === "1px" && style.borderLeftWidth === "1px" && style.borderRightWidth === "0px" && style.borderBottomWidth === "0px";
-      };
+      const hasStripTopOwner = (strip: HTMLElement) => getComputedStyle(strip).borderTopWidth === "1px";
+      const hasStripLeftOwner = (strip: HTMLElement) => getComputedStyle(strip).borderLeftWidth === "1px";
+      const hasStripRightPaint = (strip: HTMLElement) => getComputedStyle(strip).borderRightWidth !== "0px" || !["", "0px"].includes(strip.style.getPropertyValue("border-right-width"));
+      const hasStripBottomPaint = (strip: HTMLElement) => getComputedStyle(strip).borderBottomWidth !== "0px" || !["", "0px"].includes(strip.style.getPropertyValue("border-bottom-width"));
+      const hasStripShadowPaint = (strip: HTMLElement) => getComputedStyle(strip).boxShadow !== "none";
+      const hasStripOwnedEdges = ({ strip }: ReturnType<typeof snapshotGrid>) => Boolean(strip) && hasStripTopOwner(strip!) && hasStripLeftOwner(strip!) && !hasStripRightPaint(strip!) && !hasStripBottomPaint(strip!);
       const checkGrid = (grid: ReturnType<typeof snapshotGrid>) => hasContinuousTopology(grid) && hasStripOwnedEdges(grid) && hasCellOwnedSeparators(grid) && hasUnusedTrackPaint(grid);
       const proveMutations = (grid: ReturnType<typeof snapshotGrid>) => {
         const cell = grid.cellElements[0];
@@ -1108,24 +1128,43 @@ try {
         const originalCellShadow = cell?.style.boxShadow ?? "";
         const originalStrip = strip ? { cssText: strip.style.cssText } : null;
         const mutationStyle = document.createElement("style");
-        const mutations: Array<[string, () => void]> = [
-          ["cell missing its right separator", () => { if (cell) cell.style.setProperty("box-shadow", "none", "important"); }],
-          ["cell missing its bottom separator", () => { if (cell) cell.style.setProperty("box-shadow", "none", "important"); }],
-          ["strip missing its top owner", () => { if (strip) strip.style.borderTop = "0"; }],
-          ["strip missing its left owner", () => { if (strip) strip.style.borderLeft = "0"; }],
-          ["strip right border paint", () => { if (strip) strip.style.borderRight = "1px solid red"; }],
-          ["strip bottom border paint", () => { if (strip) strip.style.borderBottom = "1px solid red"; }],
-          ["strip shadow paint", () => { if (strip) strip.style.boxShadow = "0 0 0 1px red"; }],
-          ["strip pseudo paint", () => { mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }"; document.head.append(mutationStyle); }],
-        ];
+        const expectRejected = (message: string, accepted: boolean) => {
+          if (accepted) throw new Error(`grid gate accepted ${message}`);
+        };
         try {
-          for (const [message, mutate] of mutations) {
-            mutate();
-            if (checkGrid(snapshotGrid(elements))) throw new Error(`grid gate accepted ${message}`);
-            if (cell) cell.style.boxShadow = originalCellShadow;
-            if (strip && originalStrip) strip.style.cssText = originalStrip.cssText;
-            mutationStyle.remove();
+          if (cell) {
+            cell.style.setProperty("box-shadow", "inset 0 -1px 0 var(--fulcrum-border)", "important");
+            expectRejected("cell missing its right separator", hasCellRightSeparator(cell));
+            cell.style.boxShadow = originalCellShadow;
+            cell.style.setProperty("box-shadow", "inset -1px 0 0 var(--fulcrum-border)", "important");
+            expectRejected("cell missing its bottom separator", hasCellBottomSeparator(cell));
           }
+          if (strip) {
+            strip.style.setProperty("border-top", "0", "important");
+            expectRejected("strip missing its top owner", hasStripTopOwner(strip));
+            strip.style.cssText = originalStrip!.cssText;
+            strip.style.setProperty("border-left", "0", "important");
+            expectRejected("strip missing its left owner", hasStripLeftOwner(strip));
+            strip.style.cssText = originalStrip!.cssText;
+            strip.style.setProperty("border-right-width", "1px", "important");
+            expectRejected("strip right border paint", !hasStripRightPaint(strip));
+            strip.style.cssText = originalStrip!.cssText;
+            strip.style.setProperty("border-bottom-width", "1px", "important");
+            expectRejected("strip bottom border paint", !hasStripBottomPaint(strip));
+            strip.style.cssText = originalStrip!.cssText;
+            strip.style.setProperty("box-shadow", "0 0 0 1px red", "important");
+            expectRejected("strip shadow paint", !hasStripShadowPaint(strip));
+            strip.style.cssText = originalStrip!.cssText;
+            strip.style.setProperty("background-color", "red", "important");
+            expectRejected("strip background color paint", hasUnusedTrackPaint(grid));
+            strip.style.cssText = originalStrip!.cssText;
+            strip.style.setProperty("background-image", "linear-gradient(red, red)", "important");
+            expectRejected("strip background image paint", hasUnusedTrackPaint(grid));
+            strip.style.cssText = originalStrip!.cssText;
+          }
+          mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }";
+          document.head.append(mutationStyle);
+          expectRejected("strip pseudo paint", getComputedStyle(strip!, "::before").content === "none");
         } finally {
           if (cell) cell.style.boxShadow = originalCellShadow;
           if (strip && originalStrip) strip.style.cssText = originalStrip.cssText;
