@@ -1,7 +1,32 @@
 import { expect, test } from "bun:test";
-import { controlSnapshot, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { controlSnapshot, createFrameRing, createGateWait, desktopPageChatProof, diagnostic, redactArtifact } from "./gate-diagnostics";
 
 const fake = "fake-secret-token";
+
+test("desktop page chat proof uses the docked surface, not the mobile bar", () => {
+  expect(desktopPageChatProof({
+    mobileQuery: false,
+    barVisible: false,
+    docked: true,
+    surfaceVisible: true,
+    surfaceRole: null,
+    surfaceAriaModal: null,
+    evidenceVisible: true,
+    evidenceHit: true,
+    evidenceInsideSurface: true,
+  })).toBe(true);
+  expect(desktopPageChatProof({
+    mobileQuery: false,
+    barVisible: false,
+    docked: true,
+    surfaceVisible: true,
+    surfaceRole: null,
+    surfaceAriaModal: null,
+    evidenceVisible: false,
+    evidenceHit: false,
+    evidenceInsideSurface: false,
+  })).toBe(false);
+});
 
 test("mobile close retries a detached button and leaves the sheet closed", async () => {
   let mounted = true;

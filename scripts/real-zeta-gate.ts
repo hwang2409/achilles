@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -2652,9 +2652,34 @@ try {
     if (new URL(observerPage.url()).pathname !== routeUnderneath) throw new Error("observer active chat changed the route");
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
     await observerPage.setViewportSize({ width: 1440, height: 900 });
-    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer desktop page chat expanded");
+    await waitFor(async () => {
+      const state = await observerPage.evaluate((expected) => {
+        const bar = document.querySelector<HTMLElement>(".page-chat-bar");
+        const surface = document.querySelector<HTMLElement>(".page-view.docked .page-chat-surface");
+        const evidenceElement = [...document.querySelectorAll<HTMLElement>('.page-chat-surface [data-part="message"]')].find((element) => element.textContent?.includes(expected));
+        const visible = (element: HTMLElement | null) => {
+          if (!element) return false;
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+        };
+        const evidenceRect = evidenceElement?.getBoundingClientRect();
+        const point = evidenceRect && document.elementFromPoint(evidenceRect.left + Math.min(8, evidenceRect.width / 2), evidenceRect.top + Math.min(8, evidenceRect.height / 2));
+        return {
+          mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches,
+          barVisible: visible(bar),
+          docked: Boolean(surface?.closest(".page-view.docked")),
+          surfaceVisible: visible(surface),
+          surfaceRole: surface?.getAttribute("role"),
+          surfaceAriaModal: surface?.getAttribute("aria-modal"),
+          evidenceVisible: visible(evidenceElement),
+          evidenceHit: Boolean(point && evidenceElement && (point === evidenceElement || evidenceElement.contains(point))),
+          evidenceInsideSurface: Boolean(surface && evidenceElement && surface.contains(evidenceElement)),
+        };
+      }, expectedEvidence);
+      return desktopPageChatProof(state);
+    }, "observer desktop docked page chat and evidence settled");
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    await gateWait.playwright(evidence, "waitFor", { state: "visible" });
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();

@@ -6,6 +6,22 @@ import { basename, dirname, join } from "node:path";
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
 export const appShortcut = (key: string) => `ControlOrMeta+${key}`;
 
+export type DesktopPageChatProof = {
+  mobileQuery: boolean;
+  barVisible: boolean;
+  docked: boolean;
+  surfaceVisible: boolean;
+  surfaceRole?: string | null;
+  surfaceAriaModal?: string | null;
+  evidenceVisible: boolean;
+  evidenceHit: boolean;
+  evidenceInsideSurface: boolean;
+};
+
+export function desktopPageChatProof(state: DesktopPageChatProof): boolean {
+  return !state.mobileQuery && !state.barVisible && state.docked && state.surfaceVisible && !state.surfaceRole && !state.surfaceAriaModal && state.evidenceVisible && state.evidenceHit && state.evidenceInsideSurface;
+}
+
 export type ClickableLocator = {
   count(): Promise<number>;
   click(options?: { timeout?: number }): Promise<void>;
