@@ -2598,8 +2598,11 @@ try {
   await page.close();
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
   await gateWait.playwright(observerBanner, "waitFor", { state: "hidden" });
+  await observerPage.reload({ waitUntil: "domcontentloaded" });
+  await gateWait.playwright(observerPage.locator(`[data-session-id="${controllerChat}"]`), "waitFor", { state: "attached" });
   const restoredMutation = "restored controller mutation";
   const restoredField = observerPage.getByRole("textbox", { name: "message", exact: true });
+  await gateWait.playwright(restoredField, "waitFor", { state: "visible" });
   if (!await restoredField.isEditable()) throw new Error("restored controller composer remained read-only");
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
