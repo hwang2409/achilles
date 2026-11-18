@@ -2497,8 +2497,7 @@ try {
   if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
   const observerNewChat = observerPage.locator("button.new-chat");
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
-  await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
-  await gateWait.playwright(observerPage.locator('[data-part="timeline"] [data-id]:visible, [data-part="timeline"] [data-virtual-id]:visible').first(), "waitFor", { state: "visible" });
+  await waitFor(async () => (await observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').count()) > 0, "observer transcript rows");
   const observerMutationMethods = new Set(["send", "steer", "new_session", "approve", "deny", "interrupt", "set_settings", "set_page_create_mode", "create_page", "update_layout", "restore_version", "mcp_refresh_tools"]);
   const observerRequests = observerFrames.flatMap(({ direction, payload }) => {
     if (direction !== "sent") return [];
@@ -2527,7 +2526,7 @@ try {
       return style.visibility === "hidden" && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
     }), "observer page-chat settled");
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    const marker = observerPage.locator('[data-part="timeline"] [data-id]:visible, [data-part="timeline"] [data-virtual-id]:visible').first();
+    const marker = observerPage.locator('[data-part="timeline"] [data-part="message"]:visible, [data-part="timeline"] [data-id]:visible, [data-part="timeline"] [data-virtual-id]:visible').first();
     await gateWait.playwright(marker, "waitFor", { state: "visible" });
     if (!(await marker.isVisible())) throw new Error("observer active-chat marker is not visible");
     await marker.scrollIntoViewIfNeeded();
