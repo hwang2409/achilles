@@ -5,6 +5,7 @@ import { updateSettings, useSettings } from "./settings";
 import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, useModalFocus } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
+import { WRITE_SURFACE } from "./writeSurfaces";
 
 export type PageLink = { id: string; route: string; title: string };
 
@@ -331,7 +332,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong></div>
-      <button className="new-chat" disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (canWrite) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
+      <button className="new-chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (canWrite) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <section className={`page-list ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`} data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
@@ -383,7 +384,7 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRe
   return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     {meta}
-    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>}
+    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" data-write-surface={WRITE_SURFACE.sidebarRename} title="rename (F2)" onClick={startRename}>✎</button>}
   </a>;
 }
 
