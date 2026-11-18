@@ -2667,6 +2667,7 @@ try {
     const before = await restoredVim.getAttribute("aria-checked");
     await restoredVim.click();
     await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
+    await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
     await restoredVim.click();
   }
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== settingsBeforeRestore) throw new Error("restored controller settings did not restore reversibly");
