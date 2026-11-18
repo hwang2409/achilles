@@ -2592,7 +2592,8 @@ try {
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
-  await gateWait.playwright(observerBanner.getByText("stayed live and read-only", { exact: false }), "waitFor", { state: "visible" });
+  await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
+  if (!(await observerBanner.innerText()).includes("another tab controls zeta")) throw new Error("observer took control while the original controller was still open");
   await page.close();
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
   await gateWait.playwright(observerBanner, "waitFor", { state: "hidden" });
