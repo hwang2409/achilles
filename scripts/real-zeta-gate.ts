@@ -2532,7 +2532,10 @@ try {
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
     }));
-    if (markerIndex < 0) throw new Error(`observer active-chat marker is not visible; candidates=${await markerCandidates.count()}`);
+    if (markerIndex < 0) {
+      const geometry = await markerCandidates.evaluateAll((elements) => elements.map((element) => ({ rect: element.getBoundingClientRect().toJSON(), display: getComputedStyle(element).display, visibility: getComputedStyle(element).visibility, transform: getComputedStyle(element).transform })));
+      throw new Error(`observer active-chat marker is not visible; candidates=${JSON.stringify(geometry)}`);
+    }
     const marker = markerCandidates.nth(markerIndex);
     await marker.scrollIntoViewIfNeeded();
     const unobscured = await marker.evaluate((element) => {
