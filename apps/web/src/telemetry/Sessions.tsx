@@ -1,14 +1,20 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { formatCount, formatDuration, formatFullTime, formatTime, formatTokens, shortId } from "./format";
 import type { Page, TelemetrySession } from "./telemetry-types";
 
 /** The cursor of every page from the first (`null`) to the shown one, and the filters they share. */
 export type SessionsQuery = { cursors: (string | null)[]; errorsOnly: boolean; profile: string | null; model: string | null };
 
+export const PAGE_SIZE = 50;
 const NUMERIC = ["duration", "turns", "model calls", "tool calls", "errors", "tokens in / out"];
 
-export function Sessions({ page, query, rangeLabel, profiles, models, setFilters, next, previous, empty }: {
+/**
+ * `total` is the session count of the whole range (overview totals). It ignores the filters, so it shows only while
+ * no filter is on. `open` follows a row's link inside the module.
+ */
+export function Sessions({ page, total, query, rangeLabel, profiles, models, setFilters, next, previous, open, empty }: {
   page: Page<TelemetrySession>;
+  total: number;
   query: SessionsQuery;
   rangeLabel: string;
   profiles: string[];
@@ -16,27 +22,32 @@ export function Sessions({ page, query, rangeLabel, profiles, models, setFilters
   setFilters: (next: Partial<SessionsQuery>) => void;
   next: () => void;
   previous: () => void;
+  open: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   empty: ReactNode;
 }) {
   const filtered = query.errorsOnly || query.profile !== null || query.model !== null;
   const firstPage = query.cursors.length === 1;
   if (page.items.length === 0 && firstPage && !filtered) return empty;
-  const index = query.cursors.length - 1;
-  const from = index * 50 + 1;
-  const to = index * 50 + page.items.length;
-  const sum = (key: "input_tokens" | "output_tokens" | "total_tokens") => page.items.reduce((total, session) => total + session[key], 0);
+  const from = (query.cursors.length - 1) * PAGE_SIZE + 1;
+  const to = from + page.items.length - 1;
+  const sum = (key: "input_tokens" | "output_tokens" | "total_tokens") => page.items.reduce((sum, session) => sum + session[key], 0);
+  const count = filtered ? null : `${formatCount(total)} ${total === 1 ? "session" : "sessions"}`;
   return (
     <div className="tm-sessions">
       <div className="tm-heading">
-        <h1>sessions</h1>
-        <span className="tm-dim">{page.items.length ? <><b className="tm-num">{from}–{to}</b> in the {rangeLabel}{filtered && " that match"} · newest first</> : `none in the ${rangeLabel} match`}</span>
+        <h1>{count && <span className="tm-narrow-only">{count}</span>}<span className="tm-wide-only">sessions</span>{!count && <span className="tm-narrow-only">sessions</span>}</h1>
+        <p className="tm-dim">
+          {count ? <span className="tm-wide-only"><b>{count}</b> in the </span> : <span className="tm-wide-only">matching sessions in the </span>}
+          {rangeLabel}
+          <span className="tm-narrow-only"> · last seen, newest first</span><span className="tm-wide-only"> · newest first</span>
+        </p>
       </div>
       <div className="tm-filters">
         <Choice label="profile" value={query.profile} options={profiles} set={(profile) => setFilters({ profile })} />
         <Choice label="model" value={query.model} options={models} set={(model) => setFilters({ model })} />
         <label className="tm-check">
           <input type="checkbox" checked={query.errorsOnly} onChange={(event) => setFilters({ errorsOnly: event.target.checked })} />
-          with errors only
+          <span><span className="tm-wide-only">with </span>errors only</span>
         </label>
         {filtered && <button type="button" className="tm-link" onClick={() => setFilters({ errorsOnly: false, profile: null, model: null })}>clear filters</button>}
       </div>
@@ -47,12 +58,12 @@ export function Sessions({ page, query, rangeLabel, profiles, models, setFilters
             <thead>
               <tr>{["last seen", "profile", "session", "model", ...NUMERIC].map((label) => <th key={label} scope="col" className={NUMERIC.includes(label) ? "tm-num" : undefined} aria-sort={label === "last seen" ? "descending" : undefined}>{label}{label === "last seen" && <span aria-hidden="true"> ↓</span>}</th>)}</tr>
             </thead>
-            <tbody>{page.items.map((session) => <SessionRow key={session.session_id} session={session} />)}</tbody>
+            <tbody>{page.items.map((session) => <SessionRow key={session.session_id} session={session} open={open} />)}</tbody>
           </table>}
       {page.items.length > 0 && <footer className="tm-pager">
         <p>these {formatCount(page.items.length)} used <b className="tm-num">{formatTokens(sum("total_tokens"))}</b> tokens · in <b className="tm-num">{formatTokens(sum("input_tokens"))}</b> · out <b className="tm-num">{formatTokens(sum("output_tokens"))}</b></p>
         <div className="tm-pager-buttons">
-          <span className="tm-num tm-dim">{from}–{to}</span>
+          <span className="tm-num tm-dim">{from}–{to}{count && ` of ${formatCount(total)}`}</span>
           <button type="button" className="tm-button" disabled={firstPage} onClick={previous} aria-label="newer sessions">‹ newer</button>
           <button type="button" className="tm-button" disabled={!page.next_cursor} onClick={next} aria-label="older sessions">older ›</button>
         </div>
@@ -74,22 +85,26 @@ function Choice({ label, value, options, set }: { label: string; value: string |
   );
 }
 
-/** Narrow screens show each row as a two-line card; `unit` is the word printed after a number there, so every value keeps a label. */
-function SessionRow({ session }: { session: TelemetrySession }) {
+/**
+ * One row is one link target: the profile link stretches over the row and opens the session's route. Narrow screens
+ * show the row as a three-line card; `unit` is the word printed after a number there, so every value keeps a label.
+ */
+function SessionRow({ session, open }: { session: TelemetrySession; open: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
+  const href = `/telemetry/sessions/${encodeURIComponent(session.session_id)}`;
   const cell = (label: string, content: ReactNode, className?: string, unit?: string) => <td data-label={label} data-unit={unit} className={className}>{content}</td>;
   return (
-    <tr>
+    <tr className="tm-row">
       {cell("last seen", <time dateTime={new Date(session.last_ns / 1e6).toISOString()} title={formatFullTime(session.last_ns)}>{formatTime(session.last_ns)}</time>, "tm-time")}
-      {cell("profile", session.profile ?? <span className="tm-dim">no profile</span>, "tm-profile")}
-      {cell("session", <span title={session.session_id} aria-label={`session ${session.session_id}`}>{shortId(session.session_id)}</span>, "tm-id")}
+      {cell("profile", <a className="tm-row-link" href={href} onClick={(event) => open(event, href)} aria-label={`session ${session.session_id}, ${session.profile ?? "no profile"}`}>{session.profile ?? <span className="tm-dim">no profile</span>}</a>, "tm-profile")}
+      {cell("session", <span title={session.session_id}>{shortId(session.session_id)}</span>, "tm-id")}
       {cell("model", session.model ?? <span className="tm-dim">not reported</span>, "tm-model")}
       {cell("duration", formatDuration(session.last_ns - session.first_ns), "tm-num tm-duration")}
-      {cell("turns", formatCount(session.turn_count), "tm-num tm-turns", "turns")}
-      {cell("model calls", formatCount(session.model_count), "tm-num tm-calls")}
-      {cell("tool calls", formatCount(session.tool_count), "tm-num")}
-      {cell("errors", session.error_count > 0 ? <span className="tm-danger">{formatCount(session.error_count)}</span> : <span className="tm-dim">0</span>, "tm-num tm-errors", "errors")}
-      {cell("tokens in / out", <span title={`${formatCount(session.input_tokens)} in, ${formatCount(session.output_tokens)} out`}>{formatTokens(session.input_tokens)} / {formatTokens(session.output_tokens)}</span>, "tm-num tm-inout")}
-      {cell("tokens", <span title={`${formatCount(session.total_tokens)} tokens`}>{formatTokens(session.total_tokens)}</span>, "tm-num tm-total", "tok")}
+      {cell("turns", formatCount(session.turn_count), "tm-num tm-turns", session.turn_count === 1 ? "turn" : "turns")}
+      {cell("model calls", formatCount(session.model_count), "tm-num tm-calls", "model")}
+      {cell("tool calls", formatCount(session.tool_count), "tm-num tm-toolcalls", "tool")}
+      {cell("errors", session.error_count > 0 ? <span className="tm-danger"><span aria-hidden="true" className="tm-narrow-only">▲ </span>{formatCount(session.error_count)}</span> : <span className="tm-dim">0</span>, "tm-num tm-errors", session.error_count === 1 ? "error" : "errors")}
+      {cell("tokens in / out", <span title={`${formatCount(session.input_tokens)} in, ${formatCount(session.output_tokens)} out`}>{formatTokens(session.input_tokens)} / {formatTokens(session.output_tokens)}</span>, "tm-num tm-inout", "tok")}
+      <td className="tm-break" aria-hidden="true" />
     </tr>
   );
 }

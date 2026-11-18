@@ -26,6 +26,7 @@
 .telemetry-module .tm-tool { color: var(--tm-tool); }
 .telemetry-module .tm-dim b { color: var(--fulcrum-fg); font-weight: 500; }
 .telemetry-module code { color: var(--fulcrum-fg); }
+.telemetry-module .tm-narrow-only { display: none; }
 .telemetry-module .tm-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* tabs row: module tabs on the left (the shared tab style of the boards), receiver mark, range, and refresh on the right */
@@ -128,9 +129,10 @@
 /* sessions */
 .tm-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 22px; }
 .tm-heading h1 { margin: 0; font-size: 32px; font-weight: 700; }
+.tm-heading p { margin: 0; }
 .tm-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 22px; }
 .tm-select { display: flex; align-items: center; gap: 8px; min-height: 44px; padding-left: 12px; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-muted); }
-.tm-select select { min-height: 42px; border: 0; }
+.tm-select select { min-height: 44px; max-width: 28ch; border: 0; text-overflow: ellipsis; }
 .tm-select-on { border-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .tm-check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
 .tm-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--fulcrum-accent); }
@@ -146,7 +148,15 @@
 .tm-table .tm-time { color: var(--fulcrum-muted); }
 .tm-table .tm-id { color: var(--fulcrum-accent); }
 .tm-table .tm-model { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; color: var(--fulcrum-muted); }
-.tm-table td.tm-total { display: none; }
+.tm-table td.tm-break { display: none; }
+/* the whole row is the profile link's target; the ring marks the row */
+.tm-row { position: relative; cursor: pointer; }
+.tm-row-link { color: inherit; }
+.tm-row-link::after { content: ""; position: absolute; inset: 0; }
+.tm-row-link:focus-visible { outline: none; }
+.tm-row:has(.tm-row-link:focus-visible) { outline: 2px solid var(--fulcrum-warn); outline-offset: -2px; }
+.tm-table .tm-profile { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; }
+.tm-id-heading { overflow-wrap: anywhere; }
 .tm-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 24px 0 0; color: var(--fulcrum-muted); }
 .tm-pager p { margin: 0; }
 .tm-pager b { color: var(--fulcrum-fg); font-weight: 500; }
@@ -180,26 +190,39 @@
   .tm-intro h1 { font-size: 26px; }
   .tm-records { grid-template-columns: 1fr; }
   .tm-empty { margin: 48px 0; }
-  .tm-filters .tm-select { flex: 1 1 140px; }
   .tm-table, .tm-table tbody { display: block; }
   .tm-table thead { display: none; }
-  /* card lines: profile, id, duration / turns, errors, tokens / model, last seen; the pseudo rows break the lines */
-  .tm-table tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 14px 0; border-bottom: 1px solid var(--tm-line); }
+  /* card lines (T2m): profile, id / last seen; model · duration / errors; turns · model · tool / tokens in / out */
+  .tm-table tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 0; padding: 14px 0; border-bottom: 1px solid var(--tm-line); }
   .tm-table tr::before, .tm-table tr::after { content: ""; flex-basis: 100%; height: 0; }
   .tm-table tr::before { order: 4; }
   .tm-table tr::after { order: 8; }
   .tm-table tbody tr:hover { background: none; }
-  .tm-table td { display: none; padding: 0; border: 0; }
+  .tm-table td { display: block; padding: 0; border: 0; white-space: nowrap; font-size: 12px; }
+  .tm-table td.tm-profile, .tm-table td.tm-id, .tm-table td.tm-time { font-size: 13px; }
   .tm-table td.tm-num { text-align: left; }
   .tm-table td[data-unit]::after { content: " " attr(data-unit); color: var(--fulcrum-muted); }
-  .tm-table td.tm-profile { display: block; order: 1; font-size: 1.05em; }
-  .tm-table td.tm-id { display: block; order: 2; }
-  .tm-table td.tm-duration { display: block; order: 3; margin-left: auto; }
-  .tm-table td.tm-turns { display: block; order: 5; }
-  .tm-table td.tm-errors { display: block; order: 6; }
-  .tm-table td.tm-total { display: block; order: 7; margin-left: auto; }
-  .tm-table td.tm-model { display: block; order: 9; min-width: 0; max-width: 60%; }
-  .tm-table td.tm-time { display: block; order: 10; margin-left: auto; }
+  .tm-table td.tm-profile { order: 1; min-width: 0; flex: 0 1 auto; max-width: 48%; margin-right: 10px; font-size: 1.05em; }
+  .tm-table td.tm-id { order: 2; flex: none; }
+  .tm-table td.tm-time { order: 3; margin-left: auto; padding-left: 12px; color: var(--fulcrum-muted); }
+  .tm-table td.tm-model { order: 5; min-width: 0; flex: 0 1 auto; max-width: none; }
+  .tm-table td.tm-duration { order: 6; }
+  .tm-table td.tm-duration::before, .tm-table td.tm-calls::before, .tm-table td.tm-toolcalls::before { content: "\00a0·\00a0"; color: var(--fulcrum-muted); }
+  .tm-table td.tm-errors { order: 7; margin-left: auto; padding-left: 12px; }
+  .tm-table td.tm-break { display: block; order: 9; flex-basis: 100%; height: 0; }
+  .tm-table td.tm-turns { order: 10; }
+  .tm-table td.tm-calls { order: 11; }
+  .tm-table td.tm-toolcalls { order: 12; }
+  .tm-table td.tm-inout { order: 13; margin-left: auto; padding-left: 12px; }
+  .telemetry-module .tm-narrow-only { display: inline; }
+  .telemetry-module .tm-wide-only { display: none; }
+  .tm-heading { display: block; }
+  .tm-heading h1 { font-size: 30px; }
+  .tm-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tm-filters .tm-select { min-width: 0; }
+  .tm-filters .tm-select select { min-width: 0; width: 100%; }
+  .tm-check { grid-column: 1 / -1; padding: 0 12px; border: 1px solid var(--fulcrum-border); }
+  .tm-filters .tm-link { grid-column: 1 / -1; justify-self: start; padding: 0; }
   .tm-pager-buttons { flex: 1; }
   .tm-pager-buttons .tm-button { flex: 1; }
 }

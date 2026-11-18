@@ -14,6 +14,8 @@ const TABS: { tab: Tab; href: string }[] = [
   { tab: "sessions", href: "/telemetry/sessions" },
 ];
 const tabOf = (path: string): Tab => (path === "/telemetry/sessions" || path.startsWith("/telemetry/sessions/") ? "sessions" : "overview");
+/** The session id of `/telemetry/sessions/:id`, else null. */
+const sessionOf = (path: string) => { const match = /^\/telemetry\/sessions\/([^/]+)$/.exec(path); return match ? decodeURIComponent(match[1]) : null; };
 
 export type Range = "24h" | "7d";
 const RANGES: Record<Range, { label: string; ms: number; bucket: "hour" | "day" }> = {
@@ -24,7 +26,7 @@ const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (now
 
 type Loaded =
   | { tab: "overview"; status: TelemetryStatus; overview: TelemetryOverview }
-  | { tab: "sessions"; status: TelemetryStatus; page: Page<TelemetrySession>; window: Window };
+  | { tab: "sessions"; status: TelemetryStatus; total: number; page: Page<TelemetrySession>; window: Window };
 
 const firstPage: SessionsQuery = { cursors: [null], errorsOnly: false, profile: null, model: null };
 
@@ -51,10 +53,12 @@ export function TelemetryModule({ client, pathname }: { client: ZetaClient | nul
   );
   if (!client) return <Frame><Notice role="status" title="connecting to zeta…" /></Frame>;
   if (!telemetryNegotiated(client)) return <NeedsNewerZeta protocol={client.protocolVersion} />;
-  return <TelemetryPages client={client} tab={tab} tabs={tabs} />;
+  const detail = sessionOf(path);
+  if (detail) return <Frame tabs={tabs}><SessionComing id={detail} back={(event) => go(event, "/telemetry/sessions")} /></Frame>;
+  return <TelemetryPages client={client} tab={tab} tabs={tabs} go={go} />;
 }
 
-function TelemetryPages({ client, tab, tabs }: { client: ZetaClient; tab: Tab; tabs: ReactNode }) {
+function TelemetryPages({ client, tab, tabs, go }: { client: ZetaClient; tab: Tab; tabs: ReactNode; go: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
   const [range, setRange] = useState<Range>("24h");
   const [chart, setChart] = useState<"calls" | "tokens">("calls");
   const [query, setQuery] = useState(firstPage);
@@ -66,9 +70,10 @@ function TelemetryPages({ client, tab, tabs }: { client: ZetaClient; tab: Tab; t
       const overview = await reads.overview(windowOf(range), RANGES[range].bucket);
       return { tab, status: overview.status, overview };
     }
+    // The count comes from overview totals for the same window, so overview and sessions show one number.
     const window = pagedWindow ?? windowOf(range);
-    const [status, page] = await Promise.all([reads.status(), reads.sessions({ ...window, cursor: query.cursors.at(-1), errorsOnly: query.errorsOnly, profile: query.profile, model: query.model })]);
-    return { tab, status, page, window };
+    const [overview, page] = await Promise.all([reads.overview(window, RANGES[range].bucket), reads.sessions({ ...window, cursor: query.cursors.at(-1), errorsOnly: query.errorsOnly, profile: query.profile, model: query.model })]);
+    return { tab, status: overview.status, total: overview.totals.sessions, page, window };
   }, [client, tab, range, query, pagedWindow]);
 
   // Filter choices come from the sessions seen so far; zeta has no list of profiles or models yet.
@@ -113,6 +118,8 @@ function TelemetryPages({ client, tab, tabs }: { client: ZetaClient; tab: Tab; t
           ? <Overview overview={data.overview} bucket={RANGES[range].bucket} chart={chart} setChart={setChart} empty={empty} />
           : <Sessions
               page={data.page}
+              total={data.total}
+              open={go}
               query={query}
               rangeLabel={rangeLabel}
               profiles={[...seen.current.profiles].sort()}
@@ -208,6 +215,18 @@ function TelemetryOff() {
         <p className="tm-dim tm-after">this page only reads telemetry. the <code>otel</code> setting lives in zeta settings; after you turn it on, running sessions send telemetry on their next turn.</p>
       </section>
     </Frame>
+  );
+}
+
+/** `/telemetry/sessions/:id` until the session detail view lands. */
+function SessionComing({ id, back }: { id: string; back: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+  return (
+    <section className="tm-empty">
+      <p className="tm-eyebrow">session</p>
+      <h1 className="tm-id-heading" title={id}>{id}</h1>
+      <p>the session view, with its agent tree and trace waterfall, comes in the next update.</p>
+      <div className="tm-actions"><a className="tm-button" href="/telemetry/sessions" onClick={back}>‹ back to sessions</a></div>
+    </section>
   );
 }
 
