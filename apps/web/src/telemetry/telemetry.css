@@ -84,6 +84,7 @@
 .tm-turn-on p { margin: 0 0 12px; }
 .tm-turn-on-action { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; }
 .tm-turn-on-action p { margin: 0; }
+.tm-turn-on-action > div { flex: 1 1 260px; min-width: 0; }
 .tm-after { margin: 24px 0 0; }
 .tm-turn-on pre { margin: 0; padding: 12px 14px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tm-facts { display: grid; grid-template-columns: auto 1fr; margin: 0 0 28px; border-top: 1px solid var(--fulcrum-border); }
