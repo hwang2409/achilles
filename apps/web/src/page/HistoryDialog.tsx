@@ -96,6 +96,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="history-title">history</h2></div><div><span>restore adds a new version</span><button type="button" onClick={onClose}>{touchOnly ? "close" : "esc"}</button></div></div>
       <div className="settings-content">
         <p ref={noteRef} tabIndex={-1} className={note?.error ? "history-note history-error" : "history-note"} role={note?.error ? "alert" : "status"}>{note?.text ?? (versions ? "" : "loading history…")}</p>
+        {!canMutate && <p className="history-hint" role="note">{disabledReason ?? "this tab is read-only; take control to make changes"}</p>}
         {versions && <>
           <section className="history-group" aria-labelledby="history-layout">
             <h3 id="history-layout">layout</h3>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ZetaError, type ZetaDiscovery } from "@fulcrum/zeta";
-import { createConnection, FEATURES } from "./connection";
+import { createConnection, FEATURES, isObserverPresentation, type ConnectionState } from "./connection";
 
 const discovery: ZetaDiscovery = { url: "ws://127.0.0.1:8765", controller_token: "c", observer_token: "o", origins: [] };
 
@@ -10,6 +10,19 @@ async function flush(times = 20) {
 
 test("negotiates tool approval origin without changing the wire data", () => {
   expect(FEATURES).toContain("tool_approval_origin");
+});
+
+test("observer presentation is server-derived, not a synonym for read-only", () => {
+  const states: ConnectionState[] = [
+    { phase: "connecting", attempt: 0, lost: false },
+    { phase: "not_running", attempt: 1, retryAt: 1, lost: false },
+    { phase: "auth_failed", reason: "rejected", origins: [], attempt: 1, retryAt: 1, lost: false },
+    { phase: "incompatible", attempt: 1, retryAt: 1, lost: false },
+    { phase: "dropped", attempt: 1, retryAt: 1, lost: true },
+  ];
+  for (const state of states) expect(isObserverPresentation(state, true)).toBe(false);
+  expect(isObserverPresentation({ phase: "connected", authority: "controller" }, true)).toBe(false);
+  expect(isObserverPresentation({ phase: "connected", authority: "observer" }, true)).toBe(true);
 });
 
 describe("createConnection controller capacity vs version mismatch", () => {
@@ -31,9 +44,12 @@ describe("createConnection controller capacity vs version mismatch", () => {
     await flush();
     expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
     expect(connection.client).toBe(opened[0]);
+    expect(connection.observerPresentation).toBe(true);
+    expect(isObserverPresentation(connection.state, connection.observerPresentation)).toBe(true);
     await connection.takeControl();
     expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
     expect(connection.client).toBe(opened[1]);
+    expect(connection.observerPresentation).toBe(true);
     (opened[0] as { close(): void }).close();
     expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
     expect(roles).toEqual(["controller", "observer", "controller", "observer"]);
@@ -46,6 +62,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
     await flush();
     expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
     expect(connection.client).toBe(client);
+    expect(connection.observerPresentation).toBe(false);
     connection.stop();
   });
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller

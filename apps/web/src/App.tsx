@@ -17,7 +17,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { backoff, createConnection, isObserverPresentation, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -288,7 +288,7 @@ export function App() {
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
-  const observer = !canMutate;
+  const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const shownToggleError = useRef(active.toggleError);
   useEffect(() => {
     // a successful retry removes the notice and its focused button; give focus back to the visible header control

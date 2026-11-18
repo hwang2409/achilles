@@ -2479,8 +2479,23 @@ try {
   if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
   if (screenshotDir) {
     await observerPage.setViewportSize({ width: 390, height: 760 });
+    const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
+    if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click();
+    const pageChatClose = observerPage.locator('.page-chat-surface button[aria-label="close page chat"]');
+    if (await pageChatClose.count() && await pageChatClose.isVisible()) await pageChatClose.click();
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const marker = observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').first();
+    await gateWait.playwright(marker, "waitFor", { state: "visible" });
+    if (!(await marker.isVisible())) throw new Error("observer active-chat marker is not visible");
+    const unobscured = await marker.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const point = document.elementFromPoint(box.left + Math.min(8, box.width / 2), box.top + Math.min(8, box.height / 2));
+      return Boolean(point && (point === element || element.contains(point)));
+    });
+    if (!unobscured) throw new Error("observer active-chat marker is obscured");
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
     await observerPage.setViewportSize({ width: 1440, height: 900 });
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
   await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
@@ -2498,7 +2513,7 @@ try {
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
-  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
+  if (process.env.SCREENSHOT_PATH) await observerPage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   passed = true;
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 

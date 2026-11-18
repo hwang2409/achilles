@@ -35,10 +35,18 @@ function serve(tool: { version: number; input_schema: unknown }) {
   return calls;
 }
 
-const block = (refreshKey: string) => createElement(FormBlock, { title: "add book", toolName: "add_book", pageId: "books", credential: "c", refreshKey });
+const block = (refreshKey: string, canMutate = true) => createElement(FormBlock, { title: "add book", toolName: "add_book", pageId: "books", credential: "c", refreshKey, canMutate, disabledReason: "this tab is read-only; take control to make changes" });
 const done = JSON.stringify("done");
 const statusButton = () => view().getByRole("button", { name: /status/ });
 const chooseStatus = async (value: string) => { const button = await view().findByRole("button", { name: /status/ }); fireEvent.click(button); fireEvent.click(view().getByRole("option", { name: value })); };
+
+test("read-only insert shows the shared reason and never invokes the tool", async () => {
+  const calls = serve({ version: 1, input_schema: schema() });
+  mounted = render(block("0:0", false));
+  await view().findByText("this tab is read-only; take control to make changes");
+  expect((view().getByRole("button", { name: "add" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(calls.some((call) => call.includes("/invoke"))).toBe(false);
+});
 
 test("a chat turn end (refreshKey change) keeps typed values and the same inputs", async () => {
   serve({ version: 1, input_schema: schema() });

@@ -32,6 +32,9 @@ export const backoff = (attempt: number) => Math.min(10_000, 500 * 2 ** Math.max
 const attemptOf = (state: ConnectionState) => ("attempt" in state ? state.attempt : 0);
 const lostOf = (state: ConnectionState) => state.phase === "connected" || ("lost" in state && state.lost);
 
+/** observer wording is valid only after the server accepts the observer handshake. */
+export const isObserverPresentation = (state: ConnectionState, retained: boolean) => retained && state.phase === "connected" && state.authority === "observer";
+
 export function reduceConnection(state: ConnectionState, event: ConnectionEvent): ConnectionState {
   const lost = lostOf(state);
   switch (event.type) {
@@ -79,6 +82,8 @@ export type Connection = {
   retryNow(): void;
   /** Reopens this page as controller, or keeps it as a live observer if the slot is still occupied. */
   takeControl(): Promise<void>;
+  /** Whether the last established authority was an observer. */
+  readonly observerPresentation: boolean;
   stop(): void;
 };
 
@@ -134,8 +139,10 @@ export function createConnection({
   let generation = 0;
   let stopped = false;
   let desiredRole: ZetaRole = "controller";
+  let retainedObserver = false;
   const listeners = new Set<() => void>();
   const send = (event: ConnectionEvent) => {
+    if (event.type !== "connected" && event.type !== "closed" && event.type !== "attempt" && event.type !== "reconnect") retainedObserver = false;
     const next = reduceConnection(state, event);
     if (next === state) return;
     state = next;
@@ -205,6 +212,8 @@ export function createConnection({
       client = null;
       send({ type: "closed", now: now() });
     });
+    if (authority === "controller") retainedObserver = false;
+    else retainedObserver = true;
     send({ type: "connected", authority });
   };
   void attempt();
@@ -212,6 +221,7 @@ export function createConnection({
     get state() { return state; },
     get client() { return client; },
     get startCommand() { return start ?? `zeta serve --ws ${port} --ws-origin ${origin}`; },
+    get observerPresentation() { return retainedObserver; },
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     retryNow() {
       if (state.phase === "connected" || state.phase === "connecting" || stopped) return;
