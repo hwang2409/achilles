@@ -21,6 +21,9 @@ from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 inspect_turn_release = asyncio.Event()
+METRIC_BOUNDARY_MATRIX = json.loads(
+    (Path(__file__).parent.parent / "apps/web/src/metric-boundary-matrix.json").read_text()
+)
 
 
 class BarrierBackend(FakeBackend):
@@ -295,17 +298,22 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                             "blocks": [
                                 {"type": "text", "text": "reading list layout"},
                                 {"type": "form", "title": "add book", "tool": "add_book"},
-                                {
-                                    "type": "metric",
-                                    "label": (
-                                        "legacy total with an unusually long descriptive label"
-                                    ),
-                                    "value": "9,999,999,999,999,999",
-                                },
+                                *[
+                                    {
+                                        "type": "metric",
+                                        **{
+                                            key: value
+                                            for key, value in metric.items()
+                                            if key not in {"expectedText", "classification"}
+                                        },
+                                    }
+                                    for metric in METRIC_BOUNDARY_MATRIX
+                                ],
                                 {
                                     "type": "metric",
                                     "label": "review status",
-                                    "value": "waiting on legal review",
+                                    "value": "waiting on an intentionally long legal and "
+                                    "editorial review",
                                 },
                                 {
                                     "type": "metric",
@@ -380,15 +388,9 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 },
                                 {
                                     "type": "metric",
-                                    "label": (
-                                        "legacy total with an unusually long descriptive label"
-                                    ),
-                                    "value": "9,999,999,999,999,999",
-                                },
-                                {
-                                    "type": "metric",
                                     "label": "review status",
-                                    "value": "waiting on legal review",
+                                    "value": "waiting on an intentionally long legal and "
+                                    "editorial review",
                                 },
                                 {
                                     "type": "metric",

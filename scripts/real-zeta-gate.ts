@@ -14,6 +14,7 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
+const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -220,10 +221,9 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const captureBlockState = async (state: string, target: Locator) => {
-    if (!screenshotDir) return;
+  const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
     for (const width of [390, 1280, 1440, 1920]) {
-      await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
+      await page.setViewportSize({ width, height: width === 390 ? mobileHeight : desktopHeight });
       if (width === 390) {
         const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
         await clickOptionalDetachedLocator(pageChatClose);
@@ -251,7 +251,14 @@ try {
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
       }
-      await page.screenshot({ path: join(screenshotDir, `state-${state}-${width}.png`), fullPage: true });
+      await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
+      if (assertFrame) await assertFrame(`${width}px`);
+      const captureName = state === "metric-boundary"
+        ? `metric-boundary-after-${width}x${width === 390 ? mobileHeight : desktopHeight}.png`
+        : state === "page-chat-closed" && width === 390
+          ? "page-chat-closed-390x844.png"
+          : `state-${state}-${width}.png`;
+      if (screenshotDir) await page.screenshot({ path: join(screenshotDir, captureName), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
   };
@@ -926,8 +933,6 @@ try {
     JSON.stringify(homeInspectValue).includes(achillesHome)
   )
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
-  const legacyMetricText =
-    "legacy total with an unusually long descriptive label: 9,999,999,999,999,999";
   const theme = process.env.GATE_THEME ?? "gruvbox-dark";
   await page.goto(`${origin}/reading?theme=${encodeURIComponent(theme)}`);
   const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.fulcrumTheme ?? "auto" }));
@@ -943,26 +948,7 @@ try {
     `raw capture: arguments truncated by zeta marker asserted in the rendered disclosure`,
   ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
-  const longMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "legacy total with an unusually long descriptive label" }) });
-  await gateWait.playwright(longMetric, "waitFor");
-  const longMetricLabel = longMetric.locator(".metric-label");
-  const longMetricValue = longMetric.locator("strong");
   const accessibility = await page.context().newCDPSession(page);
-  const metricObject = await accessibility.send("Runtime.evaluate", {
-    expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify("legacy total with an unusually long descriptive label")})`,
-  });
-  const metricAxTree = await accessibility.send("Accessibility.getPartialAXTree", {
-    objectId: metricObject.result.objectId,
-    fetchRelatives: true,
-  });
-  const metricAxNames = metricAxTree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
-  const longMetricGeometry = await longMetricValue.evaluate((element) => {
-    const value = element.getBoundingClientRect();
-    const block = element.closest<HTMLElement>(".metric-block")?.getBoundingClientRect();
-    return { valueHeight: value.height, blockHeight: block?.height ?? 0, blockScrollWidth: element.closest<HTMLElement>(".metric-block")?.scrollWidth ?? 0, blockClientWidth: element.closest<HTMLElement>(".metric-block")?.clientWidth ?? 0 };
-  });
-  if (await longMetricLabel.innerText() !== "legacy total with an unusually long descriptive label" || await longMetricValue.innerText() !== "10,000T" || await longMetricValue.getAttribute("title") !== "9,999,999,999,999,999" || !metricAxNames.includes("9,999,999,999,999,999") || metricAxNames.includes("10,000T") || longMetricGeometry.valueHeight > 34 || longMetricGeometry.blockScrollWidth > longMetricGeometry.blockClientWidth)
-    throw new Error(`long metric did not retain its full value in Chromium's accessibility tree or fit on one line: label=${JSON.stringify(await longMetricLabel.innerText())} value=${JSON.stringify(await longMetricValue.innerText())} axNames=${JSON.stringify(metricAxNames)} geometry=${JSON.stringify(longMetricGeometry)}`);
   await page.setViewportSize({ width: 390, height: 760 });
   const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
   const textMetricGeometry = await textMetric.evaluate((element) => ({
@@ -971,10 +957,11 @@ try {
     documentScrollWidth: document.documentElement.scrollWidth,
     viewportWidth: innerWidth,
   }));
-  if (await textMetric.locator("strong").innerText() !== "waiting on legal review" || textMetricGeometry.blockScrollWidth > textMetricGeometry.blockClientWidth || textMetricGeometry.documentScrollWidth > textMetricGeometry.viewportWidth)
+  if (await textMetric.locator("strong").innerText() !== "waiting on an intentionally long legal and editorial review" || textMetricGeometry.blockScrollWidth > textMetricGeometry.blockClientWidth || textMetricGeometry.documentScrollWidth > textMetricGeometry.viewportWidth)
     throw new Error(`long nonnumeric metric overflowed at 390px: ${JSON.stringify(textMetricGeometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-nonnumeric-390x760.png"), fullPage: true });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-boundary-after-390x844.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
+  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "metric-boundary-after-1440x900.png"), fullPage: true });
   const readingMetric = page.locator(".metric-block").filter({ has: page.getByText("reading", { exact: true }) });
   await gateWait.playwright(readingMetric.locator("strong").filter({ hasText: "0" }), "waitFor");
   const booksList = page.locator('.record-list[data-collection="books"]');
@@ -1063,32 +1050,117 @@ try {
   await page.getByRole("button", { name: "create mode on", exact: true }).click();
   await gateWait.playwright(page.getByRole("button", { name: "create mode off", exact: true }), "waitFor");
 
+  await page.setViewportSize({ width: 1440, height: 1400 });
   const desktopViewport = page.viewportSize();
-  await page.setViewportSize({ width: 390, height: 760 });
-  const metricBoxes = await page.locator(".metric-block").evaluateAll((elements) =>
-    elements.map((element) => {
-      const box = element.getBoundingClientRect();
-      return {
-        top: box.top,
-        width: box.width,
-        clientWidth: element.clientWidth,
-        scrollWidth: element.scrollWidth,
+  const matrixStrip = page.locator(".metric-strip").first();
+  const matrixBlocks = matrixStrip.locator(".metric-block");
+  const assertMetricMatrix = async (viewport: string) => {
+    const entries = await matrixBlocks.evaluateAll((elements, expected) => expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
+      const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
+      const block = element as HTMLElement | undefined;
+      const labelNode = element?.querySelector<HTMLElement>(".metric-label");
+      const rendered = element?.querySelector<HTMLElement>(".metric-value");
+      const blockBox = block?.getBoundingClientRect();
+      const labelBox = labelNode?.getBoundingClientRect();
+      const valueBox = rendered?.getBoundingClientRect();
+      const style = block ? getComputedStyle(block) : null;
+      const renderedStyle = rendered ? getComputedStyle(rendered) : null;
+      const clip = document.querySelector<HTMLElement>(".page-content")?.getBoundingClientRect();
+      const points = [
+        ...(blockBox ? [{ name: "top-left", x: blockBox.left + 1, y: blockBox.top + 1 }, { name: "top-right", x: blockBox.right - 1, y: blockBox.top + 1 }, { name: "bottom-left", x: blockBox.left + 1, y: blockBox.bottom - 1 }, { name: "bottom-right", x: blockBox.right - 1, y: blockBox.bottom - 1 }] : []),
+        ...(labelBox ? [{ name: "label-center", x: labelBox.left + labelBox.width / 2, y: labelBox.top + labelBox.height / 2 }] : []),
+        ...(valueBox ? [{ name: "value-center", x: valueBox.left + valueBox.width / 2, y: valueBox.top + valueBox.height / 2 }] : []),
+      ];
+      const stacks = points.map((point) => ({ ...point, stack: document.elementsFromPoint(point.x, point.y).slice(0, 5).map((node) => ({ tag: node.tagName, id: (node as HTMLElement).id, className: (node as HTMLElement).className })) }));
+      const hits = points.every((point) => { const hit = document.elementFromPoint(point.x, point.y); return Boolean(hit && block && (hit === block || block.contains(hit))); });
+      const expectedMark = expectedStatus ? `record-mark-${expectedStatus.toLowerCase().replace(/\s+/g, "-")}` : "";
+      const painted = valueBox && rendered ? { top: valueBox.top, right: valueBox.right, bottom: valueBox.bottom, left: valueBox.left } : null;
+      const numeric = ["finite", "zero", "signed-zero"].includes(classification);
+      const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
+      const numericFit = !numeric || Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && renderedStyle?.textOverflow !== "ellipsis" && renderedStyle?.overflow !== "hidden" && renderedStyle?.whiteSpace === "nowrap" && rendered.innerText.length <= (scientific ? 7 : 5) && (!scientific || renderedStyle.fontSize === "20px"));
+      const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48)));
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
+      const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+      const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
+    }), metricBoundaryMatrix);
+    const failures = entries.flatMap((entry) => {
+      const marker = entry.expectedStatus ? entry.mark.includes(entry.expectedMark) : !entry.mark;
+      const exact = entry.found && entry.text === entry.expectedText && entry.title === entry.value && entry.aria === entry.value;
+      const geometry = entry.contained && entry.clipContained && entry.hits && !entry.overlayHit && entry.rightGap >= entry.padding && entry.textFit;
+      return exact && marker && entry.numericFit && geometry ? [] : [`${entry.label}: ${JSON.stringify({ exact, marker, numericFit: entry.numericFit, geometry, entry })}`];
+    });
+    for (let index = 0; index < entries.length; index += 1) for (let next = index + 1; next < entries.length; next += 1) {
+      const left = entries[index].painted;
+      const right = entries[next].painted;
+      if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}: ${JSON.stringify({ left, right })}`);
+    }
+    for (const entry of entries) {
+      const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
+      if (counterpart && entry.text !== counterpart.text) failures.push(`${entry.label}: marker parity differs from ${counterpart.label}`);
+    }
+    if (viewport === "390px") for (const entry of entries) {
+      const metricObject = await accessibility.send("Runtime.evaluate", { expression: `Array.from(document.querySelectorAll('.metric-block')).find((element) => element.querySelector('.metric-label')?.textContent === ${JSON.stringify(entry.label)})?.querySelector('.metric-value')` });
+      const tree = await accessibility.send("Accessibility.getPartialAXTree", { objectId: metricObject.result.objectId, fetchRelatives: false });
+      const names = tree.nodes.map((node) => node.name?.value).filter((name): name is string => typeof name === "string");
+      if (names.filter((name) => name === entry.value).length !== 1 || (entry.text !== entry.value && names.includes(entry.text ?? ""))) failures.push(`${entry.label}: chromium AX names=${JSON.stringify(names)}`);
+    }
+    if (failures.length) throw new Error(`metric boundary matrix failed at ${viewport}: ${JSON.stringify(failures)}`);
+  };
+  const provedMatrixViewports = new Set<string>();
+  await captureBlockState("metric-boundary", matrixStrip, 2400, 1400, async (viewport) => {
+    if (viewport === "390px" || viewport === "1440px") {
+      provedMatrixViewports.add(viewport);
+      await assertMetricMatrix(viewport);
+    }
+  });
+  if (!provedMatrixViewports.has("390px") || !provedMatrixViewports.has("1440px"))
+    throw new Error(`missing 1440px proof: ${JSON.stringify([...provedMatrixViewports])}`);
+  const assertClosedFrame = async (viewport: string) => {
+    const frame = await page.evaluate(() => {
+      const describe = (selector: string) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) return null;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return { visibility: style.visibility, transform: style.transform, display: style.display, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height } };
       };
-    }),
-  );
-  if (
-    metricBoxes.length !== 3 ||
-    metricBoxes[0].top !== metricBoxes[1].top ||
-    metricBoxes[2].top <= metricBoxes[0].top ||
-    metricBoxes.some(
-      (box) => box.width > 172 || box.scrollWidth > box.clientWidth,
-    )
-  )
-    throw new Error(
-      `390px metrics did not render two wrapped columns: ${JSON.stringify(metricBoxes)}`,
-    );
+      const target = document.querySelector<HTMLElement>(".record-form-actions button.primary:not(:disabled)");
+      const targetBox = target?.getBoundingClientRect();
+      const point = targetBox ? { x: Math.max(targetBox.left + 1, Math.min(targetBox.right - 1, innerWidth / 2)), y: Math.max(targetBox.top + 1, Math.min(targetBox.bottom - 1, innerHeight / 2)) } : null;
+      const hit = point ? document.elementFromPoint(point.x, point.y) : null;
+      const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        const rect = element?.getBoundingClientRect();
+        return element && rect && rect.width > 0 && rect.height > 0 ? [{ selector, rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left } }] : [];
+      });
+      const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+      return {
+        viewport: { width: innerWidth, height: innerHeight },
+        bar: document.querySelector<HTMLElement>(".page-chat-bar")?.getAttribute("aria-expanded"),
+        surface: describe(".page-chat-surface"),
+        drawer: describe(".sidebar"),
+        target: targetBox && { top: targetBox.top, right: targetBox.right, bottom: targetBox.bottom, left: targetBox.left, width: targetBox.width, height: targetBox.height },
+        targetHit: Boolean(hit && target && (hit === target || target.contains(hit))),
+        overlayCoversTarget: Boolean(targetBox && overlays.some(({ rect }) => intersects(targetBox, rect))),
+        scroll: { window: scrollY, content: document.querySelector<HTMLElement>(".page-content")?.scrollTop ?? -1 },
+        overlays,
+      };
+    });
+    if (frame.viewport.width !== 390 || frame.viewport.height !== 844)
+      throw new Error(`closed frame has wrong viewport: ${JSON.stringify(frame)}`);
+    if (frame.bar !== "false" || frame.surface?.visibility !== "hidden" || frame.surface.transform === "matrix(1, 0, 0, 1, 0, 0)" || !frame.drawer || frame.drawer.rect.right > 0 || frame.drawer.transform === "matrix(1, 0, 0, 1, 0, 0)")
+      throw new Error(`closed frame overlays are not hidden and offscreen: ${JSON.stringify(frame)}`);
+    if (!frame.target || !frame.targetHit || frame.overlayCoversTarget || frame.scroll.window !== 0 || frame.scroll.content !== 0)
+      throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
+  };
+  await captureBlockState("page-chat-closed", page.locator(".record-form-actions button.primary:not(:disabled)"), 844, 900, async (viewport) => {
+    if (viewport === "390px") await assertClosedFrame(viewport);
+  });
+  await page.setViewportSize({ width: 390, height: 760 });
   const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
+  if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
   const closedGeometry = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>(".page-chat-bar")?.getBoundingClientRect();
     const action = document.querySelector<HTMLElement>(".record-form-actions button")?.getBoundingClientRect();
@@ -1096,7 +1168,6 @@ try {
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
-  if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-390x844.png"), fullPage: true });
   await page.evaluate(() => {
     const originalAdd = window.addEventListener.bind(window);
     const result = { prevented: false, inside: false };
@@ -1113,10 +1184,18 @@ try {
       }
     }) as typeof window.addEventListener;
   });
+  const preChatClick = await page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>(".page-chat-surface");
+    const close = document.querySelector<HTMLElement>('.page-chat-surface button[aria-label="close page chat"]');
+    const style = surface && getComputedStyle(surface);
+    return { barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), close: { connected: Boolean(close?.isConnected), visible: Boolean(close && style && style.visibility !== "hidden"), disabled: close instanceof HTMLButtonElement && close.disabled }, surface: style && { visibility: style.visibility, transform: style.transform, transition: style.transition }, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop };
+  });
   await pageChatBar.click();
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
+  const focusAfterChatClick = await page.evaluate(() => ({ active: { tag: document.activeElement?.tagName, id: (document.activeElement as HTMLElement | null)?.id, className: (document.activeElement as HTMLElement | null)?.className, aria: document.activeElement?.getAttribute("aria-label"), insideModal: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')) }, barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), layout: { mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop, surface: (() => { const node = document.querySelector<HTMLElement>(".page-chat-surface"); const style = node && getComputedStyle(node); return node && style ? { connected: node.isConnected, visibility: style.visibility, transform: style.transform, transition: style.transition } : null; })() } }));
+  if (!focusAfterChatClick.active.insideModal || focusAfterChatClick.active.aria !== "close page chat") throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify({ preChatClick, focusAfterChatClick, chat: await pageChatLayout() })}`);
   const preTabFocus = await page.evaluate(() => ({
     inside: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')),
     close: document.activeElement?.getAttribute("aria-label") === "close page chat",
@@ -1424,10 +1503,20 @@ try {
     process.exit(0);
   }
   await gateWait.playwright(page.locator(".page-lead").filter({ hasText: "layout updated without reload" }), "waitFor", { timeout: 20000 });
-  await waitFor(async () => {
-    const metrics = page.locator(".metric-strip");
-    return await metrics.locator(".metric-label").filter({ hasText: "legacy total with an unusually long descriptive label" }).count() === 1 && await metrics.getByText("all books", { exact: true }).count() === 1 && await metrics.getByText("reading", { exact: true }).count() === 1 && await page.locator('.record-list table[data-collection="books"]').count() === 1;
-  }, "open page layout after chat tool completion");
+  const layoutContract = () => page.evaluate(() => {
+    const visible = (element: Element) => { const node = element as HTMLElement; const box = node.getBoundingClientRect(); const style = getComputedStyle(node); return Boolean(box.width && box.height && style.display !== "none" && style.visibility !== "hidden"); };
+    const labelState = (label: string) => Array.from(document.querySelectorAll(".metric-label")).filter((element) => element.textContent === label).map((element) => ({ visible: visible(element), owner: element.closest(".metric-block")?.outerHTML.slice(0, 240) }));
+    return { route: location.pathname, lead: Array.from(document.querySelectorAll(".page-lead")).map((element) => ({ text: element.textContent, visible: visible(element) })), legacy: labelState("legacy total with an unusually long descriptive label"), allBooks: labelState("all books"), reading: labelState("reading"), review: labelState("review status"), tables: Array.from(document.querySelectorAll('.record-list table[data-collection="books"]')).map((element) => ({ visible: visible(element), owner: element.closest(".page-block")?.outerHTML.slice(0, 240) })), detail: Array.from(document.querySelectorAll('.record-detail')).map((element) => ({ visible: visible(element) })), forms: Array.from(document.querySelectorAll('.record-form')).map((element) => ({ visible: visible(element) })), layoutVersion: document.querySelector(".page-layout-version")?.textContent };
+  });
+  const layoutDiagnostics = async () => ({ contract: await layoutContract(), control: JSON.parse(await Bun.file(control).text()) });
+  try {
+    await gateWait.playwright(page.locator(".metric-label", { hasText: "all books" }), "waitFor", { state: "visible", timeout: 20000 });
+    const contract = await layoutContract();
+    if (contract.legacy.length !== 0 || contract.allBooks.length !== 1 || !contract.allBooks[0].visible || contract.reading.length !== 1 || !contract.reading[0].visible || contract.review.length !== 1 || !contract.review[0].visible || contract.tables.length !== 1 || !contract.tables[0].visible || contract.detail.length !== 1 || !contract.detail[0].visible || contract.forms.length !== 1 || !contract.forms[0].visible)
+      throw new Error(`replacement layout contract failed: ${JSON.stringify(contract)}`);
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: layout diagnostics=${JSON.stringify(await layoutDiagnostics())}`);
+  }
   const afterLayoutUpdate = JSON.parse(await Bun.file(control).text());
   const updateLayoutResult = afterLayoutUpdate.tool_results?.find((result: { call_id: string }) => result.call_id === "update-reading-layout");
   if (!updateLayoutResult || updateLayoutResult.is_error)
