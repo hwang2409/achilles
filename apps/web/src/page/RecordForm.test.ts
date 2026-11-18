@@ -96,7 +96,7 @@ function serveUpdate(stored: Record<string, unknown>) {
   }) as typeof fetch;
   return sent;
 }
-const editBlock = () => createElement(FormBlock, { title: "edit book", toolName: "edit_book", pageId: "books", credential: "c", refreshKey: "0:0" });
+const editBlock = () => createElement(FormBlock, { title: "edit book", toolName: "edit_book", pageId: "books", credential: "c", refreshKey: "0:0", canWrite: true });
 
 test("a selected row fills the update form and its record_id and revision are sent, not shown", async () => {
   const stored = { record_id: "b1", revision: 3, status: "to read", title: "Dune" };

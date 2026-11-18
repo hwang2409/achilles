@@ -41,7 +41,7 @@ export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
-export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert, canWrite = true, disabledReason }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void; canWrite?: boolean; disabledReason?: string }) {
+export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert, canWrite = false, disabledReason }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void; canWrite?: boolean; disabledReason?: string }) {
   const [reload, setReload] = useState(0);
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.

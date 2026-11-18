@@ -74,7 +74,7 @@ function useMetricCounts(blocks: Array<Record<string, unknown>>, pageId: string,
   return new Map(queries.map(({ key }) => [key, entries.current.get(key)?.value ?? "…"]));
 }
 
-export function PageView({ page, pageId, credential, refreshKey, onAskChat, canWrite = true, disabledReason }: PageViewProps) {
+export function PageView({ page, pageId, credential, refreshKey, onAskChat, canWrite = false, disabledReason }: PageViewProps) {
   const blocks = page.layout.blocks;
   const leadIndex = blocks.findIndex((block) => block.type === "text");
   const lead = leadIndex >= 0 ? String(blocks[leadIndex].text ?? "") : "";
@@ -105,7 +105,7 @@ function blockIdentity(block: Record<string, unknown>, blocks: Array<Record<stri
   return `${type}:${signature}:${ordinal}`;
 }
 
-export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert, canWrite = true, disabledReason }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (id: string, capability: InsertCapability) => () => void; canWrite?: boolean; disabledReason?: string }) {
+export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefreshKey, onAskChat, insertCapability, onRegisterInsert, canWrite = false, disabledReason }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability; onRegisterInsert?: (id: string, capability: InsertCapability) => () => void; canWrite?: boolean; disabledReason?: string }) {
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
