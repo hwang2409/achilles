@@ -2,13 +2,12 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 import type { ZetaClient } from "@fulcrum/zeta";
 import { formatAgo, formatHour } from "./format";
 import { Overview, OverviewSkeleton } from "./Overview";
-import { usePoll } from "./poll";
-import { Sessions, type SessionsQuery } from "./Sessions";
-import { STATE_FEATURE, TELEMETRY_FEATURE, telemetryClient, telemetryNegotiated, telemetryProblem, type TelemetryProblem, type Window } from "./telemetry-client";
-import type { Page, TelemetryOverview, TelemetrySession, TelemetryStatus } from "./telemetry-types";
+import { RANGES, useTelemetryReads, type Loaded, type Range, type Tab } from "./reads";
+import { Sessions } from "./Sessions";
+import { STATE_FEATURE, TELEMETRY_FEATURE, telemetryNegotiated, telemetryProblem, type TelemetryProblem } from "./telemetry-client";
+import type { TelemetryStatus } from "./telemetry-types";
 import "./telemetry.css";
 
-type Tab = "overview" | "sessions";
 const TABS: { tab: Tab; href: string }[] = [
   { tab: "overview", href: "/telemetry" },
   { tab: "sessions", href: "/telemetry/sessions" },
@@ -16,25 +15,6 @@ const TABS: { tab: Tab; href: string }[] = [
 const tabOf = (path: string): Tab => (path === "/telemetry/sessions" || path.startsWith("/telemetry/sessions/") ? "sessions" : "overview");
 /** The session id of `/telemetry/sessions/:id`, else null. */
 const sessionOf = (path: string) => { const match = /^\/telemetry\/sessions\/([^/]+)$/.exec(path); return match ? decodeURIComponent(match[1]) : null; };
-
-export type Range = "24h" | "7d";
-const RANGES: Record<Range, { label: string; ms: number; bucket: "hour" | "day" }> = {
-  "24h": { label: "last 24 hours", ms: 24 * 3600_000, bucket: "hour" },
-  "7d": { label: "last 7 days", ms: 7 * 24 * 3600_000, bucket: "day" },
-};
-const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (nowMs - RANGES[range].ms) * 1e6, end_ns: nowMs * 1e6 });
-
-/**
- * What the reads ask for: a new object per user choice, so a reply answers the choice on screen only when its `ask` is
- * that object. `window` is set while paging, because zeta ties a cursor to the window and filters that issued it.
- */
-type Ask = { range: Range; query: SessionsQuery; window: Window | null };
-
-type Loaded =
-  | { ask: Ask; tab: "overview"; status: TelemetryStatus; overview: TelemetryOverview }
-  | { ask: Ask; tab: "sessions"; status: TelemetryStatus; total: number; page: Page<TelemetrySession>; window: Window };
-
-const firstPage: SessionsQuery = { cursors: [null], errorsOnly: false, profile: null, model: null };
 
 /** The telemetry pages: one read-only view of zeta's telemetry over the page's live connection. */
 export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
@@ -69,63 +49,28 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
   return <TelemetryPages client={client} tab={tab} tabs={tabs} go={go} openTelemetrySettings={openTelemetrySettings} />;
 }
 
-/**
- * The read state of the pages. Every range or filter change starts again from the first page and a fresh window.
- * Paging is off until the reply for the shown choice arrives (`current`), and the next cursor goes out only with the
- * filters and window of the page that issued it.
- */
-function useTelemetryReads(client: ZetaClient, tab: Tab) {
-  const [current, setAsk] = useState<Ask>({ range: "24h", query: firstPage, window: null });
-  const reads = telemetryClient(client);
-  const poll = usePoll<Loaded>(async () => {
-    const { range, query } = current;
-    if (tab === "overview") {
-      const overview = await reads.overview(windowOf(range), RANGES[range].bucket);
-      return { ask: current, tab: "overview", status: overview.status, overview };
-    }
-    // The count comes from overview totals for the same window, so overview and sessions show one number.
-    const window = current.window ?? windowOf(range);
-    const [overview, page] = await Promise.all([reads.overview(window, RANGES[range].bucket), reads.sessions({ ...window, cursor: query.cursors.at(-1), errorsOnly: query.errorsOnly, profile: query.profile, model: query.model })]);
-    return { ask: current, tab: "sessions", status: overview.status, total: overview.totals.sessions, page, window };
-  }, [client, tab, current]);
-  const answered = poll.data?.ask === current && poll.data.tab === tab ? poll.data : undefined;
-  const restart = (patch: Partial<Ask>, filters: Partial<SessionsQuery> = {}) => setAsk({ ...current, ...patch, query: { ...current.query, ...filters, cursors: [null] }, window: null });
-  const sessions = answered?.tab === "sessions" ? answered : undefined;
-  return {
-    poll,
-    range: current.range,
-    query: current.query,
-    chooseRange: (range: Range) => restart({ range }),
-    setFilters: (filters: Partial<SessionsQuery>) => restart({}, filters),
-    next: sessions?.page.next_cursor
-      ? () => setAsk({ ...current, query: { ...current.query, cursors: [...current.query.cursors, sessions.page.next_cursor] }, window: sessions.window })
-      : undefined,
-    previous: answered && current.query.cursors.length > 1
-      ? () => { const cursors = current.query.cursors.slice(0, -1); setAsk({ ...current, query: { ...current.query, cursors }, window: cursors.length === 1 ? null : current.window }); }
-      : undefined,
-  };
-}
-
 function TelemetryPages({ client, tab, tabs, go, openTelemetrySettings }: { client: ZetaClient; tab: Tab; tabs: ReactNode; go: (event: MouseEvent<HTMLAnchorElement>, href: string) => void; openTelemetrySettings?: () => void }) {
   const [chart, setChart] = useState<"calls" | "tokens">("calls");
   const reads = useTelemetryReads(client, tab);
-  const { poll, range } = reads;
-  const seen = useSeenFilters(poll.data);
-  const status = poll.data?.status;
-  const problem = poll.error === undefined ? null : telemetryProblem(poll.error);
+  const { data, shown, range } = reads;
+  const seen = useSeenFilters(data);
+  const status = data?.status;
+  const problem = reads.error === undefined ? null : telemetryProblem(reads.error);
   if (problem?.kind === "off" || status?.enabled === false) return <TelemetryOff openSettings={openTelemetrySettings} />;
 
-  const rangeLabel = RANGES[range].label;
-  const data = poll.data?.tab === tab ? poll.data : undefined;
-  const banner = problem && <FailedBanner problem={problem} updatedAt={data ? poll.updatedAt : undefined} retry={poll.refresh} />;
-  const empty = <NoTelemetryYet rangeLabel={rangeLabel} widen={range === "24h" ? () => reads.chooseRange("7d") : undefined} />;
-  let view: ReactNode = null;
-  if (data?.tab === "overview") view = <Overview overview={data.overview} bucket={RANGES[range].bucket} chart={chart} setChart={setChart} empty={empty} />;
-  else if (data?.tab === "sessions") view = <Sessions page={data.page} total={data.total} open={go} query={reads.query} shown={data.ask.query} rangeLabel={rangeLabel} profiles={seen.profiles} models={seen.models} setFilters={reads.setFilters} next={reads.next} previous={reads.previous} empty={empty} />;
-  const body = data
-    ? <>{banner}<div className={problem ? "tm-stale" : undefined}>{view}</div></>
-    : <>{banner}{!problem && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {rangeLabel}…</p>}{tab === "overview" && <OverviewSkeleton />}</>;
-  return <Frame tools={<Tools status={status} refreshing={poll.refreshing && !!poll.data} range={range} chooseRange={reads.chooseRange} refresh={poll.refresh} />} tabs={tabs}>{body}</Frame>;
+  const banner = problem && <FailedBanner problem={problem} updatedAt={shown ? reads.updatedAt : undefined} retry={reads.refresh} />;
+  let body: ReactNode;
+  if (shown) {
+    // Labels come from the ask the shown reply answers; while a newer ask loads, the old reply stays, dimmed.
+    const empty = <NoTelemetryYet rangeLabel={shown.label} widen={range === "24h" ? () => reads.chooseRange("7d") : undefined} />;
+    const view = shown.data.tab === "overview"
+      ? <Overview overview={shown.data.overview} bucket={shown.bucket} chart={chart} setChart={setChart} empty={empty} />
+      : <Sessions page={shown.data.page} total={shown.data.total} open={go} query={reads.query} shown={shown.data.ask.query} rangeLabel={shown.label} profiles={seen.profiles} models={seen.models} setFilters={reads.setFilters} next={reads.next} previous={reads.previous} empty={empty} />;
+    body = <>{banner}<div className={shown.stale ? "tm-stale" : undefined} aria-busy={shown.stale && !problem ? true : undefined}>{view}</div></>;
+  } else {
+    body = <>{banner}{!problem && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {RANGES[range].label}…</p>}{tab === "overview" && <OverviewSkeleton />}</>;
+  }
+  return <Frame tools={<Tools status={status} refreshing={reads.phase === "refreshing"} range={range} chooseRange={reads.chooseRange} refresh={reads.refresh} />} tabs={tabs}>{body}</Frame>;
 }
 
 /** Filter choices come from the sessions seen so far; zeta has no list of profiles or models yet. */
