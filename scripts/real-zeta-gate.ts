@@ -2461,8 +2461,11 @@ try {
   await page.goto(`${origin}/?chat=${first}`);
   const controllerChat = await page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 });
   if (controllerChat !== first) throw new Error(`known controller chat did not attach: expected ${first}, got ${controllerChat}`);
-  const observerMarker = page.getByText("prove chat", { exact: true }).first();
-  await gateWait.playwright(observerMarker, "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page, "waitForFunction", () =>
+    document.querySelectorAll('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').length > 0,
+    undefined,
+    { timeout: 20_000 },
+  );
   const observerPage = await browser.newPage();
   await observerPage.goto(`${origin}/?chat=${controllerChat}`);
   const observerBanner = observerPage.locator(".observer-banner");
