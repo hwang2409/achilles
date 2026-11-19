@@ -20,10 +20,12 @@
 .chat-group h2, .sidebar > footer > button { font-size: 13px; }
 .list-head { padding-inline: 14px; font-size: 11px; letter-spacing: .1em; }
 .page-list a,
+.place-nav a,
 .chat-row { position: relative; border-left: 2px solid transparent; }
-.page-list a { gap: 10px; padding: 6px 14px 6px 10px; font-size: 13px; }
-.page-list a > span { flex: 0 0 auto; color: var(--fulcrum-muted); }
+.page-list a, .place-nav a { gap: 10px; padding: 6px 14px 6px 10px; font-size: 13px; }
+.page-list a > span, .place-nav a > span { flex: 0 0 auto; color: var(--fulcrum-muted); }
 .page-list a b,
+.place-nav a b,
 .chat-row strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .chat-row { display: block; padding: 8px 14px 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
 .chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 20px; }
@@ -134,8 +136,9 @@
   .page-chat-docked .page-chat-surface [data-part="composer"] { width: calc(100% - 32px); }
 }
 
-.page-list > .telemetry-link { flex: none; align-items: center; min-height: 40px; }
-.page-list > .telemetry-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.page-list > .telemetry-link[aria-current="page"] b { font-weight: 700; }
-.page-list > .telemetry-link:focus-visible { outline-offset: -2px; }
+.place-nav { flex: none; border-bottom: 1px solid var(--fulcrum-border); }
+.place-nav .telemetry-link { align-items: center; min-height: 40px; }
+.place-nav .telemetry-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.place-nav .telemetry-link[aria-current="page"] b { font-weight: 700; }
+.place-nav .telemetry-link:focus-visible { outline-offset: -2px; }
 .sidebar > footer > .palette-button:only-child { position: static; width: auto; height: 40px; opacity: 1; }
