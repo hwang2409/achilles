@@ -20,6 +20,9 @@ export const WRITE_SURFACE = {
   shellNewChat: "shell.new-chat",
   keyboardCommands: "keyboard.commands",
   paletteCommands: "palette.commands",
+  pageChatNew: "page-chat.new",
+  pageChatAutoApprove: "page-chat.auto-approve",
+  pageChatCreateMode: "page-chat.create-mode",
   pageChat: "page.chat",
   historyRestore: "history.restore",
   recordInsert: "record.insert",
@@ -41,13 +44,14 @@ export const WRITE_SURFACE = {
 } as const;
 
 export type WriteSurfaceId = (typeof WRITE_SURFACE)[keyof typeof WRITE_SURFACE];
-export type WriteSurfaceMetadata = { readonly id: WriteSurfaceId; readonly channel: "websocket" | "http" | "storage" | "storage-and-shared-default" | "http-and-storage" | "persistence"; readonly observer?: "browser-only"; readonly visibility: "visible" | "command" | "passive" };
+export type WriteSurfaceMetadata = { readonly id: WriteSurfaceId; readonly channel: "websocket" | "http" | "storage" | "storage-and-shared-default" | "http-and-storage" | "http-and-websocket" | "persistence"; readonly observer?: "browser-only"; readonly visibility: "visible" | "command" | "passive" };
 
 export const WRITE_SURFACES: readonly WriteSurfaceMetadata[] = [
   ["emptySend", "websocket", "visible"], ["emptyCreate", "websocket", "visible"], ["emptyContinue", "websocket", "visible"],
   ["busyRetry", "websocket", "visible"], ["createRetry", "websocket", "visible"], ["createDiscard", "websocket", "visible"], ["missingNewChat", "websocket", "visible"],
   ["approvalApprove", "websocket", "visible"], ["approvalDeny", "websocket", "visible"], ["composerSend", "websocket", "visible"], ["composerSteer", "websocket", "visible"], ["composerAbort", "websocket", "visible"], ["deliveryRetry", "websocket", "visible"],
   ["headerCreate", "http", "visible"], ["headerRename", "http", "visible"], ["sidebarRename", "http", "visible"], ["shellNewChat", "http", "visible"], ["keyboardCommands", "http", "command"], ["paletteCommands", "http-and-storage", "command", "browser-only"], ["pageChat", "websocket", "visible"], ["historyRestore", "http", "visible"], ["recordInsert", "http", "visible"], ["recordUpdate", "http", "visible"], ["recordAdd", "http", "visible"],
+  ["pageChatNew", "http-and-websocket", "visible"], ["pageChatAutoApprove", "websocket", "visible"], ["pageChatCreateMode", "http-and-websocket", "visible"],
   ["settingsTheme", "storage", "visible", "browser-only"], ["settingsUiFont", "storage", "visible", "browser-only"], ["settingsCodeFont", "storage", "visible", "browser-only"], ["settingsSize", "storage", "visible", "browser-only"], ["settingsDensity", "storage", "visible", "browser-only"], ["settingsVim", "storage", "visible", "browser-only"], ["settingsAutoApprove", "storage-and-shared-default", "visible"], ["settingsReset", "storage-and-shared-default", "visible"],
   ["passiveLastState", "persistence", "passive"], ["passiveFirstMessage", "persistence", "passive"], ["passiveTitle", "persistence", "passive"], ["passiveAttachment", "persistence", "passive"], ["passiveRepair", "persistence", "passive"],
 ].map(([key, channel, visibility, observer]) => ({ id: WRITE_SURFACE[key as keyof typeof WRITE_SURFACE], channel: channel as WriteSurfaceMetadata["channel"], visibility: visibility as WriteSurfaceMetadata["visibility"], observer: observer as WriteSurfaceMetadata["observer"] }));

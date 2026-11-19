@@ -7,7 +7,7 @@ import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
 import { createChatCreationOwner, StaleCreation, type ChatCreationInput, type ChatCreationOwner, type PendingChat } from "./chatCreation";
-import { ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
+import { applyApprovalMode, ChatBusyError, creationApprovalMode, loadSession, openHomeSession, pageBinding, runningSession, SessionNotFoundError } from "./zeta/session";
 import { createTurnEndOwner, whenTurnEnds } from "./zeta/turnEnd";
 
 export type Page = { id: string; route: string; title: string; zeta_session_id: string | null; workspace: string; create_mode: boolean; approval_mode?: string | null; active_layout_version?: number; layout: { blocks: Array<Record<string, unknown>> } };
@@ -162,7 +162,7 @@ export async function attachPage(
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
       const session = observer
-        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: serverApprovalMode, pending: false, rebind: false }
+        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: (await client.request("session_settings", { session_id: sessionId }) as { approval_mode?: string | null }).approval_mode ?? serverApprovalMode, pending: false, rebind: false }
         : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
@@ -479,6 +479,10 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   // "retry creating chat" re-runs the attach: the failed-create screen and its header stay until the retry settles
   const retryingCreation = useRef(false);
   const [listRefresh, setListRefresh] = useState(0);
+  const [approvalChange, setApprovalChange] = useState<{ pending: boolean; error?: string; savedAt?: Date } | null>(null);
+  const approvalRequest = useRef<number | null>(null);
+  const authority = useRef(canWrite);
+  authority.current = canWrite;
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [toggleBlocked, setToggleBlocked] = useState(false);
@@ -525,6 +529,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (!client || !connected) return;
     const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
     // Selecting a chat whose tool refresh failed re-attaches it; its retry notice stays until a refresh succeeds.
+    setApprovalChange(null);
     const stale = modeToggle.current.stale();
     const keepStale = stale?.idle && stale.sessionId === selectedId ? stale : null;
     if (!keepStale) { modeToggle.current.reset(); setToggleError(null); setToggling(false); setToggleBlocked(false); setToggleRetryable(false); }
@@ -604,6 +609,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (!context) return;
     const key = context.route === "/" ? "home" : context.route.slice(1);
     const token = owner.current.begin(`new:${key}`, true);
+    setApprovalChange(null);
     const focusClaim = claimComposerFocus();
     const run = ++newChatRun.current;
     // the page stays (header, new-chat box) while the chat is created; it can wait for an earlier create of the page
@@ -699,19 +705,32 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const ready = state.phase === "ready" ? state : null;
   const workSessionId = ready && (ready.rebind || ready.pendingApprovalMode) ? ready.sessionId : null;
   useEffect(() => {
-    if (!client || !ready || !workSessionId) return;
+    if (!canWrite || !client || !ready || !workSessionId) return;
     const token = owner.current.token();
     const turn = createTurnEndOwner({
       client, sessionId: ready.sessionId, binding: pageBinding(ready.credential, ready.page.workspace), clock,
       work: { rebind: ready.rebind, approvalMode: ready.pendingApprovalMode },
-      settled: (update) => updateReady(token, (value) => value.sessionId !== ready.sessionId ? value
-        : "rebind" in update ? { ...value, rebind: false }
-        : { ...value, page: { ...value.page, approval_mode: update.approvalMode }, pendingApprovalMode: update.pendingApprovalMode }),
-      failed: (caught) => { if (owner.current.current(token)) setState({ phase: "error", error: attachmentError(caught) }); },
+      settled: (update) => {
+        if (!owner.current.current(token)) return;
+        updateReady(token, (value) => value.sessionId !== ready.sessionId ? value
+          : "rebind" in update ? { ...value, rebind: false }
+          : { ...value, page: { ...value.page, approval_mode: update.approvalMode }, pendingApprovalMode: update.pendingApprovalMode });
+        if (!("rebind" in update) && !update.pendingApprovalMode) {
+          setApprovalChange((change) => change?.pending ? { pending: false, savedAt: new Date() } : change);
+        }
+      },
+      failed: (caught) => {
+        if (!owner.current.current(token)) return;
+        if (ready.rebind || ready.serverApprovalMode === "ask") setState({ phase: "error", error: attachmentError(caught) });
+        else {
+          updateReady(token, (value) => ({ ...value, pendingApprovalMode: null }));
+          setApprovalChange({ pending: false, error: "could not change tool approval; try again" });
+        }
+      },
     });
     turnEnd.current = turn;
     return () => { turn.dispose(); if (turnEnd.current === turn) turnEnd.current = null; };
-  }, [client, workSessionId, ready?.lease, ready?.rebind, ready?.pendingApprovalMode]); // a new attach (lease) gets a new owner and token
+  }, [canWrite, client, workSessionId, ready?.lease, ready?.rebind, ready?.pendingApprovalMode]); // a new attach (lease) gets a new owner and token
 
   const send = useCallback(async (text: string, intent: SendIntent, track: (id: string) => void) => {
     if (!canWrite) throw new Error("this tab is read-only; take control to make changes");
@@ -754,13 +773,34 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     if (!client || (state.phase !== "ready" && state.phase !== "empty") || (toggleBlocked && !toggleRetryable)) return;
     const current = state; const token = owner.current.token();
     const enabled = !current.page.create_mode;
-    if (current.phase === "empty") { setPendingCreateMode(current, enabled); return; }
+    if (current.phase === "empty") { setPendingCreateMode(current, enabled); return { createMode: enabled, error: null }; }
     setToggling(true); // a shown refresh notice stays until the retry settles, so a second failure never flickers or stacks
     const result = await modeToggle.current.run({ client, pageId: current.page.id, sessionId: current.sessionId, enabled });
     if (!owner.current.current(token)) return;
     if (result.createMode !== null) updateReady(token, (value) => ({ ...value, page: { ...value.page, create_mode: result.createMode! } }));
     setToggleError(result.error); setToggleBlocked(result.blocked); setToggleRetryable(result.retryable); setToggling(false);
+    return result;
   }, [canWrite, client, setPendingCreateMode, state, toggleBlocked, toggleRetryable, updateReady]);
+
+  const toggleApprovalMode = useCallback(async () => {
+    if (!canWrite || !client || !ready || ready.serverApprovalMode === "ask" || ready.pendingApprovalMode) return;
+    const token = owner.current.token();
+    if (approvalRequest.current === token) return;
+    const current = () => owner.current.current(token) && authority.current;
+    const desired = ready.page.approval_mode === "allow" ? "ask" : "allow";
+    approvalRequest.current = token;
+    setApprovalChange({ pending: true });
+    try {
+      const result = await applyApprovalMode(client, ready.sessionId, desired, current);
+      if (!current()) return;
+      updateReady(token, (value) => ({ ...value, page: { ...value.page, approval_mode: result.approvalMode }, pendingApprovalMode: result.pending ? desired : null }));
+      if (!result.pending) setApprovalChange({ pending: false, savedAt: new Date() });
+    } catch {
+      if (current()) setApprovalChange({ pending: false, error: "could not change tool approval; try again" });
+    } finally {
+      if (approvalRequest.current === token) approvalRequest.current = null;
+    }
+  }, [canWrite, client, ready, updateReady]);
 
   const rename = useCallback(async (sessionId: string, nextTitle: string): Promise<boolean> => {
     if (!canWrite) return false;
@@ -814,5 +854,5 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [canWrite, state]);
 
-  return { state, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  return { state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }

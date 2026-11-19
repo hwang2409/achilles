@@ -168,6 +168,21 @@ const composer = (action: "send" | "steer" | "abort", options: Options = { attac
 const running = { attached: true, joined: { status: { state: "running", session: { session_id: "session" } } } };
 const insert = { description: "Add a book", name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } };
 const records = { tool: insert, page: { layout: { blocks: [{ type: "form", title: "add book", tool: insert.name }, { type: "list", title: "books", collection: "books" }] } } };
+const docked: Options = { ...records, attached: true };
+const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row => ({ kind: "visible", options, check: async (app, authority, writes) => {
+  if (id !== "page-chat.new") await click(select(app, '[aria-label="page chat options"]'));
+  const control = select(app, tag(id));
+  expect(disabled(control)).toBe(authority === "observer");
+  if (authority === "observer") {
+    const description = select(app, `#${CSS.escape(control.getAttribute("aria-describedby")!)}`);
+    expect(description.textContent).toContain("this tab is read-only");
+  }
+  await click(control);
+  if (authority === "controller") {
+    if (id !== "page-chat.new") await click(app.getByRole("button", { name: "confirm", exact: true }));
+    didWrite(writes, write);
+  }
+} });
 const userMessage = { id: "message", role: "user", content: [{ type: "text", text: "Fixture history title" }] };
 const pendingKey = "achilles-pending-chats";
 const blockedCreation = (path: string, method: string) => path === "/api/pages/page/chats" && method === "POST" ? new Response(null, { status: 503 }) : undefined;
@@ -247,6 +262,9 @@ const rows: Record<WriteSurfaceId, Row> = {
   "settings.auto-approve": setting("settings.auto-approve", "autoApproveDefault", "", true),
   "settings.reset": setting("settings.reset", "size", "", true),
   "shell.new-chat": button(tag("shell.new-chat"), "new_session"),
+  "page-chat.new": dockedWrite("page-chat.new", "new_session"),
+  "page-chat.auto-approve": dockedWrite("page-chat.auto-approve", "set_settings", { ...docked, rpc: { set_settings: (params) => ({ result: { approval_mode: params.approval_mode } }) } }),
+  "page-chat.create-mode": dockedWrite("page-chat.create-mode", "POST /api/pages/page/create-mode"),
   "header.create": button(`${tag("header.create")}`, "POST /api/pages/page/create-mode", { attached: true }),
   "composer.send": composer("send"),
   "composer.steer": composer("steer", running),
