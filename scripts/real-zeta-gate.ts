@@ -1298,6 +1298,17 @@ with _database() as db:
   await field.press("Enter", { timeout: 20_000 });
   await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  const readingChat = new URL(page.url()).searchParams.get("chat");
+  if (!readingChat) throw new Error("the page opened from /pages did not select a chat after the first send");
+  const readingChatRow = page.locator(`[data-chat-id="${readingChat}"]`);
+  await gateWait.playwright(readingChatRow, "waitFor");
+  await readingChatRow.press("F2");
+  const readingRename = readingChatRow.getByRole("textbox", { name: /^rename / });
+  await readingRename.fill("reading catalog notes");
+  await readingRename.press("Enter");
+  await gateWait.playwright(readingChatRow.getByText("reading catalog notes", { exact: true }), "waitFor");
+  await gateWait.playwright(dockHead(page).getByText("reading catalog notes", { exact: true }), "waitFor");
+  console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row and dock");
   if (screenshotDir) {
     const readingUrl = page.url();
     const oneChat = async (tab: Page, name: string) => {
