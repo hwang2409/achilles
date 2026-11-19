@@ -28,7 +28,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   const setComposerTypography = async () => {
     // Open in another tab to keep the workspace and its draft mounted during the live typography check.
     const link = page.getByRole("navigation", { name: "places" }).getByRole("region", { name: "manage" }).getByRole("link", { name: "settings", exact: true });
-    const [settingsPage] = await Promise.all([page.waitForEvent("popup", { timeout: 10_000 }), link.click({ modifiers: ["ControlOrMeta"] })]);
+    await link.evaluate((anchor) => anchor.setAttribute("target", "_blank"));
+    const [settingsPage] = await Promise.all([page.context().waitForEvent("page", { timeout: 10_000 }), link.click()]);
     try {
       await gateWait.playwright(settingsPage.getByText("display settings are here for now. more settings come later.", { exact: true }), "waitFor");
       const displaySettings = settingsPage.getByRole("button", { name: "display settings", exact: true });
