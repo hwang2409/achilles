@@ -20,6 +20,17 @@ const point = { start_ns: 0, end_ns: 1, sessions: 2, traces: 0, spans: 0, errors
 const status = { enabled: true, receiver: "ready", endpoint: "builtin", last_export: "ok", last_export_ns: null, raw_days: 14, rollup_days: 90, max_bytes: 1, used_bytes: 0, oldest_raw_ns: null, oldest_rollup_ns: null };
 const session = (id: string) => ({ session_id: id, first_ns: 0, last_ns: 1, last_trace_id: "t", profile: "worker", model: "m", span_count: 1, turn_count: 1, model_count: 1, tool_count: 0, error_count: 0, input_tokens: 1, output_tokens: 1, total_tokens: 2 });
 
+test("overview error rate uses all spans, not just model calls", async () => {
+  const client = {
+    features: ["telemetry_read_v1"],
+    request: async () => ({ status, totals: { ...point, spans: 12, errors: 9, model_calls: 1 }, series: [], active_models: 0, active_tools: 0, next_cursor: null }),
+  } as unknown as ZetaClient;
+  const view = render(createElement(TelemetryModule, { client, pathname: "/telemetry" }));
+  await view.findByRole("heading", { name: "telemetry overview" });
+  expect(view.container.querySelector(".tm-m-errors .tm-metric-detail")?.firstChild?.textContent).toBe("75%");
+  expect(view.container.querySelector(".tm-m-errors .tm-metric-suffix")?.textContent).toBe(" of spans");
+});
+
 test("a filter change turns paging off until its first page arrives, so the old page's cursor never goes out with the new filter", async () => {
   const sessions: Record<string, unknown>[] = [];
   let releaseFiltered = () => {};

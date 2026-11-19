@@ -15,7 +15,7 @@ const ENDPOINT = { builtin: "built-in · 127.0.0.1:4323", external: "external co
 export function Overview({ overview, bucket, chart, setChart, empty }: { overview: TelemetryOverview; bucket: "hour" | "day"; chart: Chart; setChart: (chart: Chart) => void; empty: ReactNode }) {
   const { status, totals, series } = overview;
   const receiver = RECEIVER[status.receiver];
-  const rate = formatPercent(totals.errors, totals.model_calls);
+  const rate = formatPercent(totals.errors, totals.spans);
   return (
     <div className="tm-overview">
       <h1 className="tm-visually-hidden">telemetry overview</h1>
@@ -39,7 +39,7 @@ export function Overview({ overview, bucket, chart, setChart, empty }: { overvie
           <Metric label="sessions" value={formatCount(totals.sessions)} className="tm-m-sessions" />
           <Metric label="model calls" mark="■" markClass="tm-accent" value={formatCount(totals.model_calls)} className="tm-m-calls" />
           <Metric label="tool calls" mark="■" markClass="tm-tool" value={formatCount(totals.tool_calls)} className="tm-m-tools" />
-          <Metric label="errors" mark="▲" markClass="tm-danger" tone="danger" value={formatCount(totals.errors)} detail={rate} detailSuffix=" of model calls" className="tm-m-errors" />
+          <Metric label="errors" mark="▲" markClass="tm-danger" tone="danger" value={formatCount(totals.errors)} detail={rate} detailSuffix=" of spans" className="tm-m-errors" />
           <Metric label="tokens" value={formatTokens(totals.total_tokens)} detail={`in ${formatTokens(totals.input_tokens)} · out ${formatTokens(totals.output_tokens)}`} className="tm-m-tokens" />
           <div className="tm-toggle" role="group" aria-label="chart shows">
             {(["calls", "tokens"] as Chart[]).map((value) => <button key={value} type="button" aria-pressed={chart === value} onClick={() => setChart(value)}>{value}</button>)}
