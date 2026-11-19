@@ -219,7 +219,7 @@ try {
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
-  const telemetryArtifacts = ["telemetry-observer-390x760.png", "telemetry-observer-1440x900.png"];
+  const telemetryArtifacts = ["telemetry-observer-390x844.png", "telemetry-observer-1440x900.png"];
   const telemetryHttp: string[] = [];
   const recordTelemetryRequest = (request: Request) => telemetryHttp.push(`${request.method()} ${new URL(request.url()).pathname}`);
   const telemetryMethods: string[] = [];
@@ -386,7 +386,7 @@ try {
     const takeControl = telemetryChatPage.getByRole("button", { name: "take control", exact: true });
     if (telemetryFailures.length) await takeControl.click({ timeout: 10_000 });
     await waitFor(async () => await telemetryChatPage.getByRole("button", { name: "new chat" }).isEnabled(), "chat controller for telemetry banner check");
-    const observerTelemetry = await browser.newPage({ viewport: { width: 390, height: 760 } });
+    const observerTelemetry = await browser.newPage({ viewport: { width: 390, height: 844 } });
     try {
       await observerTelemetry.goto(`${origin}/telemetry`);
       await waitFor(async () => await observerTelemetry.getByText("telemetry · needs a newer zeta", { exact: true }).isVisible(), "observer telemetry connected");
@@ -394,12 +394,21 @@ try {
       if (!await banner.getByText("this page is read-only", { exact: true }).isVisible()) telemetryFailures.push("telemetry opened with a chat controller did not show the read-only banner");
       if (await observerTelemetry.getByRole("button", { name: "take control", exact: true }).count()) telemetryFailures.push("telemetry offered take control");
       if (telemetryFailures.length) throw new Error(telemetryFailures.join("\n"));
-      if (screenshotDir) {
-        for (const [index, viewport] of [{ width: 390, height: 760 }, { width: 1440, height: 900 }].entries()) {
-          if (viewport.width === 390) await setupMobileSheet(observerTelemetry, viewport.height);
-          else await observerTelemetry.setViewportSize(viewport);
-          await observerTelemetry.screenshot({ path: join(screenshotDir, telemetryArtifacts[index]!), animations: "disabled" });
+      for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 1440, height: 900 }].entries()) {
+        if (viewport.width === 390) await setupMobileSheet(observerTelemetry, viewport.height);
+        else await observerTelemetry.setViewportSize(viewport);
+        await observerTelemetry.evaluate(() => document.fonts.ready.then(() => undefined));
+        const notice = observerTelemetry.locator(".telemetry-placeholder");
+        if (await notice.evaluate(element => element.scrollTop) !== 0) throw new Error("telemetry recovery must be tested without scrolling");
+        for (const action of [notice.getByRole("button", { name: "check again", exact: true }), notice.getByRole("link", { name: "back to chats", exact: true })]) {
+          const geometry = await action.evaluate(element => {
+            const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+            const hit = element.contains(document.elementFromPoint(left + width / 2, top + height / 2));
+            return { top, bottom, hit, inViewport: width > 0 && height > 0 && left >= 0 && top >= 0 && right <= innerWidth && bottom <= innerHeight };
+          });
+          if (!geometry.inViewport || !geometry.hit) throw new Error(`telemetry recovery ${viewport.width}x${viewport.height}: ${await action.textContent()} not fully visible and hit-testable: ${JSON.stringify(geometry)}`);
         }
+        if (screenshotDir) await observerTelemetry.screenshot({ path: join(screenshotDir, telemetryArtifacts[index]!), animations: "disabled" });
       }
       console.log("telemetry observer: chat can control zeta, read-only banner visible, no take-control button");
     } finally { await observerTelemetry.close(); }
