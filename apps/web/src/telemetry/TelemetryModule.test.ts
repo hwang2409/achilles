@@ -34,6 +34,44 @@ test.each([
   expect(view.container.querySelector(".tm-m-errors .tm-metric-suffix")?.textContent).toBe(" errored spans / all spans");
 });
 
+const failedTools = { ...point, spans: 12, errors: 9, tool_calls: 9, model_calls: 1 };
+const call = { calls: 1, errors: 9, duration_ns: 0, p50_ns: 0, p95_ns: 0, last_ns: 0 };
+const model = { ...call, model: "sample", provider: null, input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+const tool = { ...call, tool_name: "sample", tool_type: null, argument_bytes: 0, result_bytes: 0 };
+const modelBucket = { ...point, spans: 1, model_calls: 1 };
+const currentHour = Math.floor(Date.now() / 3.6e6) * 3.6e12;
+
+test.each([
+  { name: "overview metric", path: "", heading: "telemetry overview", selector: ".tm-m-errors .tm-metric-detail", expected: "75% errored spans / all spans" },
+  { name: "overview chart", path: "", heading: "telemetry overview", selector: ".tm-bar-error", style: "height", expected: null },
+  { name: "models row", path: "/models", heading: "models", selector: "[data-selected] [role=cell]:nth-child(4)", expected: "errors 9 · 100%" },
+  { name: "tools row", path: "/tools", heading: "tools", selector: ".tm-ag-failure-rate", expected: "100%" },
+  { name: "tools meter uses bounded shares on both sides of its scale", path: "/tools", heading: "tools", selector: "[role=row]:last-child .tm-ag-meter i", style: "width", expected: "50%" },
+  { name: "per-model chart ignores the overview tool errors", path: "/models", heading: "models", selector: ".tm-bar-error", style: "height", expected: null },
+  { name: "per-model chart caps its own errors", path: "/models", heading: "models", selector: ".tm-bar-error", style: "height", expected: "100%", modelErrors: 9 },
+  { name: "per-model chart shows its own errors", path: "/models", heading: "models", selector: ".tm-bar-error", style: "height", expected: "50%", modelErrors: 1, modelCalls: 2 },
+])("bounded error share: $name", async ({ path, heading, selector, style, expected, modelErrors = 0, modelCalls = 1 }) => {
+  const client = {
+    features: ["telemetry_read_v1"],
+    request: async (method: string, params: Record<string, unknown>) => {
+      switch (method) {
+        case "telemetry_overview": return { status, totals: failedTools, series: [failedTools], active_models: 1, active_tools: 2, next_cursor: null };
+        case "telemetry_models": return { items: [model], next_cursor: null };
+        case "telemetry_tools": return { items: [tool, { ...tool, tool_name: "other", calls: 2, errors: 1 }], next_cursor: null };
+        case "telemetry_series": return {
+          points: params.group_by === "model" ? [{ key: '[null,"sample"]', point: { ...modelBucket, spans: modelCalls, model_calls: modelCalls, start_ns: currentHour, end_ns: currentHour + 3.6e12, errors: modelErrors } }] : [],
+          next_cursor: null,
+        };
+        default: throw new Error(`unexpected method: ${method}`);
+      }
+    },
+  } as unknown as ZetaClient;
+  const view = render(createElement(TelemetryModule, { client, pathname: `/telemetry${path}` }));
+  await view.findByRole("heading", { name: heading, exact: true });
+  const element = view.container.querySelector<HTMLElement>(selector);
+  expect((style ? element?.style.getPropertyValue(style) : element?.textContent) ?? null).toBe(expected);
+});
+
 test("a filter change turns paging off until its first page arrives, so the old page's cursor never goes out with the new filter", async () => {
   const sessions: Record<string, unknown>[] = [];
   let releaseFiltered = () => {};

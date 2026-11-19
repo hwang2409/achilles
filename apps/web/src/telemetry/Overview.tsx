@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { formatBytes, formatCount, formatDay, formatHour, formatPercent, formatTokens } from "./format";
-import type { SeriesPoint, TelemetryOverview } from "./telemetry-types";
+import { errorShare } from "./errorShare";
+import type { ModelSeriesPoint, SeriesPoint, TelemetryOverview } from "./telemetry-types";
 
 type Chart = "calls" | "tokens";
 
@@ -15,7 +16,7 @@ const ENDPOINT = { builtin: "built-in · 127.0.0.1:4323", external: "external co
 export function Overview({ overview, bucket, chart, setChart, empty }: { overview: TelemetryOverview; bucket: "hour" | "day"; chart: Chart; setChart: (chart: Chart) => void; empty: ReactNode }) {
   const { status, totals, series } = overview;
   const receiver = RECEIVER[status.receiver];
-  const rate = formatPercent(totals.errors, totals.spans);
+  const rate = formatPercent(errorShare({ spans: totals }), 1);
   return (
     <div className="tm-overview">
       <h1 className="tm-visually-hidden">telemetry overview</h1>
@@ -86,16 +87,18 @@ export function OverviewSkeleton() {
   );
 }
 
-const bucketLabel = (point: SeriesPoint, bucket: "hour" | "day") =>
+type ChartPoint = SeriesPoint | ModelSeriesPoint;
+
+const bucketLabel = (point: ChartPoint, bucket: "hour" | "day") =>
   bucket === "hour" ? `${formatHour(point.start_ns)} – ${formatHour(point.end_ns)}` : formatDay(point.start_ns);
 
 /**
- * Bars per bucket: model calls with errors as a red cap, or total tokens. The bucket that holds now is dashed: it is
+ * Bars per bucket: model calls or total tokens. Only model-grouped buckets can show a call error share. The bucket that holds now is dashed: it is
  * still filling. One tab stop; arrow keys and the pointer pick a bucket, and its exact numbers show in a live tooltip.
  */
-export function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: Chart; bucket: "hour" | "day" }) {
+export function TrendChart({ series, chart, bucket }: { series: ChartPoint[]; chart: Chart; bucket: "hour" | "day" }) {
   const [active, setActive] = useState<number | null>(null);
-  const value = (point: SeriesPoint) => (chart === "calls" ? point.model_calls : point.total_tokens);
+  const value = (point: ChartPoint) => (chart === "calls" ? point.model_calls : point.total_tokens);
   const max = Math.max(1, ...series.map(value));
   const step = Math.max(1, Math.ceil(series.length / 8));
   const middle = Math.floor(series.length / 2); // narrow screens keep only the first, the middle, and "now"
@@ -111,7 +114,8 @@ export function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; c
     else return;
     event.preventDefault();
   };
-  const what = chart === "calls" ? `model calls per ${bucket} · errors on top` : `tokens per ${bucket}`;
+  const modelSeries = series[0] && "errored_model_calls" in series[0];
+  const what = chart === "calls" ? `model calls per ${bucket}${modelSeries ? " · errored calls on top" : ""}` : `tokens per ${bucket}`;
   return (
     <figure className="tm-chart">
       <figcaption className="tm-chart-head">
@@ -129,12 +133,12 @@ export function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; c
           onBlur={() => setActive(null)}
         >
           {series.map((point, index) => {
-            const errors = chart === "calls" ? Math.min(point.errors, point.model_calls) : 0;
+            const share = chart === "calls" && "errored_model_calls" in point ? errorShare({ modelBucket: point }) : null;
             const open = point.start_ns <= nowNs && nowNs < point.end_ns;
             return (
               <div key={point.start_ns} className={`tm-col${index === active ? " tm-col-active" : ""}${open ? " tm-col-open" : ""}`} onMouseEnter={() => setActive(index)}>
                 <div className="tm-bar-fill" style={{ height: `${(value(point) / max) * 100}%` }}>
-                  {errors > 0 && <div className="tm-bar-error" style={{ height: `${Math.max(4, (errors / Math.max(1, point.model_calls)) * 100)}%` }} />}
+                  {share !== null && share > 0 && <div className="tm-bar-error" style={{ height: `${share * 100}%` }} />}
                 </div>
                 {(index % step === 0 || index === middle) && <span className={`tm-tick${index === 0 || index === middle ? " tm-tick-key" : ""}`} aria-hidden="true">{bucket === "hour" ? formatHour(point.start_ns) : formatDay(point.start_ns)}</span>}
               </div>
@@ -148,7 +152,9 @@ export function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; c
             <b>{bucketLabel(shown, bucket)}</b>
             <dl>
               <dt>model calls</dt><dd>{formatCount(shown.model_calls)}</dd>
-              <dt>errors</dt><dd className="tm-danger">{formatCount(shown.errors)}</dd>
+              {"errored_model_calls" in shown
+                ? <><dt>errored model calls</dt><dd className="tm-danger">{formatCount(shown.errored_model_calls)}</dd></>
+                : <><dt>errored spans</dt><dd className="tm-danger">{formatCount(shown.errors)}</dd></>}
               <dt>tool calls</dt><dd>{formatCount(shown.tool_calls)}</dd>
               <dt>tokens</dt><dd>{formatTokens(shown.total_tokens)}</dd>
             </dl>
