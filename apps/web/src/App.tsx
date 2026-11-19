@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ZetaClient } from "@fulcrum/zeta";
+
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
@@ -146,10 +148,18 @@ function connectionFailure(state: ConnectionState): string | null {
 }
 
 export function App() {
-  const settings = useSettings();
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
+  useEffect(() => {
+    const unsubscribe = connection.subscribe(() => setClient(connection.client));
+    return () => { unsubscribe(); connection.stop(); };
+  }, [connection]);
+  return <AgentSurface connection={connection} client={client} connectionState={connectionState} />;
+}
+
+function AgentSurface({ connection, client, connectionState }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState }) {
+  const settings = useSettings();
   const active = useActiveChat(client, connectionState.phase === "connected");
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
@@ -206,10 +216,6 @@ export function App() {
     );
   };
 
-  useEffect(() => {
-    const unsubscribe = connection.subscribe(() => setClient(connection.client));
-    return () => { unsubscribe(); connection.stop(); };
-  }, [connection]);
   useEffect(() => store?.subscribe(() => {
     for (const item of store.getState().outline) {
       if (item.kind !== "tool") continue;
