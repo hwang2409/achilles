@@ -15,7 +15,7 @@ const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: n
 const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
-type Options = { unsent?: boolean; pending?: boolean; attached?: boolean; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object>; http?: (path: string, method: string) => Response | undefined };
+type Options = { browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[]) => Promise<void>) {
   const writes: string[] = [];
@@ -88,7 +88,9 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     await check(app, writes, requests);
     if (authority === "observer") {
       expect(writes).toEqual([]);
-      expect(localStorage.getItem(SETTINGS_KEY)).toBe(JSON.stringify({ ...oldSettings, vim: false, size: 15 }));
+      const expected = { ...oldSettings, vim: false, size: 15 };
+      if (options.browserPreference) Object.assign(expected, { [options.browserPreference]: getSettings()[options.browserPreference] });
+      expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)).toEqual(expected);
     }
   } finally {
     app?.unmount();
@@ -123,16 +125,25 @@ const button = (selector: string, write: string, options?: Options): Row => ({ k
   await click(control);
   if (authority === "controller") didWrite(writes, write);
 } });
-const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, child = ""): Row => ({ kind: "visible", check: async (app, authority) => {
+const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, child = "", locksApprovalDefault = false): Row => ({ kind: "visible", options: { browserPreference: locksApprovalDefault ? undefined : key }, check: async (app, authority, writes) => {
   await click(select(app, ".settings-button"));
   const control = select(app, tag(id) + child);
   const before = getSettings()[key];
-  expect(disabled(control)).toBe(authority === "observer");
+  const storageBefore = localStorage.getItem(SETTINGS_KEY);
+  const locked = locksApprovalDefault && authority === "observer";
+  expect(WRITE_SURFACES.find((row) => row.id === id)?.observer).toBe(locksApprovalDefault ? undefined : "browser-only");
+  expect(WRITE_SURFACES.find((row) => row.id === id)?.channel).toBe(locksApprovalDefault ? "storage-and-shared-default" : "storage");
+  expect(disabled(control)).toBe(locked);
   await click(control);
-  if (authority === "controller") {
+  if (locked) {
+    expect(getSettings()[key]).toBe(before);
+    expect(localStorage.getItem(SETTINGS_KEY)).toBe(storageBefore);
+    expect(app.getByText("locked while another tab controls zeta")).toBeTruthy();
+  } else {
     expect(getSettings()[key]).not.toBe(before);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)[key]).toBe(getSettings()[key]);
   }
+  expect(writes).toEqual([]);
 } });
 const change = (element: HTMLElement, value: string) => act(async () => {
   fireEvent.change(element, { target: { value } });
@@ -233,8 +244,8 @@ const rows: Record<WriteSurfaceId, Row> = {
   "settings.size": setting("settings.size", "size", ' button[aria-pressed="false"]'),
   "settings.density": setting("settings.density", "density", ' button[aria-pressed="false"]'),
   "settings.vim": setting("settings.vim", "vim"),
-  "settings.auto-approve": setting("settings.auto-approve", "autoApproveDefault"),
-  "settings.reset": setting("settings.reset", "size"),
+  "settings.auto-approve": setting("settings.auto-approve", "autoApproveDefault", "", true),
+  "settings.reset": setting("settings.reset", "size", "", true),
   "shell.new-chat": button(tag("shell.new-chat"), "new_session"),
   "header.create": button(`${tag("header.create")}`, "POST /api/pages/page/create-mode", { attached: true }),
   "composer.send": composer("send"),
@@ -323,20 +334,14 @@ const rows: Record<WriteSurfaceId, Row> = {
   "passive.repair": { kind: "passive", options: { attached: true, chat: { ...chat, title: null, message_sent: false, titled_by_user: false }, joined: { messages: [userMessage] } }, check: async (_app, authority, writes) => {
     if (authority === "controller") didWrite(writes, 'PATCH /api/chats/session {"first_message":"Fixture history title"');
   } },
-  "palette.commands": { kind: "command", absent: true, check: async (app, authority) => {
+  "palette.commands": { kind: "command", options: { browserPreference: "vim" }, check: async (app, authority, writes) => {
     await click(select(app, ".palette-button"));
-    const option = app.queryByText("toggle vim mode", { exact: true });
-    if (authority === "observer") {
-      expect(Boolean(option)).toBe(false);
-      const search = select(app, ".command-palette input");
-      await change(search, "toggle vim mode");
-      await keydown(search, "Enter");
-    }
-    else {
-      await click(option!);
-      expect(getSettings().vim).toBe(true);
-      expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).vim).toBe(true);
-    }
+    expect(WRITE_SURFACES.find(({ id }) => id === "palette.commands")).toMatchObject({ channel: "http-and-storage", observer: "browser-only" });
+    expect(Boolean(app.queryByText("toggle create mode", { exact: true }))).toBe(authority === "controller");
+    await click(app.getByText("toggle vim mode", { exact: true }));
+    expect(getSettings().vim).toBe(true);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).vim).toBe(true);
+    expect(writes).toEqual([]);
   } },
 };
 

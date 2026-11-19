@@ -12,7 +12,7 @@ import {
   type UiFont,
 } from "./settings";
 import { wrapTab } from "./keyboard";
-import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
+import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
 
 const swatches = ["bg", "fg", "accent", "ok", "warn", "danger"];
@@ -27,7 +27,7 @@ function Swatch({ theme }: { theme: ThemeChoice }) {
   </span>;
 }
 
-function ThemeList({ value, onChange, disabled = false, disabledReason }: { value: ThemeChoice; onChange(value: ThemeChoice): void; disabled?: boolean; disabledReason?: string }) {
+function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: ThemeChoice): void }) {
   const options = useRef<Array<HTMLButtonElement | null>>([]);
   const focus = (index: number) => options.current[index]?.focus();
   const onKeyDown = (event: KeyboardEvent, index: number) => {
@@ -52,8 +52,6 @@ function ThemeList({ value, onChange, disabled = false, disabledReason }: { valu
       tabIndex={theme === value ? 0 : -1}
       data-selected={theme === value || undefined}
       onKeyDown={(event) => onKeyDown(event, index)}
-      disabled={disabled}
-      title={disabled ? disabledReason : undefined}
       onClick={() => onChange(theme)}
     >
       <span>{theme}</span><Swatch theme={theme} />
@@ -61,24 +59,23 @@ function ThemeList({ value, onChange, disabled = false, disabledReason }: { valu
   </div>;
 }
 
-function Segments<T extends string | number>({ label, value, choices, onChange, disabled = false, disabledReason, surface }: { label: string; value: T; choices: Array<[T, string]>; onChange(value: T): void; disabled?: boolean; disabledReason?: string; surface: string }) {
-  return <div className="settings-segments" role="group" aria-label={label} aria-disabled={disabled || undefined} title={disabled ? disabledReason : undefined} data-write-surface={surface}>
-    {choices.map(([choice, text]) => <button key={choice} type="button" disabled={disabled} aria-pressed={choice === value} onClick={() => onChange(choice)}>{text}</button>)}
+function Segments<T extends string | number>({ label, value, choices, onChange, surface }: { label: string; value: T; choices: Array<[T, string]>; onChange(value: T): void; surface: string }) {
+  return <div className="settings-segments" role="group" aria-label={label} data-write-surface={surface}>
+    {choices.map(([choice, text]) => <button key={choice} type="button" aria-pressed={choice === value} onClick={() => onChange(choice)}>{text}</button>)}
   </div>;
 }
 
-function Toggle({ label, checked, onChange, disabled = false, disabledReason, surface }: { label: string; checked: boolean; onChange(value: boolean): void; disabled?: boolean; disabledReason?: string; surface: string }) {
-  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} title={disabled ? disabledReason : undefined} data-write-surface={surface} onClick={() => onChange(!checked)}><span /></button>;
+function Toggle({ label, checked, onChange, disabled, surface }: { label: string; checked: boolean; onChange(value: boolean): void; disabled?: boolean; surface: string }) {
+  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} data-write-surface={surface} onClick={() => onChange(!checked)}><span /></button>;
 }
 
 function Row({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return <section className="settings-row"><div className="settings-row-label"><h3>{title}</h3><p>{description}</p></div><div>{children}</div></section>;
 }
 
-export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite, disabledReason = READ_ONLY_REASON }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite: boolean; disabledReason?: string }) {
+export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
-  const change = <T extends Partial<Settings>>(next: T) => { if (canWrite) updateSettings(next); };
   useLayoutEffect(() => {
     const node = dialog.current;
     if (!node) return;
@@ -96,13 +93,18 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
     <div className="settings-panel">
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="settings-title">settings</h2></div><div><span>saved in this browser</span><button type="button" onClick={onClose}>esc</button></div></div>
       <div className="settings-content">
-        <Row title="theme" description="fulcrum palettes. auto follows the OS."><div data-write-surface={WRITE_SURFACE.settingsTheme}><ThemeList value={settings.theme} disabled={!canWrite} disabledReason={disabledReason} onChange={(theme) => change({ theme })} /></div></Row>
-        <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} disabled={!canWrite} disabledReason={disabledReason} surface={WRITE_SURFACE.settingsUiFont} onChange={(uiFont) => change({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} disabled={!canWrite} disabledReason={disabledReason} surface={WRITE_SURFACE.settingsCodeFont} onChange={(codeFont) => change({ codeFont })} /></div></Row>
-        <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} disabled={!canWrite} disabledReason={disabledReason} surface={WRITE_SURFACE.settingsSize} onChange={(size) => change({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} disabled={!canWrite} disabledReason={disabledReason} surface={WRITE_SURFACE.settingsDensity} onChange={(density) => change({ density })} /></div></Row>
-        <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} disabled={!canWrite} disabledReason={disabledReason} surface={WRITE_SURFACE.settingsVim} onChange={(vim) => change({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
-        <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} disabled={!canWrite} disabledReason={disabledReason} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(autoApproveDefault) => change({ autoApproveDefault })} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
+        <Row title="theme" description="fulcrum palettes. auto follows the OS."><div data-write-surface={WRITE_SURFACE.settingsTheme}><ThemeList value={settings.theme} onChange={(theme) => updateSettings({ theme })} /></div></Row>
+        <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} surface={WRITE_SURFACE.settingsUiFont} onChange={(uiFont) => updateSettings({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} surface={WRITE_SURFACE.settingsCodeFont} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
+        <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} surface={WRITE_SURFACE.settingsSize} onChange={(size) => updateSettings({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} surface={WRITE_SURFACE.settingsDensity} onChange={(density) => updateSettings({ density })} /></div></Row>
+        <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} surface={WRITE_SURFACE.settingsVim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
       </div>
-      <footer><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(defaultSettings)} title={!canWrite ? disabledReason : undefined}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+      <section aria-label="new chat defaults and reset" aria-describedby={!canWrite ? "settings-lock-note" : undefined} className="settings-session">
+        {!canWrite && <p id="settings-lock-note">locked while another tab controls zeta</p>}
+        <div className="settings-content">
+          <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(autoApproveDefault) => { if (canWrite) updateSettings({ autoApproveDefault }); }} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
+        </div>
+        <footer><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(defaultSettings)}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+      </section>
     </div>
   </dialog>;
 }

@@ -15,7 +15,7 @@ export type ConnectionState =
   | { phase: "unresponsive" | "incompatible" | "controller_taken" | "observer_limit"; attempt: number; retryAt: number; lost: boolean };
 
 export type ConnectionEvent =
-  | { type: "attempt" | "reconnect" }
+  | { type: "attempt" }
   | { type: "connected"; authority: ZetaRole }
   | { type: "not_running"; now: number }
   | { type: "auth_failed"; reason: "origin" | "rejected"; origins: string[]; now: number }
@@ -40,8 +40,6 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
   switch (event.type) {
     case "attempt":
       return state.phase === "connected" ? state : { phase: "connecting", attempt: attemptOf(state), lost, ...(state.phase === "unresponsive" || (state.phase === "connecting" && state.lastFailure === "unresponsive") ? { lastFailure: "unresponsive" as const } : {}) };
-    case "reconnect":
-      return { phase: "connecting", attempt: attemptOf(state), lost };
     case "connected":
       return { phase: "connected", authority: event.authority };
     case "closed":
@@ -54,6 +52,28 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
       if (event.type === "auth_failed") return { phase: "auth_failed", reason: event.reason, origins: event.origins, attempt, retryAt, lost };
       return { phase: event.type, attempt, retryAt, lost };
     }
+  }
+}
+
+type RoleState = { role: ZetaRole; reason: string | null };
+type RoleEvent = "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "retry";
+
+export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
+  switch (event) {
+    case "controller_granted":
+    case "controller_closed":
+    case "both_busy":
+      return { role: "controller", reason: null };
+    case "observer_granted":
+    case "controller_busy":
+    case "observer_busy":
+      return { role: "observer", reason: null };
+    case "takeover_refused":
+      return { role: state.role, reason: "close the other tab, then take control." };
+    case "takeover_failed":
+      return { role: state.role, reason: "could not take control. try again." };
+    case "retry":
+      return { role: state.role, reason: null };
   }
 }
 
@@ -81,7 +101,7 @@ export type Connection = {
   /** Skips the wait before the next automatic try. */
   retryNow(): void;
   /** Reopens this page as controller, or keeps it as a live observer if the slot is still occupied. */
-  takeControl(): Promise<void>;
+  takeControl(): Promise<string | null>;
   /** Whether the last established authority was an observer. */
   readonly observerPresentation: boolean;
   stop(): void;
@@ -140,11 +160,13 @@ export function createConnection({
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
-  let desiredRole: ZetaRole = "controller";
+  let roleState: RoleState = { role: "controller", reason: null };
   let retainedObserver = false;
+  let liveDiscovery: ZetaDiscovery | null = null;
+  let takingControl = false;
   const listeners = new Set<() => void>();
   const send = (event: ConnectionEvent) => {
-    if (event.type !== "connected" && event.type !== "closed" && event.type !== "attempt" && event.type !== "reconnect") retainedObserver = false;
+    if (event.type !== "connected" && event.type !== "closed" && event.type !== "attempt") retainedObserver = false;
     const next = reduceConnection(state, event);
     if (next === state) return;
     state = next;
@@ -154,6 +176,54 @@ export function createConnection({
   const schedule = (ms: number) => {
     if (timer !== null) clearTimer(timer);
     timer = setTimer(() => { timer = null; void attempt(); }, Math.max(0, ms));
+  };
+  type OpenResult = { kind: "connected"; client: ZetaClient } | { kind: "busy" } | { kind: "unresponsive" } | { kind: "version_mismatch" } | { kind: "rejected" };
+  const openRole = async (discovery: ZetaDiscovery, role: ZetaRole): Promise<OpenResult> => {
+    let timedOut = false;
+    let closePending = () => {};
+    let connectTimeout: unknown = null;
+    try {
+      const opened = await Promise.race([
+        connect(discovery, role, (close) => { closePending = close; }).then((value) => { if (timedOut) value.close(); return value; }),
+        new Promise<never>((_, reject) => { connectTimeout = setTimer(() => { timedOut = true; closePending(); reject(new Error("hello timeout")); }, helloTimeoutMs); }),
+      ]);
+      return { kind: "connected", client: opened };
+    } catch (error) {
+      if (timedOut) return { kind: "unresponsive" };
+      const kind = error instanceof ZetaError ? error.kind : "connect_failed";
+      return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
+    } finally { if (connectTimeout !== null) clearTimer(connectTimeout); }
+  };
+  const negotiateRole = async (discovery: ZetaDiscovery, current: () => boolean) => {
+    roleState = transitionRole(roleState, "retry");
+    const first = roleState.role;
+    const opened = await openRole(discovery, first);
+    if (opened.kind !== "busy" || !current()) return { opened, authority: first };
+    if (first === "observer") {
+      roleState = transitionRole(roleState, "observer_busy");
+      return { opened, authority: first };
+    }
+    // The fallback is provisional: only an accepted observer hello changes future retries.
+    const authority = transitionRole(roleState, "controller_busy").role;
+    const fallback = await openRole(discovery, authority);
+    if (fallback.kind === "busy" && current()) roleState = transitionRole(roleState, "both_busy");
+    return { opened: fallback, authority };
+  };
+  const adopt = (next: ZetaClient, discovery: ZetaDiscovery, authority: ZetaRole) => {
+    const previous = client;
+    client = next;
+    liveDiscovery = discovery;
+    roleState = transitionRole(roleState, authority === "controller" ? "controller_granted" : "observer_granted");
+    previous?.close();
+    (next as ZetaClient & { authority?: ZetaRole }).authority = authority;
+    next.onClose(() => {
+      if (client !== next) return;
+      client = null;
+      roleState = transitionRole(roleState, authority === "controller" ? "controller_closed" : "retry");
+      send({ type: "closed", now: now() });
+    });
+    retainedObserver = authority === "observer";
+    send({ type: "connected", authority });
   };
   const attempt = async () => {
     if (stopped || state.phase === "connected") return;
@@ -173,50 +243,15 @@ export function createConnection({
     // An origin the allowlist lacks fails at the upgrade with no detail, so name it before trying.
     if (discovery.origins.length && !discovery.origins.includes(origin))
       return send({ type: "auth_failed", reason: "origin", origins: discovery.origins, now: now() });
-    type OpenResult = { kind: "connected"; client: ZetaClient } | { kind: "busy" } | { kind: "unresponsive" } | { kind: "version_mismatch" } | { kind: "rejected" };
-    const openRole = async (role: ZetaRole): Promise<OpenResult> => {
-      let timedOut = false;
-      let closePending = () => {};
-      let connectTimeout: unknown = null;
-      try {
-        const opened = await Promise.race([
-          connect(discovery, role, (close) => { closePending = close; }).then((value) => { if (timedOut) value.close(); return value; }),
-          new Promise<never>((_, reject) => { connectTimeout = setTimer(() => { timedOut = true; closePending(); reject(new Error("hello timeout")); }, helloTimeoutMs); }),
-        ]);
-        return { kind: "connected", client: opened };
-      } catch (error) {
-        if (timedOut) return { kind: "unresponsive" };
-        const kind = error instanceof ZetaError ? error.kind : "connect_failed";
-        return { kind: kind === "busy" || kind === "version_mismatch" ? kind : "rejected" };
-      } finally { if (connectTimeout !== null) clearTimer(connectTimeout); }
-    };
-    let authority = desiredRole;
-    let opened = await openRole(authority);
+    const { opened, authority } = await negotiateRole(discovery, current);
     if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    // -32001 means the controller slot is occupied. Retry with the observer credential.
-    if (opened.kind === "busy" && authority === "controller") {
-      desiredRole = authority = "observer";
-      opened = await openRole(authority);
-      if (!current()) return opened.kind === "connected" ? opened.client.close() : undefined;
-    }
     if (opened.kind === "busy") return send({ type: authority === "observer" ? "observer_limit" : "controller_taken", now: now() });
     if (opened.kind === "unresponsive") return send({ type: "unresponsive", now: now() });
     // -32002 "protocol_mismatch": the only case that is a real version mismatch.
     if (opened.kind === "version_mismatch") return send({ type: "incompatible", now: now() });
     // The process runs and the origin is allowed, so a refused upgrade means the token was refused.
     if (opened.kind === "rejected") return send({ type: "auth_failed", reason: "rejected", origins: discovery.origins, now: now() });
-    const next = opened.client;
-    if (!current()) return next.close();
-    client = next;
-    (next as ZetaClient & { authority?: ZetaRole }).authority = authority;
-    next.onClose(() => {
-      if (client !== next) return;
-      client = null;
-      send({ type: "closed", now: now() });
-    });
-    if (authority === "controller") retainedObserver = false;
-    else retainedObserver = true;
-    send({ type: "connected", authority });
+    adopt(opened.client, discovery, authority);
   };
   void attempt();
   return {
@@ -228,18 +263,27 @@ export function createConnection({
     retryNow() {
       if (state.phase === "connected" || state.phase === "connecting" || stopped) return;
       if (timer !== null) { clearTimer(timer); timer = null; }
-      // A slot may have freed since both roles were refused: start again as a fresh open does, controller first.
       void attempt();
     },
     async takeControl() {
-      if (stopped || state.phase !== "connected" || !client) return;
-      const open = client;
-      client = null;
-      generation++;
-      desiredRole = "controller";
-      send({ type: "reconnect" });
-      open.close();
-      await attempt();
+      if (stopped || takingControl || state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return null;
+      const observer = client;
+      const discovery = liveDiscovery;
+      takingControl = true;
+      roleState = transitionRole(roleState, "retry");
+      // Keep the live observer until a controller handshake actually succeeds.
+      const opened = await openRole(discovery, "controller");
+      takingControl = false;
+      if (stopped || client !== observer) {
+        if (opened.kind === "connected") opened.client.close();
+        return null;
+      }
+      if (opened.kind !== "connected") {
+        roleState = transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed");
+        return roleState.reason;
+      }
+      adopt(opened.client, discovery, "controller");
+      return null;
     },
     stop() {
       stopped = true;

@@ -30,6 +30,8 @@ type Props = {
   serverForcesAsk?: boolean;
   canWrite?: boolean;
   hasComposer: boolean;
+  banner?: ReactNode;
+  header?: ReactNode;
   children: ReactNode;
   refreshKey: number;
   pageRefreshKey: number;
@@ -119,7 +121,7 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 // short heights use the drawer too: a phone on its side cannot spare 288px for the sidebar. matches style.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, canWrite = false, hasComposer, children, agentActions, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, canWrite = false, hasComposer, banner, header, children, agentActions, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -272,7 +274,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
     ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
     ...loading || !page || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
     { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
-    ...!canWrite ? [] : [{ id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) }],
+    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
   ];
   // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.
@@ -374,10 +376,14 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
       <footer>{agentActions !== false && <SettingsControl onOpen={openSettings} className="settings-button" />}<button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
     </aside>
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
-      <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
+      {banner}
+      <div className="shell-header">
+        <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
+        {header}
+      </div>
       {children}
     </main>
-    {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} disabledReason="this tab is read-only; take control to make changes" />}
+    {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {agentActions !== false && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
   </div>;

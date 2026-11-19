@@ -2577,18 +2577,25 @@ try {
   const observerHttpCountAtActions = observerHttp.length;
   const observerComposer = observerPage.getByRole("textbox", { name: "message", exact: true });
   if (await observerComposer.count()) { await observerComposer.fill("observer must not send"); await observerComposer.press("Enter"); }
+  await observerPage.setViewportSize({ width: 1440, height: 900 });
   const observerSettingsButton = observerPage.locator(".settings-button");
-  if (await observerSettingsButton.count()) {
-    await observerSettingsButton.click();
-    const reset = observerPage.getByRole("button", { name: "reset to defaults", exact: true });
-    if (await reset.count() && !(await reset.isDisabled())) throw new Error("observer settings reset was editable");
-    const closeSettings = observerPage.getByRole("button", { name: "esc", exact: true });
-    if (await closeSettings.count()) await closeSettings.click();
+  await observerSettingsButton.click();
+  const observerSettings = observerPage.getByRole("dialog", { name: "settings", exact: true });
+  await gateWait.playwright(observerSettings.getByText("locked while another tab controls zeta", { exact: true }), "waitFor", { state: "visible" });
+  for (const control of [observerSettings.getByRole("switch", { name: "auto-approve default", exact: true }), observerSettings.getByRole("button", { name: "reset to defaults", exact: true })]) {
+    if (!await control.isDisabled()) throw new Error("observer could edit new-chat defaults or reset them");
   }
+  for (const id of ["theme", "ui-font", "code-font", "size", "density", "vim"]) {
+    const buttons = observerSettings.locator(`[data-write-surface="settings.${id}"]`).locator("xpath=self::button | .//button");
+    if (!await buttons.count() || (await buttons.evaluateAll((elements) => elements.some((button) => button.matches(":disabled"))))) throw new Error(`observer display preference ${id} was absent or locked`);
+  }
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-settings-1440x900.png") });
+  await observerSettings.getByRole("button", { name: "esc", exact: true }).click();
   await observerPage.keyboard.press(appShortcut("k"));
   const palette = observerPage.getByRole("dialog", { name: "command palette" });
   await gateWait.playwright(palette, "waitFor", { state: "visible" });
-  if (await palette.getByText("toggle vim mode", { exact: true }).count()) throw new Error("observer palette exposed the vim mode toggle");
+  if (!await palette.getByText("toggle vim mode", { exact: true }).isVisible()) throw new Error("observer palette hid the local vim mode toggle");
+  if (await palette.getByText("toggle create mode", { exact: true }).count()) throw new Error("observer palette exposed the shared create mode toggle");
   await observerPage.keyboard.press("Escape");
   const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
   if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
@@ -2711,12 +2718,25 @@ try {
     await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
   }
-  await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
-  await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
-  if (!(await observerBanner.innerText()).includes("another tab controls zeta")) throw new Error("observer took control while the original controller was still open");
+  const takeControl = observerBanner.getByRole("button", { name: "take control", exact: true });
+  const helloRoles = () => observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(",");
+  await takeControl.click();
+  await gateWait.playwright(observerBanner.getByText("close the other tab, then take control.", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
+  if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
+  await observerPage.setViewportSize({ width: 390, height: 844 });
+  const observerMenu = observerPage.getByRole("button", { name: "open menu", exact: true });
+  const bannerBox = await observerBanner.boundingBox();
+  const menuBox = await observerMenu.boundingBox();
+  if (!bannerBox || !menuBox || bannerBox.y + bannerBox.height > menuBox.y) throw new Error("observer banner overlapped the mobile header");
+  await observerMenu.focus();
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-390x844.png") });
+  await observerPage.setViewportSize({ width: 1440, height: 900 });
   await page.close();
-  await observerBanner.getByRole("button", { name: "take control", exact: true }).click();
-  await gateWait.playwright(observerBanner, "waitFor", { state: "hidden" });
+  await takeControl.click();
+  await gateWait.playwright(observerBanner, "waitFor", { state: "hidden", timeout: 20_000 });
+  await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
+  if (helloRoles() !== "controller,observer,controller,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles()}`);
   await observerPage.reload({ waitUntil: "domcontentloaded" });
   await gateWait.playwright(observerPage.locator(`[data-session-id="${controllerChat}"]`), "waitFor", { state: "attached" });
   const restoredMutation = "restored controller mutation";
@@ -2726,11 +2746,6 @@ try {
   await restoredField.fill(restoredMutation);
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
-  const restoredControllerSockets = observerSockets.filter((row) => row.role === "controller" && row.lifecycle === "open");
-  const replacementObserverSockets = observerSockets.filter((row) => row.role === "observer" && row.lifecycle === "open");
-  if (restoredControllerSockets.length < 1 || replacementObserverSockets.length < 2) throw new Error(`takeover socket matrix incomplete: ${JSON.stringify(observerSockets)}`);
-  const helloRoles = observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").sort((a, b) => a.socketId - b.socketId).map((row) => row.role);
-  if (helloRoles.length !== 5 || helloRoles.join(",") !== "controller,observer,controller,observer,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles.join(",")}`);
   const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
   const restoredSettingsButton = observerPage.locator(".settings-button");
   await restoredSettingsButton.click();
@@ -2786,7 +2801,7 @@ try {
       privacy: { secretsRedacted: true, tokensPresent: false },
       cleanup: "browser, servers, and temporary homes are removed in finally",
     }, null, 2) + "\n");
-    await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
+    await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png, observer-refused-390x844.png, observer-refused-1440x900.png, observer-settings-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
   }
   if (process.env.SCREENSHOT_PATH) await observerPage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   passed = true;

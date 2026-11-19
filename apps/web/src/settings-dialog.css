@@ -18,13 +18,16 @@
 .settings-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; color: var(--fulcrum-fg); font: var(--achilles-ui-size) / 1.5 var(--achilles-ui-font); background: transparent; border: 0; }
 .settings-dialog::backdrop { background: color-mix(in srgb, #000 68%, transparent); }
 .settings-panel { overflow: auto; max-height: calc(100vh - 32px); background: var(--fulcrum-bg); border: 1px solid var(--fulcrum-fg); }
-.settings-titlebar, .settings-panel > footer { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
+.settings-titlebar, .settings-session > footer { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 20px; border-bottom: 1px solid var(--fulcrum-border); }
 .settings-titlebar > div { display: flex; align-items: center; gap: 12px; }
 .settings-titlebar h2 { margin: 0; font-size: 18px; }
-.settings-titlebar span, .settings-panel > footer span { color: var(--fulcrum-muted); }
+.settings-titlebar span, .settings-session > footer span { color: var(--fulcrum-muted); }
 .settings-titlebar button { padding: 5px 9px; color: var(--fulcrum-fg); font: inherit; background: transparent; border: 1px solid var(--fulcrum-border); }
 .settings-mark { width: 9px; height: 9px; background: var(--fulcrum-accent); }
 .settings-content { padding: 0 20px; }
+.settings-session { border-top: 1px solid var(--fulcrum-border); }
+#settings-lock-note { margin: 12px 20px 0; color: var(--fulcrum-muted); }
+.settings-toggle:disabled { opacity: .55; }
 .settings-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--fulcrum-border); }
 .settings-row:last-child { border-bottom: 0; }
 .settings-row-label h3 { margin: 0 0 2px; font-size: 14px; }
@@ -47,7 +50,7 @@
 .settings-toggle span { display: block; width: 14px; height: 14px; background: var(--fulcrum-muted); transition: transform 100ms ease; }
 .settings-toggle[aria-checked="true"] { background: var(--fulcrum-accent); }
 .settings-toggle[aria-checked="true"] span { background: var(--fulcrum-bg); transform: translateX(14px); }
-.settings-panel > footer { border-top: 1px solid var(--fulcrum-border); border-bottom: 0; }
+.settings-session > footer { border-top: 1px solid var(--fulcrum-border); border-bottom: 0; }
 .settings-link { padding: 0; color: var(--fulcrum-fg); font: inherit; text-decoration: underline; background: transparent; border: 0; }
 .settings-link:disabled { color: var(--fulcrum-muted); }
 @media (max-width: 680px) {
@@ -55,7 +58,8 @@
   .settings-panel { max-height: calc(100vh - 16px); }
   .settings-row { grid-template-columns: 1fr; gap: 10px; }
   .theme-options { grid-template-columns: 1fr; }
-  .settings-titlebar, .settings-panel > footer, .settings-content { padding-left: 14px; padding-right: 14px; }
+  #settings-lock-note { margin-inline: 14px; }
+  .settings-titlebar, .settings-session > footer, .settings-content { padding-left: 14px; padding-right: 14px; }
   .settings-titlebar > div:last-child > span { display: none; }
   .theme-options button, .settings-segments button, .settings-titlebar button, .settings-link { min-height: 40px; }
   .settings-segments button { min-width: 40px; }
