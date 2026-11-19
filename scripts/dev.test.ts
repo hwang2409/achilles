@@ -221,9 +221,10 @@ exit 0
   };
 
   try {
+    const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
+    expect(pin, "zeta.rev must contain a 40-character lowercase git SHA").toMatch(/^[0-9a-f]{40}$/);
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
     expect(owned.stderr).toBe(zetaRemediationMessage(pin) + "\n");
     expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
