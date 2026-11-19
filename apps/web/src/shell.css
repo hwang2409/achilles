@@ -95,6 +95,11 @@
   .vim-mode-chip { min-width: auto; padding-inline: 6px; }
 }
 
+/* Anchor popup height to the dock/sheet. Keep timeline overlays in the transcript's own layer. */
+.page-chat-docked .page-chat-surface { container-type: size; }
+.page-chat-docked .transcript { isolation: isolate; }
+/* Put the breathing room outside the scrollport, so a partial row never meets the header divider. */
+.page-chat-docked .transcript [data-part="timeline-scroll"] { margin-top: 8px; }
 .page-chat-bar { display: none; }
 .page-chat-docked { overflow-wrap: anywhere; }
 
@@ -127,7 +132,7 @@
 }
 
 @media (max-width: 760px) and (min-height: 501px) {
-  .page-chat-docked .page-chat-surface .transcript [data-part="timeline"] { padding: 14px 0 8px; }
+  .page-chat-docked .page-chat-surface .transcript [data-part="timeline"] { padding: 6px 0 8px; }
 }
 @media (max-width: 760px), (max-height: 500px) {
   .chat-header { padding-left: 64px; padding-right: 12px; }
@@ -139,7 +144,7 @@
 
 @media (width >= 1280px) {
   .page-view.docked > .page-chat { border-left: 1px solid var(--fulcrum-border); }
-  .page-chat-docked .transcript [data-part="timeline"] { padding: 20px 0 16px; }
+  .page-chat-docked .transcript [data-part="timeline"] { padding: 12px 0 16px; }
   .page-chat-docked .transcript [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: calc(100% - 32px); margin-inline: 16px; }
   .main-pane .page-chat-docked [data-part="composer"] { margin-bottom: 16px; }
 }

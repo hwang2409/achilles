@@ -29,6 +29,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
 }) {
   const catalog = useContext(PageChatCatalog)!;
   const chats = catalog.chats.filter((chat) => chat.page_id === pageId);
+  const count = `${chats.length} ${chats.length === 1 ? "chat" : "chats"}`;
   const [popup, setPopup] = useState<Popup | null>(null);
   const [confirmation, setConfirmation] = useState<number | null>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -59,11 +60,10 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     if (!popup) return;
     const outside = (event: Event) => {
       if (event.target instanceof Node && !panel.current?.contains(event.target)
-        && !switcher.current?.contains(event.target) && !menu.current?.contains(event.target)) dismiss();
+        && !switcher.current?.contains(event.target) && !menu.current?.contains(event.target)) dismiss(true);
     };
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("focusin", outside);
-    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("focusin", outside); };
+    document.addEventListener("click", outside);
+    return () => document.removeEventListener("click", outside);
   }, [popup]);
   const finishConfirmation = () => {
     if (confirmation !== null) rows()[confirmation]?.focus();
@@ -94,20 +94,26 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
   const reason = (mode: Mode) => mode.reason ?? mode.pending;
   return <>
     <div className="page-chat-head" data-popup={popup ?? undefined} onKeyDown={keys}>
-      <strong id="page-chat-title" title={title}>{title}</strong>
-      <div className="page-chat-readouts">
-        <span className={`run-state page-chat-status state-${state}`} title={stateLabel}>{stateLabel}</span>
-        {(!approval.checked || !create.checked) && <div className="page-chat-modes">
-          {!approval.checked && <span className="page-chat-ask" aria-label="ask before tools" title="ask before running tools">ask</span>}
-          {!create.checked && <span className="page-chat-data">data only</span>}
-        </div>}
+      <div className="page-chat-title-row">
+        <button className="page-chat-trigger page-chat-switcher" type="button" ref={switcher} aria-label={`${title}, ${count}`} aria-haspopup="listbox" aria-expanded={popup === "chats"} aria-controls={popup === "chats" ? "page-chat-choices" : undefined} onClick={() => open("chats")}>
+          <strong id="page-chat-title" title={title}>{title}</strong><span aria-hidden="true">⌄</span>
+        </button>
+        {close && <button className="page-chat-trigger page-chat-icon page-chat-close" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><span aria-hidden="true">⌄</span></button>}
       </div>
-      <button className="page-chat-trigger" type="button" ref={switcher} aria-label={`${chats.length} chats`} aria-haspopup="listbox" aria-expanded={popup === "chats"} aria-controls={popup === "chats" ? "page-chat-choices" : undefined} onClick={() => open("chats")}>{chats.length} chats <span aria-hidden="true">⌄</span></button>
-      <button className="page-chat-trigger page-chat-icon" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={newReason ? "page-chat-new-reason" : undefined} disabled={!newChat} onClick={newChat}>+</button>
-      <button className="page-chat-trigger page-chat-icon" type="button" ref={menu} aria-label="page chat options" aria-haspopup="menu" aria-expanded={popup === "modes"} aria-controls={popup === "modes" ? "page-chat-modes" : undefined} onClick={() => open("modes")}>⋯</button>
-      {close && <button className="page-chat-trigger page-chat-icon page-chat-close" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><span aria-hidden="true">⌄</span></button>}
+      <div className="page-chat-controls">
+        <div className="page-chat-readouts">
+          <span className={`run-state page-chat-status state-${state}`} title={stateLabel}>{stateLabel}</span>
+          {(!approval.checked || !create.checked) && <div className="page-chat-modes">
+            {!approval.checked && <span className="page-chat-ask" aria-label="ask before tools" title="ask before running tools">ask</span>}
+            {!create.checked && <span className="page-chat-data">data only</span>}
+          </div>}
+        </div>
+        <button className="page-chat-trigger page-chat-icon" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={newReason ? "page-chat-new-reason" : undefined} disabled={!newChat} onClick={newChat}>+</button>
+        <button className="page-chat-trigger page-chat-icon" type="button" ref={menu} aria-label="page chat options" aria-haspopup="menu" aria-expanded={popup === "modes"} aria-controls={popup === "modes" ? "page-chat-modes" : undefined} onClick={() => open("modes")}>⋯</button>
+      </div>
       {popup === "chats" && <div className="page-chat-popup" data-kind="chats" ref={panel} tabIndex={-1}>
-        <div role="listbox" id="page-chat-choices" aria-label="chats on this page" aria-busy={catalog.loading}>
+        <div className="page-chat-popup-note" id="page-chat-count">{count} on this page</div>
+        <div role="listbox" id="page-chat-choices" aria-labelledby="page-chat-count" aria-busy={catalog.loading}>
           {chats.map((chat) => <button type="button" key={chat.session_id} className="page-chat-choice" role="option" data-popup-row tabIndex={-1} aria-selected={chat.session_id === sessionId} onClick={() => select(chat)}>
             <span className="page-chat-choice-title" title={titleOf(chat)}>{titleOf(chat)}</span>
             <span className={`page-chat-status state-${chat.last_state ?? "idle"}`}>{chat.last_state === "approval" ? "needs you" : chat.last_state ?? "idle"}</span>

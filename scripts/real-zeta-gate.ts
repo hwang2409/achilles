@@ -327,14 +327,14 @@ try {
     switcher: "pointer",
     confirmation: "pointer",
   } as const;
-  const setupMobileSheet = async (tab: Page, height: number, state: keyof typeof mobileSheet = "closed") => {
+  const setupMobileSheet = async (tab: Page, height: number, state: keyof typeof mobileSheet = "closed", width = 390) => {
     const opener = mobileSheet[state];
     const bar = tab.locator(".page-chat-bar");
     const dialog = tab.getByRole("dialog", { name: "page chat", exact: true });
     const closeButton = dialog.getByRole("button", { name: "close page chat", exact: true });
     const settleClosed = async () => {
       const wasFocused = await tab.evaluate(() => Boolean(document.activeElement?.closest(".page-chat-docked #message-composer") && !matchMedia("(width < 1280px)").matches));
-      await tab.setViewportSize({ width: 390, height });
+      await tab.setViewportSize({ width, height });
       if (wasFocused) {
         // A focused resize opens the sheet. Do not close until that commit happened.
         await gateWait.playwright(tab, "waitForFunction", () => Boolean(document.activeElement?.closest('#page-chat-sheet[aria-modal="true"] #message-composer')));
@@ -1103,6 +1103,23 @@ try {
   await field.press("Enter", { timeout: 20_000 });
   await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (screenshotDir) {
+    const readingUrl = page.url();
+    const oneChat = async (tab: Page, name: string) => {
+      await setupMobileSheet(tab, 844, "button");
+      await gateWait.playwright(dockHead(tab).getByRole("button", { name: /, 1 chat$/ }), "waitFor");
+      await tab.screenshot({ path: join(screenshotDir, `s2-header-one-chat-${name}-390.png`), animations: "disabled" });
+    };
+    await oneChat(page, "controller");
+    const oneChatObserver = await browser.newPage();
+    try {
+      await oneChatObserver.goto(readingUrl);
+      await gateWait.playwright(oneChatObserver.locator(".observer-banner"), "waitFor");
+      await oneChat(oneChatObserver, "observer");
+    } finally { await oneChatObserver.close(); }
+    await setupMobileSheet(page, 844);
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
   if (screenshotDir) {
     const captureInsets = async (width: number) => {
       const surface = page.locator(".page-chat-docked .page-chat-surface");
@@ -2752,18 +2769,56 @@ try {
     await gateWait.playwright(dockHead(page).locator(`[role="menuitemcheckbox"][aria-checked="${checked}"]`).and(item), "waitFor");
     await page.keyboard.press("Escape");
   };
-  const headerGeometry = async (label: string, touch = false) => {
+  const headerGeometry = async () => {
     const dimensions = await dockHead(page).evaluate((head) => {
+      const box = (selector: string) => head.querySelector(selector)!.getBoundingClientRect();
       const title = head.querySelector("strong")!;
-      return { height: head.getBoundingClientRect().height, overflow: head.scrollWidth > head.clientWidth, ellipsized: title.scrollWidth > title.clientWidth, buttons: [...head.querySelectorAll(".page-chat-trigger")].map((button) => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })) };
+      const titleRow = box(".page-chat-title-row");
+      const controls = box(".page-chat-controls");
+      const marks = [...head.querySelectorAll<HTMLElement>(".page-chat-status, .page-chat-ask, .page-chat-data")];
+      return {
+        height: head.getBoundingClientRect().height, stacked: titleRow.bottom === controls.top,
+        overflow: head.scrollWidth > head.clientWidth,
+        ellipsized: title.scrollWidth > title.clientWidth && title.clientHeight < 30 && getComputedStyle(title).textOverflow === "ellipsis",
+        oneBaseline: marks.every((mark) => getComputedStyle(mark).whiteSpace === "nowrap" && Math.abs((mark.getBoundingClientRect().top + mark.clientHeight / 2) - (controls.top + controls.height / 2)) <= 1),
+        touchTargets: [...head.querySelectorAll(".page-chat-trigger")].every((button) => button.getBoundingClientRect().width >= 44 && button.getBoundingClientRect().height === 44),
+      };
     });
-    if (dimensions.height !== 48 || dimensions.overflow || !dimensions.ellipsized || dimensions.buttons.some(({ width, height }) => height !== (touch ? 44 : 28) || (touch && width < 44))) throw new Error(`page chat header geometry ${label}: ${JSON.stringify(dimensions)}`);
-    return dimensions;
+    if (dimensions.height !== 90 || !dimensions.stacked || dimensions.overflow || !dimensions.ellipsized || !dimensions.oneBaseline || !dimensions.touchTargets) throw new Error(`page chat header geometry: ${JSON.stringify(dimensions)}`);
+  };
+  const popupBounds = async () => {
+    if (!await dockHead(page).locator(".page-chat-popup").evaluate((node) => {
+      const popup = node.getBoundingClientRect();
+      const surface = node.closest(".page-chat-surface")!.getBoundingClientRect();
+      return popup.top >= surface.top && popup.bottom <= surface.bottom && popup.left >= surface.left && popup.right <= surface.right;
+    })) throw new Error("page chat popup escaped the rail or sheet");
+  };
+  const outsideCloses = async (trigger: ReturnType<Page["locator"]>) => {
+    // The title/controls split gives us a stable outside click within the rail/sheet.
+    await dockHead(page).locator(".page-chat-readouts").click();
+    if (await trigger.getAttribute("aria-expanded") !== "false" || !await trigger.evaluate((node) => node === document.activeElement)) throw new Error("outside click did not close the popup and restore its trigger");
+  };
+  const popupPointers = async () => {
+    await modeMenu(page).click();
+    await popupBounds();
+    for (const name of ["run tools without asking", "create mode"] as const) {
+      await modeItem(page, name).click();
+      await popupBounds();
+      await dockHead(page).getByRole("button", { name: "keep current", exact: true }).click();
+    }
+    await outsideCloses(modeMenu(page));
+    await switcher.click();
+    await popupBounds();
+    await outsideCloses(switcher);
+    await switcher.click();
+    await dockHead(page).getByRole("option", { selected: true }).click();
+    if (await switcher.getAttribute("aria-expanded") !== "false") throw new Error("pointer did not select the current chat row");
   };
   const captures = async (name: string) => {
     for (const width of [1280, 1440, 1920]) {
       await page.setViewportSize({ width, height: 900 });
-      await headerGeometry(`${name}-${width}`);
+      await headerGeometry();
+      if (name === "non-default") await popupPointers();
       await s2Shot(page, `${name}-${width}`);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -2777,8 +2832,19 @@ try {
   await setupMobileSheet(page, 844, "switcher");
   await setupMobileSheet(page, 844, "confirmation");
   await setupMobileSheet(page, 844, "button");
-  await headerGeometry("390", true);
-  await s2Shot(page, "sheet-390");
+  for (const [width, height] of [[360, 780], [390, 844], [430, 844]]) {
+    await setupMobileSheet(page, height, "button", width);
+    await headerGeometry();
+    await popupPointers();
+    await s2Shot(page, `sheet-${width}`);
+    await switcher.click();
+    await dockHead(page).getByRole("option", { selected: false }).first().click();
+    await gateWait.playwright(page, "waitForURL", (url) => url.searchParams.get("chat") === alternateId);
+    await page.goto(`${origin}/reading?chat=${controllerChat}&theme=${encodeURIComponent(theme)}`);
+    await setupMobileSheet(page, height, "button", width);
+    await gateWait.playwright(dockHead(page).getByText(longTitle, { exact: true }), "waitFor");
+  }
+  await setupMobileSheet(page, 844, "button");
   await modeMenu(page).click();
   await s2Shot(page, "menu-390");
   await page.keyboard.press("Home");
@@ -2864,7 +2930,17 @@ try {
   await recordRenderedWriteSurfaces(observerPage);
   await s2Shot(observerPage, "observer-1440");
   await observerPage.keyboard.press("Escape");
-  if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-confirmation-390.png"] }, null, 2) + "\n");
+  await setupMobileSheet(observerPage, 844, "button");
+  await s2Shot(observerPage, "observer-390");
+  await modeMenu(observerPage).click();
+  for (const name of ["run tools without asking", "create mode"] as const) {
+    if (!await modeItem(observerPage, name).isDisabled()) throw new Error("mobile observer can change a mode");
+  }
+  await gateWait.playwright(dockHead(observerPage).getByText("this tab is read-only", { exact: false }).first(), "waitFor");
+  await s2Shot(observerPage, "observer-menu-390");
+  await setupMobileSheet(observerPage, 844);
+  await observerPage.setViewportSize({ width: 1440, height: 900 });
+  if (screenshotDir) await writeFile(join(screenshotDir, "s2-header-manifest.json"), JSON.stringify({ head: (await Bun.$`git rev-parse HEAD`.text()).trim(), theme, captures: [...s2Images, "s2-header-switcher-390.png", "s2-header-confirmation-390.png", "s2-header-one-chat-controller-390.png", "s2-header-one-chat-observer-390.png"] }, null, 2) + "\n");
   const observerComposerReason = observerPage.locator('[data-part="composer-reason"]');
   const observerBody = await observerPage.locator("body").innerText();
   if ((await observerComposerReason.count()) && !(await observerComposerReason.first().innerText()).includes("read-only")) throw new Error("observer composer did not explain its disabled state");

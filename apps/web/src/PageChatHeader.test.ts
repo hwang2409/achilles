@@ -21,7 +21,7 @@ function setup() {
 test("switcher keeps the shared catalog order and uses its continuation and retry", () => {
   const { app, called, update } = setup();
   try {
-    fireEvent.click(app.getByRole("button", { name: "3 chats" }));
+    fireEvent.click(app.getByRole("button", { name: "fixture, 3 chats" }));
     const rows = app.getAllByRole("option");
     expect(rows.map((node) => node.firstElementChild?.textContent)).toEqual([longTitle, "current", "older"]);
     expect(rows[0].firstElementChild?.getAttribute("title")).toBe(longTitle);
@@ -38,7 +38,7 @@ test("switcher keeps the shared catalog order and uses its continuation and retr
     expect(called).toEqual(["more", "older"]);
     expect(app.queryByRole("listbox")).toBeNull();
     update({ chats: [], error: true, next: null });
-    fireEvent.click(app.getByRole("button", { name: "0 chats" }));
+    fireEvent.click(app.getByRole("button", { name: "fixture, 0 chats" }));
     fireEvent.click(app.getByRole("button", { name: "retry" }));
     expect(called.at(-1)).toBe("reload");
     update({ error: false, loading: true });
