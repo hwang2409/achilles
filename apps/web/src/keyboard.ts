@@ -1,13 +1,19 @@
+import { useLayoutEffect, type RefObject } from "react";
+import { focusable } from "./focusable";
+
 export function isEditableTarget(event: KeyboardEvent) {
   const target = event.target;
   return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable], [role="textbox"], .cm-editor'));
 }
 
 export const isMac = navigator.platform.includes("Mac");
+export const hasAppModifier = (event: Pick<KeyboardEvent, "metaKey" | "ctrlKey">) => {
+  const mac = navigator.platform.includes("Mac");
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+};
 export const modKey = (key: string) => isMac ? `⌘${key}` : `ctrl+${key}`;
 
-export const focusable = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
-const nativelyFocusable = "button, a[href], input, select, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
+const nativelyFocusable = "button, a[href], input, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 // in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
 const tabbable = (element: HTMLElement) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true });
 export const firstFocusable = (parent: HTMLElement | null) => parent?.querySelector<HTMLElement>(focusable) ?? null;
@@ -30,6 +36,40 @@ export const keyboardFocusToComposer = (event: { detail: number; currentTarget: 
 };
 
 // keeps Tab inside `container`: from the last tabbable control to the first, and back with Shift+Tab
+const nativeModal = (event: KeyboardEvent) => {
+  const pathDialog = event.composedPath().find((target): target is HTMLDialogElement => target instanceof HTMLDialogElement);
+  const focusIsUnassigned = document.activeElement === document.body || document.activeElement === document.documentElement;
+  try {
+    if (pathDialog?.matches(":modal")) return true;
+    return focusIsUnassigned && document.querySelector<HTMLDialogElement>("dialog:modal") !== null;
+  } catch {
+    // older engines have no :modal selector; every app-native dialog uses showModal().
+    return pathDialog?.open === true || (focusIsUnassigned && document.querySelector<HTMLDialogElement>("dialog[open]") !== null);
+  }
+};
+
+export function useModalFocus(open: boolean, container: RefObject<HTMLElement | null>, initial?: RefObject<HTMLElement | null>, preserveFocus = false) {
+  useLayoutEffect(() => {
+    if (!open) return;
+    const node = container.current;
+    if (!node) return;
+    const key = (event: KeyboardEvent) => {
+      if (nativeModal(event)) return;
+      wrapTab(event, node);
+    };
+    window.addEventListener("keydown", key, true);
+    let frame = 0;
+    if (!preserveFocus || !node.contains(document.activeElement)) {
+      const target = initial?.current ?? firstFocusable(node);
+      if (target && tabbable(target)) target.focus();
+      else if (target) frame = requestAnimationFrame(() => {
+        if (!node.contains(document.activeElement) && target.isConnected && tabbable(target)) target.focus();
+      });
+    }
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); };
+  }, [open, container, initial, preserveFocus]);
+}
+
 export function wrapTab(event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault">, container: HTMLElement) {
   if (event.key !== "Tab") return;
   const controls = Array.from(container.querySelectorAll<HTMLElement>(focusable)).filter(tabbable);

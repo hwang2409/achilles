@@ -15,7 +15,7 @@ test("offers the provider default when the in-use account failed", () => {
   const accounts = [
     account("anthropic:default", { current: true }),
     account("anthropic:personal", { default: true }),
-    account("codex:work", { current: true, default: true }),
+    account("codex:work", { default: true }),
   ];
   const recovery = accountRecovery(accounts);
   expect(recovery?.failed.account).toBe("anthropic:default");
@@ -37,6 +37,7 @@ test("no other account of the provider: failed is reported with no target", () =
   expect(recovery?.target).toBeNull();
 });
 
-test("no in-use account: nothing to recover", () => {
+test("zero or multiple in-use accounts: do not guess which failed", () => {
+  expect(accountRecovery([account("anthropic:default", { current: true }), account("codex:work", { current: true })])).toBeNull();
   expect(accountRecovery([account("anthropic:personal", { default: true })])).toBeNull();
 });

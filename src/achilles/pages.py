@@ -102,6 +102,10 @@ _LAYOUT_BLOCK_SCHEMA = {
                 "type": {"const": "metric"},
                 "label": {"type": "string"},
                 "value": {"type": "string"},
+                "detail": {"type": "string"},
+                "delta": {"type": "string"},
+                "status": {"type": "string"},
+                "warn": {"type": "boolean"},
             },
             "required": ["type", "label", "value"],
             "additionalProperties": False,
@@ -114,6 +118,10 @@ _LAYOUT_BLOCK_SCHEMA = {
                 "collection": {"type": "string"},
                 "count": {"const": True},
                 "where": _EQUALITY_FILTER_SCHEMA,
+                "detail": {"type": "string"},
+                "delta": {"type": "string"},
+                "status": {"type": "string"},
+                "warn": {"type": "boolean"},
             },
             "required": ["type", "label", "collection", "count"],
             "additionalProperties": False,
@@ -280,6 +288,30 @@ def chat_row(row) -> dict[str, Any]:
         **dict(row),
         "titled_by_user": bool(row["titled_by_user"]),
         "message_sent": bool(row["message_sent"]),
+    }
+
+
+def _first_block_label(blocks: list[dict[str, Any]]) -> str | None:
+    """A short label from the first block, so near-identical layout versions read apart."""
+    if not blocks:
+        return None
+    for key in ("title", "label", "text"):
+        value = blocks[0].get(key)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())[:80]
+    return None
+
+
+def _layout_version_row(row) -> dict[str, Any]:
+    blocks = json.loads(row[2])["blocks"]
+    return {
+        "version": row[0],
+        "created_at": row[1],
+        "block_types": [block["type"] for block in blocks],
+        "summary": _first_block_label(blocks),
+        "active": bool(row[3]),
+        "action": row[4],
+        "restored_from": row[5] if row[4] == "restore_layout" else None,
     }
 
 
@@ -921,17 +953,7 @@ class PageStore:
                 (page_id,),
             ).fetchall()
         return {
-            "layout": [
-                {
-                    "version": row[0],
-                    "created_at": row[1],
-                    "block_types": [block["type"] for block in json.loads(row[2])["blocks"]],
-                    "active": bool(row[3]),
-                    "action": row[4],
-                    "restored_from": row[5] if row[4] == "restore_layout" else None,
-                }
-                for row in layouts
-            ],
+            "layout": [_layout_version_row(row) for row in layouts],
             "tools": [
                 {
                     "name": row[0],

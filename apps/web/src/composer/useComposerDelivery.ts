@@ -1,4 +1,5 @@
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -36,6 +37,8 @@ export type ComposerAdapterProps = ComposerProps & {
   /** this chat was just created by the page's new-chat composer `fromNewChat`; that composer's owner moves here */
   fromNewChat?: string;
   onActivity?: (activity: ReturnType<typeof composerActivity>) => void;
+  questionWaiting?: boolean;
+  commandOutput?: ReactNode;
 };
 
 /** `deliveryId`: send with this id (a retry of a held row), not a new one */
@@ -131,7 +134,7 @@ export function createComposerDelivery(options: DeliveryOptions, rows: Omit<Queu
     },
     async submit() {
       apply({ type: "state", state: current.state });
-      if (current.onCommand) {
+      if (current.onCommand && current.state !== "read-only") {
         const parsed = parseComposerInput(model.draft);
         if (parsed.kind === "command") {
           // a slash command never reaches the model; the handler keeps or clears the draft

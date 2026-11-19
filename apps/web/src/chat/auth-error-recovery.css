@@ -1,0 +1,21 @@
+.chat-auth-error {
+  display: grid; gap: 10px; margin: 8px 0; padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--fulcrum-danger) 55%, var(--fulcrum-border));
+  border-inline-start: 2px solid var(--fulcrum-danger);
+  background: color-mix(in srgb, var(--fulcrum-danger) 8%, var(--fulcrum-bg));
+  color: var(--fulcrum-fg); overflow-wrap: anywhere;
+}
+.chat-auth-error strong::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 9px; background: var(--fulcrum-danger); vertical-align: 1px; }
+.chat-auth-error code { font: inherit; }
+.chat-auth-error p { margin: 0; color: var(--fulcrum-muted); }
+.chat-auth-error-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.chat-auth-error-actions button, .chat-auth-login-link { min-height: 40px; max-width: 100%; padding: 5px 10px; text-align: left; }
+.chat-auth-error-actions button:first-child { background: var(--fulcrum-accent); color: var(--fulcrum-bg); border-color: var(--fulcrum-accent); }
+.chat-auth-error-actions button:not(:disabled):hover { border-color: var(--fulcrum-fg); }
+.chat-auth-error-actions button:disabled { cursor: not-allowed; opacity: .6; }
+.chat-auth-login-link { width: fit-content; display: inline-flex; align-items: center; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-accent); text-decoration: underline; }
+@media (max-width: 500px) {
+  .page-chat:not(.page-chat-docked) .chat-auth-error { margin-inline: 12px; }
+  .chat-auth-error-actions { align-items: stretch; flex-direction: column; }
+  .chat-auth-error-actions button { min-height: 44px; }
+}

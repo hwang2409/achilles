@@ -1,10 +1,13 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { history } from "@codemirror/commands";
 import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView } from "@codemirror/view";
 import { getCM, Vim, vim } from "@replit/codemirror-vim";
 import { isEditableTarget } from "../keyboard";
+import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, submitAction, type ComposerModel } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
+import { ComposerHint } from "./hint";
 import { useComposerDelivery, type ComposerAdapterProps } from "./useComposerDelivery";
 import "./vim-composer.css";
 
@@ -21,7 +24,7 @@ export function VimComposer(props: ComposerAdapterProps) {
 }
 
 function InteractiveVimComposer(props: ComposerAdapterProps) {
-  const { state, reason, label = "message", placeholder, defaultValue = "", className, onStop } = props;
+  const { state, reason, label = "message", placeholder, defaultValue = "", className, onStop, questionWaiting } = props;
   const id = useId();
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -44,6 +47,9 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const [mode, setMode] = useState<Mode>("insert");
   const [focused, setFocused] = useState(true);
   const [pending, setPending] = useState("");
+  // a short note shown when a key achilles intercepts has no action (e.g. the ex line ":")
+  const [note, setNote] = useState("");
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [selectionLength, setSelectionLength] = useState(0);
   useLayoutEffect(() => {
     const view = viewRef.current;
@@ -69,7 +75,7 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       state: EditorState.create({
         doc: initialDefaultValue,
         extensions: [
-          vim(), drawSelection(), EditorView.lineWrapping, editable.of(EditorView.editable.of(state !== "read-only")),
+          vim(), history(), drawSelection(), EditorView.lineWrapping, editable.of(EditorView.editable.of(state !== "read-only")),
           EditorView.contentAttributes.of({ "aria-label": label, "aria-describedby": `${id}-mode ${id}-hint ${id}-message`, "data-placeholder": placeholder ?? "" }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) edit(update.state.doc.toString());
@@ -106,9 +112,16 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape" && modeBefore === "normal") { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); view.contentDOM.blur(); return; }
       if (modeBefore === "insert") { if (event.key === "Escape") queueMicrotask(() => syncVimState(view)); return; }
-      const ctrlRedo = event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r";
-      const allowed = ctrlRedo || event.key === "Tab" || event.key === "Escape" || /^[0-9ghjklwbeiaIoOAxdcypuvVG$]$/.test(event.key);
-      if (!allowed) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); return; }
+      // codemirror-vim owns normal- and visual-mode keys; achilles intercepts only the ex line and cmd shortcuts, so a
+      // new vim motion or operator needs no change here. (the command palette's mod+k is consumed upstream in AppShell.)
+      if (event.key === ":") {
+        event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+        setNote("ex commands are off in achilles");
+        clearTimeout(noteTimer.current);
+        noteTimer.current = setTimeout(() => setNote(""), 3000);
+        return;
+      }
+      if (event.metaKey) return; // cmd shortcuts (palette, settings, sidebar) belong to the app and browser
       if (event.key === "y" || (cm?.state.vim?.status ?? "").includes("y")) yankPending = true;
       queueMicrotask(() => syncVimState(view));
     };
@@ -127,11 +140,12 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
         if (event.key === "i" && vimMode(view) === "normal") Vim.handleKey(cm!, "i", "user");
         syncVimState(view);
       } else if (event.key === "j" || event.key === "k") {
-        event.preventDefault(); document.querySelector(".transcript")?.scrollBy({ top: event.key === "j" ? 96 : -96, behavior: "smooth" });
+        event.preventDefault(); document.querySelector('[data-part="timeline-scroll"]')?.scrollBy({ top: event.key === "j" ? 96 : -96, behavior: "smooth" });
       }
     };
     document.addEventListener("keydown", onPageKeyDown);
     return () => {
+      clearTimeout(noteTimer.current);
       document.removeEventListener("keydown", onPageKeyDown);
       host.current?.removeEventListener("keydown", onKeyDown, true);
       cm?.off("vim-command-done", commandDone);
@@ -144,27 +158,28 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint = mode === "insert" ? `esc normal · enter ${queues ? "queue" : "send"} · shift+enter new line` : mode === "visual" ? "d delete · y yank · c change · esc normal" : focused ? "i insert · v visual · enter send · esc leave" : "i focus · j/k scroll chat · ? shortcuts";
+  const hint = note || undefined;
   const onFormSubmit = (event: FormEvent) => { event.preventDefault(); viewRef.current?.focus(); submit(); };
   const stopButtonRef = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
     return () => { if (document.activeElement === button) viewRef.current?.focus(); };
   }, []);
 
-  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
+  return <form className={["vim-composer", className].filter(Boolean).join(" ")} data-part="composer" data-write-surface={WRITE_SURFACE.composerSend} data-state={state} data-mode={mode} data-focused={focused || undefined} data-error={model.error?.kind} data-pending={model.sending ? "submit" : model.stopping ? "stop" : undefined} data-queued={model.queue.length || undefined} aria-label={label} aria-busy={model.sending || model.stopping || undefined} onSubmit={onFormSubmit}>
     <QueuedMessages model={model} onRetry={(id) => { retry(id); viewRef.current?.focus(); }} onRestore={restore} onCancel={(id) => { cancel(id); viewRef.current?.focus(); }} />
     <div data-part="composer-field" data-empty={!model.draft || undefined} data-value={model.draft} ref={host} />
     {state === "read-only" ? <p data-part="composer-reason">{reason}</p> : <div data-part="composer-bar">
       <div className="vim-guidance">
         <span className="vim-mode-chip" data-mode={mode} id={`${id}-mode`} aria-live="polite">{mode.toUpperCase()}</span>
         <p data-part="composer-status" data-tone={tone} title={model.error?.text}>
-          <span data-part="composer-hint" id={`${id}-hint`} hidden={Boolean(message)}>{hint}</span>
+          <ComposerHint id={`${id}-hint`} state={state} mode={mode} queues={queues} focused={focused} questionWaiting={questionWaiting} override={note || undefined} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>{message}</span>
         </p>
       </div>
       <span className="vim-pending" aria-hidden="true">{mode === "visual" && selectionLength ? `${selectionLength} chars` : pending}</span>
-      {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
-      <button type="submit" data-part="composer-submit" data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</button>
+      {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-write-surface={WRITE_SURFACE.composerAbort} data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
+      <button type="submit" data-part="composer-submit" data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend} data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</button>
     </div>}
-  </form>;
+  {props.commandOutput}
+    </form>;
 }

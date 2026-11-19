@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { inFlight, MAYBE_SENT_HINT, MAYBE_SENT_LABEL, shownQueue, type ComposerModel } from "./composer-machine";
+import { WRITE_SURFACE } from "../writeSurfaces";
 
 /** `navigator.clipboard` exists only in a secure context (not on plain http from a LAN address): copy through a
  * selected hidden textarea there */
@@ -51,7 +52,7 @@ export function QueuedMessages({ model, onRetry, onRestore, onCancel }: { model:
             <span data-part="composer-queued-label">{label}</span>
             <span data-part="composer-queued-text" title={item.text}>{item.text}</span>
             <span data-part="composer-queued-actions">
-              {item.failed ? <button type="button" data-part="composer-queued-retry" aria-label={`retry: ${preview}`} onClick={() => onRetry(item.id)}>retry</button> : null}
+              {item.failed ? <button type="button" data-part="composer-queued-retry" data-write-surface={WRITE_SURFACE.deliveryRetry} aria-label={`retry: ${preview}`} onClick={() => onRetry(item.id)}>retry</button> : null}
               {item.failed && !held ? <button type="button" data-part="composer-queued-edit" aria-label={`edit: ${preview}`} onClick={() => onRestore(item.id)}>edit</button> : null}
               {held ? <CopyButton text={item.text} preview={preview} /> : null}
               {sending ? null : <button type="button" data-part="composer-queued-cancel" aria-label={`cancel message: ${preview}`} title="cancel (esc in an empty box cancels the last)" onClick={() => onCancel(item.id)}>×</button>}

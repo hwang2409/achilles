@@ -23,18 +23,11 @@ export async function switchAccount(client: ZetaClient, sessionId: string, accou
 
 const providerOf = (account: string) => account.split(":", 1)[0];
 
-/**
- * After a provider auth error, the account a chat should switch to. The failed account is the provider's in-use
- * (`current`) account; the target is that provider's `default` if it differs, else another of its accounts,
- * preferring one that still has a stored login. `target` is null when the provider has no other account to offer.
- */
+/** If more than one provider has a current account, the auth error cannot identify which failed. */
 export function accountRecovery(accounts: Account[]): { failed: Account; target: Account | null } | null {
-  let fallback: { failed: Account; target: null } | null = null;
-  for (const failed of accounts.filter((item) => item.current)) {
-    const others = accounts.filter((item) => item !== failed && providerOf(item.account) === providerOf(failed.account));
-    const target = others.find((item) => item.default) ?? others.find((item) => item.available) ?? others[0] ?? null;
-    if (target) return { failed, target };
-    fallback ??= { failed, target: null };
-  }
-  return fallback;
+  const current = accounts.filter((item) => item.current);
+  const failed = current.length === 1 ? current[0] : undefined;
+  if (!failed) return null;
+  const candidates = accounts.filter((item) => item !== failed && item.available && providerOf(item.account) === providerOf(failed.account));
+  return { failed, target: candidates.find((item) => item.default) ?? candidates[0] ?? null };
 }

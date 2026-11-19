@@ -7,12 +7,14 @@ import {
   type KeyboardEvent,
 } from "react";
 import { restoreFocus } from "../keyboard";
+import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, inFlight, submitAction } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
 import {
   useComposerDelivery,
   type ComposerAdapterProps,
 } from "./useComposerDelivery";
+import { ComposerHint } from "./hint";
 
 /** A textarea adapter for the shared Achilles composer delivery module. */
 export function PlainComposer(props: ComposerAdapterProps) {
@@ -23,6 +25,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
     placeholder,
     className,
     onStop,
+    questionWaiting,
   } = props;
   const id = useId();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -35,14 +38,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
   const action = submitAction(model);
   const queues = model.sending || model.queue.length > 0;
   const { text: message, tone } = composerStatus(model);
-  const hint =
-    state === "running"
-      ? "a turn is running · stop it or wait to send"
-      : queues
-        ? "enter to queue · esc in an empty box cancels the last"
-        : steer
-          ? "enter to steer · shift+enter new line"
-          : "enter to send · shift+enter for a new line";
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape" && !model.draft && model.queue.length && model.queue.at(-1) !== inFlight(model) && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -89,6 +85,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
         tabIndex={-1}
         className={className}
         data-part="composer"
+        data-write-surface={WRITE_SURFACE.composerSend}
         data-state="read-only"
         role="group"
         aria-label={label}
@@ -112,6 +109,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
     <form
       className={className}
       data-part="composer"
+      data-write-surface={WRITE_SURFACE.composerSend}
       data-state={state}
       data-error={model.error?.kind}
       data-pending={
@@ -141,13 +139,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           data-tone={tone}
           title={model.error?.text}
         >
-          <span
-            data-part="composer-hint"
-            id={`${id}-hint`}
-            hidden={Boolean(message)}
-          >
-            {hint}
-          </span>
+          <ComposerHint id={`${id}-hint`} state={state} queues={queues} questionWaiting={questionWaiting} hidden={Boolean(message)} />
           <span data-part="composer-message" id={`${id}-message`} role={model.error ? "alert" : "status"}>
             {message}
           </span>
@@ -157,6 +149,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
             ref={stopButtonRef}
             type="button"
             data-part="composer-stop"
+            data-write-surface={WRITE_SURFACE.composerAbort}
             data-action="stop"
             aria-label="stop the running turn"
             aria-disabled={model.stopping || undefined}
@@ -170,6 +163,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
         <button
           type="submit"
           data-part="composer-submit"
+          data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend}
           data-action={queues ? "queue" : steer ? "steer" : "send"}
           aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"}
           aria-disabled={!action || undefined}
@@ -177,6 +171,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           {queues ? "queue" : steer ? "steer" : "send"}
         </button>
       </div>
+    {props.commandOutput}
     </form>
   );
 }

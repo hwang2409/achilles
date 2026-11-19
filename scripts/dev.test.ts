@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
-import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, type ProcessIdentity } from "./dev";
+import { dirname, resolve } from "node:path";
+import { mcpDecision, ownedProcessMatches, processIdentity, serveDecision, webInstallDecision, zetaExecutable, zetaRemediationMessage, zetaRevisionDecision, zetaStoredFormatMessage, type ProcessIdentity } from "./dev";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const zetaCommand = "/usr/local/bin/zeta serve --port 43001 --ws 43003 --provider ollama --model 'test model'";
@@ -42,23 +43,11 @@ function processesContaining(text: string): string[] {
 
 async function diagnostic(args: string[]): Promise<string> {
   const child = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-  const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-    .then(([stdout, stderr]) => stdout + stderr);
-  let timedOut = false;
-  const result = await Promise.race([
-    output,
-    Bun.sleep(5_000).then(() => { timedOut = true; return ""; }),
+  const [output] = await Promise.all([
+    Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]).then(([stdout, stderr]) => stdout + stderr),
+    child.exited,
   ]);
-  if (timedOut) {
-    try { child.kill("SIGKILL"); } catch {}
-    await Promise.race([
-      child.exited,
-      Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping diagnostic pid ${child.pid}`); }),
-    ]);
-    return `[diagnostic timeout: ${args.join(" ")}]`;
-  }
-  await child.exited;
-  return result;
+  return output;
 }
 
 async function killAndReap(child: Bun.Subprocess): Promise<void> {
@@ -67,6 +56,12 @@ async function killAndReap(child: Bun.Subprocess): Promise<void> {
     child.exited,
     Bun.sleep(5_000).then(() => { throw new Error(`timed out reaping pid ${child.pid}`); }),
   ]);
+}
+
+async function sourceRuntimeSnapshot(): Promise<string> {
+  const status = Bun.spawnSync(["git", "status", "--porcelain", "--ignored"], { cwd: root }).stdout.toString();
+  const cache = Bun.spawnSync(["find", ".cache", "-print"], { cwd: root });
+  return `${status}\0${cache.stdout.toString()}`;
 }
 
 async function spawnTracked(args: string[], options: Parameters<typeof Bun.spawn>[1]) {
@@ -99,11 +94,67 @@ test("serve discovery requires a live zeta process and allows either local origi
   expect(serveDecision({ pid: 123, port: 43003, origins: [requested] }, requested, "python unrelated.py").kind).toBe("start");
 });
 
-test("an existing different MCP entry is left unchanged with an exact fix command", () => {
-  expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/")).toEqual({
-    kind: "different",
-    command: "zeta mcp remove achilles --scope user && zeta mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles",
-  });
+test("zeta invocations use one selected executable", () => {
+  const pin = "d6776edb3a60e7207eabcd1055e01a3aab092a83";
+  const cases = [
+    ["default", "/repo/.cache/zeta/.venv/bin/zeta", "'/repo/.cache/zeta/.venv/bin/zeta' mcp remove achilles --scope user && '/repo/.cache/zeta/.venv/bin/zeta' mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles", "ok"],
+    ["path", "zeta", "'zeta' mcp remove achilles --scope user && 'zeta' mcp add --scope user --url 'http://127.0.0.1:43002/mcp/' achilles", "ok"],
+    ["path mismatch", "zeta", zetaRemediationMessage(pin), "behind"],
+  ] as const;
+  for (const [name, executable, command, kind] of cases) {
+    if (kind === "behind") {
+      const decision = zetaRevisionDecision(pin, "/home/u/zeta", true, false);
+      expect(decision.kind, name).toBe("behind");
+      expect(decision.kind === "behind" ? decision.message : "", name).toBe(command);
+    }
+    else expect(mcpDecision({ transport: "stdio", url: "http://old.test" }, "http://127.0.0.1:43002/mcp/", executable), name).toMatchObject({ kind: "different", command });
+  }
+});
+
+test("newer stored formats produce actionable startup messages", () => {
+  const log = "error: stored format 12 is newer than writer capability 11";
+  expect(zetaStoredFormatMessage(log, "/tmp/home", false, "pinsha")).toBe("zeta serve cannot start for home /tmp/home: stored format 12 is newer than writer capability 11. achilles' zeta pin (zeta.rev pinsha) is older than this home (stored format 12); update achilles (git pull) or move zeta.rev to a zeta main commit with WRITER_EPOCH >= 12");
+  expect(zetaStoredFormatMessage(log, "/tmp/home", true, "pinsha")).toBe("zeta serve cannot start for home /tmp/home: stored format 12 is newer than writer capability 11. your zeta is older than zeta.rev pinsha; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one");
+  expect(zetaStoredFormatMessage("other failure", "/tmp/home", false, "pinsha")).toBeNull();
+});
+
+test("web dependencies install only when the web-deps stamp changed", () => {
+  // The old make dev installed web deps inside the fulcrum build step, so a stamp that
+  // only tracked fulcrum never saw a changed apps/web/package.json. The web-deps stamp
+  // must drive the install on its own: equal stamp skips, any change installs.
+  expect(webInstallDecision("web-stamp-a", "web-stamp-a")).toBe("skip");
+  expect(webInstallDecision("web-stamp-a", "web-stamp-b")).toBe("install");
+  expect(webInstallDecision(null, "web-stamp-a")).toBe("install");
+});
+
+test("default zeta selection is isolated and path selection is explicit", () => {
+  const old = process.env.ACHILLES_USE_PATH_ZETA;
+  try {
+    delete process.env.ACHILLES_USE_PATH_ZETA;
+    expect(zetaExecutable()).toBe(resolve(root, ".cache/zeta/.venv/bin/zeta"));
+    process.env.ACHILLES_USE_PATH_ZETA = "1";
+    expect(zetaExecutable()).toBe(Bun.which("zeta") ?? "zeta");
+  } finally {
+    if (old === undefined) delete process.env.ACHILLES_USE_PATH_ZETA;
+    else process.env.ACHILLES_USE_PATH_ZETA = old;
+  }
+});
+
+test("zeta remediation never mutates an installed checkout", () => {
+  const pin = "d6776edb3a60e7207eabcd1055e01a3aab092a83";
+  const cases = [
+    ["serve too old", zetaRemediationMessage(pin)],
+    ["mcp missing", `missing zeta mcp: ${zetaRemediationMessage(pin)}`],
+    ["behind pin", zetaRevisionDecision(pin, "/home/u/zeta", true, false).kind === "behind" ? zetaRevisionDecision(pin, "/home/u/zeta", true, false).message : ""],
+    ["not a checkout", `warning: cannot verify the installed zeta is at least the pin ${pin}: zeta is not installed from a git checkout`],
+  ];
+  for (const [name, text] of cases) {
+    expect(text, name).not.toContain("uv tool install");
+    expect(text, name).not.toContain("pull");
+    expect(text, name).not.toContain("git -C '/home/u/zeta'");
+  }
+  expect(cases[2][1]).toBe(zetaRemediationMessage(pin));
+  expect(cases[3][1]).toContain("not installed from a git checkout");
 });
 
 test("stop ownership requires pid, start time, and exact command", () => {
@@ -155,6 +206,7 @@ exit 0
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
     HOME: temp,
     ZETA_HOME: home,
     ACHILLES_HOME: achillesHome,
@@ -171,8 +223,8 @@ exit 0
   try {
     const owned = await runDev();
     expect(owned.exitCode).not.toBe(0);
-    expect(owned.stderr).toContain("zeta too old: update zeta or set ACHILLES_ZETA_DISCOVERY to attach\nminimum zeta: 8f4b469\n");
-    expect(owned.stderr).toContain("uv tool upgrade zeta, then restart zeta sessions");
+    expect(owned.stderr).toBe(zetaRemediationMessage("308935dbd492c1cd61f1103bdbbe182963ce1a55") + "\n");
+    expect(owned.stderr).not.toContain("uv tool upgrade zeta");
     expect(await Bun.file(started).exists()).toBe(false);
     expect(await Bun.file(resolve(devCache, "zeta-serve.json")).exists()).toBe(false);
     expect(await Bun.file(home).exists()).toBe(false);
@@ -189,15 +241,28 @@ exit 0
 });
 
 test("the real dev entry preserves MCP wiring and owns its process lifecycle", async () => {
+  const sourceSnapshot = await sourceRuntimeSnapshot();
   const temp = await mkdtemp(resolve(tmpdir(), "achilles-dev-test-"));
+  const testRootPath = resolve(temp, "testRoot");
+  await mkdir(testRootPath, { recursive: true });
+  const testRoot = await realpath(testRootPath);
+  await Promise.all([
+    cp(resolve(root, "Makefile"), resolve(testRoot, "Makefile")),
+    cp(resolve(root, "zeta.rev"), resolve(testRoot, "zeta.rev")),
+    cp(resolve(root, "pyproject.toml"), resolve(testRoot, "pyproject.toml")),
+    cp(resolve(root, "uv.lock"), resolve(testRoot, "uv.lock")),
+    cp(resolve(root, "scripts/dev.ts"), resolve(testRoot, "scripts/dev.ts")),
+    cp(resolve(root, "scripts/stop.ts"), resolve(testRoot, "scripts/stop.ts")),
+    cp(resolve(root, "scripts/locked.py"), resolve(testRoot, "scripts/locked.py")),
+    cp(resolve(root, "src/achilles"), resolve(testRoot, "src/achilles"), { recursive: true }),
+  ]);
   const home = resolve(temp, "home");
   const bin = resolve(temp, "bin");
   const achillesHome = resolve(temp, "achilles-home");
   const calls = resolve(temp, "zeta-calls.jsonl");
   const serverPids = resolve(temp, "server-pids.jsonl");
-  const webStamp = resolve(root, ".cache/web-build.stamp");
-  const devCache = resolve(root, ".cache/dev");
-  const oldWebStamp = await Bun.file(webStamp).exists() ? await readFile(webStamp) : null;
+  const webStamp = resolve(testRoot, ".cache/web-build.stamp");
+  const devCache = resolve(testRoot, ".cache/dev");
   const managed: ProcessIdentity[] = [];
   const spawned: Bun.Subprocess[] = [];
   const discovered: ProcessIdentity[] = [];
@@ -213,7 +278,7 @@ test("the real dev entry preserves MCP wiring and owns its process lifecycle", a
     if (await Bun.file(resolve(devCache, state)).exists()) throw new Error("refusing to replace existing make dev state");
   }
   await rm(devCache, { recursive: true, force: true });
-  await mkdir(resolve(root, ".cache"), { recursive: true });
+  await mkdir(resolve(testRoot, ".cache"), { recursive: true });
   await writeFile(webStamp, "test-web-stamp-1");
 
   const fakeServer = resolve(temp, "server.ts");
@@ -264,17 +329,36 @@ if (args[0] === "mcp" && args[1] === "show") {
 process.exit(0);
 `);
   await Promise.all(["uv", "open", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
+  const fakeGit = resolve(bin, "git");
+  await writeFile(fakeGit, `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_GIT_CALLS"
+case "$*" in *status*) exec /usr/bin/git "$@";; *fetch*|*checkout*) exit 0;; esac
+exec /usr/bin/git "$@"
+`);
+  await chmod(fakeGit, 0o755);
+  const cachedZeta = resolve(testRoot, ".cache/zeta/.venv/bin/zeta");
+  await mkdir(resolve(testRoot, ".cache/zeta/.venv/bin"), { recursive: true });
+  await writeFile(cachedZeta, await readFile(fakeZeta));
+  await chmod(cachedZeta, 0o755);
+  await writeFile(resolve(testRoot, ".cache/zeta/.gitignore"), ".venv/\n");
+  const zetaFixture = resolve(testRoot, ".cache/zeta");
+  expect(Bun.spawnSync(["git", "init", "-q", zetaFixture]).exitCode).toBe(0);
+  expect(Bun.spawnSync(["git", "-C", zetaFixture, "add", ".gitignore"]).exitCode).toBe(0);
+  expect(Bun.spawnSync(["git", "-C", zetaFixture, "-c", "user.email=test@example.invalid", "-c", "user.name=test", "commit", "-qm", "fixture"]).exitCode).toBe(0);
 
   const port = await freePort();
+  const gitCalls = resolve(temp, "git-calls");
   const baseEnv = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
     PORT: String(port),
     ZETA_HOME: home,
     ACHILLES_HOME: achillesHome,
     ACHILLES_DEV_SKIP_BUILD: "1",
     FAKE_MCP_URL: `http://127.0.0.1:${port}/mcp/`,
     FAKE_ZETA_CALLS: calls,
+    FAKE_GIT_CALLS: gitCalls,
     FAKE_SERVER_PIDS: serverPids,
     FAKE_PARENT_PID: String(process.pid),
   };
@@ -284,7 +368,7 @@ process.exit(0);
     return tracked;
   };
   const runDev = async (env = baseEnv) => {
-    const { child } = await track(["make", "--silent", "dev"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const { child } = await track(["make", "--silent", "dev"], { cwd: testRoot, env, stdout: "pipe", stderr: "pipe" });
     const exitCode = await child.exited;
     return { exitCode, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
   };
@@ -298,7 +382,8 @@ process.exit(0);
     expect(startedServe?.flatMap((arg, index) => arg === "--ws-origin" ? [startedServe[index + 1]] : [])).toEqual([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
     expect(startedServe?.[startedServe.indexOf("--ws-discovery") + 1]).toBe(resolve(achillesHome, "run/serve.json"));
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
-    const firstZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity;
+    const firstZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity & { executable: string };
+    expect(firstZetaState.executable).toBe(fakeZeta);
     zetaPid = firstZetaState.pid;
     discovered.push(firstZetaState);
     expect(callsAfterFirst.some((args) => args[0] === "mcp" && ["add", "remove"].includes(args[1]) && !args.includes("--help"))).toBe(false);
@@ -306,12 +391,53 @@ process.exit(0);
     managed.push(firstState);
     expect(alive(firstState.pid)).toBe(true);
 
+    const attached = await runDev({ ...baseEnv, ACHILLES_ZETA_DISCOVERY: resolve(achillesHome, "run/serve.json") });
+    expect(attached.exitCode, attached.stderr).toBe(0);
+    expect(alive(firstZetaState.pid), "attached discovery must not restart the external zeta serve").toBe(true);
+
     const second = await runDev();
     expect(second.exitCode, second.stderr).toBe(0);
     const secondState = JSON.parse(await readFile(resolve(devCache, "achilles.json"), "utf8"));
     expect(secondState.pid).toBe(firstState.pid);
+
+    await writeFile(resolve(testRoot, "zeta.rev"), "changed-pin\n");
+    const changedPin = await runDev();
+    expect(changedPin.exitCode, changedPin.stderr).toBe(0);
+    const changedPinState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"))) as ProcessIdentity & { pin: string };
+    expect(changedPinState.pin).toBe("changed-pin");
+    expect(changedPinState.pid).not.toBe(firstZetaState.pid);
+    expect(alive(firstZetaState.pid), "changed zeta pin must replace the owned serve").toBe(false);
+    discovered.push(changedPinState);
+
+    const defaultRun = await runDev({ ...baseEnv, ACHILLES_USE_PATH_ZETA: "0" });
+    expect(defaultRun.exitCode, defaultRun.stderr).toBe(0);
+    expect(alive(firstZetaState.pid), "switching zeta mode must stop the path-owned server").toBe(false);
+    const defaultZetaState = JSON.parse(await readFile(resolve(devCache, "zeta-serve.json"), "utf8")) as ProcessIdentity & { executable: string };
+    expect(defaultZetaState.executable).toBe(cachedZeta);
+    expect(alive(defaultZetaState.pid)).toBe(true);
+    discovered.push(defaultZetaState);
+
+    const isolatedRoot = resolve(temp, "isolated-root");
+    const isolatedCache = resolve(isolatedRoot, ".cache/zeta");
+    const isolatedExecutable = resolve(isolatedCache, ".venv/bin/zeta");
+    await mkdir(dirname(isolatedExecutable), { recursive: true });
+    expect(Bun.spawnSync(["git", "init", isolatedCache]).exitCode).toBe(0);
+    await writeFile(resolve(isolatedRoot, "zeta.rev"), "test-pin\n");
+    await writeFile(isolatedExecutable, await readFile(fakeZeta));
+    await chmod(isolatedExecutable, 0o755);
+    const dirtyFile = resolve(isolatedCache, "dirty-test-file");
+    await writeFile(dirtyFile, "must remain");
+    const beforeGitCalls = (await readFile(gitCalls, "utf8")).split("\n").filter(Boolean).length;
+    const dirtyRun = await runDev({ ...baseEnv, ACHILLES_ROOT: isolatedRoot, ACHILLES_USE_PATH_ZETA: "0" });
+    expect(dirtyRun.exitCode).not.toBe(0);
+    expect(dirtyRun.stderr).toContain(".cache/zeta has local changes; make dev will not change it\n");
+    expect(await readFile(dirtyFile, "utf8")).toBe("must remain");
+    const afterGitCalls = (await readFile(gitCalls, "utf8")).split("\n").filter(Boolean);
+    expect(afterGitCalls.slice(beforeGitCalls).some((call) => call.includes("fetch"))).toBe(false);
+    await rm(dirtyFile);
+
     const callsAfterSecond = (await readFile(calls, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
-    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(1);
+    expect(callsAfterSecond.filter((args) => args[0] === "serve" && !args.includes("--help"))).toHaveLength(3);
     expect(await readFile(resolve(home, "run/serve.ws.json"), "utf8")).toBe("shared discovery sentinel");
 
     const ownedDiscovery = resolve(achillesHome, "run/serve.json");
@@ -341,7 +467,7 @@ process.exit(0);
     expect(thirdState.stamp).not.toBe(firstState.stamp);
 
     const block = resolve(temp, "block");
-    const { child: held } = await track(["make", "--silent", "dev"], { cwd: root, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
+    const { child: held } = await track(["make", "--silent", "dev"], { cwd: testRoot, env: { ...baseEnv, FAKE_ZETA_BLOCK: block }, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(`${block}.ready`).exists(), "first make dev to hold its lock");
     const lockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     const concurrent = await runDev({ ...baseEnv, FAKE_ZETA_BLOCK: block });
@@ -357,7 +483,7 @@ process.exit(0);
     const launcherReady = resolve(temp, "launcher-ready");
     const launcherRelease = resolve(temp, "launcher-release");
     await writeFile(launcher, `import os\nimport time\nfrom pathlib import Path\nPath(${JSON.stringify(launcherReady)}).write_text(str(os.getpid()))\nwhile not Path(${JSON.stringify(launcherRelease)}).exists(): time.sleep(0.01)\nos.execvp("python3", ["python3", "scripts/locked.py", "python3", ${JSON.stringify(waiter)}])\n`);
-    const { child: crashed, identity: crashedIdentity } = await track(["python3", launcher], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const { child: crashed, identity: crashedIdentity } = await track(["python3", launcher], { cwd: testRoot, stdout: "pipe", stderr: "pipe" });
     await waitFor(() => Bun.file(launcherReady).exists(), "launcher identity to be captured");
     await writeFile(launcherRelease, "release");
     await waitFor(() => Bun.file(waiterReady).exists(), "locked child to start");
@@ -366,14 +492,14 @@ process.exit(0);
     if (crashedChildIdentity) discovered.push(crashedChildIdentity);
     const crashedLockPid = Number(await readFile(resolve(devCache, "lock"), "utf8"));
     crashedLockIdentity = crashedIdentity.pid === crashedLockPid ? crashedIdentity : null;
-    const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const rejected = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: testRoot, stdout: "pipe", stderr: "pipe" });
     expect(await rejected.exited).toBe(1);
     expect(await new Response(rejected.stderr).text()).toContain(`make dev is already running (pid ${crashedLockPid})`);
     expect(crashedLockIdentity).not.toBeNull();
     expect(ownedProcessMatches(crashedIdentity, await processIdentity(crashed.pid))).toBe(false);
     crashed.kill("SIGKILL");
     await crashed.exited;
-    const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const recovered = Bun.spawn(["python3", "scripts/locked.py", "python3", "-c", "pass"], { cwd: testRoot, stdout: "pipe", stderr: "pipe" });
     const recoveredExit = await recovered.exited;
     const recoveredStderr = await new Response(recovered.stderr).text();
     if (recoveredExit !== 0) {
@@ -385,7 +511,7 @@ process.exit(0);
     await stop(crashedChildIdentity!);
     crashedChildPid = 0;
 
-    const { child: stopped } = await track(["make", "--silent", "stop"], { cwd: root, env: baseEnv, stdout: "pipe", stderr: "pipe" });
+    const { child: stopped } = await track(["make", "--silent", "stop"], { cwd: testRoot, env: baseEnv, stdout: "pipe", stderr: "pipe" });
     const stopExit = await stopped.exited;
     expect(stopExit, await new Response(stopped.stderr).text()).toBe(0);
     expect(alive(thirdState.pid)).toBe(false);
@@ -442,12 +568,131 @@ process.exit(0);
     }
     try { await rm(devCache, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
     try {
-      if (oldWebStamp === null) await rm(webStamp, { force: true }); else await writeFile(webStamp, oldWebStamp);
+      expect(await sourceRuntimeSnapshot()).toBe(sourceSnapshot);
+      await rm(temp, { recursive: true, force: true });
     } catch (error) { cleanupErrors.push(String(error)); }
-    try { await rm(temp, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(String(error)); }
     if (cleanupErrors.length || survivors.size) {
       const details = [...survivors].map(([pid, command]) => `pid ${pid} ${command}`);
       throw new Error([...cleanupErrors, ...details].join("\n"));
     }
   }
 }, 60_000);
+
+test("make dev refuses an installed zeta that predates the pin before starting serve", async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), "achilles-zeta-rev-test-"));
+  const bin = resolve(temp, "bin");
+  const home = resolve(temp, "home");
+  const achillesHome = resolve(temp, "achilles-home");
+  const toolDir = resolve(temp, "tool");
+  const checkout = resolve(temp, "checkout");
+  const started = resolve(temp, "started");
+  const pin = (await readFile(resolve(root, "zeta.rev"), "utf8")).trim();
+  await mkdir(bin, { recursive: true });
+  await mkdir(toolDir, { recursive: true });
+  await mkdir(checkout, { recursive: true });
+  // A real git checkout that does not contain the pin commit, so make dev cannot confirm it is new enough.
+  expect(Bun.spawnSync(["git", "init", "-q", checkout]).exitCode).toBe(0);
+  await writeFile(resolve(checkout, "f"), "x");
+  expect(Bun.spawnSync(["git", "-C", checkout, "add", "f"]).exitCode).toBe(0);
+  expect(Bun.spawnSync(["git", "-C", checkout, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"]).exitCode).toBe(0);
+  await writeFile(resolve(toolDir, "uv-receipt.toml"), `[tool]\neditable = "${checkout}"\n`);
+  await writeFile(resolve(bin, "uv"), `#!/bin/sh\nif [ "$1 $2" = "tool list" ]; then echo "zeta v0.1.0 (${toolDir})"; exit 0; fi\nexit 0\n`);
+  await writeFile(resolve(bin, "zeta"), `#!/bin/sh
+case "$*" in
+  "serve --help") echo "--ws --ws-origin --ws-discovery"; exit 0;;
+  *--help*) echo "add show remove --scope --json --url"; exit 0;;
+  serve*) : > "${started}"; exit 1;;
+  *) exit 0;;
+esac
+`);
+  await Promise.all(["uv", "zeta"].map((name) => chmod(resolve(bin, name), 0o755)));
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_USE_PATH_ZETA: "1",
+    HOME: temp,
+    ZETA_HOME: home,
+    ACHILLES_HOME: achillesHome,
+    ACHILLES_DEV_SKIP_BUILD: "1",
+  };
+  try {
+    const child = Bun.spawn(["bun", "scripts/dev.ts"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const exitCode = await child.exited;
+    const stderr = await new Response(child.stderr).text();
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain(`your zeta is older than zeta.rev ${pin}; run make dev without ACHILLES_USE_PATH_ZETA to use the pinned one`);
+    expect(stderr).not.toContain("uv tool install");
+    expect(stderr).not.toContain("pull");
+    expect(stderr).not.toContain(`git -C '${checkout}' fetch`);
+    expect(stderr).not.toContain(`git -C '${checkout}' checkout`);
+    expect(stderr).not.toContain(`git -C '${checkout}' reset`);
+    expect(existsSync(started)).toBe(false);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("web dependencies reinstall when apps/web changed even if the fulcrum build is unchanged", async () => {
+  const sourceSnapshot = await sourceRuntimeSnapshot();
+  const temp = await mkdtemp(resolve(tmpdir(), "achilles-web-deps-test-"));
+  const testRoot = resolve(temp, "testRoot");
+  const cache = resolve(testRoot, ".cache");
+  await mkdir(resolve(testRoot, "apps/web"), { recursive: true });
+  await Promise.all([
+    cp(resolve(root, "fulcrum.rev"), resolve(testRoot, "fulcrum.rev")),
+    cp(resolve(root, "scripts/dev.ts"), resolve(testRoot, "scripts/dev.ts")),
+    cp(resolve(root, "apps/web/package.json"), resolve(testRoot, "apps/web/package.json")),
+    cp(resolve(root, "apps/web/bun.lock"), resolve(testRoot, "apps/web/bun.lock")),
+  ]);
+  const bin = resolve(temp, "bin");
+  const home = resolve(temp, "home");
+  const achillesHome = resolve(temp, "achilles-home");
+  const calls1 = resolve(temp, "bun-calls-1");
+  const calls2 = resolve(temp, "bun-calls-2");
+  await mkdir(bin, { recursive: true });
+  await writeFile(resolve(bin, "uv"), "#!/bin/sh\nexit 0\n");
+  await writeFile(resolve(bin, "zeta"), `#!/bin/sh\ncase "$*" in\n  *--help*) echo "add show remove --scope --json --url"; exit 0;;\n  *) exit 0;;\nesac\n`);
+  await writeFile(resolve(bin, "git"), `#!/bin/sh
+for a in "$@"; do dest="$a"; done
+case "$*" in
+  clone*) mkdir -p "$dest/.git" "$dest/packages/core"; echo x > "$dest/packages/core/index.ts"; exit 0;;
+  *ls-files*) echo "packages/core/index.ts"; exit 0;;
+  *) exit 0;;
+esac
+`);
+  await writeFile(resolve(bin, "bun"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_BUN_CALLS"\nexit 0\n`);
+  await Promise.all(["uv", "zeta", "git", "bun"].map((name) => chmod(resolve(bin, name), 0o755)));
+  const baseEnv = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    ACHILLES_ROOT: testRoot,
+    ACHILLES_USE_PATH_ZETA: "1",
+    HOME: temp,
+    ZETA_HOME: home,
+    ACHILLES_HOME: achillesHome,
+    ACHILLES_ZETA_DISCOVERY: resolve(temp, "missing-serve.json"),
+  };
+  const runDev = async (callsFile: string) => {
+    const child = Bun.spawn([process.execPath, "scripts/dev.ts"], { cwd: testRoot, env: { ...baseEnv, FAKE_BUN_CALLS: callsFile }, stdout: "pipe", stderr: "pipe" });
+    const exitCode = await child.exited;
+    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { exitCode, stdout, stderr, calls: existsSync(callsFile) ? await readFile(callsFile, "utf8") : "" };
+  };
+  try {
+    // First run clones the fake fulcrum, builds the vendor, installs web deps, and writes the stamps.
+    const first = await runDev(calls1);
+    expect(first.stderr).toContain("does not name a live zeta serve");
+    expect(first.calls).toMatch(/scripts\/fulcrum\.ts/);
+
+    // Simulate a changed apps/web (e.g. a new dependency) while the fulcrum build is unchanged.
+    await writeFile(resolve(cache, "web-deps.stamp"), "stale-apps-web-package-json");
+    const second = await runDev(calls2);
+    expect(second.stderr).toContain("does not name a live zeta serve");
+    expect(second.stdout).toContain("fulcrum build unchanged");
+    // The bug: the old make dev skipped the web install here; it must now run from its own stamp.
+    expect(second.calls).toContain("scripts/fulcrum.ts --install-web");
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+    expect(await sourceRuntimeSnapshot()).toBe(sourceSnapshot);
+  }
+}, 30_000);

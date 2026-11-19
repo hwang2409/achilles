@@ -1,16 +1,17 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./test-dom";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import React from "react";
-import { cleanup, render, type RenderResult } from "@testing-library/react";
-import { LayoutBlock, RecordList } from "./App";
+import { cleanup, fireEvent, render, type RenderResult } from "@testing-library/react";
+import { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./page/listColumns";
+import { formatMetricValue } from "./page/metricValue";
 import type { PageTool } from "./page/usePageTools";
+
+const metricBoundaryMatrix = JSON.parse(await Bun.file(new URL("./metric-boundary-matrix.json", import.meta.url)).text()) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 
 const originalFetch = globalThis.fetch;
 
-GlobalRegistrator.register();
-afterAll(() => GlobalRegistrator.unregister());
 
 type Deferred = { promise: Promise<Response>; resolve: (response: Response) => void };
 
@@ -25,15 +26,10 @@ type RecordListProps = {
 const props: RecordListProps = { title: "reading", collection: "books", pageId: "page-one", credential: "secret", refreshKey: "0:0" };
 let calls: Deferred[] = [];
 
-beforeAll(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-});
-
 afterEach(cleanup);
 
 afterAll(() => {
   globalThis.fetch = originalFetch;
-  delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 
 function deferred(): Deferred {
@@ -67,23 +63,60 @@ function renderList(listProps: RecordListProps, key = `${listProps.pageId}:${lis
 }
 
 describe("RecordList", () => {
+  test("projects an insert form capability to the matching empty list", async () => {
+    routeFetches([{ name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], []);
+    const result = render(React.createElement(PageView, { canWrite: true, page: { title: "reading", route: "/reading", layout: { blocks: [{ type: "form", title: "add book", tool: "add_book" }, { type: "list", title: "books", collection: "books" }] } }, pageId: "page-capability", credential: "secret", refreshKey: "0:0" }));
+    await act(async () => {});
+    expect(result.getByRole("button", { name: "add a book", exact: true })).toBeTruthy();
+  });
+
+  test("removes an insert action when its form leaves the same page", async () => {
+    routeFetches([{ name: "add_book", operation: "insert", collection: "books", input_schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } }], []);
+    const page = (blocks: Array<Record<string, unknown>>) => React.createElement(PageView, { canWrite: true, page: { title: "reading", route: "/reading", layout: { blocks } }, pageId: "page-capability-cleanup", credential: "secret", refreshKey: "0:0" });
+    const result = render(page([{ type: "form", title: "add book", tool: "add_book" }, { type: "list", title: "books", collection: "books" }]));
+    await act(async () => {});
+    const addBook = result.getByRole("button", { name: "add a book", exact: true });
+    fireEvent.click(addBook);
+    expect(result.container.querySelector('input[name="title"]')).toBe(document.activeElement);
+    result.rerender(page([{ type: "list", title: "books", collection: "books" }]));
+    await act(async () => {});
+    expect(result.queryByRole("button", { name: "add a book", exact: true })).toBeNull();
+  });
+
   test("shows loading instead of empty while the first fetch is held", async () => {
     holdFetches();
     const result = renderList(props);
-    expect(text(result)).toContain("loading records…");
-    expect(text(result)).not.toContain("no records yet");
+    expect(text(result)).toContain("loading…");
+    expect(text(result)).not.toContain("no reading yet");
     await settle(calls[0], []);
-    expect(text(result)).toContain("no records yet");
+    expect(text(result)).toContain("no reading yet");
+  });
+
+  test("retries the same request and renders the recovered rows", async () => {
+    holdFetches();
+    const result = renderList(props);
+    await act(async () => calls[0].resolve(new Response("no", { status: 503 })));
+    expect(text(result)).toContain("could not load reading");
+    const retry = result.getByRole("button", { name: "try again" });
+    fireEvent.keyDown(retry, { key: "Enter" });
+    fireEvent.click(retry);
+    expect(calls).toHaveLength(2);
+    await settle(calls[1], [{ record_id: "book-retry", title: "Recovered" }]);
+    expect(text(result)).toContain("Recovered");
+    expect(text(result)).not.toContain("could not load reading");
+    expect(text(result)).not.toContain("no reading yet");
+    expect(result.queryByRole("button", { name: "add a record", exact: true })).toBeNull();
+    expect(result.queryByRole("button", { name: "ask the chat", exact: true })).toBeNull();
   });
 
   test("resets rows when the layout page identity changes", async () => {
     holdFetches();
     const block = { type: "list", title: props.title, collection: props.collection };
-    const result = render(React.createElement(LayoutBlock, { block, pageId: props.pageId, credential: props.credential, refreshKey: props.refreshKey }));
+    const result = render(React.createElement(LayoutBlock, { canWrite: true, block, pageId: props.pageId, credential: props.credential, refreshKey: props.refreshKey }));
     await settle(calls[0], [{ record_id: "book-1", title: "The Dispossessed" }]);
 
-    result.rerender(React.createElement(LayoutBlock, { block, pageId: "page-two", credential: props.credential, refreshKey: props.refreshKey }));
-    expect(text(result)).toContain("loading records…");
+    result.rerender(React.createElement(LayoutBlock, { canWrite: true, block, pageId: "page-two", credential: props.credential, refreshKey: props.refreshKey }));
+    expect(text(result)).toContain("loading…");
     expect(text(result)).not.toContain("The Dispossessed");
   });
 
@@ -91,7 +124,7 @@ describe("RecordList", () => {
     holdFetches();
     const result = renderList(props);
     await settle(calls[0], []);
-    expect(text(result)).toContain("no records yet");
+    expect(text(result)).toContain("no reading yet");
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:1" }));
     await settle(calls[1], [{ record_id: "book-1", title: "The Dispossessed" }]);
@@ -99,7 +132,7 @@ describe("RecordList", () => {
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:2" }));
     expect(text(result)).toContain("The Dispossessed");
-    expect(text(result)).not.toContain("loading records…");
+    expect(text(result)).not.toContain("loading…");
 
     result.rerender(React.createElement(RecordList, { key: "page-one:books", ...props, refreshKey: "0:3" }));
     await settle(calls[3], [{ record_id: "book-2", title: "A Wizard of Earthsea" }]);
@@ -115,7 +148,7 @@ describe("RecordList", () => {
       return response([{ record_id: "c-1", name: "Synthetic Ada", group: "work" }]);
     }) as typeof fetch;
     const block = { type: "list", title: "work", collection: "contacts", fields: ["name", "group"], filter: { field: "group", equals: "work" } };
-    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-filter", credential: "secret", refreshKey: "0:0" }));
+    const result = render(React.createElement(LayoutBlock, { canWrite: true, block, pageId: "page-filter", credential: "secret", refreshKey: "0:0" }));
     await act(async () => {});
     const query = new URL(urls[0], "http://x").searchParams;
     expect([query.get("field"), query.get("equals"), query.get("limit")]).toEqual(["group", '"work"', "100"]);
@@ -146,7 +179,7 @@ describe("list columns", () => {
   test("a list block with fields shows exactly those columns in that order", async () => {
     routeFetches([], books);
     const block = { type: "list", title: "reading", collection: "books", fields: ["title", "status"] };
-    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-one", credential: "secret", refreshKey: "0:0" }));
+    const result = render(React.createElement(LayoutBlock, { canWrite: true, block, pageId: "page-one", credential: "secret", refreshKey: "0:0" }));
     await act(async () => {});
     expect(headers(result)).toEqual(["title", "status"]);
     expect(text(result)).not.toContain("b1");
@@ -155,7 +188,7 @@ describe("list columns", () => {
   test("without fields, the data schema's required fields lead, the rest are sorted, and record_id is hidden", async () => {
     routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchema }, { name: "add_film", collection: "films", data_schema: { type: "object", properties: { director: {} } } }], books);
     const block = { type: "list", title: "reading", collection: "books" };
-    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-two", credential: "secret", refreshKey: "0:0" }));
+    const result = render(React.createElement(LayoutBlock, { canWrite: true, block, pageId: "page-two", credential: "secret", refreshKey: "0:0" }));
     await act(async () => {});
     expect(headers(result)).toEqual(["title", "status", "author", "pages"]);
   });
@@ -177,8 +210,171 @@ describe("list columns", () => {
   test("fields: [] behaves like no fields: schema order, then extra record keys, sorted", async () => {
     routeFetches([{ name: "add_book", collection: "books", data_schema: bookSchemaWithoutAuthor }], books);
     const block = { type: "list", title: "reading", collection: "books", fields: [] };
-    const result = render(React.createElement(LayoutBlock, { block, pageId: "page-empty-fields", credential: "secret", refreshKey: "0:0" }));
+    const result = render(React.createElement(LayoutBlock, { canWrite: true, block, pageId: "page-empty-fields", credential: "secret", refreshKey: "0:0" }));
     await act(async () => {});
     expect(headers(result)).toEqual(["title", "status", "pages", "author"]);
   });
+});
+
+
+test("record list reveal projection keeps loaded rows and one reachable tab stop", () => {
+  const rows = Array.from({ length: 8 }, (_, index) => ({ record_id: `book-${index + 1}`, title: `book ${index + 1}` }));
+  const cases = [
+    { name: "collapsed", total: 8, expanded: false, expectedRows: 5, expectedAction: "show 3 more", expectedCount: "5 of 8" },
+    { name: "expanded", total: 8, expanded: true, initialAction: "show 3 more", expectedRows: 8, expectedAction: "show less", expectedCount: "8 of 8" },
+    { name: "loaded less than server total", total: 1000, expanded: false, records: Array.from({ length: 100 }, (_, index) => ({ record_id: `loaded-${index}`, title: `loaded ${index}` })), expectedRows: 5, expectedAction: "show 95 more", expectedCount: "5 of 1000" },
+    { name: "expanded loaded less than server total", total: 1000, expanded: true, initialAction: "show 95 more", records: Array.from({ length: 100 }, (_, index) => ({ record_id: `loaded-${index}`, title: `loaded ${index}` })), expectedRows: 100, expectedAction: "show less", expectedCount: "100 of 1000" },
+  ];
+  for (const scenario of cases) {
+    const result = render(React.createElement(RecordListView, { title: "reading", collection: "books", records: scenario.records ?? rows, columns: ["title"], total: scenario.total, error: null, selectedId: undefined, onSelect: () => {} }));
+    if (scenario.expanded) fireEvent.click(result.getByRole("button", { name: scenario.initialAction }));
+    expect(result.getAllByRole("row")).toHaveLength(scenario.expectedRows + 1);
+    expect(result.getByRole("button").textContent).toBe(scenario.expectedAction);
+    expect(result.getByText(scenario.expectedCount)).toBeTruthy();
+    if (scenario.name === "collapsed") {
+      fireEvent.click(result.getByRole("button", { name: "show 3 more" }));
+      fireEvent.focus(result.getAllByRole("row")[6]);
+      fireEvent.click(result.getByRole("button", { name: "show less" }));
+      const visibleTabStops = result.getAllByRole("row").slice(1).filter((row) => row.getAttribute("tabindex") === "0");
+      expect(visibleTabStops).toHaveLength(1);
+      expect(visibleTabStops[0]?.getAttribute("data-record-id")).toBe("book-1");
+      expect(result.getByRole("button").textContent).toBe("show 3 more");
+    }
+    cleanup();
+  }
+});
+
+for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["marked seven digit", "9999999", "10M"], ["huge exponent", "1.0e+307", "1e307"]] as const) {
+  test(`numeric metric boundary: ${label}`, () => {
+    const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label, value, status: "done" }] } };
+    const result = render(React.createElement(PageView, { canWrite: true, page, pageId: `metric-fail-first-${label}`, credential: "secret", refreshKey: "0" }));
+    expect(result.container.querySelector(".metric-value")?.textContent, label).toBe(expected);
+  });
+}
+
+test("metric formatter matches every declared numeric matrix expectation", () => {
+  for (const entry of metricBoundaryMatrix.filter((item) => item.classification !== "text")) {
+    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero", scientific: /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.expectedText) });
+  }
+});
+
+test("numeric metric displays stay within the declared matrix boundary", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: metricBoundaryMatrix.map(({ label, value, status }) => ({ type: "metric", label, value, ...(status ? { status } : {}) })) } };
+  const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-wrap", credential: "secret", refreshKey: "0" }));
+  for (const entry of metricBoundaryMatrix) {
+    const block = [...result.container.querySelectorAll(".metric-block")].find((node) => node.querySelector(".metric-label")?.textContent === entry.label)!;
+    const value = block.querySelector(".metric-value")!;
+    expect(value.textContent, entry.label).toBe(entry.expectedText);
+    expect(value.getAttribute("title"), entry.label).toBe(entry.value);
+    expect(value.getAttribute("aria-label"), entry.label).toBe(entry.value);
+  }
+});
+
+test("metric values keep words intact and expose long values once", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: [
+    { type: "metric", label: "description", value: "intentionally editorial text" },
+    { type: "metric", label: "single token", value: "supercalifragilisticexpialidocious" },
+  ] } };
+  const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-text-boundary", credential: "secret", refreshKey: "0" }));
+  const values = [...result.container.querySelectorAll(".metric-value")];
+  expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
+  expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
+  expect(values[1]?.classList.contains("metric-value-text-single")).toBe(true);
+  expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
+  expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
+  expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");
+});
+
+test("page metrics render a live static layout value", () => {
+  const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "score", value: "1" }] } };
+  const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(result.getByText("1")).toBeTruthy();
+  result.rerender(React.createElement(PageView, { canWrite: true, page: { ...page, active_layout_version: 2, layout: { blocks: [{ type: "metric", label: "score", value: "2" }] } }, pageId: "metric-page", credential: "secret", refreshKey: "0" }));
+  expect(result.getByText("2")).toBeTruthy();
+});
+
+test("page-owned metric counts keep unchanged values across layout lifecycles", async () => {
+  const metric = (label: string) => ({ type: "metric", label, count: true, collection: `books-${label}` });
+  const value = (result: RenderResult, label: string) => [...result.container.querySelectorAll(".metric-label")].find((node) => node.textContent === label)?.closest(".metric-block")?.querySelector(".metric-value")?.textContent;
+  const cases = [
+    { name: "prepend", initial: [metric("one"), metric("two")], next: [metric("new"), metric("one"), metric("two")], extra: 1 },
+    { name: "remove settled", initial: [metric("one"), metric("two")], next: [metric("one")], extra: 0 },
+    { name: "remove and re-add in flight", initial: [metric("one"), metric("two")], next: [metric("one")], readd: [metric("one"), metric("two")] },
+    { name: "lone metric gains a neighbour", initial: [metric("one")], next: [metric("one"), metric("two")], extra: 1 },
+    { name: "strip inserted above", initial: [metric("one"), metric("two")], next: [metric("new"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("one"), metric("two")], extra: 2 },
+    { name: "list inserted between metrics", initial: [metric("one"), metric("two")], next: [metric("one"), { type: "list", title: "books", collection: "books", fields: ["title"] }, metric("two")], extra: 1 },
+    { name: "append metric", initial: [metric("one"), metric("two")], next: [metric("one"), metric("two"), metric("new")], extra: 1 },
+    { name: "replace removed metric", initial: [metric("one"), metric("two")], next: [metric("one"), metric("new")], extra: 1 },
+  ];
+  for (const scenario of cases) {
+    holdFetches();
+    const page = { title: scenario.name, route: "/page", layout: { blocks: scenario.initial } };
+    const result = render(React.createElement(PageView, { canWrite: true, page, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+    const initialCount = scenario.initial.filter((block) => block.type === "metric").length;
+    expect(calls).toHaveLength(initialCount);
+    for (let index = 0; index < initialCount; index++) {
+      if (scenario.readd && index === 1) continue;
+      await settle(calls[index], [{ record_id: `${index}-one` }, ...(index ? [{ record_id: `${index}-two` }] : [])]);
+    }
+    expect(value(result, "one")).toBe("1");
+    if (scenario.initial.length > 1 && !scenario.readd) expect(value(result, "two")).toBe("2");
+    result.rerender(React.createElement(PageView, { canWrite: true, page: { ...page, layout: { blocks: scenario.next } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+    if (scenario.readd) {
+      expect(calls).toHaveLength(initialCount);
+      result.rerender(React.createElement(PageView, { canWrite: true, page: { ...page, layout: { blocks: scenario.readd } }, pageId: `metric-${scenario.name}`, credential: "secret", refreshKey: "0" }));
+      expect(calls).toHaveLength(initialCount + 1);
+      await settle(calls[initialCount], [{ record_id: "new-value" }, { record_id: "new-value-2" }]);
+      expect(value(result, "two")).toBe("2");
+      await settle(calls[1], [{ record_id: "stale" }]);
+      expect(value(result, "two")).toBe("2");
+    } else {
+      expect(calls).toHaveLength(initialCount + scenario.extra!);
+      for (const call of calls.slice(initialCount)) await settle(call, [{ record_id: "new" }]);
+    }
+    expect(value(result, "one")).toBe("1");
+    if (scenario.next.some((block) => block.type === "metric" && block.label === "two")) expect(value(result, "two"), scenario.name).toBe(scenario.initial.some((block) => block.type === "metric" && block.label === "two") ? "2" : "1");
+    expect(value(result, "one")).not.toBe("…");
+    if (scenario.next.some((block) => block.type === "metric" && block.label === "two")) expect(value(result, "two")).not.toBe("…");
+  }
+});
+
+test("page-owned counts refresh for a new generation", async () => {
+  holdFetches();
+  const metric = { type: "metric", label: "total", count: true, collection: "books" };
+  const page = { title: "page", route: "/page", layout: { blocks: [metric] } };
+  const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-refresh", credential: "secret", refreshKey: "0" }));
+  await settle(calls[0], [{ record_id: "one" }]);
+  expect(result.getByText("1")).toBeTruthy();
+  result.rerender(React.createElement(PageView, { canWrite: true, page, pageId: "metric-refresh", credential: "secret", refreshKey: "0:1" }));
+  expect(calls).toHaveLength(2);
+  await settle(calls[1], [{ record_id: "one" }, { record_id: "two" }]);
+  expect(result.getByText("2")).toBeTruthy();
+});
+
+test("keyboard and click selection update the row and detail without auto-scroll", async () => {
+  holdFetches();
+  const page = { title: "reading", route: "/reading", layout: { blocks: [
+    { type: "list", title: "books", collection: "books", fields: ["title", "status"] },
+    { type: "detail", title: "selected book", collection: "books", fields: ["title"], filter: { field: "status", equals: "reading" } },
+  ] } };
+  const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "selection-page", credential: "secret", refreshKey: "0" }));
+  const scrollIntoView = HTMLElement.prototype.scrollIntoView;
+  let scrolls = 0;
+  HTMLElement.prototype.scrollIntoView = () => { scrolls += 1; };
+  const first = { record_id: "book-1", title: "first book", status: "reading" };
+  const second = { record_id: "book-2", title: "second book", status: "reading" };
+  await settle(calls[0], [first, second]);
+  await settle(calls[1], [first]);
+  const rows = result.getAllByRole("row");
+  await act(async () => {
+    rows[1].focus();
+    fireEvent.keyDown(rows[1], { key: "Enter" });
+  });
+  expect(rows[1].getAttribute("aria-selected")).toBe("true");
+  expect(result.getAllByText("first book").length).toBeGreaterThan(1);
+  await act(async () => fireEvent.click(rows[2]));
+  expect(rows[2].getAttribute("aria-selected")).toBe("true");
+  expect(result.getAllByText("second book").length).toBeGreaterThan(1);
+  expect(scrolls).toBe(0);
+  HTMLElement.prototype.scrollIntoView = scrollIntoView;
 });

@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { CommandPalette, Highlight, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
-import { firstFocusable, isEditableTarget, isMac, modKey, restorableFocus, wrapTab } from "./keyboard";
+import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, useModalFocus } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
+import { WRITE_SURFACE } from "./writeSurfaces";
 
 export type PageLink = { id: string; route: string; title: string };
 
@@ -22,20 +23,46 @@ export type Chat = {
   titled_by_user?: boolean;
 };
 
+export const PageChatCatalog = createContext<{
+  chats: readonly Chat[];
+  loading: boolean;
+  error: boolean;
+  next: string | null;
+  reload: () => void;
+  more: () => void;
+  clearSearch: () => void;
+} | null>(null);
+
 type Props = {
   page: PageLink | null;
   sessionId: string | null;
   waiting: number;
   serverForcesAsk?: boolean;
+  canWrite?: boolean;
   hasComposer: boolean;
+  banner?: ReactNode;
+  header?: ReactNode;
   children: ReactNode;
-  onNewChat: () => Promise<void>;
-  onToggleCreateMode: () => Promise<void>;
-  onSelectChat: (chat: Chat) => void;
-  onRenameChat: (chat: Chat, title: string) => void;
   refreshKey: number;
   pageRefreshKey: number;
-};
+} & (
+  | {
+      agentActions?: true;
+      onNewChat: () => Promise<void>;
+      onToggleCreateMode: () => Promise<unknown>;
+      onSelectChat: (chat: Chat) => void;
+      onRenameChat: (chat: Chat, title: string) => void;
+    }
+  | {
+      agentActions: false;
+      onNewChat?: never;
+      onToggleCreateMode?: never;
+      onSelectChat?: never;
+      onRenameChat?: never;
+    }
+);
+
+export const isTelemetryPath = (pathname: string) => pathname === "/telemetry" || pathname.startsWith("/telemetry/");
 
 const pageHref = (route: string) => {
   const url = new URL(route === "/" ? "/" : route, location.href);
@@ -76,7 +103,7 @@ function groupLabel(value: string) {
 }
 
 // one lowercase style for every age: "10:23 pm", "mon", "nov 7"
-function timeLabel(value: string) {
+export function timeLabel(value: string) {
   const date = new Date(value);
   const group = groupLabel(value);
   const label = group === "today" ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : group === "yesterday" || group === "this week" ? date.toLocaleDateString([], { weekday: "short" }) : date.toLocaleDateString([], { month: "short", day: "numeric" });
@@ -104,7 +131,7 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 // short heights use the drawer too: a phone on its side cannot spare 288px for the sidebar. matches style.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, canWrite = false, hasComposer, banner, header, children, agentActions, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -192,7 +219,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     const top = layers.at(-1);
     if (!top) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename]"))) return;
+      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename], .page-chat-head[data-popup]"))) return;
       event.preventDefault();
       event.stopPropagation();
       top();
@@ -200,42 +227,46 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     document.addEventListener("keydown", escape, true);
     return () => document.removeEventListener("keydown", escape, true);
   }, [drawer, query, settingsOpen, shortcutsOpen, paletteOpen]);
+  useModalFocus(narrow && drawer, sidebar);
   useEffect(() => {
-    if (!narrow || !drawer) return;
+    // capture on window runs before the composer (CodeMirror vim too) sees app shortcuts.
     const key = (event: KeyboardEvent) => {
-      if (sidebar.current?.contains(document.activeElement)) wrapTab(event, sidebar.current);
-    };
-    document.addEventListener("keydown", key, true);
-    return () => document.removeEventListener("keydown", key, true);
-  }, [drawer, narrow]);
-  useEffect(() => {
-    // capture on window runs before the composer (CodeMirror vim too) sees the key, so it only opens the palette
-    const key = (event: KeyboardEvent) => {
-      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-      if (!mod || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (paletteOpen) closePalette(); else openPalette();
-    };
-    addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
-  }, [paletteOpen, drawer]);
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); if (!narrow) setCollapsed((value) => !value); }
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+      if (!hasAppModifier(event) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (!event.shiftKey && key === "k") {
         event.preventDefault();
+        event.stopPropagation();
+        if (paletteOpen) closePalette(); else openPalette();
+      } else if (key === "b") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!narrow) setCollapsed((value) => !value);
+      } else if (agentActions !== false && event.key === ",") {
+        event.preventDefault();
+        event.stopPropagation();
         const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
         if (paletteOpen) closePalette();
         openSettings(opener);
+      } else if (agentActions !== false && event.shiftKey && key === "o") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!loading && canWrite) void onNewChat();
+      } else if (agentActions !== false && event.key === ".") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!loading && canWrite) void onToggleCreateMode();
       }
-      if (!loading && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") { event.preventDefault(); void onNewChat(); }
-      if (!loading && (event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); void onToggleCreateMode(); }
+    };
+    addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
+  }, [agentActions, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
       if (isEditableTarget(event)) return;
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
-      if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
+      if (agentActions !== false && event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [loading, narrow, onNewChat, onToggleCreateMode, settingsOpen, shortcutsOpen, paletteOpen]);
+  }, [agentActions, shortcutsOpen]);
 
   const pageRows = pageList.items ?? [];
   const waitingTotal = Math.max(waiting, chatList.meta);
@@ -244,10 +275,14 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     for (const chat of chats ?? []) { const group = groupLabel(chat.updated_at); values.set(group, [...(values.get(group) ?? []), chat]); }
     return [...values];
   }, [chats]);
-  const select = (chat: Chat) => { setDrawer(false); onSelectChat(chat); };
-  const commands: PaletteEntry[] = [
-    ...loading ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
-    ...loading || !page ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
+  const select = (chat: Chat) => {
+    setDrawer(false);
+    if (onSelectChat) onSelectChat(chat);
+    else location.assign(chatHref(chat));
+  };
+  const commands: PaletteEntry[] = agentActions === false ? [] : [
+    ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
+    ...loading || !page || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
     { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
     { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
@@ -325,40 +360,57 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
-      <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong><span>v3.2</span>{!narrow && <button aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>◧</button>}</div>
-      <button className="new-chat" onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>
+      <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong></div>
+      {agentActions !== false && <button className="new-chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (canWrite) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>}
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
+      <nav className="place-nav" aria-label="places">
+        <a className="telemetry-link" href={pageHref("/telemetry")} aria-current={isTelemetryPath(location.pathname) ? "page" : undefined}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M1 8h3l2-4 3 8 2-4h4" />
+          </svg>
+          <b>telemetry</b>
+        </a>
+      </nav>
       <section className={`page-list ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`} data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
-        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>{pagesOpen ? "▾" : "▸"} pages</span><b>{pageList.error ? "!" : pageList.items === null ? "" : pageList.next ? "20+" : pageRows.length}</b></button>
+        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>pages</span><b>{pageList.error ? "!" : pageList.items === null ? "" : pageList.next ? "20+" : pageRows.length}</b></button>
         <div className="page-list-scroll">
           {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload(null)}>retry</button></div> : pageList.items === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}</>}
         </div>
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={select} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={select} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? select : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? select : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
-      <footer><SettingsControl onOpen={openSettings} className="settings-button" /><button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
+      <footer>{agentActions !== false && <SettingsControl onOpen={openSettings} className="settings-button" />}<button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
     </aside>
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
-      <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => { requestFocus(() => firstFocusable(sidebar.current)); setDrawer(true); }}>☰</button>
-      {children}
+      {banner}
+      <div className="shell-header">
+        <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
+        {header}
+      </div>
+      <PageChatCatalog.Provider value={{
+        chats: search ? [] : chats, loading: Boolean(search) || loading || chatList.loading,
+        error: !search && Boolean(chatList.error), next: search ? null : chatList.next,
+        reload: () => void chatListOwner.current!.reload(search), more: () => void chatListOwner.current!.more(),
+        clearSearch: () => { setQuery(""); setSearch(""); },
+      }}>{children}</PageChatCatalog.Provider>
     </main>
-    <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} />
-    {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
+    {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
+    {agentActions !== false && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
   </div>;
 }
 
-function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect: (chat: Chat) => void; onRename: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
+function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
   // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
   const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs approval · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
+  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs you · </>}{chat.last_state === "running" && <>running · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
@@ -369,15 +421,16 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRe
   }
   // F2 or the pencil both start a rename the same way, so focus returns to the row either way (onRenameStart marks it)
   const startRename = (event: { preventDefault(): void; stopPropagation(): void }) => {
+    if (!onRename) return;
     event.preventDefault();
     event.stopPropagation();
     onRenameStart(chat.session_id);
     rename.start(chat.title?.trim() || chat.first_title?.trim() || "", (value) => onRename(chat, value));
   };
-  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={(event) => { event.preventDefault(); onSelect(chat); }} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts="F2" aria-current={current ? "page" : undefined}>
+  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={onSelect && ((event) => { event.preventDefault(); onSelect(chat); })} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts={onRename ? "F2" : undefined} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     {meta}
-    <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>
+    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" data-write-surface={WRITE_SURFACE.sidebarRename} title="rename (F2)" onClick={startRename}>✎</button>}
   </a>;
 }
 

@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { appShortcut, type GateWait } from "./gate-diagnostics";
 
 export async function gateShell(
   page: Page,
@@ -32,7 +32,7 @@ export async function gateShell(
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== secondSessionId)
     throw new Error("reload did not keep the selected chat query");
-  await page.keyboard.press("Meta+Shift+O");
+  await page.keyboard.press(appShortcut("Shift+O"));
   await waitFor(async () => {
     const field = page.getByRole("textbox", { name: "message", exact: true });
     return await field.count() === 1 && await field.evaluate((element) => element === document.activeElement);
@@ -68,7 +68,29 @@ export async function gateShell(
   const sidebar = page.locator("aside.sidebar");
   await waitFor(async () => (await sidebar.getAttribute("aria-hidden")) === "true", "closed drawer accessibility state");
   const menu = page.getByRole("button", { name: "open menu" });
-  await menu.click();
+  const drawerFirstFrameTab = await menu.evaluate((button: HTMLButtonElement) => new Promise<{ dispatched: boolean; prevented: boolean; inside: boolean }>((resolve) => {
+    const originalAdd = window.addEventListener;
+    const result = { dispatched: false, prevented: false, inside: false };
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      originalAdd.call(window, type, listener, options);
+      const drawer = document.querySelector('.drawer-open aside.sidebar:not([inert])');
+      if (!result.dispatched && type === "keydown" && options === true && drawer) {
+        result.dispatched = true;
+        const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+        window.dispatchEvent(event);
+        result.prevented = event.defaultPrevented;
+        result.inside = drawer.contains(document.activeElement);
+      }
+    }) as typeof window.addEventListener;
+    requestAnimationFrame(() => {
+      window.addEventListener = originalAdd;
+      resolve(result);
+    });
+    // Arm and click in the same task; a Playwright click can wait for a frame.
+    button.click();
+  }));
+  if (!drawerFirstFrameTab.dispatched) throw new Error("390px drawer: trap registered after the first frame or the probe never dispatched Shift+Tab");
+  if (!drawerFirstFrameTab.prevented || !drawerFirstFrameTab.inside) throw new Error(`390px drawer first-frame Shift+Tab was not trapped inside the drawer: ${JSON.stringify(drawerFirstFrameTab)}`);
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   const main = page.locator("main.main-pane");
   if (!(await main.evaluate((element) => element.inert)) || await main.getAttribute("aria-hidden") !== "true")
@@ -85,14 +107,26 @@ export async function gateShell(
   if ((await sidebar.getAttribute("aria-hidden")) !== "true") throw new Error("escape did not close the drawer");
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   if (!(await menu.evaluate((button) => button === document.activeElement))) throw new Error("closing the drawer did not restore menu focus");
-  const overflow = page.getByRole("button", { name: "chat options" });
-  await overflow.click();
-  if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
-  if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
-  if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
-  await capture("09-narrow-chat-menu-review-390x844.png");
-  await page.keyboard.press("Escape");
-  if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
+  if (await page.locator(".page-chat-head").count()) {
+    await page.locator(".page-chat-bar").click();
+    const overflow = page.getByRole("button", { name: "page chat options" });
+    await overflow.click();
+    const modeMenu = page.getByRole("menu", { name: "page chat options" });
+    if (await modeMenu.getByRole("menuitemcheckbox").count() !== 2) throw new Error("docked chat menu must expose exactly the two mode changes");
+    await capture("09-narrow-chat-menu-review-390x844.png");
+    await page.keyboard.press("Escape");
+    if (await modeMenu.count()) throw new Error("escape did not close the docked chat menu");
+    await page.keyboard.press("Escape");
+  } else {
+    const overflow = page.getByRole("button", { name: "chat options" });
+    await overflow.click();
+    if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
+    if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
+    if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
+    await capture("09-narrow-chat-menu-review-390x844.png");
+    await page.keyboard.press("Escape");
+    if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
+  }
   await page.setViewportSize({ width: 1440, height: 900 });
 
   return secondSessionId;

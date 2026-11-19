@@ -21,6 +21,9 @@ from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 inspect_turn_release = asyncio.Event()
+METRIC_BOUNDARY_MATRIX = json.loads(
+    (Path(__file__).parent.parent / "apps/web/src/metric-boundary-matrix.json").read_text()
+)
 
 
 class BarrierBackend(FakeBackend):
@@ -37,7 +40,7 @@ class BarrierBackend(FakeBackend):
                 block.text
                 for block in latest_user.content
                 if isinstance(block, TextContent)
-                and block.text in {"open created page", "start allow-mode chat"}
+                and block.text in {"open created page", "start allow-mode chat", "sb7 page stream"}
             ),
             None,
         )
@@ -53,6 +56,17 @@ class BarrierBackend(FakeBackend):
                 [ScriptedTurn(content=[TextContent("allow page ready")])],
                 request_serializer=request_serializer,
             ),
+            "sb7 page stream": FakeBackend(
+                [
+                    ScriptedTurn(
+                        content=[
+                            TextContent(f"sb7 stream line {index:03d}\\n") for index in range(120)
+                        ],
+                        delay=0.03,
+                    )
+                ],
+                request_serializer=request_serializer,
+            ),
         }
         self.control = control
 
@@ -62,6 +76,15 @@ class BarrierBackend(FakeBackend):
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
+            jump_chunk = (
+                event.type.name == "MESSAGE_UPDATE"
+                and isinstance(event.content, TextContent)
+                and event.content.text.startswith("text-only line 080")
+            )
+            if jump_chunk:
+                yield event
+                await hold(self.control, "jump_stream_barrier")
+                continue
             if event.type.name == "MESSAGE_END":
                 document = read_control(self.control) or {}
                 returned = document.get("returned_tool_calls", [])
@@ -168,7 +191,11 @@ def book_tool(name: str, operation: str, description: str) -> dict:
         "additionalProperties": False,
     }
     if operation == "list":
-        input_schema = {"type": "object", "additionalProperties": False}
+        input_schema = {
+            "type": "object",
+            "properties": {"search": {"type": "string"}},
+            "additionalProperties": False,
+        }
     elif operation == "update":
         input_schema = {
             "type": "object",
@@ -216,6 +243,16 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 TextContent(
                     "# Rendered markdown\n\n## Structured reply\n\n"
                     "* first item\n* second item\n\n"
+                    "| book | change since june | status |\n"
+                    "| :--- | ---: | :--- |\n"
+                    "| achilles | +12 | ready |\n"
+                    "| fulcrum | -3 | review |\n\n"
+                    "| one | two | three | four | five | six | seven | eight |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+                    "| alphaaaaaaaaaaaaaaaaaaaaaaaaaaaa | betaaaaaaaaaaaaaaaaaaaaaaaaaaaa | "
+                    "gammaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | deltaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | "
+                    "epsiloooooooooooooooooooooooooooo | zetaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | "
+                    "etaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | thetaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |\n\n"
                     "```python\nvalue = 42\nprint(value)\n```"
                 )
             ]
@@ -261,12 +298,22 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                             "blocks": [
                                 {"type": "text", "text": "reading list layout"},
                                 {"type": "form", "title": "add book", "tool": "add_book"},
+                                *[
+                                    {
+                                        "type": "metric",
+                                        **{
+                                            key: value
+                                            for key, value in metric.items()
+                                            if key not in {"expectedText", "classification"}
+                                        },
+                                    }
+                                    for metric in METRIC_BOUNDARY_MATRIX
+                                ],
                                 {
                                     "type": "metric",
-                                    "label": (
-                                        "legacy total with an unusually long descriptive label"
-                                    ),
-                                    "value": "9,999,999,999,999,999",
+                                    "label": "review status",
+                                    "value": "waiting on an intentionally long legal and "
+                                    "editorial review",
                                 },
                                 {
                                     "type": "metric",
@@ -335,10 +382,15 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 {"type": "text", "text": "layout updated without reload"},
                                 {
                                     "type": "metric",
-                                    "label": (
-                                        "legacy total with an unusually long descriptive label"
-                                    ),
-                                    "value": "9,999,999,999,999,999",
+                                    "label": "all books",
+                                    "collection": "books",
+                                    "count": True,
+                                },
+                                {
+                                    "type": "metric",
+                                    "label": "review status",
+                                    "value": "waiting on an intentionally long legal and "
+                                    "editorial review",
                                 },
                                 {
                                     "type": "metric",
@@ -355,11 +407,17 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                     "fields": ["title"],
                                     "filter": {"field": "status", "equals": "reading"},
                                 },
+                                {"type": "form", "title": "edit book", "tool": "update_book"},
                             ]
                         },
-                        "expected_version": 1,
+                        "expected_version": 2,
                     },
-                )
+                ),
+                ToolCall(
+                    "list-books-summary",
+                    "achilles__list_books",
+                    {"search": "synthetic-" + "x" * 9_000},
+                ),
             ]
         ),
         ScriptedTurn(content=[TextContent("layout updated")]),
@@ -368,7 +426,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                 ToolCall(
                     "stale-reading-layout",
                     "achilles__update_layout",
-                    {"layout": {"blocks": []}, "expected_version": 1},
+                    {"layout": {"blocks": []}, "expected_version": 2},
                 )
             ]
         ),
@@ -395,7 +453,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
                                 }
                             ]
                         },
-                        "expected_version": 2,
+                        "expected_version": 3,
                     },
                 )
             ]

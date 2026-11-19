@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { wrapTab } from "../keyboard";
+import { layoutSummary } from "./layoutSummary";
+import { READ_ONLY_REASON, WRITE_SURFACE } from "../writeSurfaces";
 import "../settings-dialog.css";
 
-type LayoutVersion = { version: number; created_at: string; block_types: string[]; active: boolean; action: string | null; restored_from: number | null };
+type LayoutVersion = { version: number; created_at: string; block_types: string[]; summary: string | null; active: boolean; action: string | null; restored_from: number | null };
 type ToolVersion = { name: string; version: number; created_at: string; active: boolean; restored_from: number | null };
 type Versions = { layout: LayoutVersion[]; tools: ToolVersion[] };
 
@@ -11,7 +13,7 @@ const when = (stamp: string) => new Date(stamp).toLocaleString(undefined, { mont
 
 // the page's layout and tool versions; restore goes through the same guarded store paths as the agent's restore_version
 // onChanged refreshes the page behind the dialog: after a restore, and after a 409 or 403 that means the page changed elsewhere
-export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void }) {
+export function HistoryDialog({ pageId, credential, createMode, opener, onClose, onChanged, canWrite = false, disabledReason = READ_ONLY_REASON }: { pageId: string; credential: string; createMode: boolean; opener: RefObject<HTMLElement | null>; onClose(): void; onChanged(): void; canWrite?: boolean; disabledReason?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
@@ -22,6 +24,8 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   const [pending, setPending] = useState<string | null>(null);
   const refocus = useRef<string | null>(null);
   const auth = { Authorization: `Bearer ${credential}` };
+  // a touch device has no Esc key, so the close control reads "close" there and keeps the "esc" hint on a keyboard
+  const touchOnly = window.matchMedia("(any-pointer: coarse)").matches;
   useLayoutEffect(() => {
     const node = dialog.current;
     node?.showModal();
@@ -47,6 +51,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   }, [pageId, credential, loads]);
 
   const restore = async (label: string, url: string, version: number, expected: number) => {
+    if (!canWrite) return;
     setPending(null);
     setBusy(true);
     try {
@@ -73,11 +78,11 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
   const toolNames = [...new Set(versions?.tools.map((row) => row.name))];
   const button = (key: string, row: { active: boolean }, blocked = false) => row.active
     ? <span className="history-current">current</span>
-    : <button type="button" disabled={busy || blocked} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
+    : <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={busy || blocked || !canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={blocked ? "history-layout-hint" : undefined} onClick={() => setPending(key)}>restore</button>;
   // the row in its confirm state; only "confirm" sends the restore
   const confirmRow = (key: string, version: number, kind: string, run: () => void) => <li key={version} data-row={key} className="history-confirm">
     <span id={`${key}-ask`}>restore version {version}? the current {kind} stays in history</span>
-    <button type="button" aria-describedby={`${key}-ask`} onClick={run}>confirm</button>
+    <button type="button" data-write-surface={WRITE_SURFACE.historyRestore} disabled={!canWrite} title={!canWrite ? disabledReason : undefined} aria-describedby={`${key}-ask`} onClick={run}>confirm</button>
     <button type="button" onClick={cancelPending}>cancel</button>
   </li>;
   return <dialog
@@ -89,9 +94,10 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
     onKeyDown={(event) => wrapTab(event, event.currentTarget)}
   >
     <div className="settings-panel">
-      <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="history-title">history</h2></div><div><span>restore adds a new version</span><button type="button" onClick={onClose}>esc</button></div></div>
+      <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="history-title">history</h2></div><div><span>restore adds a new version</span><button type="button" onClick={onClose}>{touchOnly ? "close" : "esc"}</button></div></div>
       <div className="settings-content">
         <p ref={noteRef} tabIndex={-1} className={note?.error ? "history-note history-error" : "history-note"} role={note?.error ? "alert" : "status"}>{note?.text ?? (versions ? "" : "loading history…")}</p>
+        {!canWrite && <p className="history-hint" role="note">{disabledReason ?? "this tab is read-only; take control to make changes"}</p>}
         {versions && <>
           <section className="history-group" aria-labelledby="history-layout">
             <h3 id="history-layout">layout</h3>
@@ -102,7 +108,7 @@ export function HistoryDialog({ pageId, credential, createMode, opener, onClose,
                 if (pending === key) return confirmRow(key, row.version, "layout", () => void restore("layout", `/api/pages/${pageId}/layout/restore`, row.version, activeLayout!));
                 return <li key={row.version} data-row={key}>
                   <span className="history-version">v{row.version}</span>
-                  <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}{row.block_types.join(", ") || "no blocks"}</span>
+                  <span className="history-detail">{row.restored_from ? `restored from v${row.restored_from} · ` : row.action ? `${actions[row.action] ?? row.action} · ` : ""}{layoutSummary(row.block_types.length, row.summary)}</span>
                   <time dateTime={row.created_at}>{when(row.created_at)}</time>
                   {button(key, row, !createMode)}
                 </li>;

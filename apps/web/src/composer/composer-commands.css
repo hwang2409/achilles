@@ -1,0 +1,18 @@
+[data-part="composer"]:has(> .composer-command-output) { position: relative; }
+.composer-command-output {
+  position: absolute; inset-inline: -1px; bottom: calc(100% + 8px); z-index: 3;
+  max-height: min(240px, 38dvh); overflow: auto; overflow-wrap: anywhere;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px 12px;
+  padding: 8px 12px; border: 1px solid var(--fulcrum-border);
+  background: var(--fulcrum-surface); color: var(--fulcrum-fg);
+  font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, monospace);
+}
+.composer-command-output p { margin: 8px 0; }
+.composer-command-output p[role="alert"] { color: var(--fulcrum-danger); }
+.composer-command-output ul { grid-column: 1 / -1; list-style: none; padding: 0; margin: 0; }
+.composer-command-output li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 6px 0; border-top: 1px solid var(--fulcrum-border); }
+.composer-command-output li small { grid-column: 1; color: var(--fulcrum-muted); }
+.composer-command-output li button { grid-column: 2; grid-row: 1 / span 2; }
+[data-part="composer"] .composer-command-output button { min-height: 40px; padding: 0 8px; border: 1px solid var(--fulcrum-border); background: transparent; color: var(--fulcrum-fg); }
+.composer-command-output button:not(:disabled):hover { border-color: var(--fulcrum-accent); }
+.composer-command-output button:disabled { opacity: .6; cursor: not-allowed; }

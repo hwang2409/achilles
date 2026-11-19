@@ -1,5 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./test-dom";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import React from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
@@ -10,18 +10,11 @@ import type { PageTool } from "./page/usePageTools";
 
 const originalFetch = globalThis.fetch;
 
-GlobalRegistrator.register();
-afterAll(() => GlobalRegistrator.unregister());
-
-beforeAll(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-});
 
 afterEach(cleanup);
 
 afterAll(() => {
   globalThis.fetch = originalFetch;
-  delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 
 // usePageTools and useHasWaitingChat both fetch; stub both so the generic (create-mode) starters
@@ -53,6 +46,7 @@ async function renderEmptyChat(props: {
     toggleCreateMode: props.toggleCreateMode,
     credential: `cred-${Math.random()}`,
     refreshKey: "0:0",
+    canWrite: true,
   }));
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return result;

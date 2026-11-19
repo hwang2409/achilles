@@ -1,9 +1,9 @@
 import type { Page } from "playwright";
-import type { GateWait } from "./gate-diagnostics";
+import { appShortcut, type GateWait } from "./gate-diagnostics";
 
 const theme = (page: Page) => page.locator("html").getAttribute("data-fulcrum-theme");
 const openSettings = async (page: Page, gateWait: GateWait) => {
-  await page.keyboard.press("Control+Comma");
+  await page.keyboard.press(appShortcut("Comma"));
   await gateWait.playwright(page.getByRole("dialog", { name: "settings" }), "waitFor", { state: "visible" });
 };
 
@@ -43,7 +43,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
   if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
   await page.getByRole("button", { name: "esc" }).click();
-  await page.keyboard.press("Control+Comma");
+  await page.keyboard.press(appShortcut("Comma"));
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const desktopDialog = page.getByRole("dialog", { name: "settings", exact: true });
   const roleDialogs = await desktopDialog.evaluateAll((dialogs) => dialogs.map((dialog) => {
@@ -124,6 +124,29 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control escaped the sidebar (last control: the palette button)");
   await page.keyboard.press("Shift+Tab");
   if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, the palette button");
+  await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+  await page.getByRole("button", { name: "settings" }).click();
+  const drawerSettings = page.getByRole("dialog", { name: "settings" });
+  await gateWait.playwright(drawerSettings, "waitFor", { state: "visible" });
+  const drawerSettingsInitial = drawerSettings.locator("button:not(:disabled):not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])").first();
+  await drawerSettingsInitial.focus();
+  await drawerSettingsInitial.evaluate((node) => { if (document.activeElement !== node) throw new Error("settings initial focus was not stable"); });
+  const drawerSettingsBeforeTabHandle = await page.evaluateHandle(() => document.activeElement);
+  const drawerSettingsBeforeTab = await page.evaluate(() => ({ name: document.activeElement?.getAttribute("aria-label"), id: document.activeElement?.id, outerHTML: document.activeElement?.outerHTML }));
+  await page.keyboard.press("Tab");
+  const drawerSettingsAfterTab = await page.evaluate(() => ({ name: document.activeElement?.getAttribute("aria-label"), id: document.activeElement?.id, outerHTML: document.activeElement?.outerHTML }));
+  const drawerSettingsInsideAfterTab = await drawerSettings.evaluate((dialog) => dialog.contains(document.activeElement));
+  if (!drawerSettingsInsideAfterTab) throw new Error(`native settings Tab did not advance inside the open drawer: before=${JSON.stringify(drawerSettingsBeforeTab)} active=${JSON.stringify(drawerSettingsAfterTab)}`);
+  if (await drawerSettingsBeforeTabHandle.evaluate((node) => node === document.activeElement)) throw new Error(`native settings focus did not advance in the open drawer: before=${JSON.stringify(drawerSettingsBeforeTab)} active=${JSON.stringify(drawerSettingsAfterTab)}`);
+  const drawerSettingsAfterTabHandle = await page.evaluateHandle(() => document.activeElement);
+  await page.keyboard.press("Shift+Tab");
+  const drawerSettingsAfterShiftTab = await page.evaluate(() => ({ name: document.activeElement?.getAttribute("aria-label"), id: document.activeElement?.id, outerHTML: document.activeElement?.outerHTML }));
+  if (!await drawerSettings.evaluate((dialog) => dialog.contains(document.activeElement)) || await drawerSettingsAfterTabHandle.evaluate((node) => node === document.activeElement)) throw new Error(`native settings reverse Tab did not advance inside the open drawer: before=${JSON.stringify(drawerSettingsBeforeTab)} afterTab=${JSON.stringify(drawerSettingsAfterTab)} active=${JSON.stringify(drawerSettingsAfterShiftTab)}`);
+  await page.keyboard.press("Escape");
+  await gateWait.playwright(drawerSettings, "waitFor", { state: "hidden" });
+  await last.focus();
+  await page.keyboard.press("Tab");
+  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer focus trap did not resume after native settings closed");
   await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   if (screenshots) await page.screenshot({ path: `${screenshots}/drawer-focus.png` });
   await page.keyboard.press("Escape");

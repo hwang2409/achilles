@@ -12,7 +12,7 @@ git -C .cache/fulcrum checkout --detach "$(cat fulcrum.rev)"
 (cd .cache/fulcrum && bun install --frozen-lockfile)
 bun test ./scripts/
 FULCRUM_DIR=$PWD/.cache/fulcrum bun scripts/fulcrum.ts
-bun test ./apps/web/src/
+bun test --preload ./apps/web/src/test-dom.ts ./apps/web/src/
 git clone https://github.com/hwang2409/zeta .cache/zeta
 git -C .cache/zeta checkout --detach "$(cat zeta.rev)"
 uv sync --project .cache/zeta --frozen

@@ -19,7 +19,7 @@ function harness(clearOn: (command: Command) => boolean) {
   return { owner, sent, commands, draft: () => draft };
 }
 
-// fail-first: on base 20666eb the composer has no command handling, so "/accounts" is delivered to the model
+// fail-first: on main before the fix the composer has no command handling, so "/accounts" is delivered to the model
 // (`sent` would be ["/accounts"]) and `onCommand` is never called.
 test("a /accounts draft runs locally and is never sent to the model", async () => {
   const h = harness((command) => command.name === "accounts");

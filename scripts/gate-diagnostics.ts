@@ -4,6 +4,23 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 const SECRET_KEYS = /token|authorization|headers|mcp_bindings|credential|secret|password/i;
+export const appShortcut = (key: string) => `ControlOrMeta+${key}`;
+
+export type DesktopPageChatProof = {
+  mobileQuery: boolean;
+  barVisible: boolean;
+  docked: boolean;
+  surfaceVisible: boolean;
+  surfaceRole?: string | null;
+  surfaceAriaModal?: string | null;
+  evidenceVisible: boolean;
+  evidenceHit: boolean;
+  evidenceInsideSurface: boolean;
+};
+
+export function desktopPageChatProof(state: DesktopPageChatProof): boolean {
+  return !state.mobileQuery && !state.barVisible && state.docked && state.surfaceVisible && !state.surfaceRole && !state.surfaceAriaModal && state.evidenceVisible && state.evidenceHit && state.evidenceInsideSurface;
+}
 
 // the python server polls control.json while it holds zeta's turn: a reader must never see a partial file
 export async function writeControl(path: string, document: unknown): Promise<void> {

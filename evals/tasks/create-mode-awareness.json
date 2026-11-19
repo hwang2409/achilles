@@ -1,0 +1,87 @@
+{
+  "id": "create-mode-awareness",
+  "suite": "focused",
+  "page_plan": [
+    {
+      "alias": "off_page",
+      "source": "setup",
+      "bind_chat": true,
+      "create_mode": false
+    },
+    {
+      "alias": "on_page",
+      "source": "fixture",
+      "route": "/studio",
+      "bind_chat": true,
+      "create_mode": true
+    }
+  ],
+  "agent_turns": 6,
+  "steps": [
+    {
+      "id": "ask-off",
+      "kind": "prompt",
+      "page": "off_page",
+      "chat": "off-chat",
+      "prompt": "Is this chat currently in create mode? Reply with exactly one word: ENABLED if this chat is in create mode right now, or DISABLED if it is not. Do not guess; rely on what your tools and their descriptions tell you."
+    },
+    {
+      "id": "ask-on",
+      "kind": "prompt",
+      "page": "on_page",
+      "chat": "on-chat",
+      "prompt": "Is this chat currently in create mode? Reply with exactly one word: ENABLED if this chat is in create mode right now, or DISABLED if it is not. Do not guess; rely on what your tools and their descriptions tell you."
+    }
+  ],
+  "setup": {
+    "tools": [],
+    "records": [
+      {
+        "id": "flag-1",
+        "collection": "flags",
+        "data": {
+          "name": "email_digest",
+          "state": "enabled"
+        }
+      },
+      {
+        "id": "flag-2",
+        "collection": "flags",
+        "data": {
+          "name": "beta_banner",
+          "state": "disabled"
+        }
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "off-answer",
+      "type": "answer_mentions",
+      "page": "off_page",
+      "step": "ask-off",
+      "value": [
+        "disabled"
+      ]
+    },
+    {
+      "id": "on-answer",
+      "type": "answer_mentions",
+      "page": "on_page",
+      "step": "ask-on",
+      "value": [
+        "enabled"
+      ]
+    },
+    {
+      "id": "no-errors-off",
+      "type": "no_error",
+      "page": "off_page"
+    },
+    {
+      "id": "no-errors-on",
+      "type": "no_error",
+      "page": "on_page"
+    }
+  ]
+}
