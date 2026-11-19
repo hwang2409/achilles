@@ -220,6 +220,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
     if (!response.ok()) throw new Error(`home lookup failed: ${response.status()}`);
     return await response.json() as { id: string; create_mode: boolean; approval_mode?: string };
   };
+  await tab.setViewportSize({ width: 1440, height: 900 });
   await tab.goto(landingUrl);
   const connected = tab.locator('.surface-connection[data-connected="true"]');
   await gateWait.playwright(connected, "waitFor", { state: "attached" });
@@ -227,8 +228,13 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });
   const newChat = tab.locator(".surface-actions").getByRole("button", { name: "new chat", exact: true });
   const assertNewChat = async () => {
-    await gateWait.playwright(tab.locator('.surface-actions > .new-chat:enabled + .create-split'), "waitFor");
-    if (!await newChat.isEnabled()) throw new Error(`new chat not available at ${new URL(tab.url()).pathname}`);
+    // A navigation from the controller can reconnect as observer before its old socket closes.
+    const enabled = newChat.and(tab.locator(":enabled"));
+    const takeover = tab.getByRole("button", { name: "take control", exact: true });
+    await gateWait.playwright(enabled.or(takeover).first(), "waitFor");
+    if (await takeover.isVisible()) await takeover.click();
+    await gateWait.playwright(enabled, "waitFor");
+    if (!await newChat.evaluate((button) => button.nextElementSibling?.querySelector('a[href^="/create"]') != null)) throw new Error("enabled new chat must be directly before the create link");
   };
   await assertNewChat();
   const home = await readHome();
@@ -247,7 +253,8 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
     if (place === "pages") await capture("new-chat-pages", 1440);
     const requestCount = requests.filter(({ method }) => method === "new_session").length;
     const registrationCount = registrations.length;
-    await newChat.click();
+    if (place === "create") await newChat.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+    else await newChat.click();
     await gateWait.playwright(tab, "waitForURL", (url) => url.pathname === "/" && Boolean(url.searchParams.get("chat")) && !url.hash, { waitUntil: "commit" });
     const latest = new URL(tab.url()).searchParams.get("chat");
     if (registrations.length !== registrationCount + 1 || registrations.at(-1)?.sessionId !== latest || registrations.at(-1)?.pageId !== home.id || requests.filter(({ method }) => method === "new_session").length !== requestCount + 1) throw new Error(`new chat from /${place} did not register one home chat`);

@@ -1030,23 +1030,32 @@ test.each([
   }
 });
 
-test("create landing keeps a refused build on the same chat and delivery id", async () => {
+test.each([
+  ["double new chat", "new", "new", false],
+  ["new chat then build", "new", "build", false],
+  ["build then new chat", "build", "new", false],
+  ["Enter and click in the same tick", "new", "new", true],
+  ["refused build permits retry", "build", "build", false],
+] as const)("chat creation guard: %s", async (name, first, second, sameTick) => {
   const draft = "  make a reading list\nwith tags  ";
   const location = new URL("http://achilles.test/create");
   const mode: unknown[] = [];
   const registrations: unknown[] = [];
   const deliveries: Array<{ session_id: string; delivery_id: string; text: string }> = [];
   const firstDelivery = deferred<unknown>();
+  const registered = deferred<Response>();
+  const navigations: string[] = [];
+  const refused = name === "refused build permits retry";
   let sessions = 0;
   setGlobals({
     localStorage: new MemoryStorage(), location,
-    history: { pushState(_state: unknown, _title: string, path: string) { location.href = new URL(path, location.href).href; } },
+    history: { pushState(_state: unknown, _title: string, path: string) { navigations.push(path); location.href = new URL(path, location.href).href; } },
     addEventListener() {}, removeEventListener() {},
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/pages/home") return Response.json(page);
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
-      if (url === "/api/pages/home/chats") { registrations.push(JSON.parse(String(init?.body))); return Response.json({}, { status: 201 }); }
+      if (url === "/api/pages/home/chats") { registrations.push(JSON.parse(String(init?.body))); return registered.promise; }
       if (url === "/api/pages/home/create-mode") { mode.push(JSON.parse(String(init?.body))); return Response.json({ create_mode: true }); }
       if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, session_id: "build-chat" }], next: null });
       if (url === "/api/chats/build-chat") return new Response(null, { status: 204 });
@@ -1056,7 +1065,7 @@ test("create landing keeps a refused build on the same chat and delivery id", as
   const underlying = client();
   const zeta = { ...underlying, async request(method: string, params: typeof deliveries[number]) {
     if (method === "new_session") { sessions++; return { session: { session_id: "build-chat" } }; }
-    if (method === "send") { deliveries.push(params); return deliveries.length === 1 ? firstDelivery.promise : { accepted: true }; }
+    if (method === "send") { deliveries.push(params); return refused && deliveries.length === 1 ? firstDelivery.promise : { accepted: true }; }
     return underlying.request(method);
   } };
   let active!: ReturnType<typeof useActiveChat>;
@@ -1066,30 +1075,44 @@ test("create landing keeps a refused build on the same chat and delivery id", as
   expect(sessions).toBe(0);
   expect(underlying.resumes).toBe(0);
   await act(async () => { active.build.setDraft(draft); });
-  let start!: Promise<void>;
+  const call = (kind: "new" | "build") => kind === "new" ? active.newChat() : active.build.start();
+  let start: Promise<void> | undefined;
+  let duplicate: Promise<void> | undefined;
   try {
-    await act(async () => { start = active.build.start(); await active.build.start(); });
-    await flushUntil(() => deliveries.length === 1);
-    expect(location.pathname + location.search).toBe("/create");
-    expect(mode).toEqual([{ enabled: true }]);
-    expect(registrations).toEqual([{ session_id: "build-chat" }]);
-    expect(deliveries[0]).toEqual({ session_id: "build-chat", delivery_id: expect.any(String), text: draft });
-    expect(deliveries[0].delivery_id).toMatch(/^[0-9a-f-]{36}$/);
-    firstDelivery.resolve({ accepted: false });
-    await act(async () => { await start; });
-    expect(active.build.error).toContain("did not accept");
-    expect(active.build.draft).toBe(draft);
-    expect(location.pathname + location.search).toBe("/create");
-    await act(async () => { await active.build.start(); });
+    await act(async () => { start = call(first); if (sameTick) duplicate = call(second); });
+    await flushUntil(() => registrations.length > 0);
+    await act(async () => {
+      if (!sameTick) duplicate = call(second);
+      await Promise.resolve();
+      registered.resolve(Response.json({}, { status: 201 }));
+    });
+    if (refused) {
+      await flushUntil(() => deliveries.length === 1);
+      expect(navigations).toEqual([]);
+      firstDelivery.resolve({ accepted: false });
+      await act(async () => { await Promise.all([start, duplicate]); });
+      expect(active.build.error).toContain("did not accept");
+      expect(active.build.draft).toBe(draft);
+      await act(async () => { await active.build.start(); });
+      expect(deliveries).toEqual([deliveries[0], deliveries[0]]);
+    } else {
+      await act(async () => { await Promise.all([start, duplicate]); });
+    }
     expect(sessions).toBe(1);
-    expect(mode).toHaveLength(1);
-    expect(registrations).toHaveLength(1);
-    expect(deliveries).toEqual([deliveries[0], deliveries[0]]);
+    expect(registrations).toEqual([{ session_id: "build-chat" }]);
+    expect(navigations).toEqual(["/?chat=build-chat"]);
     expect(location.pathname + location.search).toBe("/?chat=build-chat");
-    expect(active.state).toMatchObject({ phase: "ready", sessionId: "build-chat", page: { id: "home", create_mode: true } });
-    expect(active.build.draft).toBe("");
+    expect(active.state).toMatchObject({ phase: "ready", sessionId: "build-chat", page: { id: "home", create_mode: first === "build" } });
+    expect(mode).toEqual(first === "build" ? [{ enabled: true }] : []);
+    if (first === "build") {
+      expect(deliveries[0]).toEqual({ session_id: "build-chat", delivery_id: expect.any(String), text: draft });
+      expect(deliveries[0].delivery_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(deliveries).toHaveLength(refused ? 2 : 1);
+      expect(active.build.draft).toBe("");
+    } else expect(deliveries).toEqual([]);
   } finally {
+    registered.resolve(Response.json({}, { status: 201 }));
     firstDelivery.resolve({ accepted: false });
-    if (start) await start;
+    await Promise.all([start, duplicate]);
   }
 });
