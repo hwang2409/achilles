@@ -70,6 +70,10 @@ export type AggregateCall = {
 export type ModelRow = AggregateCall & Pick<SeriesPoint, "input_tokens" | "output_tokens" | "total_tokens"> & {
   provider: string | null;
   model: string;
+  ttft_p50_ns?: number | null;
+  ttft_p95_ns?: number | null;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
 };
 
 export type ToolRow = AggregateCall & {
@@ -96,6 +100,8 @@ export type ErrorRow = {
   mcp_method: string | null;
   mcp_tool: string | null;
 };
+
+export type ErrorPage = Page<ErrorRow> & { classes?: { error_type: string | null; count: number }[] };
 
 export type SeriesRow = { key: string | null; point: SeriesPoint };
 export type SeriesPage = { points: SeriesRow[]; next_cursor: string | null };

@@ -3,7 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { errorKey, mergePage, modelKey, modelTrends, toolKey, type AggregateTab } from "./aggregates";
 import type { SessionsQuery } from "./Sessions";
 import { telemetryClient, type Window } from "./telemetry-client";
-import type { ErrorRow, ModelRow, Operation, Page, SeriesPoint, SeriesRow, TelemetryOverview, TelemetrySession, TelemetryStatus, ToolRow } from "./telemetry-types";
+import type { ErrorPage, ErrorRow, ModelRow, Operation, Page, SeriesPoint, SeriesRow, TelemetryOverview, TelemetrySession, TelemetryStatus, ToolRow } from "./telemetry-types";
 
 export const POLL_MS = 5_000;
 
@@ -24,7 +24,7 @@ export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window
 type AggregatePage =
   | { tab: "models"; page: Page<ModelRow>; trends: ReturnType<typeof modelTrends> }
   | { tab: "tools"; page: Page<ToolRow> }
-  | { tab: "errors"; page: Page<ErrorRow> };
+  | { tab: "errors"; page: Page<ErrorRow>; classes: ErrorPage["classes"] };
 export type AggregateLoaded = AggregatePage & { ask: Ask; status: TelemetryStatus; window: Window; total: number; totals: SeriesPoint };
 type AggregateChoice = { tab: Tab; operation: Operation | null; prefix?: AggregateLoaded };
 
@@ -134,7 +134,7 @@ async function loadAggregate(reads: ReturnType<typeof telemetryClient>, ask: Ask
     return { ask, window, tab, status: overview.status, total: overview.active_tools, totals: overview.totals, page: mergePage(prefix?.tab === tab ? prefix.page.items : [], page, toolKey) };
   }
   const [overview, page] = await Promise.all([overviewRead, reads.errors({ ...query, operation: ask.aggregate?.operation ?? null })]);
-  return { ask, window, tab, status: overview.status, total: overview.totals.errors, totals: overview.totals, page: mergePage(prefix?.tab === tab ? prefix.page.items : [], page, errorKey) };
+  return { ask, window, tab, status: overview.status, total: overview.totals.errors, totals: overview.totals, classes: page.classes, page: mergePage(prefix?.tab === tab ? prefix.page.items : [], page, errorKey) };
 }
 
 async function loadModelTrends(reads: ReturnType<typeof telemetryClient>, window: Window, bucket: "hour" | "day") {

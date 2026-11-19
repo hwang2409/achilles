@@ -83,7 +83,7 @@ function Models({ data, bucket, label }: { data: Extract<AggregateLoaded, { tab:
   const points = trends.get(key);
   return <>
     <Heading title="models">{formatCount(total)} models · {formatCount(totals.model_calls)} calls · tokens only</Heading>
-    <Table kind="models" columns={["model / provider", `calls per ${bucket}`, "calls ↓", "errors / rate", "p50", "p95", "input", "output", "total", "last"]}>
+    <Table kind="models" columns={["model / provider", `calls per ${bucket}`, "calls ↓", "errors / rate", "p50", "p95", "TTFT p50", "TTFT p95", "input", "output", "total", "cache read", "cache write", "last"]}>
       {items.map((row) => {
         const id = modelKey(row);
         return <div role="row" key={id} data-selected={id === key}>
@@ -96,9 +96,13 @@ function Models({ data, bucket, label }: { data: Extract<AggregateLoaded, { tab:
           <Cell label="errors"><span className={row.errors ? "tm-danger" : "tm-dim"}>{formatCount(row.errors)}</span><span className="tm-dim"> · {formatPercent(row.errors, row.calls) ?? "—"}</span></Cell>
           <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
           <Cell label="p95"><span title={latencyTitle}>{formatLatency(row.p95_ns)}</span></Cell>
+          <Cell label="TTFT p50"><span title={`time to first token · ${latencyTitle}`}>{formatLatency(row.ttft_p50_ns)}</span></Cell>
+          <Cell label="TTFT p95"><span title={`time to first token · ${latencyTitle}`}>{formatLatency(row.ttft_p95_ns)}</span></Cell>
           <Cell label="in">{formatTokens(row.input_tokens)}</Cell>
           <Cell label="out">{formatTokens(row.output_tokens)}</Cell>
           <Cell label="tokens">{formatTokens(row.total_tokens)}</Cell>
+          <Cell label="cache read">{formatTokens(row.cache_read_tokens)}</Cell>
+          <Cell label="cache write">{formatTokens(row.cache_write_tokens)}</Cell>
           <Cell label="last" className="tm-ag-last tm-dim"><time title={formatFullTime(row.last_ns)}>{formatHour(row.last_ns)}</time></Cell>
         </div>;
       })}
@@ -150,19 +154,23 @@ function Errors({ data, label, operation, choose, open }: { data: Extract<Aggreg
   const { items, next_cursor } = data.page;
   const answered = data.ask.aggregate?.operation ?? null;
   const [expanded, setExpanded] = useState(false);
-  const groups = new Map<string, number>();
-  for (const row of items) { const key = row.error_type ?? "unknown class"; groups.set(key, (groups.get(key) ?? 0) + 1); }
-  const ranked = [...groups].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
-  const rest = ranked.slice(4);
-  const scale = ranked[0]?.[1] ?? 0;
+  const classes = data.classes ?? [];
+  const hidden = classes.length - 4;
+  const scale = Math.max(0, ...classes.map(({ count }) => count));
   return <>
     <Heading title={<><span className="tm-danger">{formatCount(items.length)}</span> {next_cursor !== null ? "errors shown" : "errors"}</>}>{label}{answered && ` · ${answered}`} · error type only, never the message</Heading>
-    {ranked.length > 0 && <ul className="tm-ag-classes" aria-label="error classes in rows shown">
-      {(expanded ? ranked : ranked.slice(0, 4)).map(([name, count]) => <li key={name}>
-        <span className="tm-ag-ellipsis" title={name}>{name}</span><span className="tm-dim"><Meter part={count} scale={scale} />{formatCount(count)}</span>
-      </li>)}
-      {rest.length > 0 && <li className="tm-ag-other"><button className="tm-button" type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "fewer types" : `${rest.length} other types ▾`}</button></li>}
-    </ul>}
+    {classes.length > 0 && <>
+      <p className="tm-ag-classes-label tm-dim" id="tm-error-classes-label">error classes · full range</p>
+      <ul className="tm-ag-classes" aria-labelledby="tm-error-classes-label">
+        {(expanded ? classes : classes.slice(0, 4)).map(({ error_type, count }) => {
+          const name = error_type ?? "unknown class";
+          return <li key={name}>
+            <span className="tm-ag-ellipsis" title={name}>{name}</span><span className="tm-dim"><Meter part={count} scale={scale} />{formatCount(count)}</span>
+          </li>;
+        })}
+        {hidden > 0 && <li className="tm-ag-other"><button className="tm-button" type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "fewer types" : `${hidden} more buckets ▾`}</button></li>}
+      </ul>
+    </>}
     <p className="tm-ag-scroll-hint tm-dim" aria-hidden="true">more operations →</p>
     <div className="tm-ag-filters" role="group" aria-label="filter by operation"><span className="tm-dim">operation</span>
       {([null, ...OPERATIONS] as const).map((op) => <button key={op ?? "all"} type="button" className="tm-button" aria-pressed={op === operation} onClick={op !== operation ? () => choose(op) : undefined}>{op ?? "all"}</button>)}
