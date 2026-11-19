@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Locator, Route } from "../apps/web/node_modules/playwright";
+import type { Locator, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
@@ -213,6 +213,47 @@ try {
     "achilles",
   );
   browser = await chromium.launch({ headless: true });
+  const telemetryPage = await browser.newPage();
+  const telemetryHttp: string[] = [];
+  const recordTelemetryRequest = (request: Request) => telemetryHttp.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  const telemetryMethods: string[] = [];
+  const forbiddenHttp = () => telemetryHttp.find((value) => value === "GET /api/pages/telemetry" || value === "GET /api/pages/telemetry/credential");
+  const forbiddenMethods = new Set(["resume", "status", "session_settings", "set_settings", "session_history_and_subscribe", "session_history", "mcp_refresh_tools", "new_session", "abort", "delivery_status", "send", "steer", "approve", "deny"]);
+  let telemetryHello = false;
+  const decodeFrame = (payload: string | Buffer): { id?: string | number; method?: string; result?: unknown } | null => {
+    try { return JSON.parse(String(payload)); } catch { return null; }
+  };
+  telemetryPage.on("request", recordTelemetryRequest);
+  telemetryPage.on("websocket", (socket) => {
+    let helloId: string | number | undefined;
+    socket.on("framesent", ({ payload }) => {
+      const frame = decodeFrame(payload);
+      if (typeof frame?.method !== "string") return;
+      telemetryMethods.push(frame.method);
+      if (frame.method === "hello") helloId = frame.id;
+    });
+    socket.on("framereceived", ({ payload }) => {
+      const frame = decodeFrame(payload);
+      if (helloId !== undefined && frame?.id === helloId && Object.hasOwn(frame, "result")) telemetryHello = true;
+    });
+  });
+  try {
+    await telemetryPage.goto(`${origin}/telemetry`);
+    await waitFor(async () => telemetryHello, "telemetry hello");
+    const newerZeta = telemetryPage.getByText("telemetry · needs a newer zeta", { exact: true });
+    // Let attachment win the race on old builds so the assertion names the side effect, not missing copy.
+    await waitFor(async () => Boolean(forbiddenHttp()) || await newerZeta.isVisible(), "telemetry route milestone");
+    await telemetryPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const attachment = forbiddenHttp();
+    if (attachment) throw new Error(`telemetry route started page attachment: ${attachment}`);
+    const agentMethods = telemetryMethods.filter((method) => forbiddenMethods.has(method));
+    if (agentMethods.length) throw new Error(`telemetry route used agent RPCs: ${agentMethods.join(", ")}`);
+    if (!await newerZeta.isVisible()) throw new Error("telemetry route did not show the newer-zeta state");
+    console.log("telemetry route: hello succeeded, newer-zeta state visible, no page attachment or agent RPCs");
+  } finally {
+    telemetryPage.off("request", recordTelemetryRequest);
+    await telemetryPage.close();
+  }
   let page = await browser.newPage();
   const errors: string[] = [];
   const requestFailures: string[] = [];
