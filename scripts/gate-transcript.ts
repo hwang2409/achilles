@@ -262,6 +262,8 @@ export async function gateTranscript(
     catch (error) { throw new Error(`${error}\njump diagnostics at timeout: ${JSON.stringify(await jumpDiagnostics())}`); }
   };
   const assertJumpLane = async (width: number) => {
+    // This path tests the manual opener, not the focused composer's resize handoff.
+    if (width === 390) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.setViewportSize({ width, height: width === 390 ? 760 : 900 });
     if (width === 390) {
       const bar = page.locator(".page-chat-bar");
@@ -269,6 +271,8 @@ export async function gateTranscript(
       await bar.click();
       const sheet = page.getByRole("dialog", { name: "page chat" });
       await gateWait.playwright(sheet, "waitFor", { state: "visible" });
+      if (!(await sheet.evaluate((node) => node.contains(document.activeElement))))
+        throw new Error("390px page chat manual opener did not move focus into the sheet");
       await gateWait.playwright(sheet.locator(".transcript"), "waitFor", { state: "visible" });
       if (await sheet.locator(".transcript").evaluate((element) => element.clientHeight <= 0)) throw new Error("390px page chat jump sheet has no usable transcript height");
     }
