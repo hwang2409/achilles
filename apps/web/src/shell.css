@@ -20,12 +20,10 @@
 .chat-group h2, .sidebar > footer > button { font-size: 13px; }
 .list-head { padding-inline: 14px; font-size: 11px; letter-spacing: .1em; }
 .page-list a,
-.place-nav a,
 .chat-row { position: relative; border-left: 2px solid transparent; }
-.page-list a, .place-nav a { gap: 10px; padding: 6px 14px 6px 10px; font-size: 13px; }
-.page-list a > span, .place-nav a > span { flex: 0 0 auto; color: var(--fulcrum-muted); }
+.page-list a { gap: 10px; padding: 6px 14px 6px 10px; font-size: 13px; }
+.page-list a > span { flex: 0 0 auto; color: var(--fulcrum-muted); }
 .page-list a b,
-.place-nav a b,
 .chat-row strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .chat-row { display: block; padding: 8px 14px 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 65%, transparent); }
 .chat-row strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 20px; }
@@ -136,9 +134,13 @@
   .page-chat-docked .page-chat-surface [data-part="composer"] { width: calc(100% - 32px); }
 }
 
-.place-nav { flex: none; border-bottom: 1px solid var(--fulcrum-border); }
-.place-nav .telemetry-link { align-items: center; min-height: 40px; }
+.place-nav { flex: none; margin: 14px 14px 0; }
+.place-nav .telemetry-link { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-left: 2px solid transparent; font-size: 13px; }
+.place-nav .telemetry-link svg { flex: none; color: var(--fulcrum-muted); }
+.place-nav .telemetry-link b { font-weight: 400; }
+.place-nav .telemetry-link:hover { background: color-mix(in srgb, var(--fulcrum-accent) 6%, transparent); }
 .place-nav .telemetry-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
 .place-nav .telemetry-link[aria-current="page"] b { font-weight: 700; }
+.place-nav .telemetry-link[aria-current="page"] svg { color: var(--fulcrum-fg); }
 .place-nav .telemetry-link:focus-visible { outline-offset: -2px; }
 .sidebar > footer > .palette-button:only-child { position: static; width: auto; height: 40px; opacity: 1; }
