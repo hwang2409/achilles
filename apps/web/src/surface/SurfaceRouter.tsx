@@ -64,4 +64,3 @@ function ObserverBanner({ connection, readOnly }: { connection: Connection; read
     {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => void takeControl()} disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div>}
   </aside>;
 }
-
