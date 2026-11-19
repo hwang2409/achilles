@@ -41,7 +41,7 @@ test("startup and offline failures never retain observer presentation", async ()
 
 const controllerRole = { role: "controller", reason: null } as const;
 const observerRole = { role: "observer", reason: null } as const;
-const refusedRole = { ...observerRole, reason: "close the other tab, then take control." };
+const refusedRole = { ...observerRole, reason: "another tab had control. try again after it closes." };
 test.each([
   ["controller granted", controllerRole, ["controller_granted"], controllerRole],
   ["controller busy probes observer", controllerRole, ["controller_busy"], observerRole],
@@ -83,7 +83,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
       const result = await connection.takeControl();
       unsubscribe();
       expect(states.filter((state) => state.phase !== "connected" || state.authority !== "observer")).toEqual([]);
-      expect(result).toBe("close the other tab, then take control.");
+      expect(result).toBe(refusedRole.reason);
       expect(connection.client).toBe(observer);
       expect(observerCloses).toBe(0);
       released = true;
