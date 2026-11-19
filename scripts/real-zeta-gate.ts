@@ -12,6 +12,7 @@ import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
+import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
 import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
 
@@ -152,6 +153,7 @@ try {
     ...process.env,
     PYTHONPATH: zeta,
     ZETA_HOME: zetaHome,
+    ZETA_ACCOUNT_HOME: zetaHome,
     ACHILLES_HOME: achillesHome,
     ZETA_PROOF_WORKTREE: root,
     ZETA_PROOF_CWD: cwd,
@@ -161,6 +163,90 @@ try {
     ACHILLES_ZETA_DISCOVERY: ownDiscovery,
     ACHILLES_APPROVAL: "ask",
   };
+  browser = await chromium.launch({ headless: true });
+  const authHome = join(temp, "auth-zeta");
+  const authDiscovery = join(authHome, "run/serve.ws.json");
+  const authAccounts = join(temp, "auth-accounts");
+  const oauthPath = (name: string) => join(authAccounts, "accounts/anthropic", name, "oauth.json");
+  const authEnv = {
+    ...env,
+    ZETA_HOME: authHome,
+    ZETA_ACCOUNT_HOME: authAccounts,
+    ACHILLES_HOME: join(temp, "auth-achilles"),
+    ACHILLES_ZETA_DISCOVERY: authDiscovery,
+    ZETA_ALLOW_API_KEY: "0",
+  };
+  const serveAuth = async (scripted: boolean) => {
+    const child = start("uv", ["run", "--project", zeta, "zeta", "serve", "--port", "0", "--ws", "0", "--ws-origin", origin, "--provider", "claude"], {
+      ...authEnv, ZETA_TEST_SCRIPTED_PROVIDER: scripted ? "1" : "0",
+    }, cwd);
+    await waitFor(async () => await Bun.file(authDiscovery).exists(), "switch-then-reply zeta discovery");
+    await readDiscovery(authDiscovery);
+    return child;
+  };
+  const stop = async (child: ChildProcess) => {
+    child.kill("SIGTERM");
+    if (!await waitForExit(child, 15_000)) throw new Error("switch-then-reply process did not exit");
+  };
+  const authApp = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], authEnv);
+  let authZeta = await serveAuth(false);
+  await writeFile(join(authAccounts, "accounts.json"), JSON.stringify({
+    version: 1,
+    accounts: {
+      "anthropic:failed": { provider: "anthropic", name: "failed" },
+      "anthropic:working": { provider: "anthropic", name: "working" },
+    },
+    defaults: { anthropic: "anthropic:failed" },
+  }), { mode: 0o600 });
+  const seedOAuth = async (name: string) => {
+    await mkdir(join(oauthPath(name), ".."), { recursive: true, mode: 0o700 });
+    await writeFile(oauthPath(name), JSON.stringify({
+      version: 1, access_token: "fake-access", refresh_token: "fake-refresh", expires_at: 4102444800,
+    }), { mode: 0o600 });
+  };
+  await seedOAuth("failed");
+  await seedOAuth("working");
+  await waitFor(async () => await fetch(origin).then(r => r.ok, () => false), "switch-then-reply achilles");
+  await Bun.write(join(authHome, "mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `${origin}/mcp/` } } }));
+  const restartAuth = async (scripted: boolean) => {
+    await stop(authZeta);
+    await rm(authDiscovery, { force: true });
+    authZeta = await serveAuth(scripted);
+  };
+  await restartAuth(false);
+  const authPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try {
+    await authPage.goto(`${origin}/not-a-real-page`);
+    await authPage.getByRole("button", { name: "new chat", exact: true }).click({ timeout: 20_000 });
+    const composer = authPage.getByRole("textbox", { name: "message", exact: true });
+    await composer.fill("fail with the pinned account", { timeout: 20_000 });
+    // A missing credential triggers real auth failure without sending a provider request.
+    await rm(oauthPath("failed"));
+    await composer.press("Enter");
+    const card = authPage.getByText("this chat can't reach its account", { exact: true });
+    await card.waitFor({ timeout: 20_000 });
+    const id = await authPage.locator("[data-session-id]").getAttribute("data-session-id");
+    if (!id) throw new Error("switch-then-reply chat has no session id");
+    const pin = async () => JSON.parse(await Bun.file(join(authHome, "sessions", id, "meta.json")).text()).selected_accounts.anthropic;
+    if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
+    await seedOAuth("failed");
+    await restartAuth(true);
+    await authPage.reload();
+    await card.waitFor({ timeout: 20_000 });
+    await authPage.getByRole("button", { name: "switch this chat to anthropic:working", exact: true }).click({ timeout: 20_000 });
+    await waitFor(async () => await pin() === "anthropic:working", "switch-then-reply working pin");
+    // Old zeta uses the real backend after switching. Keep that path offline too.
+    await rm(oauthPath("working"));
+    await composer.fill("reply after switch");
+    await composer.press("Enter");
+    await waitFor(async () => await authPage.getByText("you said: reply after switch", { exact: true }).isVisible(), "switch-then-reply scripted reply");
+    await card.waitFor({ state: "hidden", timeout: 20_000 });
+    console.log("switch-then-reply passed: pin changed to anthropic:working, scripted reply visible, auth card gone");
+  } finally {
+    await authPage.close();
+  }
+  await stop(authZeta);
+  await stop(authApp);
   const sharedProcess = start(
     "uv",
     ["run", "--project", zeta, "zeta", "serve", "--port", "0", "--ws", "0", "--ws-origin", origin, "--provider", "codex"],
@@ -243,7 +329,6 @@ with _database() as db:
     if (parent !== app.pid || !cwd.split("\n").includes(`n${root.replace(/\/$/, "")}`)) throw new Error("gate did not start the listener in this worktree");
     console.log(`verified worktree listener pid=${pid} port=${port}`);
   }
-  browser = await chromium.launch({ headless: true });
   for (const [width, height, scale] of [[320, 720, 1], [360, 780, 1], [390, 844, 1], [1440, 900, 1], [390, 844, 2]]) {
     const viewport = { width: width / scale, height: height / scale };
     const tab = await browser.newPage({ viewport, deviceScaleFactor: scale });
@@ -321,6 +406,19 @@ with _database() as db:
   const decodeFrame = (payload: string | Buffer): { id?: string | number; method?: string; result?: unknown } | null => {
     try { return JSON.parse(String(payload)); } catch { return null; }
   };
+  // New zeta negotiates telemetry_read_v1. Keep exercising the legacy recovery UI
+  // by omitting only that optional feature from these tabs' hello requests.
+  const legacyTelemetry = (tab: Page) => tab.routeWebSocket(url => url.hostname === "127.0.0.1", socket => {
+    const server = socket.connectToServer();
+    socket.onMessage(payload => {
+      const frame = JSON.parse(String(payload));
+      if (frame.method === "hello" && Array.isArray(frame.params?.features)) {
+        frame.params.features = frame.params.features.filter((feature: string) => feature !== TELEMETRY_FEATURE);
+        server.send(JSON.stringify(frame));
+      } else server.send(payload);
+    });
+  });
+  await legacyTelemetry(telemetryPage);
   telemetryPage.on("request", recordTelemetryRequest);
   telemetryPage.on("websocket", (socket) => {
     let helloId: string | number | undefined;
@@ -514,6 +612,7 @@ with _database() as db:
     await waitFor(async () => await telemetryChatPage.getByRole("button", { name: "new chat" }).isEnabled(), "chat controller for telemetry banner check");
     const observerTelemetry = await browser.newPage({ viewport: { width: 390, height: 844 } });
     try {
+      await legacyTelemetry(observerTelemetry);
       await observerTelemetry.goto(`${origin}/telemetry`);
       await waitFor(async () => await observerTelemetry.getByText("telemetry · needs a newer zeta", { exact: true }).isVisible(), "observer telemetry connected");
       const banner = observerTelemetry.getByRole("complementary", { name: "observer mode" });
