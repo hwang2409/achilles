@@ -278,15 +278,43 @@ def test_computed_metric_equals_preserves_json_scalar_types(tmp_path):
     ]
 
 
-def test_create_page_schema_rejects_reserved_route_through_store(tmp_path):
-    value = {"route": "/api/report", "title": "report", "layout": {"blocks": []}}
-    assert not Draft202012Validator(CREATE_PAGE_SCHEMA).is_valid(value)
+@pytest.mark.parametrize(
+    "route, allowed",
+    [
+        (f"/{segment}{suffix}", False)
+        for segment in (
+            "chats",
+            "pages",
+            "agents",
+            "sessions",
+            "projects",
+            "telemetry",
+            "skills",
+            "agent-profiles",
+            "settings",
+            "accounts",
+            "mcp",
+            "create",
+            "api",
+            "assets",
+        )
+        for suffix in ("", "/report")
+    ]
+    + [("/settingsx", True), ("/create-list", True), ("/my/settings", True)],
+)
+def test_create_page_schema_rejects_reserved_route_through_store(tmp_path, route, allowed):
+    value = {"route": route, "title": "report", "layout": {"blocks": []}}
     store = PageStore(tmp_path)
     store.set_create_mode("home", True)
-    with pytest.raises(ValidationError) as caught:
-        store.create_page(**value)
-    assert caught.value.path == "/route"
-    assert caught.value.expected.startswith("pattern ")
+    if allowed:
+        page, *_ = store.create_page(**value)
+        assert page["route"] == route
+    else:
+        with pytest.raises(ValidationError) as caught:
+            store.create_page(**value)
+        assert caught.value.path == "/route"
+        assert caught.value.expected.startswith("pattern ")
+    assert Draft202012Validator(CREATE_PAGE_SCHEMA).is_valid(value) == allowed
 
 
 def test_layout_rejects_unknown_tool_reference() -> None:
