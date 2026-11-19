@@ -343,7 +343,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .telemetry-eyebrow { margin: 0 0 12px; color: var(--fulcrum-muted); font-size: 12px; }
 .telemetry-notice h1 { margin: 0 0 18px; font-size: 26px; line-height: 1.25; text-wrap: balance; }
 .telemetry-lead { margin: 0 0 24px; color: var(--fulcrum-muted); text-wrap: pretty; }
-.telemetry-notice code { color: var(--fulcrum-fg); }
+.telemetry-notice code { color: var(--fulcrum-fg); font-family: var(--achilles-code-font); font-size: inherit; }
 .telemetry-notice dl { display: grid; grid-template-columns: auto 1fr; margin: 0 0 28px; border-top: 1px solid var(--fulcrum-border); }
 .telemetry-notice :is(dt, dd) { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--fulcrum-border); }
 .telemetry-notice dt, .telemetry-notice dt code { color: var(--fulcrum-muted); }
@@ -357,4 +357,9 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .telemetry-actions > *:hover { border-color: var(--fulcrum-muted); }
 @media (max-width: 760px), (max-height: 500px) {
   .telemetry-placeholder { padding: 64px 16px 24px; }
+}
+@media (max-width: 480px) {
+  .telemetry-notice dl { grid-template-columns: minmax(0, 1fr); }
+  .telemetry-notice dt { padding-bottom: 2px; border-bottom: 0; }
+  .telemetry-notice dd { padding: 0 0 10px; text-align: left; }
 }

@@ -143,4 +143,4 @@
 .place-nav .telemetry-link[aria-current="page"] b { font-weight: 700; }
 .place-nav .telemetry-link[aria-current="page"] svg { color: var(--fulcrum-fg); }
 .place-nav .telemetry-link:focus-visible { outline-offset: -2px; }
-.sidebar > footer > .palette-button:only-child { position: static; width: auto; height: 40px; opacity: 1; }
+.sidebar > footer > .palette-button:only-child { position: static; width: auto; min-width: 44px; height: 40px; padding-inline: 10px; justify-content: center; opacity: 1; }
