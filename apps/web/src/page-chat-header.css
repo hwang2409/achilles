@@ -1,12 +1,13 @@
 .page-chat-head {
   position: relative; z-index: 1;
-  display: flex; align-items: center; gap: 10px; flex: 0 0 48px; min-width: 0;
+  display: flex; align-items: center; gap: 8px; flex: 0 0 48px; min-width: 0;
   padding: 0 16px; border-bottom: 1px solid var(--fulcrum-border);
-  font-size: 12px; white-space: nowrap;
+  font-size: 12px; white-space: nowrap; box-sizing: border-box;
 }
 .page-chat-head strong, .page-chat-choice-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.page-chat-head strong { flex: 1; font-size: 13px; font-weight: 600; }
-.page-chat-head .page-chat-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.page-chat-head strong { flex: 1 0 4ch; font-size: 13px; font-weight: 600; }
+.page-chat-readouts, .page-chat-modes { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.page-chat-readouts .page-chat-status { flex: 0 1 auto; min-width: 0; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page-chat-ask { color: var(--fulcrum-warn); }
 .page-chat-ask::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; background: currentColor; }
 .page-chat-data, .page-chat-new-reason { color: var(--fulcrum-muted); }
@@ -49,7 +50,10 @@
 }
 @media (width <= 480px) {
   .page-chat-head { gap: 4px; }
-  .page-chat-head .page-chat-status { max-width: 68px; }
+  .page-chat-head { padding-inline: 8px; }
+  .page-chat-readouts { flex: none; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.25; }
+  .page-chat-readouts .page-chat-status { max-width: 86px; }
+  .page-chat-modes { gap: 4px; font-size: 10px; }
   .page-chat-head .page-chat-status::before { margin-right: 4px; }
   .page-chat-trigger { padding-inline: 5px; }
   .page-chat-ask::before { margin-right: 3px; }

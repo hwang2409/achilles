@@ -15,9 +15,9 @@ const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: n
 const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
-type Options = { browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object>; http?: (path: string, method: string) => Response | undefined };
+type Options = { browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
-async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[]) => Promise<void>) {
+async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   const writes: string[] = [];
   const requests: string[] = [];
   // Happy DOM has no layout; give the real virtual timeline a viewport.
@@ -35,9 +35,12 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   const url = location.href;
   const status = { session: { session_id: "session" }, state: "idle" };
   const chats = options.chat ? [options.chat] : options.attached ? [chat] : [];
+  if (options.extraChat) chats.push(options.extraChat);
   let app: RenderResult | undefined;
+  let socket: Socket;
+  const emit = (event: object) => socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));
   class Socket extends EventTarget {
-    constructor() { super(); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    constructor() { super(); socket = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
     close() { this.dispatchEvent(new Event("close")); }
     send(raw: string) {
       const { id, method, params } = JSON.parse(raw);
@@ -54,7 +57,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
           send: { accepted: true }, steer: { accepted: true }, delivery_status: { status: "delivered" },
           session_history_and_subscribe: { messages: [], next_before: null, status, ...options.joined },
         } as Record<string, unknown>)[method] ?? {} });
-      queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ jsonrpc: "2.0", id, ...response }) })));
+      void Promise.resolve(response).then((reply) => emit({ jsonrpc: "2.0", id, ...reply }));
     }
   }
   try {
@@ -85,7 +88,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
       expect(banner).toBeNull();
       expect(requests).toContain("hello");
     }
-    await check(app, writes, requests);
+    await check(app, writes, requests, emit);
     if (authority === "observer") {
       expect(writes).toEqual([]);
       const expected = { ...oldSettings, vim: false, size: 15 };
@@ -370,4 +373,56 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
   for (const authority of ["observer", "controller"] as const) {
     await withApp(authority, row.options ?? {}, (app, writes, requests) => row.check(app, authority, writes, requests));
   }
+});
+
+const requestApprovalChange = async (app: RenderResult) => {
+  await click(select(app, '[aria-label="page chat options"]'));
+  await click(select(app, tag("page-chat.auto-approve")));
+  await click(app.getByRole("button", { name: "confirm", exact: true }));
+};
+
+test("tool approval waits for the turn end and reports the authoritative result", async () => {
+  let busy = true;
+  const rpc = {
+    status: () => ({ result: { state: busy ? "running" : "idle", session: { session_id: "session" } } }),
+    set_settings: (params: Record<string, unknown>) => ({ result: { approval_mode: params.approval_mode } }),
+  };
+  await withApp("controller", { ...docked, rpc }, async (app, writes, _requests, emit) => {
+    await requestApprovalChange(app);
+    expect(writes).not.toContain("set_settings");
+    expect(app.getByText("waiting for the turn to finish…")).toBeTruthy();
+    expect(select(app, tag("page-chat.auto-approve")).getAttribute("aria-checked")).toBe("true");
+    busy = false;
+    await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "agent_end", session_id: "session" } }); });
+    expect(writes).toContain("set_settings");
+    expect(select(app, tag("page-chat.auto-approve")).getAttribute("aria-checked")).toBe("false");
+    expect(app.getByText(/ask before running tools · saved/)).toBeTruthy();
+  });
+});
+
+test("tool approval errors leave the old setting and a stale chat never writes", async () => {
+  let reads = 0;
+  let release!: (result: object) => void;
+  const held = new Promise<object>((resolve) => { release = resolve; });
+  const settings = { result: { model: "fixture", approval_mode: "allow" } };
+  await withApp("controller", { ...docked, extraChat: { ...chat, title: "Other fixture chat", session_id: "other" }, rpc: {
+    session_settings: (params) => params.session_id === "session" && ++reads === 3 ? held : settings,
+    set_settings: () => ({ error: { code: -32000, message: "fixture refused" } }),
+    resume: (params) => ({ result: { session: { session_id: params.session_id } } }),
+  } }, async (app, writes) => {
+    try {
+      await requestApprovalChange(app);
+      expect(app.getByText("could not change tool approval; try again")).toBeTruthy();
+      expect(select(app, tag("page-chat.auto-approve")).getAttribute("aria-checked")).toBe("true");
+      await click(select(app, tag("page-chat.auto-approve")));
+      await click(app.getByRole("button", { name: "confirm", exact: true }));
+      expect(app.getByText("saving…")).toBeTruthy();
+      await click(select(app, '[aria-haspopup="listbox"]'));
+      await click(app.getByRole("option", { name: /Other fixture chat/ }));
+      await act(async () => { release(settings); });
+      expect(writes.filter((method) => method === "set_settings")).toHaveLength(1);
+      expect(select(app, "#page-chat-title").textContent).toBe("Other fixture chat");
+      expect(app.queryByText("could not change tool approval; try again")).toBeNull();
+    } finally { release(settings); }
+  });
 });

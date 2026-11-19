@@ -161,8 +161,13 @@ export async function attachPage(
     const observer = !canWrite;
 
     const attachSession = async (sessionId: string): Promise<ReadyState> => {
+      // A docked observer can read the true per-session mode without resuming the session or writing settings.
+      const observedMode = observer && page.layout.blocks.length && serverApprovalMode !== "ask"
+        ? (await client.request("session_settings", { session_id: sessionId }).catch(() => null) as { approval_mode?: string | null } | null)?.approval_mode
+        : null;
+      requireCurrent(owner, token);
       const session = observer
-        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: (await client.request("session_settings", { session_id: sessionId }) as { approval_mode?: string | null }).approval_mode ?? serverApprovalMode, pending: false, rebind: false }
+        ? { id: sessionId, name: selectedChat?.title ?? selectedChat?.first_title ?? null, approvalMode: observedMode ?? serverApprovalMode, pending: false, rebind: false }
         : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
