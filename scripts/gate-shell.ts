@@ -68,33 +68,29 @@ export async function gateShell(
   const sidebar = page.locator("aside.sidebar");
   await waitFor(async () => (await sidebar.getAttribute("aria-hidden")) === "true", "closed drawer accessibility state");
   const menu = page.getByRole("button", { name: "open menu" });
-  await page.evaluate(() => {
-    const originalAdd = window.addEventListener.bind(window);
-    const result = { prevented: false, inside: false };
-    let armed = true;
-    (window as typeof window & { __drawerFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__drawerFirstFrame = { result, originalAdd: window.addEventListener };
+  const drawerFirstFrameTab = await menu.evaluate((button: HTMLButtonElement) => new Promise<{ dispatched: boolean; prevented: boolean; inside: boolean }>((resolve) => {
+    const originalAdd = window.addEventListener;
+    const result = { dispatched: false, prevented: false, inside: false };
     window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
-      originalAdd(type, listener, options);
-      // The trap installs in a layout effect after the drawer opens.
-      const drawer = document.querySelector(".drawer-open aside.sidebar:not([inert])");
-      if (armed && type === "keydown" && options === true && drawer) {
-        armed = false;
+      originalAdd.call(window, type, listener, options);
+      const drawer = document.querySelector('.drawer-open aside.sidebar:not([inert])');
+      if (!result.dispatched && type === "keydown" && options === true && drawer) {
+        result.dispatched = true;
         const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
         window.dispatchEvent(event);
         result.prevented = event.defaultPrevented;
         result.inside = drawer.contains(document.activeElement);
       }
     }) as typeof window.addEventListener;
-  });
-  await menu.click();
-  const drawerFirstFrameTab = await page.evaluate(() => {
-    const state = (window as typeof window & { __drawerFirstFrame?: { result: { prevented: boolean; inside: boolean }; originalAdd: typeof window.addEventListener } }).__drawerFirstFrame;
-    if (!state) return { prevented: false, inside: false };
-    window.addEventListener = state.originalAdd;
-    delete (window as typeof window & { __drawerFirstFrame?: unknown }).__drawerFirstFrame;
-    return state.result;
-  });
-  if (!drawerFirstFrameTab.inside) throw new Error(`390px drawer first-frame Shift+Tab was not trapped inside the drawer: ${JSON.stringify(drawerFirstFrameTab)}`);
+    requestAnimationFrame(() => {
+      window.addEventListener = originalAdd;
+      resolve(result);
+    });
+    // Arm and click in the same task; a Playwright click can wait for a frame.
+    button.click();
+  }));
+  if (!drawerFirstFrameTab.dispatched) throw new Error("390px drawer: trap registered after the first frame or the probe never dispatched Shift+Tab");
+  if (!drawerFirstFrameTab.prevented || !drawerFirstFrameTab.inside) throw new Error(`390px drawer first-frame Shift+Tab was not trapped inside the drawer: ${JSON.stringify(drawerFirstFrameTab)}`);
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   const main = page.locator("main.main-pane");
   if (!(await main.evaluate((element) => element.inert)) || await main.getAttribute("aria-hidden") !== "true")
