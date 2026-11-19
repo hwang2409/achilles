@@ -23,7 +23,7 @@ const metricStrips = {
   "sb7-short": [["queued", "7"], ["reading", "1"], ["done", "12"]],
   "three-long": [["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"]],
   "seven-mixed": [["queued", "7"], ["reading", "1"], ["done", "12"], ["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"], ["review", "waiting on an intentionally long legal and editorial review"]],
-  "three-oversize": [["state", "supercalifragilisticexpialidocious"], ["reading", "1"], ["done", "12"]],
+  "three-oversize": [["state", "supercalifragilisticexpialidocious"], ["cjk", "国際共同編集進捗"], ["emoji", "📚📚📚📚📚📚📚📚"]],
 };
 
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);

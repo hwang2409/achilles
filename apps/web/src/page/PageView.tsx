@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { DetailRecord, type DetailFilter } from "../DetailRecord";
 import { FormBlock, refreshSelection, selectRow, useRecordWrites, useSelectedRow } from "./RecordForm";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
 import "./page.css";
 import { RecordMark } from "./RecordMark";
+import { observeMetricFit } from "./metricFit";
 import { formatMetricValue } from "./metricValue";
 import { WRITE_SURFACE } from "../writeSurfaces";
 
@@ -94,7 +95,7 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat, canW
     <div className="page-blocks">{groupBlocks(content).map((group, index) => {
       if (group[0].type === "metric") {
         const metrics = group.map(block => metricPresentation(block, counts.get(metricQueryKey(block, pageId, credential) ?? "")));
-        return <div className="metric-strip" style={metricStripFit(metrics)} key={`metric-strip:${index}`}>{metrics.map(metric => <MetricBlock key={blockIdentity(metric.block, content)} {...metric} />)}</div>;
+        return <MetricStrip key={`metric-strip:${index}`} metrics={metrics} blocks={content} />;
       }
       return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} insertCapability={addFor(String(group[0].collection ?? ""))} onRegisterInsert={registerInsert} canWrite={canWrite} disabledReason={disabledReason} />;
     })}</div>
@@ -132,25 +133,10 @@ function metricPresentation(block: Record<string, unknown>, count?: string) {
 }
 
 type Metric = ReturnType<typeof metricPresentation>;
-const chars = (value: string) => [...value].length;
-const tokenWidth = (value: string) => ({ "--metric-token-chars": Math.max(1, chars(value)) }) as CSSProperties;
-
-function metricStripFit(metrics: Metric[]): CSSProperties {
-  let numberChars = 0, scientificChars = 0, textChars = 0;
-  for (const { formatted, number, words } of metrics) {
-    const length = chars(formatted.display);
-    if (formatted.scientific) scientificChars = Math.max(scientificChars, length);
-    else if (formatted.numeric) numberChars = Math.max(numberChars, length);
-    else if (number) textChars = Math.max(textChars, length);
-    else {
-      const tokens = words.filter(word => word.trim());
-      // Let neighboring words fit together where the strip has the room.
-      tokens.forEach((word, index) => {
-        textChars = Math.max(textChars, chars(index ? `${tokens[index - 1]} ${word}` : word));
-      });
-    }
-  }
-  return { "--metric-number-chars": numberChars, "--metric-scientific-chars": scientificChars, "--metric-text-chars": textChars } as CSSProperties;
+function MetricStrip({ metrics, blocks }: { metrics: Metric[]; blocks: Metric["block"][] }) {
+  const strip = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => observeMetricFit(strip.current!), [metrics]);
+  return <div className="metric-strip" ref={strip}>{metrics.map(metric => <MetricBlock key={blockIdentity(metric.block, blocks)} {...metric} />)}</div>;
 }
 
 function MetricBlock({ block, fullValue, formatted, number, words }: Metric) {
@@ -159,8 +145,8 @@ function MetricBlock({ block, fullValue, formatted, number, words }: Metric) {
   const displayValue = formatted.display;
   const isCompacted = displayValue !== fullValue;
   const valueClass = formatted.scientific ? " metric-value-scientific" : formatted.numeric ? "" : " metric-value-text";
-  const value = number ? displayValue : words.map((word, index) => word.trim() ? <span key={index} className="metric-word" style={tokenWidth(word)}>{word}</span> : word);
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${valueClass}${number ? " metric-value-number" : ""}`} style={number ? tokenWidth(displayValue) : undefined} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{value}</span> : value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  const value = number ? displayValue : words.map((word, index) => word.trim() ? <span key={index} className="metric-word">{word}</span> : word);
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${valueClass}${number ? " metric-value-number" : ""}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{value}</span> : value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
