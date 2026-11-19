@@ -3,6 +3,7 @@ import { fieldError, formArguments, formErrors, formFields, keepValues, recordVa
 import { schemaColumns } from "./listColumns";
 import { usePageTools, type PageTool } from "./usePageTools";
 import { EnumListbox } from "./EnumListbox";
+import { WRITE_SURFACE } from "../writeSurfaces";
 
 export type { PageTool };
 type FieldError = { path: string; expected: string };
@@ -40,7 +41,7 @@ export function useSelectedRow(pageId: string): SelectedRow | null {
   return useSyncExternalStore(subscribe, () => selections.get(pageId) ?? null);
 }
 
-export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void }) {
+export function FormBlock({ title, toolName, fields, pageId, credential, refreshKey, onRegisterInsert, canWrite = false, disabledReason }: { title: string; toolName: string; fields?: string[]; pageId: string; credential: string; refreshKey: string; onRegisterInsert?: (id: string, capability: { collection: string; focusFirst: () => void }) => () => void; canWrite?: boolean; disabledReason?: string }) {
   const [reload, setReload] = useState(0);
   // Default key matches other blocks on the same refreshKey, so a page with a form and the
   // empty chat starters share one fetch; a manual "reload tool" click forces its own fresh key.
@@ -67,10 +68,10 @@ export function FormBlock({ title, toolName, fields, pageId, credential, refresh
   const headingNote = tool?.operation === "update" ? row ? `runs ${toolName} on the selected row` : `select a ${tool.collection.replace(/s$/, "")} in the list to edit it` : "";
   const body = tool === undefined ? <p role={error ? "alert" : "status"}>{error ?? "loading form…"}</p>
     : tool === null ? <p aria-disabled="true">no tool assigned</p>
-    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} />
+    : tool.operation === "insert" ? <RecordForm tool={tool} order={order} pageId={pageId} credential={credential} onReloadTool={onReloadTool} formRef={formRef} disabled={!canWrite} disabledReason={disabledReason} />
     : tool.operation !== "update" ? <p aria-disabled="true">this tool has no form</p>
-    : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row} formRef={formRef} />;
-  return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
+    : <RecordForm key={row ? String(row.record_id) : "no-selection"} tool={tool} order={order} row={row ?? undefined} opener={selected?.opener} pageId={pageId} credential={credential} onReloadTool={onReloadTool} disabled={!row || !canWrite} disabledReason={disabledReason} formRef={formRef} />;
+  return <section className={`record-form${tool?.operation === "update" && !row ? " record-form-no-selection" : ""}`} data-write-surface={tool?.operation === "update" ? WRITE_SURFACE.recordUpdate : WRITE_SURFACE.recordInsert} data-collection={tool?.collection} data-operation={tool?.operation}><h2>{heading} {headingNote && <small className="form-note">{headingNote}</small>}</h2>{error && tool !== undefined && <p role="alert">{error}</p>}{body}</section>;
 }
 
 // The form finds its row back after cancel or save: the row that opened it while it is still on the page, else the first
@@ -81,7 +82,7 @@ const tableRow = (opener: HTMLElement | undefined, collection: string, recordId:
 };
 
 // With a row, the form edits that record: record_id and revision come from the row and are never inputs.
-export function RecordForm({ tool, order, row, opener, pageId, credential, onReloadTool, disabled = false, formRef }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; opener?: HTMLElement; pageId: string; credential: string; onReloadTool: () => void; disabled?: boolean; formRef?: RefObject<HTMLFormElement | null> }) {
+export function RecordForm({ tool, order, row, opener, pageId, credential, onReloadTool, disabled = false, disabledReason, formRef }: { tool: PageTool; order?: string[]; row?: Record<string, unknown>; opener?: HTMLElement; pageId: string; credential: string; onReloadTool: () => void; disabled?: boolean; disabledReason?: string; formRef?: RefObject<HTMLFormElement | null> }) {
   const mapped = formFields(tool.input_schema, order);
   const fields = "fields" in mapped ? mapped.fields.filter((field) => !row || (field.name !== "record_id" && field.name !== "revision")) : [];
   // typed holds only what the user changed, so a reloaded row shows its new values under the user's edits
@@ -176,6 +177,7 @@ export function RecordForm({ tool, order, row, opener, pageId, credential, onRel
 
   return <>
     <form ref={form} noValidate onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === "Escape" && row && !event.defaultPrevented && !event.nativeEvent.isComposing) { event.preventDefault(); cancel(); } }}>
+    {disabled && disabledReason && <p className="form-note" role="note">{disabledReason}</p>}
     {fields.map((field) => <Field key={field.name} id={`${idPrefix}-${field.name}`} field={field} value={disabled ? field.kind === "boolean" ? false : "" : values[field.name]} error={fieldErrors[field.name] ?? null} disabled={disabled} onChange={(value) => { setTyped((current) => ({ ...current, [field.name]: value })); setMessage((current) => current?.kind === "status" ? null : current); }} />)}
     <div className="record-form-actions">
       {/* a mouse save keeps focus where the user was (webkit never focuses a clicked button), and the button is not disabled

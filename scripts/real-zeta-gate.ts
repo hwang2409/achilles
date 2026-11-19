@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Request, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -14,12 +14,24 @@ import { gateVim } from "./gate-vim";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
+const writeSurfaceSource = await readFile(join(root, "apps/web/src/writeSurfaces.ts"), "utf8");
+const writeSurfaceObject = writeSurfaceSource.split("} as const")[0]!;
+const registryWriteSurfaceIds = [...writeSurfaceObject.matchAll(/\s+\w+:\s+"([^"]+)"/g)].map((match) => match[1]!);
+if (registryWriteSurfaceIds.length !== 37 || new Set(registryWriteSurfaceIds).size !== 37) throw new Error(`write-surface registry must contain 37 unique ids, got ${registryWriteSurfaceIds.length}`);
 const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
 if (!/^[0-9a-f]{40}$/.test(zetaRef))
   throw new Error("zeta.rev must contain one sha");
+const pinnedProtocol = await readFile(join(zeta, "src/zeta/server/protocol.py"), "utf8");
+const protocolMutationMethods = new Set<string>();
+for (const declaration of pinnedProtocol.matchAll(/\b[A-Z_]+\s*=\s*\(([^)]*)\)/g)) {
+  const body = declaration[1]!;
+  const wire = body.match(/^\s*"([^"]+)"/s)?.[1];
+  if (wire && /Access\.(?:SESSION_MUTATION|DELIVERY|CONTROLLER_WRITE)/.test(body)) protocolMutationMethods.add(wire);
+}
+if (!protocolMutationMethods.size) throw new Error(`pinned zeta ${zetaRef} has no mutation declarations`);
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));
 const zetaHome = join(temp, "zeta-home");
 const achillesHome = join(temp, "achilles-home");
@@ -242,7 +254,7 @@ try {
     telemetryPage.off("request", recordTelemetryRequest);
     await telemetryPage.close();
   }
-  const page = await browser.newPage();
+  let page = await browser.newPage();
   const errors: string[] = [];
   const requestFailures: string[] = [];
   const consoleErrors: string[] = [];
@@ -250,11 +262,22 @@ try {
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
+  const connectionRows: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string }> = [];
   let nextSocket = 0;
   page.on("websocket", (socket) => {
     const socketId = nextSocket++;
-    socket.on("framesent", (event) => { const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "sent", payload]); frameRing.record(socketId, "sent", payload); });
-    socket.on("framereceived", (event) => { const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "received", payload]); frameRing.record(socketId, "received", payload); });
+    const attempt = socketId + 1;
+    const row = { socketId, attempt, role: null as string | null, lifecycle: "open" as const };
+    connectionRows.push(row);
+    socket.on("framesent", (event) => {
+      const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "sent", payload]); frameRing.record(socketId, "sent", payload);
+      try { const frame = JSON.parse(payload) as { method?: unknown; params?: { role?: unknown } }; if (frame.method === "hello" && (frame.params?.role === "controller" || frame.params?.role === "observer")) row.role = frame.params.role; connectionRows.push({ ...row, lifecycle: "open", direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined }); } catch { /* raw protocol payload remains in frameLog */ }
+    });
+    socket.on("framereceived", (event) => {
+      const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "received", payload]); frameRing.record(socketId, "received", payload);
+      try { const frame = JSON.parse(payload) as { method?: unknown }; connectionRows.push({ ...row, lifecycle: "open", direction: "received", method: typeof frame.method === "string" ? frame.method : undefined }); } catch { /* raw protocol payload remains in frameLog */ }
+    });
+    socket.on("close", () => connectionRows.push({ ...row, lifecycle: "closed" }));
   });
   page.on("pageerror", (e) => errors.push(`${e.message}${requestFailures.length ? `; latest request failure: ${requestFailures.at(-1)}` : ""}${consoleErrors.length ? `; latest console error: ${consoleErrors.at(-1)}` : ""}`));
   page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${requestPath(request.url())}: ${request.failure()?.errorText ?? "unknown failure"}`));
@@ -339,7 +362,7 @@ try {
     throw new Error("zeta shutdown timeout after 15 seconds");
   }
   await restartZeta("restarted zeta");
-  const field = page.getByRole("textbox", { name: "message" });
+  let field = page.getByRole("textbox", { name: "message" });
   await gateWait.playwright(field, "waitFor", { timeout: 20000 }).catch(async () => {
     throw new Error(
       `composer missing: ${redact(await page.locator("body").innerText())} errors=${redact(errors.join(" | "))} logs=${redact(logs.get(zetaProcess) ?? "")} discovery fields unavailable`,
@@ -2495,10 +2518,308 @@ try {
     await page.unroute("**/api/chats**", hold);
   }
 
+  // final two-tab observer journey runs after the legacy gate so it cannot change its request assertions.
+  if (zetaProcess.exitCode !== null) await restartZeta("observer fallback capture");
+  await page.goto(`${origin}/reading`);
+  const controllerChat = await page.locator("[data-session-id]").getAttribute("data-session-id", { timeout: 20_000 });
+  if (!controllerChat) throw new Error("page-mapped controller chat did not attach");
+  await gateWait.playwright(page, "waitForFunction", () =>
+    document.querySelectorAll('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').length > 0,
+    undefined,
+    { timeout: 20_000 },
+  );
+  const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
+  if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
+  const observerPage = await browser.newPage();
+  const renderedWriteSurfaceIds = new Set<string>();
+  const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
+    for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
+  };
+  await recordRenderedWriteSurfaces(page);
+  const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
+  const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; helloAccepted?: boolean }> = [];
+  const observerHttp: { method: string; path: string; body: string | null }[] = [];
+  let observerSocketId = 0;
+  observerPage.on("websocket", (socket) => {
+    const socketId = observerSocketId++;
+    const row = { socketId, attempt: socketId + 1, role: null as string | null, lifecycle: "open" as const };
+    observerSockets.push(row);
+    let helloId: string | number | undefined;
+    socket.on("framesent", (event) => {
+      const payload = String(event.payload); observerFrames.push({ direction: "sent", payload });
+      try {
+        const frame = JSON.parse(payload) as { id?: string | number; method?: unknown; params?: { role?: unknown } };
+        if (frame.method === "hello" && (frame.params?.role === "controller" || frame.params?.role === "observer")) {
+          row.role = frame.params.role;
+          helloId = frame.id;
+        }
+        observerSockets.push({ ...row, direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined });
+      } catch { /* raw frame remains in observerFrames */ }
+    });
+    socket.on("framereceived", (event) => {
+      const payload = String(event.payload); observerFrames.push({ direction: "received", payload });
+      const frame = decodeFrame(payload);
+      if (!frame) return;
+      const helloReply = helloId !== undefined && frame.id === helloId;
+      observerSockets.push({ ...row, direction: "received", method: helloReply ? "hello" : frame.method, ...(helloReply ? { helloAccepted: Object.hasOwn(frame, "result") } : {}) });
+    });
+    socket.on("close", () => observerSockets.push({ ...row, lifecycle: "closed" }));
+  });
+  observerPage.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin === origin) observerHttp.push({ method: request.method(), path: url.pathname, body: request.postData() });
+  });
+  await observerPage.goto(`${origin}/reading?chat=${controllerChat}`);
+  const observerStorageBefore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  const observerBanner = observerPage.locator(".observer-banner");
+  await gateWait.playwright(observerBanner, "waitFor", { state: "visible" });
+  await recordRenderedWriteSurfaces(observerPage);
+  if (!(await observerBanner.innerText()).includes("another tab controls zeta") || !(await observerBanner.innerText()).includes("live and read-only")) throw new Error("observer banner did not explain the live read-only state");
+  const observerComposerReason = observerPage.locator('[data-part="composer-reason"]');
+  const observerBody = await observerPage.locator("body").innerText();
+  if ((await observerComposerReason.count()) && !(await observerComposerReason.first().innerText()).includes("read-only")) throw new Error("observer composer did not explain its disabled state");
+  if (!observerBody.includes("read-only")) throw new Error("observer page did not expose a read-only reason");
+  const observerNewChat = observerPage.locator("button.new-chat");
+  if (!(await observerNewChat.isDisabled())) throw new Error("observer new-chat control was editable");
+  await waitFor(async () => (await observerPage.locator('[data-part="timeline"] [data-id], [data-part="timeline"] [data-virtual-id]').count()) > 0, "observer transcript rows");
+  const observerMutationMethods = protocolMutationMethods;
+  const observerStorageAtActions = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  const observerFrameCountAtActions = observerFrames.length;
+  const observerHttpCountAtActions = observerHttp.length;
+  const observerComposer = observerPage.getByRole("textbox", { name: "message", exact: true });
+  if (await observerComposer.count()) { await observerComposer.fill("observer must not send"); await observerComposer.press("Enter"); }
+  await observerPage.setViewportSize({ width: 1440, height: 900 });
+  const observerSettingsButton = observerPage.locator(".settings-button");
+  await observerSettingsButton.click();
+  const observerSettings = observerPage.getByRole("dialog", { name: "settings", exact: true });
+  await gateWait.playwright(observerSettings.getByText("locked while another tab controls zeta", { exact: true }), "waitFor", { state: "visible" });
+  for (const control of [observerSettings.getByRole("switch", { name: "auto-approve default", exact: true }), observerSettings.getByRole("button", { name: "reset to defaults", exact: true })]) {
+    if (!await control.isDisabled()) throw new Error("observer could edit new-chat defaults or reset them");
+  }
+  for (const id of ["theme", "ui-font", "code-font", "size", "density", "vim"]) {
+    const buttons = observerSettings.locator(`[data-write-surface="settings.${id}"]`).locator("xpath=self::button | .//button");
+    if (!await buttons.count() || (await buttons.evaluateAll((elements) => elements.some((button) => button.matches(":disabled"))))) throw new Error(`observer display preference ${id} was absent or locked`);
+  }
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-settings-1440x900.png") });
+  await observerSettings.getByRole("button", { name: "esc", exact: true }).click();
+  await observerPage.keyboard.press(appShortcut("k"));
+  const palette = observerPage.getByRole("dialog", { name: "command palette" });
+  await gateWait.playwright(palette, "waitFor", { state: "visible" });
+  if (!await palette.getByText("toggle vim mode", { exact: true }).isVisible()) throw new Error("observer palette hid the local vim mode toggle");
+  if (await palette.getByText("toggle create mode", { exact: true }).count()) throw new Error("observer palette exposed the shared create mode toggle");
+  await observerPage.keyboard.press("Escape");
+  const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
+  if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
+  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
+  if (observerFrames.slice(observerFrameCountAtActions).some(({ direction, payload }) => direction === "sent" && observerMutationMethods.has((JSON.parse(payload) as { method?: string }).method ?? ""))) throw new Error("observer action matrix sent a mutating websocket request");
+  if (observerHttp.slice(observerHttpCountAtActions).some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer action matrix issued mutating HTTP");
+  const observerRequests = observerFrames.flatMap(({ direction, payload }) => {
+    if (direction !== "sent") return [];
+    try { const frame = JSON.parse(payload) as { method?: unknown }; return typeof frame.method === "string" ? [frame.method] : []; }
+    catch { return []; }
+  });
+  const unexpectedObserverReads = observerRequests.filter((method) => observerMutationMethods.has(method));
+  if (unexpectedObserverReads.length) throw new Error(`observer websocket mutation leak: ${unexpectedObserverReads.join(", ")}`);
+  const expectedObserverReads = new Set(["hello", "session_history_and_subscribe", "session_history", "status"]);
+  if (!observerRequests.includes("hello") || !observerRequests.includes("session_history_and_subscribe")) throw new Error(`observer websocket read projection incomplete: ${observerRequests.join(", ")}`);
+  if (observerRequests.some((method) => !expectedObserverReads.has(method))) throw new Error(`observer websocket unexpected read: ${observerRequests.join(", ")}`);
+  if (observerHttp.some(({ method }) => ["POST", "PUT", "PATCH", "DELETE"].includes(method))) throw new Error("observer issued mutating HTTP request");
+  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
+  if (screenshotDir) {
+    const observerMarker = "prove chat";
+    await observerPage.setViewportSize({ width: 390, height: 760 });
+    const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
+    if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
+    for (const dialog of await observerPage.locator('[role="dialog"][aria-modal="true"]').all()) {
+      const close = dialog.getByRole("button", { name: /close/i }).first();
+      if (await close.isVisible().catch(() => false)) await close.click({ force: true });
+    }
+    const pageChatBar = observerPage.locator(".page-chat-bar");
+    const pageChatDialog = observerPage.getByRole("dialog", { name: "page chat" });
+    await waitFor(async () => await observerPage.locator(".sidebar").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
+    }), "observer drawer settled");
+    if (await pageChatBar.getAttribute("aria-expanded") !== "false") {
+      const close = pageChatDialog.getByRole("button", { name: "close page chat" });
+      await close.click({ force: true });
+      await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
+    }
+    const routeUnderneath = new URL(observerPage.url()).pathname;
+    if (routeUnderneath !== "/reading") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
+    await pageChatBar.click();
+    await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer page chat expanded");
+    await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    await waitFor(async () => await pageChatDialog.evaluate((dialog) => {
+      const surface = dialog.querySelector<HTMLElement>(".page-chat-surface") ?? dialog;
+      const style = getComputedStyle(surface);
+      return style.visibility === "visible" && style.display !== "none";
+    }), "observer page chat settled");
+    await pageChatDialog.getByRole("button", { name: "close page chat" }).evaluate((element) => {
+      if (document.activeElement !== element) (element as HTMLElement).focus();
+    });
+    if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement))) throw new Error("observer page chat did not focus inside the open sheet");
+    const surface = observerPage.locator(".page-chat-surface");
+    const transcript = surface.locator('[data-part="timeline-scroll"]');
+    const marker = surface.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
+    const jumpToLatest = surface.locator('[data-part="jump-to-latest"]');
+    if (await jumpToLatest.isVisible().catch(() => false)) await jumpToLatest.click({ force: true });
+    const rows = surface.locator('[data-part="message"]');
+    await waitFor(async () => {
+      if (await marker.isVisible().catch(() => false)) return true;
+      for (let index = 0, count = await rows.count(); index < count; index++) if (await rows.nth(index).isVisible().catch(() => false)) return true;
+      return false;
+    }, "observer source marker or latest");
+    const useMarker = await marker.isVisible().catch(() => false);
+    let evidence = marker;
+    if (!useMarker) {
+      let latestIndex = -1;
+      for (let index = 0, count = await rows.count(); index < count; index++) if (await rows.nth(index).isVisible().catch(() => false)) latestIndex = index;
+      if (latestIndex < 0) throw new Error("observer active chat had no rendered latest row");
+      evidence = rows.nth(latestIndex);
+    }
+    const expectedEvidence = useMarker ? observerMarker : (await evidence.innerText()).trim();
+    await transcript.evaluate((element, text) => {
+      const scroll = element as HTMLElement;
+      const row = [...document.querySelectorAll<HTMLElement>('[data-part="message"]')].find((candidate) => candidate.textContent?.includes(text));
+      if (!row) throw new Error(`missing source-derived observer evidence: ${text}`);
+      row.scrollIntoView({ block: "center", inline: "nearest" });
+      scroll.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }, expectedEvidence);
+    await gateWait.playwright(evidence, "waitFor", { state: "visible" });
+    const mobileMarker = await evidence.evaluate((element, expected) => {
+      const rect = element.getBoundingClientRect();
+      const transcriptRect = element.closest('[data-part="timeline-scroll"]')?.getBoundingClientRect();
+      const point = document.elementFromPoint(rect.left + Math.min(8, rect.width / 2), rect.top + Math.min(8, rect.height / 2));
+      return { text: element.textContent ?? "", rect: rect.toJSON(), transcriptRect: transcriptRect?.toJSON() ?? null, hit: Boolean(point && (point === element || element.contains(point))), expected };
+    }, useMarker ? observerMarker : observerLatestSource);
+    if (!mobileMarker.text.includes(expectedEvidence) || !mobileMarker.transcriptRect || mobileMarker.rect.top < mobileMarker.transcriptRect.top || mobileMarker.rect.bottom > mobileMarker.transcriptRect.bottom || !mobileMarker.hit)
+      throw new Error(`observer active chat evidence is not readable in open sheet: ${JSON.stringify(mobileMarker)}`);
+    if (new URL(observerPage.url()).pathname !== routeUnderneath) throw new Error("observer active chat changed the route");
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-390x760.png"), fullPage: true });
+    await observerPage.setViewportSize({ width: 1440, height: 900 });
+    await waitFor(async () => {
+      const state = await observerPage.evaluate((expected) => {
+        const bar = document.querySelector<HTMLElement>(".page-chat-bar");
+        const surface = document.querySelector<HTMLElement>(".page-view.docked .page-chat-surface");
+        const evidenceElement = [...document.querySelectorAll<HTMLElement>('.page-chat-surface [data-part="message"]')].find((element) => element.textContent?.includes(expected));
+        const visible = (element: HTMLElement | null) => {
+          if (!element) return false;
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+        };
+        const evidenceRect = evidenceElement?.getBoundingClientRect();
+        const point = evidenceRect && document.elementFromPoint(evidenceRect.left + Math.min(8, evidenceRect.width / 2), evidenceRect.top + Math.min(8, evidenceRect.height / 2));
+        return {
+          mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches,
+          barVisible: visible(bar),
+          docked: Boolean(surface?.closest(".page-view.docked")),
+          surfaceVisible: visible(surface),
+          surfaceRole: surface?.getAttribute("role"),
+          surfaceAriaModal: surface?.getAttribute("aria-modal"),
+          evidenceVisible: visible(evidenceElement),
+          evidenceHit: Boolean(point && evidenceElement && (point === evidenceElement || evidenceElement.contains(point))),
+          evidenceInsideSurface: Boolean(surface && evidenceElement && surface.contains(evidenceElement)),
+        };
+      }, expectedEvidence);
+      return desktopPageChatProof(state);
+    }, "observer desktop docked page chat and evidence settled");
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-active-chat-1440x900.png"), fullPage: true });
+  }
+  const takeControl = observerBanner.getByRole("button", { name: "take control", exact: true });
+  const helloRoles = () => observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(",");
+  await takeControl.click();
+  const takeoverReason = observerPage.getByText("close the other tab, then take control.", { exact: true });
+  await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
+  if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
+  await observerPage.setViewportSize({ width: 390, height: 844 });
+  const observerMenu = observerPage.getByRole("button", { name: "open menu", exact: true });
+  const bannerBox = await observerBanner.boundingBox();
+  const menuBox = await observerMenu.boundingBox();
+  if (!bannerBox || !menuBox || bannerBox.y + bannerBox.height > menuBox.y) throw new Error("observer banner overlapped the mobile header");
+  await observerMenu.focus();
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-390x844.png") });
+  await observerPage.setViewportSize({ width: 1440, height: 900 });
+  await page.close();
+  const takeoverStart = observerSockets.length;
+  await takeControl.click();
+  await waitFor(async () => await observerComposer.isVisible() && await observerComposer.isEditable({ timeout: 1_000 }), "editable composer after take control without reload");
+  if (!observerSockets.slice(takeoverStart).some((row) => row.role === "controller" && row.helloAccepted)) throw new Error("controller hello was not accepted after closing the controller tab");
+  if (await observerBanner.isVisible() || await takeoverReason.isVisible()) throw new Error("observer banner or refusal reason remained after take control");
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-takeover-no-reload-1440x900.png") });
+  await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
+  if (helloRoles() !== "controller,observer,controller,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles()}`);
+  await observerPage.reload({ waitUntil: "domcontentloaded" });
+  await gateWait.playwright(observerPage.locator(`[data-session-id="${controllerChat}"]`), "waitFor", { state: "attached" });
+  const restoredMutation = "restored controller mutation";
+  const restoredField = observerPage.getByRole("textbox", { name: "message", exact: true });
+  await gateWait.playwright(restoredField, "waitFor", { state: "visible" });
+  if (!await restoredField.isEditable()) throw new Error("restored controller composer remained read-only");
+  await restoredField.fill(restoredMutation);
+  await restoredField.press("Enter");
+  await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
+  const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  const restoredSettingsButton = observerPage.locator(".settings-button");
+  await restoredSettingsButton.click();
+  const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
+  if (await restoredVim.count()) {
+    const before = await restoredVim.getAttribute("aria-checked");
+    await restoredVim.click();
+    await gateWait.playwright(observerPage, "waitForFunction", (expected) => localStorage.getItem("achilles-settings")?.includes(`\"vim\":${expected}`), before !== "true");
+    await waitFor(async () => await restoredVim.getAttribute("aria-checked") !== before, "restored vim toggle");
+    await restoredVim.click();
+  }
+  const settingsAfterRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
+  if (settingsAfterRestore === settingsBeforeRestore) throw new Error("restored controller settings did not write");
+  await observerPage.evaluate((snapshot) => { localStorage.clear(); for (const [key, value] of Object.entries(JSON.parse(snapshot) as Record<string, string>)) localStorage.setItem(key, value); }, settingsBeforeRestore);
+  if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== settingsBeforeRestore) throw new Error("restored controller settings did not restore reversibly");
+  if (screenshotDir) {
+    await observerPage.locator('[data-part="timeline-scroll"]').evaluate((element) => { element.scrollTop = 0; });
+    await observerPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await observerPage.screenshot({ path: join(screenshotDir, "observer-controller-restored-1440x900.png"), fullPage: true });
+  }
+
+  const connectionHelloRoles = connectionRows.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role);
+  if (!connectionHelloRoles.includes("controller")) throw new Error(`controller websocket role was not captured: ${connectionHelloRoles.join(",")}`);
   if (errors.length) throw new Error(`browser errors: ${redact(errors.join(" | "))}`);
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
-  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
+  await recordRenderedWriteSurfaces(observerPage);
+  const observed = [...renderedWriteSurfaceIds].sort();
+  const registry = [...registryWriteSurfaceIds].sort();
+  const unknown = observed.filter((id) => !registry.includes(id));
+  if (!observed.length || unknown.length) throw new Error(`invalid browser write-surface sample: ${JSON.stringify({ observed, unknown })}`);
+  if (screenshotDir) {
+    await writeFile(join(screenshotDir, "manifest.json"), JSON.stringify({
+      head: (await Bun.$`git rev-parse HEAD`.text()).trim(),
+      base: (await Bun.$`git rev-parse origin/main`.text()).trim(),
+      clean: (await Bun.$`git status --porcelain`.text()).trim() === "",
+      command: "ZETA_CHECKOUT=$PWD/.cache/zeta bun scripts/real-zeta-gate.ts",
+      origin,
+      zeta: zetaRef,
+      timestamps: { started: new Date().toISOString(), completed: new Date().toISOString() },
+      viewports: ["390x760", "1440x900"],
+      routes: [new URL(observerPage.url()).pathname],
+      states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored"],
+      artifacts: ["observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png"],
+      writeSurfaceRegistry: registry,
+      renderedWriteSurfaceIds: observed,
+      unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
+      errors,
+      failedRequests: [],
+      websocket: { connectionRows, observerSockets },
+      http: observerHttp,
+      storage: { before: observerStorageBefore, restored: await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) },
+      privacy: { secretsRedacted: true, tokensPresent: false },
+      cleanup: "browser, servers, and temporary homes are removed in finally",
+    }, null, 2) + "\n");
+    await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png, observer-refused-390x844.png, observer-refused-1440x900.png, observer-settings-1440x900.png, observer-takeover-no-reload-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
+  }
+  if (process.env.SCREENSHOT_PATH) await observerPage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   passed = true;
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 

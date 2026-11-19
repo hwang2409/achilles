@@ -19,16 +19,19 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, createConnection, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { backoff, createConnection, isObserverPresentation, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
 import "./chat/markdown.css";
 import "./shell.css";
+import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
 
 export { LayoutBlock, PageView, RecordList, RecordListView } from "./page/PageView";
+
+export const canWriteForState = (state: ConnectionState) => state.phase === "connected" && state.authority === "controller";
 
 const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
@@ -152,6 +155,7 @@ export function App() {
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   useEffect(() => {
+    setClient(connection.client);
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
@@ -171,7 +175,9 @@ export function App() {
 
 function AgentSurface({ connection, client, connectionState }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState }) {
   const settings = useSettings();
-  const active = useActiveChat(client, connectionState.phase === "connected");
+  const canWrite = canWriteForState(connectionState);
+  const readOnlyReason = READ_ONLY_REASON;
+  const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite);
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
@@ -219,6 +225,7 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
   // after every composer of this commit has attached to its chat's queue owner
   useLayoutEffect(() => chatQueues.settle());
   const send: typeof active.send = (text, intent, track) => {
+    if (!canWrite) return Promise.reject(new Error(readOnlyReason));
     setFollowRequest((value) => value + 1);
     return trackQueuedSteer(
       (queue) => active.send(text, intent, queue),
@@ -302,6 +309,7 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
+  const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const shownToggleError = useRef(active.toggleError);
   useEffect(() => {
     // a successful retry removes the notice and its focused button; give focus back to the visible header control
@@ -320,40 +328,40 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
     return () => removeEventListener("beforeunload", warn);
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!approval ? "zeta is offline" : undefined} onApprove={approval ? (request) => approval("approve", request) : undefined} onDeny={approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
-  const composerProps: ComposerProps = active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder: "message zeta" }
+  const composerProps: ComposerProps = !canWrite ? { state: "read-only", reason: readOnlyReason, onSubmit: send, placeholder: "message zeta" }
+    : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder: "message zeta" }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); });
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
-  const hasComposer = !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
+  const hasComposer = observer ? Boolean(activePage) : !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
   // rows typed in the new-chat box that no chat took (a refused create): the page opens another chat, so say they wait
   const unsentNew = ready ? chatQueues.unsent(`new:${ready.page.id}`).length : 0;
   // a failed create keeps the message typed for it in the page's new-chat box: show it, so the user sees it is safe
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
   const content = <>
-    {activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat} toggle={active.toggle} onRename={ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}
-    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} />}
+    {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
-    {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} />}
-    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" autoFocus onClick={(event) => { event.currentTarget.focus(); active.retrySaving(); }}>retry creating chat</button><button type="button" onClick={active.discardCreation}>start over</button></div></div>
-      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" onClick={active.newChat}>new chat</button></div>
+    {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
+    {active.creationError ? <div className="full-state"><p role="alert">{active.creationError}</p>{keptNew.map((text, index) => <figure key={index} className="kept-message"><figcaption>kept, not sent</figcaption><blockquote>{text}</blockquote></figure>)}<div className="full-state-actions"><button className="primary" data-write-surface={WRITE_SURFACE.createRetry} autoFocus onClick={(event) => { event.currentTarget.focus(); if (canWrite) active.retrySaving(); }} disabled={!canWrite}>retry creating chat</button><button type="button" data-write-surface={WRITE_SURFACE.createDiscard} onClick={active.discardCreation} disabled={!canWrite}>start over</button></div></div>
+      : active.state.phase === "missing" ? <div className="full-state"><p role="alert">this chat no longer exists</p><button className="primary" data-write-surface={WRITE_SURFACE.missingNewChat} onClick={active.newChat} disabled={!canWrite}>new chat</button></div>
       : active.state.phase === "error" && active.state.error === "page not found" ? <NotFoundState onNewChat={active.newChat} />
       : active.state.phase === "error" ? <div className="full-state"><p role="alert">{active.state.error}</p></div>
-      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} />}</>
+      : busyPage ? <>{busyPage.page.layout.blocks.length > 0 && <PageView page={busyPage.page} pageId={busyPage.page.id} credential={busyPage.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}</>
       : failure && !lost ? <ConnectionBanner state={connectionState} connection={connection} />
       : !activePage || !activeStore ? <div className="full-state"><p role="status">{active.attachSlow ? "still connecting to this chat" : "loading chat…"}</p>{active.attachSlow && <button className="primary" type="button" onClick={active.retryAttachment}>Retry</button>}</div>
       : <RunProvider store={activeStore}>
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
-        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={askPageChat} />}
+        {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetOpen ? " mobile-chat-open" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{pageChatSheetOpen ? "⌃" : "⌃"}</span></button>}
         {hasBlocks && pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
         <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={hasBlocks && pageChatSheetOpen ? "dialog" : undefined} aria-modal={hasBlocks && pageChatSheetOpen ? "true" : undefined} aria-labelledby={hasBlocks && pageChatSheetOpen ? "page-chat-title" : undefined} aria-hidden={mobilePageChat && hasBlocks && !pageChatSheetOpen ? "true" : undefined}>
         {hasBlocks && <div className="page-chat-sheet-head"><strong id="page-chat-title">page chat</strong><button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button></div>}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -367,10 +375,10 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
         </div>
       </RunProvider>}
   </>;
-  return <AppShell page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell banner={observer && <ObserverBanner connection={connection} />} header={activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
-function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void }) {
+function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {
   const here = busy.sessionId !== null && busy.sessionId === openSessionId;
   const open = !here && busy.chat;
   const running = open ? `"${titleOf(busy.chat!)}"` : "another chat";
@@ -379,7 +387,7 @@ function BusyNotice({ busy, openSessionId, onOpen, onRetry }: { busy: { sessionI
     : open ? `"${titleOf(busy.chat!)}" is still running. open it to approve or stop it, then try again.`
     : busy.sessionId ? "another chat is still running. approve or stop it, then try again."
     : "zeta was busy a moment ago and is ready now. try again.";
-  return <div className="create-mode-alert" role="alert"><span>{text}</span><span>{open && <button type="button" onClick={onOpen}>open it</button>}<button type="button" onClick={onRetry}>try again</button></span></div>;
+  return <div className="create-mode-alert" role="alert"><span>{text}</span><span>{open && <button type="button" onClick={onOpen}>open it</button>}<button type="button" data-write-surface={WRITE_SURFACE.busyRetry} disabled={!canWrite} onClick={onRetry}>try again</button></span></div>;
 }
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
@@ -434,10 +442,10 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
   const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : `◻ create mode${page.create_mode ? " on" : ""}`;
-  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" aria-label={toggling ? modeLabel : page.create_mode ? "create mode on" : "create mode off"} aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button>}</>;
+  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" data-write-surface={WRITE_SURFACE.headerCreate} aria-label={toggling ? modeLabel : page.create_mode ? "create mode on" : "create mode off"} aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button>}</>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
-    : <strong ref={titleControl} title={title} aria-label={title} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
+    : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
   // the fold hides the full controls into the ••• menu below 64em, but an enabled mode must stay visible
   // without opening it (spec.md:36, :109): a short word mark per mode that is on sits beside •••.
   // when the header is tight the CSS-hidden .fold-long parts drop: "auto-approve" becomes "auto" and
@@ -454,6 +462,18 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
   auth_failed: "zeta refused this page",
   incompatible: "zeta version mismatch",
 };
+
+function ObserverBanner({ connection }: { connection: Connection }) {
+  const [working, setWorking] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const takeControl = async () => {
+    setWorking(true); setFeedback(null);
+    const reason = await connection.takeControl();
+    setWorking(false);
+    setFeedback(reason);
+  };
+  return <aside className="observer-banner" aria-label="observer mode"><div><strong>another tab controls zeta</strong><span>this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled.</span></div><div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => void takeControl()} disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div></aside>;
+}
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";

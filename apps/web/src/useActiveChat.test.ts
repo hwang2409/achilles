@@ -327,7 +327,7 @@ describe("active chat attachment", () => {
     }) as typeof fetch;
     const owner = createAttachmentOwner();
     try {
-      const ready = await withFetch(fetcher, () => attachPage(attachmentClient() as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true)));
+      const ready = await withFetch(fetcher, () => attachPage(attachmentClient() as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true), false, undefined, undefined, false, true));
       expect(ready).toMatchObject({ phase: "ready", sessionId: "home-latest" });
     } finally { owner.clear(); }
   });
@@ -353,7 +353,7 @@ describe("active chat attachment", () => {
     });
     const owner = createAttachmentOwner();
     try {
-      const ready = await withFetch(fetcher, () => attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true)));
+      const ready = await withFetch(fetcher, () => attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true), false, undefined, undefined, false, true));
       expect(writes.filter((write) => write.includes("/api/pages/home/session"))).toEqual([]);
       expect(methods).not.toContain("new_session");
       expect(ready).toMatchObject({ phase: "ready", sessionId: "home-first" });
@@ -446,7 +446,7 @@ describe("active chat attachment", () => {
       replay: async (_id: string, refresh: () => Promise<unknown[]>) => { await refresh(); return { store: { getState: () => ({ outline: [] }), resync() {} }, release() { releases += 1; } }; },
     };
     const owner = createAttachmentOwner();
-    const operation = attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true));
+    const operation = attachPage(client as never, "home", null, owner, createChatCreationOwner(new MemoryStorage()), owner.begin("home", true), false, undefined, undefined, false, true);
     try {
       await waitBounded(reachedFinalStatus, () => { owner.begin("other", true); release(); }, () => operation);
       owner.begin("other", true); release();
@@ -474,7 +474,7 @@ describe("active chat attachment", () => {
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(storage);
     const attempt = async () => {
-      return attachPage(client as never, "home", null, owner, creation, owner.begin("attempt", true), true);
+      return attachPage(client as never, "home", null, owner, creation, owner.begin("attempt", true), true, undefined, undefined, false, true);
     };
     try {
       await attempt().catch(() => {});
@@ -503,7 +503,7 @@ describe("active chat attachment", () => {
       await creation.ensure({ input: input(client, true), current: () => true, attach: async (sessionId) => ({ sessionId }) })!.catch(() => {});
       expect(creation.status("home").error).toContain("could not save session mapping");
 
-      await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true)).catch(() => {});
+      await attachPage(client as never, "home", null, owner, creation, owner.begin("reconnect", true), false, undefined, undefined, false, true).catch(() => {});
       expect(creation.status("home")).toMatchObject({ pending: { sessionId: "created-on-zeta", stage: "mapped" }, error: "forced later attachment failure" });
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
@@ -524,7 +524,7 @@ describe("active chat attachment", () => {
     });
     const owner = createAttachmentOwner();
     try {
-      await attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true)).catch(() => {});
+      await attachPage(client as never, "home", "missing", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("missing", true), false, undefined, undefined, false, true).catch(() => {});
       expect(sessions).toBe(0);
     } finally { owner.clear(); globalThis.fetch = originalFetch; }
   });
@@ -557,7 +557,7 @@ describe("attachment while a turn runs", () => {
     };
     const owner = createAttachmentOwner();
     try {
-      const result = await withFetch(pageFetch([{ session_id: "waiting", page_id: "home", title: "waiting chat" }]), () => attachPage(client as never, "home", "waiting", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("reload", true)))
+      const result = await withFetch(pageFetch([{ session_id: "waiting", page_id: "home", title: "waiting chat" }]), () => attachPage(client as never, "home", "waiting", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("reload", true), false, undefined, undefined, false, true))
         .catch((caught: Error) => ({ phase: "error", error: caught.message }));
       expect(result).toMatchObject({ phase: "ready", sessionId: "waiting", rebind: true });
       expect(events.filter((event) => event.type === "approval_request").map((event) => event.request_id)).toEqual(["c1"]);
@@ -575,7 +575,7 @@ describe("attachment while a turn runs", () => {
     }) as typeof fetch;
     const owner = createAttachmentOwner();
     try {
-      const result = await withFetch(fetcher, () => attachPage(client as never, "home", "lost", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("lost", true)));
+      const result = await withFetch(fetcher, () => attachPage(client as never, "home", "lost", owner, createChatCreationOwner(new MemoryStorage()), owner.begin("lost", true), false, undefined, undefined, false, true));
       expect(result).toMatchObject({ phase: "ready", title: "plan the trip" });
       expect(patches).toEqual([{ first_message: "plan the trip" }]);
     } finally { owner.clear(); }
@@ -591,7 +591,7 @@ describe("attachment while a turn runs", () => {
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(new MemoryStorage());
     try {
-      const result = await withFetch(pageFetch([]), () => attachPage(client as never, "home", null, owner, creation, owner.begin("new", true), true, undefined, undefined, true))
+      const result = await withFetch(pageFetch([]), () => attachPage(client as never, "home", null, owner, creation, owner.begin("new", true), true, undefined, undefined, true, true))
         .catch((caught: Error) => ({ phase: "error", error: caught.message }));
       expect(result).toMatchObject({ phase: "busy", busySessionId: "waiting" });
       expect(creation.status("home").pending).toBeFalsy();
@@ -708,7 +708,7 @@ describe("chat creation lifecycle", () => {
       const load = async (key: string) => {
         const attachment = createAttachmentOwner();
         pageOwner = createChatCreationOwner(storage, fetcher);
-        try { return await withFetch(fetcher, () => attachPage(client as never, key, null, attachment, pageOwner, attachment.begin(key, true), false, applyMode)); }
+        try { return await withFetch(fetcher, () => attachPage(client as never, key, null, attachment, pageOwner, attachment.begin(key, true), false, applyMode, undefined, false, true)); }
         finally { attachment.clear(); }
       };
       try {
@@ -746,7 +746,7 @@ describe("chat creation lifecycle", () => {
     }
     const run = () => reopen
       ? withFetch(fetcher, async () => {
-        try { return await attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish); }
+        try { return await attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), true, applyMode, publish, false, true); }
         finally { attachmentOwner.clear(); }
       })
       : owner.ensure({
@@ -757,7 +757,7 @@ describe("chat creation lifecycle", () => {
         publishReady: publish,
       })!;
     if (reopen) {
-      const reopened = await withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true)));
+      const reopened = await withFetch(fetcher, () => attachPage(client as never, "home", null, attachmentOwner, owner, attachmentOwner.begin("home", true), false, undefined, undefined, false, true));
       attachmentOwner.clear();
       expect(reopened.page.create_mode).toBe(true);
       if (turnOff) owner.setCreateMode("home", false);

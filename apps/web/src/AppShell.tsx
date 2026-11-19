@@ -5,6 +5,7 @@ import { updateSettings, useSettings } from "./settings";
 import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, useModalFocus } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "./pageList";
 import { useInlineRename } from "./useInlineRename";
+import { WRITE_SURFACE } from "./writeSurfaces";
 
 export type PageLink = { id: string; route: string; title: string };
 
@@ -27,7 +28,10 @@ type Props = {
   sessionId: string | null;
   waiting: number;
   serverForcesAsk?: boolean;
+  canWrite?: boolean;
   hasComposer: boolean;
+  banner?: ReactNode;
+  header?: ReactNode;
   children: ReactNode;
   refreshKey: number;
   pageRefreshKey: number;
@@ -117,7 +121,7 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 // short heights use the drawer too: a phone on its side cannot spare 288px for the sidebar. matches style.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, hasComposer, children, agentActions, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, canWrite = false, hasComposer, banner, header, children, agentActions, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
@@ -236,15 +240,15 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       } else if (agentActions !== false && event.shiftKey && key === "o") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading) void onNewChat();
+        if (!loading && canWrite) void onNewChat();
       } else if (agentActions !== false && event.key === ".") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading) void onToggleCreateMode();
+        if (!loading && canWrite) void onToggleCreateMode();
       }
     };
     addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
-  }, [agentActions, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
+  }, [agentActions, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (isEditableTarget(event)) return;
@@ -267,8 +271,8 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     else location.assign(chatHref(chat));
   };
   const commands: PaletteEntry[] = agentActions === false ? [] : [
-    ...loading ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
-    ...loading || !page ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
+    ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
+    ...loading || !page || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
     { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
     { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
@@ -347,7 +351,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
       <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong></div>
-      {agentActions !== false && <button className="new-chat" onClick={() => { setDrawer(false); void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>}
+      {agentActions !== false && <button className="new-chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (canWrite) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>}
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <nav className="place-nav" aria-label="places">
@@ -366,16 +370,20 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       </section>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? select : undefined} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? select : undefined} onRename={onRenameChat} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? select : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? select : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>
       <footer>{agentActions !== false && <SettingsControl onOpen={openSettings} className="settings-button" />}<button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
     </aside>
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
-      <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
+      {banner}
+      <div className="shell-header">
+        <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
+        {header}
+      </div>
       {children}
     </main>
-    {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} />}
+    {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {agentActions !== false && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
   </div>;
@@ -407,7 +415,7 @@ function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRe
   return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={onSelect && ((event) => { event.preventDefault(); onSelect(chat); })} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts={onRename ? "F2" : undefined} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     {meta}
-    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" title="rename (F2)" onClick={startRename}>✎</button>}
+    {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" data-write-surface={WRITE_SURFACE.sidebarRename} title="rename (F2)" onClick={startRename}>✎</button>}
   </a>;
 }
 

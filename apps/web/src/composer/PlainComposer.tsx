@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { restoreFocus } from "../keyboard";
+import { WRITE_SURFACE } from "../writeSurfaces";
 import { composerStatus, enterAction, inFlight, submitAction } from "./composer-machine";
 import { QueuedMessages } from "./QueuedMessages";
 import {
@@ -84,6 +85,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
         tabIndex={-1}
         className={className}
         data-part="composer"
+        data-write-surface={WRITE_SURFACE.composerSend}
         data-state="read-only"
         role="group"
         aria-label={label}
@@ -107,6 +109,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
     <form
       className={className}
       data-part="composer"
+      data-write-surface={WRITE_SURFACE.composerSend}
       data-state={state}
       data-error={model.error?.kind}
       data-pending={
@@ -146,6 +149,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
             ref={stopButtonRef}
             type="button"
             data-part="composer-stop"
+            data-write-surface={WRITE_SURFACE.composerAbort}
             data-action="stop"
             aria-label="stop the running turn"
             aria-disabled={model.stopping || undefined}
@@ -159,6 +163,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
         <button
           type="submit"
           data-part="composer-submit"
+          data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend}
           data-action={queues ? "queue" : steer ? "steer" : "send"}
           aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"}
           aria-disabled={!action || undefined}

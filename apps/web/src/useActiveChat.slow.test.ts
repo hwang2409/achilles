@@ -119,7 +119,7 @@ test("a slow attachment can retry without accepting its late answer", async () =
   const slowClient = client(firstResume.promise);
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
-  const Harness = () => { active = useActiveChat(slowClient as never, true, clock as never); return null; };
+  const Harness = () => { active = useActiveChat(slowClient as never, true, clock as never, true); return null; };
   let renderer!: RenderResult;
 
   await act(async () => { renderer = render(createElement(Harness)); mounted = renderer; });
@@ -201,7 +201,7 @@ async function refreshFailureHarness(failures: number) {
     finishReplay: () => true,
   };
   const clock = new ManualClock();
-  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never, true); return null; };
   // a page load (reload, or a page switch's location.assign): a new hook with nothing kept in memory
   const load = async () => {
     if (mounted) await act(async () => { mounted?.unmount(); });
@@ -362,7 +362,7 @@ test("a reload during a pending approval re-binds the page tools, so the approve
   };
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
-  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never); return null; };
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
   await act(async () => { mounted = render(createElement(Harness)); });
   await flushUntil(() => active.state.phase !== "loading");
   expect(active.state).toMatchObject({ phase: "ready", sessionId: "chat" });
@@ -464,7 +464,7 @@ test.each(turnEndRows)("a pending ask mode is applied when the turn ends: $name"
   if (row.name.startsWith("agent_end before the owner")) zeta.state.beforeJoin = () => { zeta.state.phase = "idle"; void zeta.frames("turn_end", "agent_end"); };
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
-  const Harness = ({ client, connected }: { client: unknown; connected: boolean }) => { active = useActiveChat(client as never, connected, clock as never); return null; };
+  const Harness = ({ client, connected }: { client: unknown; connected: boolean }) => { active = useActiveChat(client as never, connected, clock as never, true); return null; };
   await act(async () => { mounted = render(createElement(Harness, { client: zeta.client, connected: true })); });
   await flushUntil(() => active.state.phase === "ready");
   if (row.name.startsWith("disconnect")) {
@@ -499,7 +499,7 @@ test("a settle zeta keeps refusing after the turn end retries a bounded number o
   const zeta = turnZeta({ name: "bound", phase: "running", sets: 0, drive: async () => {} });
   const clock = new ManualClock();
   let active!: ReturnType<typeof useActiveChat>;
-  const Harness = () => { active = useActiveChat(zeta.client as never, true, clock as never); return null; };
+  const Harness = () => { active = useActiveChat(zeta.client as never, true, clock as never, true); return null; };
   await act(async () => { mounted = render(createElement(Harness)); });
   await flushUntil(() => active.state.phase === "ready");
   zeta.state.phase = "finishing"; // reports idle, refuses every settings change
@@ -618,7 +618,7 @@ test.each(createRows)("first chat of a page: $name", async (row) => {
   };
   let active!: ReturnType<typeof useActiveChat>;
   const clock = new ManualClock();
-  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never); return null; };
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, true); return null; };
 
   // the composer App shows (none while loading or while a create error is shown), with its owner in `chatQueues`
   let view: { key: string; owner: ReturnType<typeof chatQueues.open>; detach: () => void } | null = null;
@@ -744,7 +744,7 @@ test("new chat while another chat's turn runs keeps the new chat and never sends
   };
   const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
   const clock = new ManualClock();
-  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never, true); return null; };
   await act(async () => { mounted = render(createElement(Harness)); });
   await flushUntil(() => harness.active.state.phase === "ready");
   await act(async () => { await harness.active.newChat(); });
@@ -834,7 +834,7 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
   };
   const harness = { active: null as unknown as ReturnType<typeof useActiveChat> };
   const clock = new ManualClock();
-  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never); return null; };
+  const Harness = () => { harness.active = useActiveChat(zeta as never, true, clock as never, true); return null; };
   // the composer of `box`, wired the way App wires it; `close` detaches it, the way a page unload or chat switch does
   let close = () => {};
   const composer = (box: string, fromNewChat?: string) => {
