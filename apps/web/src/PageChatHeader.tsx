@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { PageChatCatalog, timeLabel, titleOf, type Chat } from "./AppShell";
+import { restorableFocus } from "./keyboard";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./page-chat-header.css";
 
@@ -60,7 +61,11 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     if (!popup) return;
     const outside = (event: Event) => {
       if (event.target instanceof Node && event.target.isConnected && !panel.current?.contains(event.target)
-        && !switcher.current?.contains(event.target) && !menu.current?.contains(event.target)) dismiss(true);
+        && !switcher.current?.contains(event.target) && !menu.current?.contains(event.target)) {
+        // Click runs after the browser's pointer focus change. Don't move focus away from the chosen control.
+        const active = document.activeElement;
+        dismiss(!restorableFocus(active) || panel.current?.contains(active));
+      }
     };
     document.addEventListener("click", outside);
     return () => document.removeEventListener("click", outside);

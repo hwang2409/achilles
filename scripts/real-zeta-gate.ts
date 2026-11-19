@@ -2820,9 +2820,20 @@ try {
     })) throw new Error("page chat popup escaped the rail or sheet");
   };
   const outsideCloses = async (trigger: ReturnType<Page["locator"]>) => {
-    // The title/controls split gives us a stable outside click within the rail/sheet.
-    await dockHead(page).locator(".page-chat-readouts").click();
-    if (await trigger.getAttribute("aria-expanded") !== "false" || !await trigger.evaluate((node) => node === document.activeElement)) throw new Error("outside click did not close the popup and restore its trigger");
+    const composer = page.locator('.page-chat-surface textarea[aria-label="message"]');
+    const cases = [
+      { name: "readouts", act: () => dockHead(page).locator(".page-chat-readouts").click(), focus: trigger },
+      ...(page.viewportSize()!.width === 1440 ? [{ name: "sidebar background", act: () => page.locator(".brand-row strong").click(), focus: trigger }] : []),
+      { name: "composer", act: () => composer.click(), focus: composer },
+      { name: "Escape", act: () => page.keyboard.press("Escape"), focus: trigger },
+    ];
+    for (const [index, { name, act, focus }] of cases.entries()) {
+      if (index) await trigger.click();
+      await act();
+      const context = `${page.viewportSize()!.width}px ${await trigger.getAttribute("aria-haspopup")}: ${name}`;
+      if (await trigger.getAttribute("aria-expanded") !== "false") throw new Error(`${context} did not close the popup`);
+      if (!await focus.evaluate((node) => node === document.activeElement)) throw new Error(`${context} left focus on the wrong element`);
+    }
   };
   const popupPointers = async () => {
     await modeMenu(page).click();
@@ -2855,6 +2866,18 @@ try {
   await changeS2Mode("run tools without asking", false, "confirm-approval-1440");
   await changeS2Mode("create mode", false, "confirm-create-1440");
   await captures("non-default");
+  // A chat switch owns navigation and focus even when an outside click also closes a popup.
+  const sidebarChat = page.locator(`a[data-chat-id="${alternateId}"]`);
+  for (const open of [false, true]) {
+    if (open) await switcher.click();
+    await sidebarChat.click();
+    await assertCurrentChat(alternateId);
+    if (!await sidebarChat.evaluate((node) => node === document.activeElement) || await switcher.getAttribute("aria-expanded") !== "false") {
+      throw new Error(`sidebar chat switch with popup ${open ? "open" : "closed"} did not retain row focus and close the popup`);
+    }
+    await page.goto(`${origin}/reading?chat=${controllerChat}&theme=${encodeURIComponent(theme)}`);
+    await waitForIdleTurn(page, waitFor);
+  }
   await setupMobileSheet(page, 844, "switcher");
   await setupMobileSheet(page, 844, "confirmation");
   await setupMobileSheet(page, 844, "button");
