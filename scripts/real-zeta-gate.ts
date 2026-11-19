@@ -1403,7 +1403,7 @@ try {
     if (!state) return false;
     window.addEventListener = state.originalAdd;
     delete (window as typeof window & { __pageChatFirstFrame?: unknown }).__pageChatFirstFrame;
-    return state.result.inside;
+    return state.result.prevented && state.result.inside;
   });
   if (!firstFrameTabPrevented) throw new Error("390px page chat first-frame Tab was not trapped inside the modal sheet");
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
