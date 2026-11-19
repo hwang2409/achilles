@@ -133,3 +133,9 @@
   .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: 12px; }
   .page-chat-docked .page-chat-surface [data-part="composer"] { width: calc(100% - 32px); }
 }
+
+.page-list > .telemetry-link { flex: none; align-items: center; min-height: 40px; }
+.page-list > .telemetry-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.page-list > .telemetry-link[aria-current="page"] b { font-weight: 700; }
+.page-list > .telemetry-link:focus-visible { outline-offset: -2px; }
+.sidebar > footer > .palette-button:only-child { position: static; width: auto; height: 40px; opacity: 1; }
