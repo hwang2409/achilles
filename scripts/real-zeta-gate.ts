@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
-import { gateShell } from "./gate-shell";
+import { gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
@@ -13,6 +13,7 @@ import { gateVim } from "./gate-vim";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
+import { surfaceRoutes } from "../apps/web/src/surface/routes";
 import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
 
@@ -407,7 +408,8 @@ with _database() as db:
   const telemetryHttp: string[] = [];
   const recordTelemetryRequest = (request: Request) => telemetryHttp.push(`${request.method()} ${new URL(request.url()).pathname}`);
   const telemetryMethods: string[] = [];
-  const forbiddenHttp = () => telemetryHttp.find((value) => value === "GET /api/pages/telemetry" || value === "GET /api/pages/telemetry/credential");
+  let telemetryConnections = 0;
+  const forbiddenHttp = () => telemetryHttp.find((value) => value.startsWith("GET /api/pages/telemetry"));
   const forbiddenMethods = new Set(["resume", "status", "session_settings", "set_settings", "session_history_and_subscribe", "session_history", "mcp_refresh_tools", "new_session", "abort", "delivery_status", "send", "steer", "approve", "deny"]);
   let telemetryHello = false;
   const decodeFrame = (payload: string | Buffer): { id?: string | number; method?: string; result?: unknown } | null => {
@@ -428,6 +430,7 @@ with _database() as db:
   await legacyTelemetry(telemetryPage);
   telemetryPage.on("request", recordTelemetryRequest);
   telemetryPage.on("websocket", (socket) => {
+    telemetryConnections += 1;
     let helloId: string | number | undefined;
     socket.on("framesent", ({ payload }) => {
       const frame = decodeFrame(payload);
@@ -441,12 +444,14 @@ with _database() as db:
     });
   });
   try {
-    await telemetryPage.goto(`${origin}/telemetry`);
+    await telemetryPage.goto(`${origin}/telemetry/sessions/x`);
     await waitFor(async () => telemetryHello, "telemetry hello");
     const newerZeta = telemetryPage.getByText("telemetry · needs a newer zeta", { exact: true });
     // Let attachment win the race on old builds so the assertion names the side effect, not missing copy.
     await waitFor(async () => Boolean(forbiddenHttp()) || await newerZeta.isVisible(), "telemetry route milestone");
     await telemetryPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "telemetry") throw new Error("telemetry child URL did not select telemetry");
+    if (telemetryConnections !== 1) throw new Error(`telemetry child opened ${telemetryConnections} connections`);
     const attachment = forbiddenHttp();
     if (attachment) throw new Error(`telemetry route started page attachment: ${attachment}`);
     const agentMethods = telemetryMethods.filter((method) => forbiddenMethods.has(method));
@@ -786,7 +791,7 @@ with _database() as db:
   await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
     await page.goto(`${origin}/not-a-real-page`);
   await gateWait.playwright(page.getByRole("alert").filter({ hasText: "page not found" }), "waitFor", { timeout: 20_000 });
-  await page.getByRole("button", { name: "new chat", exact: true }).click();
+  await page.getByRole("main").getByRole("button", { name: "new chat", exact: true }).click();
   await gateWait.playwright(page.getByRole("textbox", { name: "message", exact: true }), "waitFor", { timeout: 20_000 });
   });
   const unknownRouteSession = await homeSessionId();
@@ -900,9 +905,13 @@ with _database() as db:
   if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor, gateWait);
+  const stablePlace = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try { await gateStablePlace(stablePlace, origin, gateWait); }
+  finally { await stablePlace.close(); }
   const focusPaginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
   if (!(await waitForExit(focusPaginationSeed, 10_000)) || focusPaginationSeed.exitCode !== 0)
     throw new Error(`focus pagination seed exited ${focusPaginationSeed.exitCode}`);
+  const workspaceUrl = page.url();
   const assertActive = async (name: string, target: Locator) => {
     if (await target.evaluate((element) => document.activeElement === element)) return;
     const active = await page.evaluate(() => {
@@ -912,7 +921,7 @@ with _database() as db:
     throw new Error(`${name} focused ${JSON.stringify(active)}`);
   };
   const reloadShell = async () => {
-    await page.reload();
+    await page.goto(workspaceUrl);
     await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
     await gateWait.playwright(page.locator('.chat-list[data-list-state="ready"]'), "waitFor", { timeout: 20_000 });
   };
@@ -1013,7 +1022,7 @@ with _database() as db:
     {
       name: "page show-more non-final",
       run: async () => {
-        await reloadShell();
+        await page.goto(`${origin}/pages`);
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
         await gateWait.playwright(showMore, "waitFor");
@@ -1029,7 +1038,7 @@ with _database() as db:
     {
       name: "page show-more final",
       run: async () => {
-        await reloadShell();
+        await page.goto(`${origin}/pages`);
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
         await gateWait.playwright(showMore, "waitFor");
@@ -1049,7 +1058,7 @@ with _database() as db:
     {
       name: "page continuation retry",
       run: async () => {
-        await reloadShell();
+        await page.goto(`${origin}/pages`);
         const links = page.locator(".page-list a");
         const showMore = page.getByRole("button", { name: "show more pages" });
         await gateWait.playwright(showMore, "waitFor");
@@ -1064,7 +1073,7 @@ with _database() as db:
         await page.route("**/api/pages?**", failContinuation);
         await expectBrowserErrors(page, [{ method: "GET", url: `${origin}/api/pages`, status: 503 }], async () => {
           await showMore.click();
-          await gateWait.playwright(page.getByText("could not load pages", { exact: true }), "waitFor");
+          await gateWait.playwright(page.getByText("the page catalog did not load", { exact: true }), "waitFor");
         });
         await page.unroute("**/api/pages?**", failContinuation);
         await page.getByRole("button", { name: "retry", exact: true }).click();
@@ -1079,7 +1088,7 @@ with _database() as db:
     {
       name: "focus moved before commit",
       run: async () => {
-        await reloadShell();
+        await page.goto(`${origin}/pages`);
         let release!: () => void;
         let seen = false;
         const held = new Promise<void>((resolve) => { release = resolve; });
@@ -1105,36 +1114,6 @@ with _database() as db:
           release();
           await page.unroute("**/api/pages?**", holdContinuation);
         }
-      },
-    },
-    {
-      name: "target removed before commit",
-      run: async () => {
-        await reloadShell();
-        let release!: () => void;
-        let seen = false;
-        const held = new Promise<void>((resolve) => { release = resolve; });
-        const holdContinuation = async (route: Route) => {
-          if (!new URL(route.request().url()).searchParams.has("before")) return route.continue();
-          seen = true;
-          await held;
-          await route.continue();
-        };
-        await page.route("**/api/pages?**", holdContinuation);
-        const showMore = page.getByRole("button", { name: "show more pages" });
-        await gateWait.playwright(showMore, "waitFor");
-        await showMore.click();
-        await waitFor(async () => seen, "continuation request was not made");
-        const heading = page.locator(".page-list > .list-head");
-        await heading.focus();
-        await page.keyboard.press("Enter");
-        const continued = gateWait.playwright(page, "waitForResponse", (response) => new URL(response.url()).pathname === "/api/pages" && new URL(response.url()).searchParams.has("before"));
-        release();
-        await continued;
-        await page.unroute("**/api/pages?**", holdContinuation);
-        await gateWait.playwright(page.locator('.page-list[data-list-state="ready"]:not([data-loaded-count="20"])'), "waitFor", { timeout: 20_000 });
-        await page.keyboard.press("Enter");
-        await assertActive("target removed before commit", heading);
       },
     },
     {
@@ -1238,6 +1217,11 @@ with _database() as db:
   const toggleResult = await toggleResponse;
   if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
   await waitCreateMode(true);
+  if (screenshotDir) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("link", { name: "create (on · this page)" }).waitFor();
+    await page.screenshot({ path: join(screenshotDir, "v5-chat-create-on-1440x900.png"), animations: "disabled" });
+  }
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
   if (pageIndexRequests.length !== pageRequestsBeforeStreamingTurn)
     throw new Error(`streaming turn made ${pageIndexRequests.length - pageRequestsBeforeStreamingTurn} extra /api/pages requests`);
@@ -1246,6 +1230,13 @@ with _database() as db:
     throw new Error(
       `backend did not receive achilles__create_tool catalog: ${JSON.stringify(backendSchemas)}`,
     );
+  for (const [index, { path }] of surfaceRoutes.entries()) {
+    const refused = await homeMcp(100 + index, "tools/call", {
+      name: "create_page", arguments: { route: path, title: "reserved route probe", layout: { blocks: [] } },
+    });
+    if (!refused.result?.isError || (await fetch(`${origin}/api/pages${path}`)).status !== 404)
+      throw new Error(`create_page did not refuse reserved route ${path}`);
+  }
   const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
   const createApprovalBefore = await createApproval.count();
   const createRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
@@ -1264,23 +1255,18 @@ with _database() as db:
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
   if (pageIndexRequests.length - pageRequestsBeforeCreate !== 1)
     throw new Error(`create_page made ${pageIndexRequests.length - pageRequestsBeforeCreate} /api/pages refetches, expected 1`);
+  await page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).click();
+  const pageSection = page.locator('.page-list[data-list-state="ready"]');
+  await gateWait.playwright(pageSection, "waitFor");
+  const pageCount = page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "pages", exact: true }).locator("small");
+  if ((await pageCount.textContent()) !== "20+") throw new Error("pages count should show 20+ while continuation exists");
   if (screenshotDir) {
-    await page.screenshot({ path: join(screenshotDir, "page-index-1440x900.png"), fullPage: true });
-    await page.setViewportSize({ width: 1440, height: 760 });
-    await page.screenshot({ path: join(screenshotDir, "page-index-1440x760.png"), fullPage: true });
-    await setupMobileSheet(page, 760);
-    await page.screenshot({ path: join(screenshotDir, "page-index-390x760.png"), fullPage: true });
+    for (const [width, height] of [[1440, 900], [1440, 760], [390, 760]]) {
+      await page.setViewportSize({ width, height });
+      await page.screenshot({ path: join(screenshotDir, `page-index-${width}x${height}.png`), fullPage: true });
+    }
     await page.setViewportSize({ width: 1440, height: 900 });
   }
-  console.log("page links at create completion", await page.locator(".page-list a").evaluateAll((links) => links.map((link) => ({ href: (link as HTMLAnchorElement).href, text: link.textContent }))));
-  console.log("tool call names", await page.locator('[data-part="timeline-frame"]').evaluateAll((frames) => [...new Set(frames.flatMap((frame) => frame.textContent?.match(/(?:achilles__)?create_page/g) ?? []))]));
-  const pageSection = page.locator(".page-list");
-  const pageHeading = pageSection.locator(":scope > .list-head");
-  const pageRowHeight = await page.locator(".page-list a").first().evaluate((element) => element.getBoundingClientRect().height);
-  const pageSectionHeight = await pageSection.evaluate((element) => element.clientHeight);
-  if (pageSectionHeight < pageRowHeight * 3 || !(await pageHeading.isVisible())) throw new Error(`page section is too short or heading is hidden: ${pageSectionHeight}px for ${pageRowHeight}px rows`);
-  const pageCount = pageHeading.locator("b");
-  if ((await pageCount.textContent()) !== "20+") throw new Error(`page count should show 20+ while continuation exists: ${await pageCount.textContent()}`);
   const showMorePages = page.getByRole("button", { name: "show more pages" });
   await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await gateWait.playwright(showMorePages, "waitFor", { state: "visible", timeout: 20000 }).catch(() => { throw new Error("show more pages is not visible in the page section"); });
@@ -1292,17 +1278,10 @@ with _database() as db:
   const secondBatchPage = page.locator('.page-list a[href^="/gate-page-27"]');
   await gateWait.playwright(secondBatchPage, "waitFor", { state: "visible", timeout: 20000 });
   await waitFor(async () => await secondBatchPage.evaluate((element) => document.activeElement === element), "focused first new page link");
-  await pageHeading.focus();
-  await page.keyboard.press("Enter");
-  const collapsedHeight = await pageSection.evaluate((element) => element.clientHeight);
-  const headingHeight = await pageHeading.evaluate((element) => element.getBoundingClientRect().height);
-  if (collapsedHeight > headingHeight + 12) throw new Error(`collapsed page section kept reserved space: ${collapsedHeight}px for ${headingHeight}px heading`);
-  await pageHeading.focus();
-  await page.keyboard.press("Enter");
-  await pageSection.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await secondBatchPage.click();
   await gateWait.playwright(page, "waitForURL", (url) => new URL(url).pathname === "/gate-page-27");
-  await page.goto(origin);
+  await page.goto(`${origin}/pages`);
+  await gateWait.playwright(pageSection, "waitFor");
   const readingLink = page.locator('.page-list a[href^="/reading"]');
   await gateWait.playwright(readingLink, "waitFor", { timeout: 20000 });
   const chatsBeforeReading = await chatCount();
@@ -1319,6 +1298,16 @@ with _database() as db:
   await field.press("Enter", { timeout: 20_000 });
   await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  const readingChat = await page.locator("[data-session-id]").getAttribute("data-session-id");
+  if (!readingChat || new URL(page.url()).searchParams.get("chat") !== readingChat) throw new Error("the page opened from /pages did not select the active chat after the first send");
+  const readingChatRow = page.locator(`[data-chat-id="${readingChat}"]`);
+  await gateWait.playwright(readingChatRow.and(page.locator('[aria-current="page"]')), "waitFor");
+  await readingChatRow.and(page.locator('[aria-current="page"]')).press("F2");
+  const readingRename = readingChatRow.getByRole("textbox", { name: /^rename / });
+  await readingRename.fill("reading catalog notes");
+  await readingRename.press("Enter");
+  await gateWait.playwright(readingChatRow.getByText("reading catalog notes", { exact: true }), "waitFor");
+  console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
   if (screenshotDir) {
     const readingUrl = page.url();
     const oneChat = async (tab: Page, name: string) => {
@@ -3202,8 +3191,7 @@ with _database() as db:
   const observerComposer = observerPage.getByRole("textbox", { name: "message", exact: true });
   if (await observerComposer.count()) { await observerComposer.fill("observer must not send"); await observerComposer.press("Enter"); }
   await observerPage.setViewportSize({ width: 1440, height: 900 });
-  const observerSettingsButton = observerPage.locator(".settings-button");
-  await observerSettingsButton.click();
+  await observerPage.keyboard.press(appShortcut("Comma"));
   const observerSettings = observerPage.getByRole("dialog", { name: "settings", exact: true });
   await gateWait.playwright(observerSettings.getByText("locked while another tab controls zeta", { exact: true }), "waitFor", { state: "visible" });
   for (const control of [observerSettings.getByRole("switch", { name: "auto-approve default", exact: true }), observerSettings.getByRole("button", { name: "reset to defaults", exact: true })]) {
@@ -3360,8 +3348,7 @@ with _database() as db:
   await restoredField.press("Enter");
   await waitFor(async () => observerFrames.some(({ direction, payload }) => direction === "sent" && payload.includes('"method":"send"')), "restored controller mutation");
   const settingsBeforeRestore = await observerPage.evaluate(() => JSON.stringify({ ...localStorage }));
-  const restoredSettingsButton = observerPage.locator(".settings-button");
-  await restoredSettingsButton.click();
+  await observerPage.keyboard.press(appShortcut("Comma"));
   const restoredVim = observerPage.getByRole("switch", { name: "vim mode", exact: true });
   if (await restoredVim.count()) {
     const before = await restoredVim.getAttribute("aria-checked");

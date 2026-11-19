@@ -3,13 +3,10 @@
 .brand-mark { position: relative; width: 11px; height: 11px; background: var(--fulcrum-accent); }
 
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--fulcrum-border); background: var(--fulcrum-bg); overflow: hidden; z-index: 4; }
-.new-chat, .chat-search { flex: 0 0 40px; margin: 12px 14px 0; display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 13px; }
-.new-chat kbd { margin-left: auto; }
 .chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; display: flex; align-items: center; margin: 0; padding: 0 16px; color: var(--fulcrum-muted); background: var(--fulcrum-bg); font-size: 13px; font-weight: 400; text-transform: lowercase; }
 .chat-row.current strong { font-weight: 700; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .brand-row { flex: 0 0 56px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--fulcrum-border); }
-.new-chat kbd, .chat-search kbd, .sidebar > footer > button kbd { font-size: 12px; }
 .list-head { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border: 0; text-transform: uppercase; letter-spacing: .1em; font-size: 11px; color: var(--fulcrum-muted); }
 .page-list a,
 .chat-row { position: relative; border-left: 2px solid transparent; }
@@ -22,7 +19,6 @@
 .chat-row-meta { overflow: hidden; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
 .chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.sidebar > footer > .settings-button { border-color: transparent; background: transparent; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 10%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
@@ -40,9 +36,6 @@
 .chat-search input::placeholder { color: var(--fulcrum-muted); }
 .chat-search:focus-within { border-color: var(--fulcrum-accent); }
 .list-head b { color: var(--fulcrum-accent); }
-.page-list { flex: 0 0 auto; min-height: 0; max-height: 40%; display: flex; flex-direction: column; overflow: hidden; margin-top: 14px; border-bottom: 1px solid var(--fulcrum-border); padding-bottom: 8px; }
-.page-list.has-pages { min-height: 168px; }
-.page-list-scroll { min-height: 0; overflow-y: auto; }
 .page-list-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; color: var(--fulcrum-muted); font-size: 12px; }
 .page-list-error button { min-height: 40px; padding: 8px 0; color: var(--fulcrum-accent); }
 /* no scroll snap here: a row inserted on top re-snapped the list to the old first row, under the sticky heads.
@@ -65,17 +58,11 @@
 .chat-row.editing > strong { grid-area: 1 / 1; visibility: hidden; }
 .chat-row-edit { grid-area: 1 / 1; align-self: stretch; box-sizing: border-box; width: calc(100% + 48px); min-width: 0; margin: -6px -40px -6px -8px; padding: 0 7px; border: 1px solid var(--fulcrum-accent); background: var(--fulcrum-bg); font: inherit; font-size: 13px; color: inherit; }
 .load-older { width: calc(100% - 32px); height: 40px; margin: 12px 16px; }
-.sidebar > footer { flex: 0 0 52px; display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--fulcrum-border); }
-.sidebar > footer > button { flex: 1; height: 40px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; font-size: 13px; }
-.sidebar > footer > button kbd { margin-left: auto; }
-.sidebar > footer > .palette-button kbd { margin: 0; }
-.sidebar > footer > .palette-button { flex: 0 0 auto; position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
 .sidebar-skeleton { padding: 8px 16px; }
-.search-skeleton { flex: 0 0 40px; margin: 12px 16px 0; border: 1px solid var(--fulcrum-border); background: linear-gradient(90deg, transparent, var(--fulcrum-surface), transparent); }
+.search-skeleton { min-height: 36px; border: 1px solid var(--fulcrum-border); background: linear-gradient(90deg, transparent, var(--fulcrum-surface), transparent); }
 .shell-loading .new-chat { color: var(--fulcrum-muted); border-color: var(--fulcrum-border); background: transparent; }
 .sidebar-skeleton i { display: block; width: 88%; height: 10px; margin: 16px 0; background: var(--fulcrum-surface); }
 .sidebar-skeleton i:nth-child(even) { width: 62%; }
-.waiting-count { display: none; }
 .skip-link { position: fixed; z-index: 20; top: 8px; left: 8px; padding: 8px 12px; color: var(--fulcrum-bg); background: var(--fulcrum-accent); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
 
@@ -255,13 +242,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 /* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px), (max-height: 500px) below) */
 @media (min-width: 761px) and (min-height: 501px) {
   .app-shell.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
-  .sidebar-collapsed .brand-row { flex-basis: 108px; flex-direction: column; justify-content: space-around; padding: 8px 0; }
-  .sidebar-collapsed .brand-row button { display: block; width: 40px; height: 40px; margin: 0; }
-  .sidebar-collapsed .brand-row strong, .sidebar-collapsed .brand-row > span:last-of-type, .sidebar-collapsed .new-chat b, .sidebar-collapsed .new-chat kbd, .sidebar-collapsed .chat-search input, .sidebar-collapsed .chat-search kbd, .sidebar-collapsed .page-list, .sidebar-collapsed .place-nav, .sidebar-collapsed .chat-list, .sidebar-collapsed .sidebar > footer .settings-label, .sidebar-collapsed .sidebar > footer > .palette-button { display: none; }
-  .sidebar-collapsed .new-chat, .sidebar-collapsed .chat-search { flex: 0 0 40px; justify-content: center; margin: 12px 6px 0; padding: 0; }
-  .sidebar-collapsed .waiting-count { display: grid; place-items: center; width: 32px; height: 32px; margin: 12px 9px; border: 1px solid var(--fulcrum-warn); }
-  .sidebar-collapsed .sidebar > footer { margin-top: auto; padding: 6px; }
-  .sidebar-collapsed .sidebar > footer > button { width: 40px; flex: 0 0 40px; padding: 0; text-align: center; }
 }
 
 @media (max-width: 760px), (max-height: 500px) {
@@ -273,7 +253,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   .main-pane { height: 100%; }
   .shell-header { display: block; position: relative; flex: none; }
   .observer-banner + .shell-header { min-height: 56px; }
-  .menu-button { position: absolute; z-index: 2; top: 9px; left: 12px; display: block; width: 40px; height: 40px; font-size: 20px; }
+  .menu-button { position: absolute; z-index: 2; top: 6px; left: 8px; display: block; width: 44px; height: 44px; font-size: 20px; }
   .skip-link:focus { top: 56px; }
   .chat-heading strong { max-width: calc(100vw - 150px); }
   .chat-heading span { display: block; max-width: calc(100vw - 150px); margin-top: 2px; }
@@ -297,14 +277,3 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   .page-chat-docked .transcript [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: calc(100% - 32px); margin-inline: 16px; }
   .main-pane .page-chat-docked [data-part="composer"] { margin-bottom: 16px; }
 }
-
-.place-nav { flex: none; margin: 14px 14px 0; }
-.place-nav .telemetry-link { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-left: 2px solid transparent; font-size: 13px; }
-.place-nav .telemetry-link svg { flex: none; color: var(--fulcrum-muted); }
-.place-nav .telemetry-link b { font-weight: 400; }
-.place-nav .telemetry-link:hover { background: color-mix(in srgb, var(--fulcrum-accent) 6%, transparent); }
-.place-nav .telemetry-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.place-nav .telemetry-link[aria-current="page"] b { font-weight: 700; }
-.place-nav .telemetry-link[aria-current="page"] svg { color: var(--fulcrum-fg); }
-.place-nav .telemetry-link:focus-visible { outline-offset: -2px; }
-.sidebar > footer > .palette-button:only-child { position: static; width: auto; min-width: 44px; height: 40px; padding-inline: 10px; justify-content: center; opacity: 1; }
