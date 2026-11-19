@@ -217,6 +217,15 @@ describe("list columns", () => {
 });
 
 
+test("record cells carry their column label, even when the value is missing", () => {
+  const { getAllByRole, getByRole } = render(React.createElement(RecordListView, { title: "tasks", records: [
+    { record_id: "one", name: "review the draft", author: "Ada" },
+    { record_id: "two", name: "send the draft" },
+  ], columns: ["name", "author"], total: 2, error: null }));
+  expect(getByRole("table", { name: "tasks" })).toBeDefined();
+  expect(getAllByRole("cell").map((cell) => cell.getAttribute("data-label"))).toEqual(["name", "author", "name", "author"]);
+});
+
 test("record list reveal projection keeps loaded rows and one reachable tab stop", () => {
   const rows = Array.from({ length: 8 }, (_, index) => ({ record_id: `book-${index + 1}`, title: `book ${index + 1}` }));
   const cases = [
