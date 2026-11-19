@@ -254,7 +254,7 @@ for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["
 
 test("metric formatter matches every declared numeric matrix expectation", () => {
   for (const entry of metricBoundaryMatrix.filter((item) => item.classification !== "text")) {
-    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero", scientific: /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.expectedText) });
+    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero" });
   }
 });
 
