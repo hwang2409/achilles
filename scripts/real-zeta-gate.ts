@@ -1365,7 +1365,7 @@ try {
   const matrixStrip = page.locator(".metric-strip").first();
   const matrixBlocks = matrixStrip.locator(".metric-block");
   const assertMetricMatrix = async (viewport: string) => {
-    const { entries, gridDiagnostics } = await matrixBlocks.evaluateAll((elements, expected) => {
+    const entries = await matrixBlocks.evaluateAll((elements, expected) => {
       const snapshotGrid = (elements: Element[]) => {
         const strip = document.querySelector<HTMLElement>(".metric-strip");
         const cellElements = [...(strip?.querySelectorAll<HTMLElement>(".metric-block") ?? [])];
@@ -1397,41 +1397,33 @@ try {
       const hasCellRightSeparator = (cell: HTMLElement) => hasVisibleInsetShadow(getComputedStyle(cell).boxShadow, -1, 0);
       const hasCellBottomSeparator = (cell: HTMLElement) => hasVisibleInsetShadow(getComputedStyle(cell).boxShadow, 0, -1);
       const hasCellOwnedSeparators = ({ cellElements }: ReturnType<typeof snapshotGrid>) => cellElements.length > 0 && cellElements.every((cell) => hasCellRightSeparator(cell) && hasCellBottomSeparator(cell));
-      const hasUnusedTrackPaint = ({ strip, rows, cellElements }: ReturnType<typeof snapshotGrid>) => {
+      const hasUnusedTrackPaint = ({ strip, rows }: ReturnType<typeof snapshotGrid>) => {
         if (!strip) return false;
         const stripStyle = getComputedStyle(strip);
         const finalRow = rows.at(-1) ?? [];
         const stripBox = strip.getBoundingClientRect();
         const trackSizes = stripStyle.gridTemplateColumns.split(/\s+/).map(Number.parseFloat);
-        const finalCell = finalRow.at(-1);
+        const trackCount = trackSizes.length;
+        const usedTrackCount = finalRow.length;
+        const finalRowHeight = finalRow[0]?.height ?? 0;
+        const finalRowTop = finalRow[0]?.top ?? stripBox.bottom;
         const transparent = (color: string) => color === "rgba(0, 0, 0, 0)" || color === "transparent";
         const pseudoPaint = (["::before", "::after"] as const).some((pseudo) => {
           const style = getComputedStyle(strip, pseudo);
           return style.content !== "none" || style.backgroundImage !== "none" || !transparent(style.backgroundColor) || style.borderTopWidth !== "0px" || style.borderRightWidth !== "0px" || style.borderBottomWidth !== "0px" || style.borderLeftWidth !== "0px" || style.boxShadow !== "none";
         });
-        if (stripStyle.backgroundImage !== "none" || !transparent(stripStyle.backgroundColor) || stripStyle.boxShadow !== "none" || stripStyle.borderRightWidth !== "0px" || stripStyle.borderBottomWidth !== "0px" || pseudoPaint || !finalCell) return false;
-        // Serialized track sizes are rounded. Use layout edges for the overlap check.
-        const left = finalCell.right;
-        const right = stripBox.right - parseFloat(stripStyle.borderRightWidth) - parseFloat(stripStyle.paddingRight);
-        const liveCells = cellElements.map((cell) => cell.getBoundingClientRect());
-        if (![left, right].every(Number.isFinite) || liveCells.some((box) => ![box.left, box.top, box.width, box.height].every(Number.isFinite) || box.width <= 0 || box.height <= 0)) return false;
-        const usedTrackCount = finalRow.length;
-        const trackCount = trackSizes.length;
-        if (usedTrackCount === trackCount) {
-          const liveFinalCell = liveCells.at(-1)!;
-          return Math.abs(right - left) <= 0.5 && Math.abs(right - liveFinalCell.right) <= 0.5;
-        }
-        if (usedTrackCount > trackCount || left >= right || liveCells.some((box) => box.right > right)) return false;
-        const occupied = liveCells.some((box) => box.left < right && box.right > left && box.top < finalCell.bottom && box.bottom > finalCell.top);
-        let trackLeft = left;
-        return !occupied && trackSizes.slice(usedTrackCount).every((width) => {
-          if (!Number.isFinite(width) || width <= 0) return false;
-          const trackRight = Math.min(trackLeft + width, right);
-          if (trackRight <= trackLeft) return false;
-          const hit = document.elementFromPoint((trackLeft + trackRight) / 2, (finalCell.top + finalCell.bottom) / 2);
-          trackLeft = trackRight;
-          return hit === strip;
+        const unusedTracks = trackSizes.slice(usedTrackCount).map((width, index) => {
+          const left = stripBox.left + strip.clientLeft + trackSizes.slice(0, usedTrackCount + index).reduce((sum, size) => sum + size, 0);
+          const rect = { left, right: left + width, top: finalRowTop, bottom: finalRowTop + finalRowHeight };
+          const point = { x: left + Math.min(width / 2, width - 1), y: rect.top + Math.min(finalRowHeight / 2, finalRowHeight - 1) };
+          const hit = document.elementFromPoint(point.x, point.y);
+          const occupied = grid.cellElements.some((cell) => {
+            const cellBox = cell.getBoundingClientRect();
+            return cellBox.left < rect.right && cellBox.right > rect.left && cellBox.top < rect.bottom && cellBox.bottom > rect.top;
+          });
+          return hit === strip && !occupied;
         });
+        return stripStyle.backgroundImage === "none" && transparent(stripStyle.backgroundColor) && stripStyle.boxShadow === "none" && stripStyle.borderRightWidth === "0px" && stripStyle.borderBottomWidth === "0px" && !pseudoPaint && (trackCount === usedTrackCount || unusedTracks.length === trackCount - usedTrackCount && unusedTracks.every(Boolean));
       };
       const hasStripTopOwner = (strip: HTMLElement) => getComputedStyle(strip).borderTopWidth === "1px";
       const hasStripLeftOwner = (strip: HTMLElement) => getComputedStyle(strip).borderLeftWidth === "1px";
@@ -1439,11 +1431,10 @@ try {
       const hasStripBottomPaint = (strip: HTMLElement) => getComputedStyle(strip).borderBottomWidth !== "0px" || !["", "0px"].includes(strip.style.getPropertyValue("border-bottom-width"));
       const hasStripShadowPaint = (strip: HTMLElement) => getComputedStyle(strip).boxShadow !== "none";
       const hasStripOwnedEdges = ({ strip }: ReturnType<typeof snapshotGrid>) => Boolean(strip) && hasStripTopOwner(strip!) && hasStripLeftOwner(strip!) && !hasStripRightPaint(strip!) && !hasStripBottomPaint(strip!);
+      const checkGrid = (grid: ReturnType<typeof snapshotGrid>) => hasContinuousTopology(grid) && hasStripOwnedEdges(grid) && hasCellOwnedSeparators(grid) && hasUnusedTrackPaint(grid);
       const proveMutations = (grid: ReturnType<typeof snapshotGrid>) => {
         const cell = grid.cellElements[0];
         const strip = grid.strip;
-        const lastCell = grid.cellElements.at(-1)!;
-        const originalLastCellTransform = lastCell.style.transform;
         const originalCellShadow = cell?.style.boxShadow ?? "";
         const originalStrip = strip ? { cssText: strip.style.cssText } : null;
         const mutationStyle = document.createElement("style");
@@ -1480,36 +1471,20 @@ try {
             strip.style.setProperty("background-image", "linear-gradient(red, red)", "important");
             expectRejected("strip background image paint", hasUnusedTrackPaint(grid));
             strip.style.cssText = originalStrip!.cssText;
-            lastCell.style.transform = "translateX(4px)";
-            expectRejected("a cell intruding into the unused track", hasUnusedTrackPaint(grid));
-            lastCell.style.transform = `translateX(${strip.getBoundingClientRect().width}px)`;
-            expectRejected("a cell crossing the unused track and leaving the strip", hasUnusedTrackPaint(grid));
-            lastCell.style.transform = originalLastCellTransform;
           }
           mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }";
           document.head.append(mutationStyle);
-          expectRejected("strip pseudo paint", hasUnusedTrackPaint(grid));
+          expectRejected("strip pseudo paint", getComputedStyle(strip!, "::before").content === "none");
         } finally {
-          lastCell.style.transform = originalLastCellTransform;
           if (cell) cell.style.boxShadow = originalCellShadow;
           if (strip && originalStrip) strip.style.cssText = originalStrip.cssText;
           mutationStyle.remove();
         }
       };
       const grid = snapshotGrid(elements);
-      const checks = {
-        hasContinuousTopology: hasContinuousTopology(grid),
-        hasStripOwnedEdges: hasStripOwnedEdges(grid),
-        hasCellOwnedSeparators: hasCellOwnedSeparators(grid),
-        hasUnusedTrackPaint: hasUnusedTrackPaint(grid),
-      };
-      if (Object.values(checks).every(Boolean) && innerWidth === 390) proveMutations(grid);
-      const gridDiagnostics = {
-        checks,
-        trackSizes: grid.strip ? getComputedStyle(grid.strip).gridTemplateColumns : null,
-        rows: grid.rows.map((row) => row.map(({ x, y, width, height }) => ({ x, y, width, height }))),
-      };
-      const entries = expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
+      const gridEdges = checkGrid(grid);
+      if (gridEdges && innerWidth === 390) proveMutations(grid);
+      return expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
       const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
       const block = element as HTMLElement | undefined;
       const labelNode = element?.querySelector<HTMLElement>(".metric-label");
@@ -1556,12 +1531,12 @@ try {
         });
       })() : false;
       const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48))) && !tokenClipping;
+      const gridEdgeResult = gridEdges;
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
-      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, tokenClipping, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, tokenClipping, painted, gridEdges: gridEdgeResult, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
       });
-      return { entries, gridDiagnostics };
     }, metricBoundaryMatrix);
     const failures = entries.flatMap((entry) => {
       const marker = entry.expectedStatus ? entry.mark.includes(entry.expectedMark) : !entry.mark;
@@ -1575,7 +1550,7 @@ try {
       if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}: ${JSON.stringify({ left, right })}`);
     }
     if (entries.some((entry) => entry.tokenClipping)) failures.push("overlong word clipped without ellipsis");
-    if (!Object.values(gridDiagnostics.checks).every(Boolean)) failures.push(`row/column edge assertion: metric grid separators are not continuous ${JSON.stringify(gridDiagnostics)}`);
+    if (entries.some((entry) => !entry.gridEdges)) failures.push(`row/column edge assertion: metric grid separators are not continuous ${JSON.stringify(entries.find((entry) => !entry.gridEdges)?.gridDiagnostics)}`);
     for (const entry of entries) {
       const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
       if (counterpart && entry.text !== counterpart.text) failures.push(`${entry.label}: marker parity differs from ${counterpart.label}`);

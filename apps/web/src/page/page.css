@@ -64,16 +64,7 @@
 .record-field-check label { order: 2; color: var(--fulcrum-fg); }
 .record-form-actions { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .record-form-actions p { margin: 0; color: var(--fulcrum-muted); font-size: 12px; }
-@media (max-width: 760px) { .page-content { padding: 24px 20px 40px; } .page-head { align-items: flex-start; flex-direction: column; gap: 8px; margin-bottom: 24px; } .page-layout-version { align-self: flex-start; } .page-blocks { gap: 24px; } .record-form form { grid-template-columns: 1fr; } .record-field:nth-child(n):not(.record-field-check) { grid-column: 1; } }
-@media (max-width: 760px) {
-  .metric-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .metric-block { position: relative; padding-inline: 10px; }
-  /* Keep the status mark beside the label so the value can use the full tile width. */
-  .metric-block > .record-mark { position: absolute; inset-inline-start: 10px; }
-  .metric-block:has(> .record-mark) .metric-label { padding-inline-start: 14px; }
-  .metric-block > div { padding-inline-end: 0; }
-}
-@media (width < 360px) { .metric-strip { grid-template-columns: repeat(auto-fit, minmax(min(100%, 128px), 1fr)); } }
+@media (max-width: 760px) { .page-content { padding: 24px 20px 40px; } .page-head { align-items: flex-start; flex-direction: column; gap: 8px; margin-bottom: 24px; } .page-layout-version { align-self: flex-start; } .page-blocks { gap: 24px; } .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metric-block { padding-inline: 10px; } .record-form form { grid-template-columns: 1fr; } .record-field:nth-child(n):not(.record-field-check) { grid-column: 1; } }
 .metric-value-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .record-count { font-weight: 400; }
 .record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
