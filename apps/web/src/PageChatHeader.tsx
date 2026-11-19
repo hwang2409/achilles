@@ -59,7 +59,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
   useEffect(() => {
     if (!popup) return;
     const outside = (event: Event) => {
-      if (event.target instanceof Node && !panel.current?.contains(event.target)
+      if (event.target instanceof Node && event.target.isConnected && !panel.current?.contains(event.target)
         && !switcher.current?.contains(event.target) && !menu.current?.contains(event.target)) dismiss(true);
     };
     document.addEventListener("click", outside);
