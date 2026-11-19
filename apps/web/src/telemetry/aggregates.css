@@ -6,7 +6,7 @@
 .tm-ag-table:focus-visible { outline-offset: 3px; }
 .tm-ag-table [role="row"] { display: grid; grid-template-columns: var(--tm-ag-columns); align-items: center; border-top: 1px solid var(--tm-line); }
 /* Fixed sharing across rows keeps numeric columns aligned when values change. */
-.tm-ag-models { --tm-ag-columns: minmax(12ch, 1.6fr) minmax(36px, .9fr) minmax(7ch, .55fr) minmax(13ch, .9fr) repeat(4, minmax(8ch, .65fr)) repeat(3, minmax(6.5ch, .62fr)) repeat(2, minmax(9ch, .7fr)) minmax(6.5ch, .55fr); }
+.tm-ag-models { --tm-ag-columns: minmax(14ch, 1.6fr) minmax(36px, .9fr) minmax(7ch, .55fr) minmax(13ch, .9fr) repeat(4, minmax(7.5ch, .65fr)) repeat(3, minmax(6.5ch, .62fr)) repeat(2, minmax(8ch, .7fr)) minmax(6.5ch, .55fr); }
 .tm-ag-tools { --tm-ag-columns: minmax(0, 1.5fr) minmax(0, .8fr) minmax(8ch, .7fr) minmax(7ch, .6fr) minmax(13ch, 1.05fr) repeat(2, minmax(8ch, .65fr)) repeat(2, minmax(10ch, .8fr)) minmax(6.5ch, .5fr); }
 .tm-ag-errors { --tm-ag-columns: minmax(11ch, .85fr) minmax(0, 1.75fr) minmax(0, 2.4fr) minmax(10ch, .8fr) minmax(14ch, 1fr); }
 .tm-ag-table .tm-ag-columns { border-top: 0; background: color-mix(in srgb, var(--fulcrum-surface) 65%, var(--fulcrum-bg)); color: var(--fulcrum-muted); font-size: .92em; }
