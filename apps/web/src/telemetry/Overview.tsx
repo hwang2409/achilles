@@ -71,7 +71,6 @@ function ComingNext() {
     <section className="tm-coming" aria-label="coming next">
       <h2>coming next</h2>
       <ul>
-        <li>recent errors, top models, top tools <span>— with zeta telemetry slice 4 (<code>telemetry_errors</code>, <code>telemetry_models</code>, <code>telemetry_tools</code>)</span></li>
         <li>running now <span>— with zeta state slice 6c (<code>state_sessions</code>, <code>state_agents</code>)</span></li>
       </ul>
     </section>

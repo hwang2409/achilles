@@ -136,8 +136,8 @@ function ToolTable({ data }: { data: Extract<AggregateLoaded, { tab: "tools" }> 
         <Cell className="tm-ag-failure-rate tm-dim"><Meter part={row.errors / Math.max(1, row.calls)} scale={highest} />{formatPercent(row.errors, row.calls) ?? "—"}</Cell>
         <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
         <Cell label="p95"><span title={latencyTitle}>{formatLatency(row.p95_ns)}</span></Cell>
-        <Cell label="args in" className="tm-ag-size">{formatBytes(row.argument_bytes)}</Cell>
-        <Cell label="results out" className="tm-ag-size">{formatBytes(row.result_bytes)}</Cell>
+        <Cell label="args" className="tm-ag-size">{formatBytes(row.argument_bytes)}</Cell>
+        <Cell label="out" className="tm-ag-size">{formatBytes(row.result_bytes)}</Cell>
         <Cell label="last" className="tm-ag-last tm-dim"><time title={formatFullTime(row.last_ns)}>{formatHour(row.last_ns)}</time></Cell>
       </div>)}
     </Table>
@@ -163,6 +163,7 @@ function Errors({ data, label, operation, choose, open }: { data: Extract<Aggreg
       </li>)}
       {rest.length > 0 && <li className="tm-ag-other"><button className="tm-button" type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "fewer types" : `${rest.length} other types ▾`}</button></li>}
     </ul>}
+    <p className="tm-ag-scroll-hint tm-dim" aria-hidden="true">more operations →</p>
     <div className="tm-ag-filters" role="group" aria-label="filter by operation"><span className="tm-dim">operation</span>
       {([null, ...OPERATIONS] as const).map((op) => <button key={op ?? "all"} type="button" className="tm-button" aria-pressed={op === operation} onClick={op !== operation ? () => choose(op) : undefined}>{op ?? "all"}</button>)}
     </div>
