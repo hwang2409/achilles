@@ -219,7 +219,7 @@ try {
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
-  const telemetryArtifacts = ["telemetry-observer-390x844.png", "telemetry-observer-1440x900.png"];
+  const telemetryArtifacts: string[] = [];
   const telemetryHttp: string[] = [];
   const recordTelemetryRequest = (request: Request) => telemetryHttp.push(`${request.method()} ${new URL(request.url()).pathname}`);
   const telemetryMethods: string[] = [];
@@ -318,9 +318,7 @@ try {
       await gateWait.playwright(tab, "waitForFunction", () => {
         const sheet = document.querySelector<HTMLElement>("#page-chat-sheet");
         if (!matchMedia("(width < 1280px)").matches) return false;
-        // The pinned zeta's telemetry notice has no page chat sheet.
-        if (!sheet) return Boolean(document.querySelector(".telemetry-placeholder"));
-        return sheet.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden" && !sheet.getAnimations().length;
+        return !!sheet && sheet.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden" && !sheet.getAnimations().length;
       });
     };
     const checkOpen = async (via: NonNullable<typeof opener>) => {
@@ -394,9 +392,16 @@ try {
       if (!await banner.getByText("this page is read-only", { exact: true }).isVisible()) telemetryFailures.push("telemetry opened with a chat controller did not show the read-only banner");
       if (await observerTelemetry.getByRole("button", { name: "take control", exact: true }).count()) telemetryFailures.push("telemetry offered take control");
       if (telemetryFailures.length) throw new Error(telemetryFailures.join("\n"));
-      for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 1440, height: 900 }].entries()) {
-        if (viewport.width === 390) await setupMobileSheet(observerTelemetry, viewport.height);
-        else await observerTelemetry.setViewportSize(viewport);
+      const captureRecovery = async (size: string) => {
+        if (!screenshotDir) return;
+        const name = `telemetry-observer-${size}.png`;
+        await observerTelemetry.screenshot({ path: join(screenshotDir, name), animations: "disabled" });
+        telemetryArtifacts.push(name);
+      };
+      for (const viewport of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
+        const size = `${viewport.width}x${viewport.height}`;
+        await observerTelemetry.setViewportSize(viewport);
+        if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
         await observerTelemetry.evaluate(() => document.fonts.ready.then(() => undefined));
         const notice = observerTelemetry.locator(".telemetry-placeholder");
         if (await notice.evaluate(element => element.scrollTop) !== 0) throw new Error("telemetry recovery must be tested without scrolling");
@@ -404,11 +409,23 @@ try {
           const geometry = await action.evaluate(element => {
             const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
             const hit = element.contains(document.elementFromPoint(left + width / 2, top + height / 2));
-            return { top, bottom, hit, inViewport: width > 0 && height > 0 && left >= 0 && top >= 0 && right <= innerWidth && bottom <= innerHeight };
+            return { top, bottom, width, height, hit, inViewport: left >= 0 && top >= 0 && right <= innerWidth && bottom <= innerHeight };
           });
-          if (!geometry.inViewport || !geometry.hit) throw new Error(`telemetry recovery ${viewport.width}x${viewport.height}: ${await action.textContent()} not fully visible and hit-testable: ${JSON.stringify(geometry)}`);
+          if (!geometry.inViewport || !geometry.hit || geometry.width < 44 || geometry.height < 44) throw new Error(`telemetry recovery ${size}: ${await action.textContent()} not fully visible and hit-testable at 44px minimum: ${JSON.stringify(geometry)}`);
         }
-        if (screenshotDir) await observerTelemetry.screenshot({ path: join(screenshotDir, telemetryArtifacts[index]!), animations: "disabled" });
+        await captureRecovery(size);
+        if (viewport.width === 360 || (viewport.width <= 480 && screenshotDir)) {
+          const geometry = await notice.evaluate(element => {
+            element.scrollTop = element.scrollHeight;
+            const pane = element.getBoundingClientRect();
+            const step = element.querySelector("ol li:last-child")!.getBoundingClientRect();
+            const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
+            return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
+          });
+          if (viewport.width === 360 && (!geometry.scrollTop || !geometry.visible)) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          await captureRecovery(`${size}-bottom`);
+          await notice.evaluate(element => { element.scrollTop = 0; });
+        }
       }
       console.log("telemetry observer: chat can control zeta, read-only banner visible, no take-control button");
     } finally { await observerTelemetry.close(); }
