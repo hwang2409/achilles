@@ -39,7 +39,8 @@ const ownDiscovery = join(achillesHome, "run/serve.json");
 const sharedDiscovery = join(zetaHome, "run/serve.ws.json");
 const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
-const port = 5200 + Math.floor(Math.random() * 1000);
+// Stay below port 6000, which Chromium blocks (X11).
+const port = 5200 + Math.floor(Math.random() * 800);
 const origin = `http://127.0.0.1:${port}`;
 const screenshotDir = process.env.SCREENSHOT_DIR;
 if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
