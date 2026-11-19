@@ -75,12 +75,14 @@ export async function gateShell(
     (window as typeof window & { __drawerFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__drawerFirstFrame = { result, originalAdd: window.addEventListener };
     window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
       originalAdd(type, listener, options);
-      if (armed && type === "keydown" && options === true) {
+      // The trap installs in a layout effect after the drawer opens.
+      const drawer = document.querySelector(".drawer-open aside.sidebar:not([inert])");
+      if (armed && type === "keydown" && options === true && drawer) {
         armed = false;
         const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
         window.dispatchEvent(event);
         result.prevented = event.defaultPrevented;
-        result.inside = Boolean(document.activeElement?.closest("aside.sidebar"));
+        result.inside = drawer.contains(document.activeElement);
       }
     }) as typeof window.addEventListener;
   });

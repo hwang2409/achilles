@@ -1362,12 +1362,14 @@ try {
     (window as typeof window & { __pageChatFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame = { result, originalAdd: window.addEventListener };
     window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
       originalAdd(type, listener, options);
-      if (armed && type === "keydown" && options === true) {
+      // The trap installs in a layout effect after the sheet becomes a dialog.
+      const sheet = document.querySelector('#page-chat-sheet[role="dialog"][aria-modal="true"]');
+      if (armed && type === "keydown" && options === true && sheet) {
         armed = false;
         const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
         window.dispatchEvent(event);
         result.prevented = event.defaultPrevented;
-        result.inside = Boolean(document.activeElement?.closest('[role="dialog"]'));
+        result.inside = sheet.contains(document.activeElement);
       }
     }) as typeof window.addEventListener;
   });

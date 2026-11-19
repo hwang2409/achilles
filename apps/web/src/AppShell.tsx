@@ -351,7 +351,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ha
       {loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}
       {waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}
       <nav className="place-nav" aria-label="places">
-        <a className="telemetry-link" href="/telemetry" aria-current={isTelemetryPath(location.pathname) ? "page" : undefined}>
+        <a className="telemetry-link" href={pageHref("/telemetry")} aria-current={isTelemetryPath(location.pathname) ? "page" : undefined}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
             <path d="M1 8h3l2-4 3 8 2-4h4" />
           </svg>
