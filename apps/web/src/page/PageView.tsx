@@ -131,7 +131,8 @@ function MetricBlock({ block, value }: { block: Record<string, unknown>; value?:
   const isNumeric = formatted.numeric;
   const textClass = !isNumeric ? ` metric-value-text${/\s/.test(fullValue.trim()) ? "" : " metric-value-text-single"}` : "";
   const numericClass = isScientific ? " metric-value-scientific" : "";
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}${numericClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  const textValue = !isNumeric ? fullValue.split(/(\s+)/).map((part, index) => /\s+/.test(part) ? part : <span className="metric-value-text-token" key={index}>{part}</span>) : displayValue;
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}${numericClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : textValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {

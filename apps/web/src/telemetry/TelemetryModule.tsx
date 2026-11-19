@@ -6,7 +6,8 @@ import { Overview, OverviewSkeleton } from "./Overview";
 import { browserEnv, RANGES, useTelemetryReads, type Loaded, type Range, type Tab } from "./reads";
 import { DetailLoading, DetailNotice, SESSION_LIST, SessionBackLink, SessionDetail } from "./SessionDetail";
 import { Sessions } from "./Sessions";
-import { STATE_FEATURE, TELEMETRY_FEATURE, telemetryNegotiated, telemetryProblem, type TelemetryProblem } from "./telemetry-client";
+import { supportsFeature, TELEMETRY_FEATURE } from "../zeta/connection";
+import { telemetryProblem, type TelemetryProblem } from "./telemetry-client";
 import type { TelemetryStatus } from "./telemetry-types";
 import "./telemetry.css";
 
@@ -20,7 +21,7 @@ const sessionOf = (path: string) => /^\/telemetry\/sessions\/([^/]+)$/.exec(path
 
 /** The telemetry pages: one read-only view of zeta's telemetry over the page's live connection. */
 export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
-  client: ZetaClient | null;
+  client: ZetaClient;
   pathname: string;
   /** Opens the settings view with the telemetry row. Until the shell passes it, the off page shows the settings.toml hint. */
   openTelemetrySettings?: () => void;
@@ -44,8 +45,33 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
       {TABS.map((item) => <a key={item.tab} href={item.href} aria-current={item.tab === tab ? "page" : undefined} onClick={(event) => go(event, item.href)}>{item.tab}</a>)}
     </nav>
   );
-  if (!client) return <Frame><Notice role="status" title="connecting to zeta…" /></Frame>;
-  if (!telemetryNegotiated(client)) return <NeedsNewerZeta client={client} />;
+  if (!supportsFeature(client, TELEMETRY_FEATURE)) {
+    const stateFeature = "state_read_v1";
+    return (
+      <div className="telemetry-placeholder">
+        <section className="telemetry-notice">
+          <p className="telemetry-eyebrow" role="status">telemetry · needs a newer zeta</p>
+          <h1>this zeta can't show telemetry yet</h1>
+          <p className="telemetry-lead">achilles reads telemetry from zeta through <code>telemetry_read_v1</code>. the zeta that achilles talks to did not offer it. chats, pages and agents still work.</p>
+          <dl>
+            <dt>zeta serve</dt><dd>connected{client.protocolVersion && ` · protocol ${client.protocolVersion}`}</dd>
+            <dt><code>{TELEMETRY_FEATURE}</code></dt><dd className="telemetry-warn"><span aria-hidden="true">■ </span>not offered</dd>
+            <dt><code>{stateFeature}</code></dt>
+            {supportsFeature(client, stateFeature) ? <dd>offered</dd> : <dd className="telemetry-warn"><span aria-hidden="true">■ </span>not offered · projects also off</dd>}
+          </dl>
+          <h2>to fix it</h2>
+          <ol>
+            <li>update zeta to a version that offers <code>telemetry_read_v1</code></li>
+            <li>restart <code>zeta serve</code> · achilles connects again by itself</li>
+          </ol>
+          <div className="telemetry-actions">
+            <button type="button" onClick={() => location.reload()}>check again</button>
+            <a href="/">back to chats</a>
+          </div>
+        </section>
+      </div>
+    );
+  }
   const detail = sessionOf(path);
   if (detail && !/^[a-f0-9]{32}$/.test(detail)) return <Frame tabs={tabs} detail><DetailNotice back={(event) => go(event, SESSION_LIST)} title="session not found">this link does not have a valid session id.</DetailNotice></Frame>;
   return <TelemetryPages client={client} tab={tab} tabs={tabs} go={go} sessionId={detail} openTelemetrySettings={openTelemetrySettings} />;
@@ -182,10 +208,6 @@ function FailedBanner({ problem, updatedAt, retry }: { problem: TelemetryProblem
   );
 }
 
-function Notice({ title, children, role }: { title: string; children?: ReactNode; role?: "status" | "alert" }) {
-  return <section className="tm-notice" role={role}><h1>{title}</h1>{children}</section>;
-}
-
 const SETTING = '[otel]\nendpoint = "http://127.0.0.1:4323/v1/traces"';
 
 /** T7. Without `openSettings` (no settings view has the telemetry row yet) the action is the settings.toml hint. */
@@ -229,33 +251,5 @@ function NoTelemetryYet({ rangeLabel, widen }: { rangeLabel: string; widen?: () 
         {widen && <button type="button" className="tm-button" onClick={widen}>last 7 days</button>}
       </div>
     </section>
-  );
-}
-
-function NeedsNewerZeta({ client }: { client: ZetaClient }) {
-  const offered = (feature: string) => client.features.includes(feature);
-  return (
-    <Frame>
-      <section className="tm-intro">
-        <p className="tm-eyebrow">telemetry · needs a newer zeta</p>
-        <h1>this zeta can't show telemetry yet</h1>
-        <p className="tm-lead">achilles reads telemetry from zeta through <code>telemetry_read_v1</code>. the zeta that achilles talks to did not offer it. chats, pages and agents still work.</p>
-        <dl className="tm-facts">
-          <dt>zeta serve</dt><dd>connected{client.protocolVersion && ` · protocol ${client.protocolVersion}`}</dd>
-          <dt><code>{TELEMETRY_FEATURE}</code></dt><dd className="tm-warn"><span aria-hidden="true">■ </span>not offered</dd>
-          <dt><code>{STATE_FEATURE}</code></dt>
-          {offered(STATE_FEATURE) ? <dd>offered</dd> : <dd className="tm-warn"><span aria-hidden="true">■ </span>not offered · projects also off</dd>}
-        </dl>
-        <h2>to fix it</h2>
-        <ol>
-          <li>update zeta to a version that offers <code>telemetry_read_v1</code></li>
-          <li>restart <code>zeta serve</code> · achilles connects again by itself</li>
-        </ol>
-        <div className="tm-actions">
-          <button type="button" className="tm-button tm-primary" onClick={() => location.reload()}>check again</button>
-          <a className="tm-button" href="/">back to chats</a>
-        </div>
-      </section>
-    </Frame>
   );
 }
