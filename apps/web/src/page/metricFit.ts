@@ -15,12 +15,20 @@ export function observeMetricFit(strip: HTMLElement): () => void {
   };
 }
 
+export function balancedMetricRows(tileCount: number, maxColumns: number): number[] {
+  const rows = Math.ceil(tileCount / maxColumns);
+  const perRow = Math.floor(tileCount / rows);
+  const extra = tileCount % rows;
+  return Array.from({ length: rows }, (_, index) => perRow + Number(index < extra));
+}
+
 function fitMetricStrip(strip: HTMLElement) {
   const stripStyle = getComputedStyle(strip);
   const usableWidth = strip.getBoundingClientRect().width - parseFloat(stripStyle.borderLeftWidth) - parseFloat(stripStyle.borderRightWidth);
   if (!(usableWidth > 0)) return;
   strip.style.removeProperty("--metric-value-size");
-  const measures = [...strip.querySelectorAll<HTMLElement>(".metric-block")].flatMap(tile => {
+  const tiles = [...strip.querySelectorAll<HTMLElement>(".metric-block")];
+  const measures = tiles.flatMap(tile => {
     const style = getComputedStyle(tile);
     const inner = getComputedStyle(tile.querySelector(":scope > div")!);
     const mark = tile.querySelector<HTMLElement>(":scope > .record-mark");
@@ -60,4 +68,22 @@ function fitMetricStrip(strip: HTMLElement) {
   const track = Math.max(...measures.map(({ insets, probe }) => insets + probe.getBoundingClientRect().width));
   strip.style.setProperty("--metric-fit", `${Math.ceil(track)}px`);
   for (const { probe } of measures) probe.remove();
+
+  // Let the existing CSS floor and the measured value widths set the upper bound.
+  strip.style.removeProperty("grid-template-columns");
+  for (const tile of tiles) tile.style.removeProperty("grid-column");
+  const maxColumns = Math.min(tiles.length, getComputedStyle(strip).gridTemplateColumns.split(" ").filter(track => parseFloat(track) > 0).length);
+  if (maxColumns < 2) return;
+  const rows = balancedMetricRows(tiles.length, maxColumns);
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  if (first === maxColumns && first === last) return;
+
+  // Unequal row sizes differ by one, so their product is their least common multiple.
+  const tracks = first === last ? first : first * last;
+  strip.style.gridTemplateColumns = `repeat(${tracks}, minmax(0, 1fr))`;
+  let index = 0;
+  for (const cells of rows) {
+    for (let cell = 0; cell < cells; cell++) tiles[index++].style.gridColumn = `span ${tracks / cells}`;
+  }
 }
