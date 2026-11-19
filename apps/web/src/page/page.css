@@ -48,7 +48,7 @@
 .record-list th:nth-child(4), .record-list td:nth-child(4) { width: 16%; }
 .record-list td { height: 40px; min-width: 0; overflow: hidden; padding: 0 8px; border-top: 1px solid var(--fulcrum-border); white-space: nowrap; text-overflow: ellipsis; }
 .record-list td:first-child, .record-list th:first-child { padding-left: 12px; }
-.record-list td:not(:first-child) { color: var(--fulcrum-muted); }
+.record-list td:not(:first-child), .record-empty-value { color: var(--fulcrum-muted); }
 .record-status { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .record-status .record-mark { margin: 0; }
 .record-updated-cell { text-align: right; }
@@ -92,17 +92,66 @@
 .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
 .record-detail dd .record-mark { margin-right: 8px; }
 .selected-note, .form-note { color: var(--fulcrum-muted); font-size: 12px; font-weight: 400; }
-@media (max-width: 640px) {
-  .record-list table { table-layout: fixed; }
-  .record-list th[data-column="author"], .record-list td[data-column="author"],
-  .record-list th[data-column="pages"], .record-list td[data-column="pages"] { display: none; }
-  .record-list th[data-column="title"], .record-list td[data-column="title"] { width: auto; }
-  .record-list th[data-column="status"], .record-list td[data-column="status"] { width: 92px; }
-  .record-list th[data-column="updated"], .record-list td[data-column="updated"] { width: 78px; }
-  .record-list td { padding-inline: 4px; }
-  .record-list td:first-child, .record-list th:first-child { padding-left: 0; }
-  .record-list td:not(:first-child) { white-space: nowrap; }
-  .record-status { gap: 4px; }
+@media (width <= 640px) {
+  .record-list table { display: block; border-bottom: 1px solid var(--fulcrum-border); }
+  /* Keep column headers in the accessibility tree, not in the visual flow. */
+  .record-list thead { position: absolute; inset-inline-start: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .record-list tbody { display: block; }
+  .record-list tbody tr {
+    display: grid;
+    gap: 4px 8px;
+    padding: 9px 8px 10px;
+    border-top: 1px solid var(--fulcrum-border);
+  }
+  .record-list td:nth-child(n) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    align-items: baseline;
+    gap: 2px 8px;
+    width: auto;
+    height: auto;
+    padding: 0;
+    border: 0;
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: start;
+    color: var(--fulcrum-fg);
+  }
+  .record-list td::before {
+    content: attr(data-label) / "";
+    color: var(--fulcrum-muted);
+    font-size: 12px;
+    font-weight: 400;
+  }
+  .record-list .record-status { gap: 4px; max-width: 100%; }
+  .record-list .record-status .record-mark { width: 7px; height: 7px; }
+}
+
+@media (280px <= width <= 640px) {
+  /* Up to four fields fit in two tracks; wider schemas keep one field per line. */
+  .record-list table:not(:has(th:nth-child(5))) {
+    tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    td { grid-template-columns: minmax(0, 1fr); }
+
+    /* Only the exact four-field shape uses the unlabelled board arrangement. */
+    &:has(th[data-column="title"]):has(th[data-column="author"]):has(th[data-column="status"]):has(th[data-column="updated"]) {
+      font-size: 12px;
+      line-height: 16px;
+      tbody tr {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 72px);
+        grid-template-areas: "title status" "author updated";
+        align-items: baseline;
+        row-gap: 2px;
+      }
+      td:nth-child(n) { display: block; }
+      td::before { content: none; }
+      td[data-column="title"] { grid-area: title; font-size: 14px; line-height: 18px; }
+      td[data-column="author"] { grid-area: author; color: var(--fulcrum-muted); }
+      td[data-column="status"] { grid-area: status; text-align: right; }
+      td[data-column="updated"] { grid-area: updated; color: var(--fulcrum-muted); text-align: right; font-size: 11px; }
+    }
+  }
 }
 
 .record-list-empty, .record-list-error { padding: 28px 16px; border: 1px dashed var(--fulcrum-border); text-align: center; }
