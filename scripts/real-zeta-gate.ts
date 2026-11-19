@@ -197,31 +197,28 @@ try {
       "run",
       "python",
       "-c",
-      "from achilles.web import _database; import json; db=_database(); db.execute(\"UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'\"); row=db.execute(\"SELECT document FROM layout_version WHERE page_id='home' ORDER BY version DESC LIMIT 1\").fetchone(); layout=json.loads(row[0]) if row else {'blocks':[]}; layout['blocks'].append({'type':'list','title':'trace annotations','collection':'trace_annotations'}); db.execute(\"INSERT OR IGNORE INTO layout_version VALUES('home',1,'gate',?,datetime('now'))\", (json.dumps(layout),)); db.execute(\"UPDATE layout_version SET document=? WHERE page_id='home' AND version=1\", (json.dumps(layout),)); db.executemany(\"INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)\", [(f'gate-page-{i}', f'/gate-page-{i}', f'gate page {i}', f'2025-01-{i:02d}', f'2025-01-{i:02d}') for i in range(1,46)]); db.commit(); db.close()",
+      `
+import json, sys
+from achilles.web import _database
+with _database() as db:
+    db.execute("UPDATE page SET zeta_session_id='stale-session-id' WHERE id='home'")
+    row = db.execute("SELECT document FROM layout_version WHERE page_id='home' ORDER BY version DESC LIMIT 1").fetchone()
+    layout = json.loads(row[0]) if row else {'blocks': []}
+    layout['blocks'].append({'type': 'list', 'title': 'trace annotations', 'collection': 'trace_annotations'})
+    db.execute("INSERT OR IGNORE INTO layout_version VALUES('home',1,'gate',?,datetime('now'))", (json.dumps(layout),))
+    db.execute("UPDATE layout_version SET document=? WHERE page_id='home' AND version=1", (json.dumps(layout),))
+    db.executemany("INSERT INTO page(id,route,title,created_at,updated_at) VALUES(?,?,?,?,?)", [(f'gate-page-{i}', f'/gate-page-{i}', f'gate page {i}', f'2025-01-{i:02d}', f'2025-01-{i:02d}') for i in range(1,46)])
+    # Use existing catalog rows so the metric proof does not change catalog order or pagination.
+    for page_id, values in json.loads(sys.argv[1]).items():
+        layout = {"blocks": [{"type": "metric", "label": label, "value": value} for label, value in values]}
+        db.execute("INSERT INTO layout_version VALUES(?,1,'gate',?,datetime('now'))", (page_id, json.dumps(layout)))
+        db.execute("UPDATE page SET active_layout_version=1 WHERE id=?", (page_id,))
+`,
+      JSON.stringify(Object.fromEntries(Object.values(metricStrips).map((values, i) => [`gate-page-${43 + i}`, values]))),
     ],
     env,
   );
-  await new Promise<void>((resolve, reject) => {
-    seed.once("exit", (code) =>
-      code === 0 ? resolve() : reject(new Error(`seed exited ${code}`)),
-    );
-  });
-  const metricSeed = start("uv", ["run", "python", "-c", `
-import json, sys
-from achilles.pages import PageStore
-from achilles.web import _home
-store = PageStore(_home())
-store.set_create_mode("home", True)
-try:
-    for name, values in json.loads(sys.argv[1]).items():
-        store.create_page(f"/{name}", name, {"blocks": [
-            {"type": "metric", "label": label, "value": value} for label, value in values
-        ]})
-finally:
-    store.set_create_mode("home", False)
-`, JSON.stringify(metricStrips)], env);
-  if (!await waitForExit(metricSeed, 15_000) || metricSeed.exitCode !== 0)
-    throw new Error("could not seed metric strip fixtures");
+  if (!await waitForExit(seed, 15_000) || seed.exitCode !== 0) throw new Error("could not seed gate fixtures");
   let app = start(
     "uv",
     ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)],
@@ -251,8 +248,8 @@ finally:
     const tab = await browser.newPage({ viewport, deviceScaleFactor: scale });
     try {
       const failures: string[] = [];
-      for (const [strip, values] of Object.entries(metricStrips)) {
-        await tab.goto(`${origin}/${strip}`);
+      for (const [index, [strip, values]] of Object.entries(metricStrips).entries()) {
+        await tab.goto(`${origin}/gate-page-${43 + index}`);
         await tab.waitForFunction((count) => document.querySelectorAll(".metric-strip .metric-value").length === count, values.length);
         await tab.evaluate(() => document.fonts.ready);
         const metrics = await tab.locator(".metric-strip .metric-value").evaluateAll(elements => elements.map(element => {
