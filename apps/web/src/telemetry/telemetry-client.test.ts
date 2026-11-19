@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { TELEMETRY_FEATURE, telemetryClient, telemetryNegotiated, telemetryProblem } from "./telemetry-client";
+import { telemetryClient, telemetryProblem } from "./telemetry-client";
 
-function fakeClient(features = [TELEMETRY_FEATURE]) {
+function fakeClient() {
   const calls: { method: string; params?: Record<string, unknown> }[] = [];
-  const client = { features, request: async (method: string, params?: Record<string, unknown>) => { calls.push({ method, params }); return {}; } };
+  const client = { request: async (method: string, params?: Record<string, unknown>) => { calls.push({ method, params }); return {}; } };
   return { client, calls };
 }
 
@@ -27,11 +27,6 @@ test("overview sends its exact params", async () => {
   expect(calls).toEqual([
     { method: "telemetry_overview", params: { start_ns: 1, end_ns: 2, bucket: "day" } },
   ]);
-});
-
-test("negotiation is read from the hello's granted features", () => {
-  expect(telemetryNegotiated(fakeClient().client)).toBe(true);
-  expect(telemetryNegotiated(fakeClient(["delivery_id"]).client)).toBe(false);
 });
 
 test("rejected reads become off or a retryable failure, -32601 included", () => {
