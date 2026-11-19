@@ -24,12 +24,13 @@ export class ChatBusyError extends Error {
 type SessionSettings = { model: string; approval_mode?: string | null };
 type ApprovalModeResult = { approvalMode?: string | null; pending: boolean };
 
-export async function applyApprovalMode(client: ZetaClient, sessionId: string, mode: string): Promise<ApprovalModeResult> {
+export async function applyApprovalMode(client: ZetaClient, sessionId: string, mode: string, current = () => true): Promise<ApprovalModeResult> {
   let settings = await client.request("session_settings", { session_id: sessionId }) as SessionSettings;
   if (settings.approval_mode === mode) return { approvalMode: settings.approval_mode, pending: false };
   const status = await client.request("status", { session_id: sessionId }) as Status;
   if (status.state !== "idle") return { approvalMode: settings.approval_mode, pending: true };
   try {
+    if (!current()) throw aborted();
     settings = await client.request("set_settings", { session_id: sessionId, model: settings.model, approval_mode: mode }) as SessionSettings;
     return { approvalMode: settings.approval_mode, pending: false };
   } catch (caught) {
@@ -67,7 +68,7 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
     }
   }
   if (!current()) throw aborted();
-  if (serverMode === "ask") return { id, name, rebind, ...await applyApprovalMode(client, id, "ask") };
+  if (serverMode === "ask") return { id, name, rebind, ...await applyApprovalMode(client, id, "ask", current) };
   const settings = await client.request("session_settings", { session_id: id }) as SessionSettings;
   return { id, name, rebind, approvalMode: settings.approval_mode, pending: false };
 }

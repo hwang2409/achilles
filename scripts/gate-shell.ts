@@ -107,14 +107,26 @@ export async function gateShell(
   if ((await sidebar.getAttribute("aria-hidden")) !== "true") throw new Error("escape did not close the drawer");
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   if (!(await menu.evaluate((button) => button === document.activeElement))) throw new Error("closing the drawer did not restore menu focus");
-  const overflow = page.getByRole("button", { name: "chat options" });
-  await overflow.click();
-  if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
-  if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
-  if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
-  await capture("09-narrow-chat-menu-review-390x844.png");
-  await page.keyboard.press("Escape");
-  if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
+  if (await page.locator(".page-chat-head").count()) {
+    await page.locator(".page-chat-bar").click();
+    const overflow = page.getByRole("button", { name: "page chat options" });
+    await overflow.click();
+    const modeMenu = page.getByRole("menu", { name: "page chat options" });
+    if (await modeMenu.getByRole("menuitemcheckbox").count() !== 2) throw new Error("docked chat menu must expose exactly the two mode changes");
+    await capture("09-narrow-chat-menu-review-390x844.png");
+    await page.keyboard.press("Escape");
+    if (await modeMenu.count()) throw new Error("escape did not close the docked chat menu");
+    await page.keyboard.press("Escape");
+  } else {
+    const overflow = page.getByRole("button", { name: "chat options" });
+    await overflow.click();
+    if (!(await page.locator(".header-menu").getByRole("button", { name: /create mode/ }).isVisible())) throw new Error("narrow chat menu did not expose create mode");
+    if (!(await page.locator(".header-menu .approval-mode").isVisible())) throw new Error("narrow chat menu did not expose approval mode");
+    if (!(await page.locator(".header-menu").getByRole("button", { name: "history" }).isVisible())) throw new Error("narrow chat menu did not expose history");
+    await capture("09-narrow-chat-menu-review-390x844.png");
+    await page.keyboard.press("Escape");
+    if (await page.locator(".header-menu").count()) throw new Error("escape did not close the narrow chat menu");
+  }
   await page.setViewportSize({ width: 1440, height: 900 });
 
   return secondSessionId;

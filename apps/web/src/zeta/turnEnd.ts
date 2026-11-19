@@ -103,7 +103,7 @@ export function createTurnEndOwner({ client, sessionId, binding, work, settled, 
     }
     const mode = due.approvalMode;
     if (!mode) return;
-    const result = await applyApprovalMode(client, sessionId, mode);
+    const result = await applyApprovalMode(client, sessionId, mode, () => !disposed);
     if (disposed) return;
     if (!result.pending) due.approvalMode = null;
     settled({ approvalMode: result.approvalMode, pendingApprovalMode: result.pending ? mode : null });
