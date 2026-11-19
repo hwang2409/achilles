@@ -6,7 +6,7 @@ import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
-import type { Chat } from "./AppShell";
+import type { Chat } from "./surface/AgentNavAdapter";
 
 
 const EXPECTED_ATTACH_SLOW_MS = 15_000;

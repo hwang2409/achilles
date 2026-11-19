@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { focusable } from "./focusable";
 
 export function isEditableTarget(event: KeyboardEvent) {
@@ -79,4 +79,18 @@ export function wrapTab(event: Pick<KeyboardEvent, "key" | "shiftKey" | "prevent
   if (document.activeElement !== current && container.contains(document.activeElement)) return;
   event.preventDefault();
   next?.focus();
+}
+
+export function useFocusAfterCommit() {
+  const pending = useRef<(() => HTMLElement | null) | null>(null);
+  useLayoutEffect(() => {
+    const target = pending.current;
+    pending.current = null;
+    target?.()?.focus();
+  });
+  const [, commit] = useState(0);
+  return (target: () => HTMLElement | null) => {
+    pending.current = target;
+    commit((value) => value + 1);
+  };
 }

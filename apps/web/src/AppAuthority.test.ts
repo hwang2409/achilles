@@ -77,8 +77,8 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     }) as typeof fetch;
     (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid/${options.attached ? "?chat=session" : ""}`);
     updateSettings({ vim: false, size: 15 });
-    const { App } = await import("./App");
-    app = render(createElement(App));
+    const { SurfaceRouter } = await import("./surface/SurfaceRouter");
+    app = render(createElement(SurfaceRouter));
     await act(async () => {});
     const banner = app.container.querySelector(".observer-banner");
     if (authority === "observer") {
@@ -129,7 +129,7 @@ const button = (selector: string, write: string, options?: Options): Row => ({ k
   if (authority === "controller") didWrite(writes, write);
 } });
 const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, child = "", locksApprovalDefault = false): Row => ({ kind: "visible", options: { browserPreference: locksApprovalDefault ? undefined : key }, check: async (app, authority, writes) => {
-  await click(select(app, ".settings-button"));
+  await keydown(window, ",", { ctrlKey: !isMac, metaKey: isMac });
   const control = select(app, tag(id) + child);
   const before = getSettings()[key];
   const storageBefore = localStorage.getItem(SETTINGS_KEY);
