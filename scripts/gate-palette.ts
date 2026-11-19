@@ -71,7 +71,8 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await page.keyboard.press("Escape");
   await gateWait.playwright(sheet, "waitFor", { state: "hidden", timeout: 10_000 });
 
-  await page.keyboard.press("ControlOrMeta+,");
+  await page.keyboard.press("ControlOrMeta+k");
+  await runCommand("display settings", "display settings");
   await gateWait.playwright(settings, "waitFor", { state: "visible", timeout: 10_000 });
   await page.keyboard.press("?");
   await gateWait.playwright(sheet, "waitFor", { state: "visible", timeout: 10_000 });

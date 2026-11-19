@@ -6,6 +6,7 @@ import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFoc
 import { PageChatCatalog, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
+import { ModuleFrame, ModuleState } from "./surface/ModuleState";
 import { SurfaceNav } from "./surface/SurfaceNav";
 import type { SurfaceRoute } from "./surface/routes";
 
@@ -33,6 +34,8 @@ const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
 export function AppShell({ current, nav, workspace, connectionStatus, hasComposer, banner, header, children }: Props) {
   const { canWrite = false, serverForcesAsk = false, onNewChat, onToggleCreateMode } = workspace ?? {};
+  const settingsPlace = current.id === "settings";
+  const displaySettings = Boolean(workspace) || settingsPlace;
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -111,7 +114,7 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
         event.preventDefault();
         event.stopPropagation();
         if (!narrow) collapse();
-      } else if (workspace && event.key === ",") {
+      } else if (displaySettings && event.key === ",") {
         event.preventDefault();
         event.stopPropagation();
         const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
@@ -128,7 +131,7 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
       }
     };
     addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
-  }, [workspace, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
+  }, [workspace, displaySettings, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (isEditableTarget(event)) return;
@@ -142,12 +145,14 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
   }, [workspace, shortcutsOpen, paletteOpen]);
 
-  const commands: PaletteEntry[] = !workspace ? [] : [
-    ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat?.(); } }],
-    ...loading || workspace.createEnabled === undefined || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode?.() }],
-    { id: "display-settings", label: "display settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
-    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
-    { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
+  const commands: PaletteEntry[] = [
+    ...loading || !canWrite || !workspace ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat?.(); } }],
+    ...loading || workspace?.createEnabled === undefined || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode?.() }],
+    ...displaySettings ? [{ id: "display-settings", label: "display settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) }] : [],
+    ...workspace ? [
+      { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
+      { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
+    ] : [],
   ];
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
@@ -161,9 +166,11 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
-      <PageChatCatalog.Provider value={catalog}>{children}</PageChatCatalog.Provider>
+      <PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
+        <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
+      </ModuleFrame> : children}</PageChatCatalog.Provider>
     </main>
-    {workspace && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
+    {displaySettings && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} onClose={closePalette} />}
   </div>;

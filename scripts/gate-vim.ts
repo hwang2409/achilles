@@ -16,7 +16,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   };
   if (screenshotDir) await page.setViewportSize({ width: 1440, height: 900 });
   const settingsDialog = page.getByRole("dialog", { name: "settings" });
-  const openSettings = () => page.locator("aside.sidebar").getByRole("button", { name: /settings/ }).click();
+  const openSettings = () => page.keyboard.press(appShortcut("Comma"));
   const setVim = async (enabled: boolean) => {
     await openSettings();
     await gateWait.playwright(settingsDialog, "waitFor", { state: "visible", timeout: 10_000 });
@@ -26,14 +26,27 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
   };
   const setComposerTypography = async () => {
-    await openSettings();
-    await gateWait.playwright(settingsDialog, "waitFor", { state: "visible", timeout: 10_000 });
-    await settingsDialog.getByRole("group", { name: "UI font" }).getByRole("button", { name: "IBM Plex Sans" }).click();
-    await settingsDialog.getByRole("group", { name: "code font" }).getByRole("button", { name: "IBM Plex Mono" }).click();
-    await settingsDialog.getByRole("group", { name: "font size" }).getByRole("button", { name: "16" }).click();
-    await settingsDialog.getByRole("option", { name: "gruvbox-dark" }).click();
-    await settingsDialog.getByRole("button", { name: "esc" }).click();
-    await gateWait.playwright(settingsDialog, "waitFor", { state: "hidden", timeout: 10_000 });
+    // Open in another tab to keep the workspace and its draft mounted during the live typography check.
+    const link = page.getByRole("navigation", { name: "places" }).getByRole("region", { name: "manage" }).getByRole("link", { name: "settings", exact: true });
+    const [settingsPage] = await Promise.all([page.waitForEvent("popup", { timeout: 10_000 }), link.click({ modifiers: ["ControlOrMeta"] })]);
+    try {
+      await gateWait.playwright(settingsPage.getByText("display settings are here for now. more settings come later.", { exact: true }), "waitFor");
+      const displaySettings = settingsPage.getByRole("button", { name: "display settings", exact: true });
+      if (process.env.SCREENSHOT_DIR) await settingsPage.screenshot({ path: join(process.env.SCREENSHOT_DIR, "v5-settings-entry.png") });
+      await displaySettings.click();
+      const dialog = settingsPage.getByRole("dialog", { name: "settings" });
+      await gateWait.playwright(dialog, "waitFor", { state: "visible", timeout: 10_000 });
+      await dialog.getByRole("group", { name: "UI font" }).getByRole("button", { name: "IBM Plex Sans" }).click();
+      await dialog.getByRole("group", { name: "code font" }).getByRole("button", { name: "IBM Plex Mono" }).click();
+      await dialog.getByRole("group", { name: "font size" }).getByRole("button", { name: "16" }).click();
+      await dialog.getByRole("option", { name: "gruvbox-dark" }).click();
+      await dialog.getByRole("button", { name: "esc" }).click();
+      await gateWait.playwright(dialog, "waitFor", { state: "hidden", timeout: 10_000 });
+      await gateWait.playwright(settingsPage, "waitForFunction", () => document.activeElement?.textContent === "display settings");
+    } finally {
+      await settingsPage.close();
+      await page.bringToFront();
+    }
   };
   const withDeadline = async <T>(promise: Promise<T>, label: string) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -88,6 +101,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
   if (await stockField.inputValue() !== multilineStockDraft) throw new Error(`stock remount row: expected ${JSON.stringify(multilineStockDraft)}, got ${JSON.stringify(await stockField.inputValue())}`);
 
   await setComposerTypography();
+  await waitFor(async () => await stockField.evaluate((element) => getComputedStyle(element).fontFamily.includes("IBM Plex Mono")), "display settings reached the mounted composer");
   const plainTypography = await stockField.evaluate((element) => { const style = getComputedStyle(element); return { family: style.fontFamily, size: style.fontSize }; });
   if (!plainTypography.family.includes("IBM Plex Mono") || plainTypography.size !== "16px") throw new Error(`plain composer ignored code font or size settings: ${JSON.stringify(plainTypography)}`);
   await screenshot("plain-after");
