@@ -1405,8 +1405,6 @@ with _database() as db:
   await field.focus();
   for (const width of [1000, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
-    await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const state = await resizeComposer.evaluate((composer) => ({ focused: document.activeElement === composer, active: document.activeElement?.tagName, draft: (composer as HTMLTextAreaElement).value }));
     if (!state.focused || state.draft !== resizeDraft)
@@ -2156,9 +2154,7 @@ with _database() as db:
     await rawSummary.click();
     await waitFor(async () => {
       await rawGeometry();
-      await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
-    await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       const settled = await rawGeometry();
       return Boolean(settled.rawBox && settled.nextBox && settled.nextText.includes("layout updated") && settled.nextBox.y >= settled.rawBox.y + settled.rawBox.height);
     }, "raw disclosure reopened after cleanup");
