@@ -1,5 +1,5 @@
 import { PageChatHeader } from "./PageChatHeader";
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
@@ -9,6 +9,8 @@ import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, 
 import type { ZetaClient } from "@fulcrum/zeta";
 import { TelemetryModule } from "./telemetry/TelemetryModule";
 import { AppShell, isTelemetryPath, titleOf } from "./AppShell";
+import { AuthErrorRecovery } from "./chat/AuthErrorRecovery";
+import { CommandOutput, useComposerCommands } from "./composer/ComposerCommands";
 import { PlainComposer } from "./composer/PlainComposer";
 import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT_LABEL } from "./composer/composer-machine";
@@ -38,7 +40,14 @@ const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
 const fences: Fences = new Proxy({}, { get: () => CodeFence });
 const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
-const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ({ id }) => <Fallback id={id} /> };
+const AuthRecoveryContext = createContext<{ id: string; sessionId: string; client: ZetaClient; canWrite: boolean; onNewChat: () => void } | null>(null);
+function ErrorRow({ id }: { id: string }) {
+  const recovery = useContext(AuthRecoveryContext);
+  const item = useItem(id);
+  const code = item?.type === "error" && item.event.type === "error" ? item.event.error.code : undefined;
+  return recovery?.id === id ? <AuthErrorRecovery key={`${recovery.sessionId}:${id}:${recovery.canWrite}`} {...recovery} code={code} /> : <Fallback id={id} />;
+}
+const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles.
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
@@ -72,8 +81,10 @@ function usePageChatSheet() {
 }
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity }: { sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, readyId, canWrite }: { client: ZetaClient | null; readyId: string | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
+  const commandOpener = useRef<HTMLElement | null>(null);
+  const commands = useComposerCommands(client, readyId, canWrite);
   const draft = useSyncExternalStore(
     (listener) => {
       const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
@@ -98,6 +109,12 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     fromNewChat,
     onActivity,
     questionWaiting,
+    onCommand: (command: Parameters<typeof commands.run>[0]) => {
+      const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
+      commandOpener.current = field ?? null;
+      return commands.run(command);
+    },
+    commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
@@ -111,6 +128,21 @@ function VimLoading() {
 
 function activeLastState(waiting: number, outcome: string, turn: "idle" | "running") {
   return waiting ? "approval" : outcome === "failed" ? "failed" : turn === "running" ? "running" : "idle";
+}
+
+// the row id of the last turn's auth failure, when the chat is idle and its last turn failed to authenticate; else
+// null. the error reaches the client with code "auth_error" (the account that failed is not in the event).
+function authErrorRow(store: ReturnType<typeof createRunStore> | null): string | null {
+  if (!store) return null;
+  const state = store.getState();
+  if (state.turn !== "idle") return null;
+  for (let index = state.outline.length - 1; index >= 0; index -= 1) {
+    const item = store.getItem(state.outline[index]!.id);
+    // the first reply/error/tool/prompt row from the end: a later success ends in a message, so the notice clears
+    if (!item || !["error", "message", "tool", "user"].includes(item.type)) continue;
+    return item.type === "error" && item.event.type === "error" && item.event.error.code === "auth_error" ? item.id : null;
+  }
+  return null;
 }
 
 // the header shows what the user is waiting on: an approval first, another chat's turn, then their own messages, then
@@ -319,7 +351,8 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
     const stop = watchJumpToLatest(store, scroll, setShowJumpToLatest, () => setFollowRequest((value) => value + 1));
     return () => { scroll.removeEventListener("keydown", arrows); stop(); };
   }, [store, transcript]);
-  const lastState = activeLastState(waiting, outcome, turn);
+  const authErrorId = useSyncExternalStore(store?.subscribe ?? (() => () => {}), () => authErrorRow(store));
+  const lastState = activeLastState(waiting, authErrorId ? "failed" : outcome, turn);
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
@@ -341,6 +374,7 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
     return () => removeEventListener("beforeunload", warn);
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
+  const recovery = authErrorId && ready && client ? { id: authErrorId, client, sessionId: ready.sessionId, canWrite, onNewChat: active.newChat } : null;
   const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
@@ -394,7 +428,7 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
             pending: active.toggling ? "saving…" : undefined, error: active.toggleError,
             savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={async () => { await active.toggle(); }} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={async () => { await active.toggle(); }} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -402,7 +436,7 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
         }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
         </section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} readyId={ready?.sessionId ?? null} canWrite={canWrite} />
         </div>
         </div>
         </div>

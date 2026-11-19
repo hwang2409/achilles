@@ -171,6 +171,7 @@ export function PlainComposer(props: ComposerAdapterProps) {
           {queues ? "queue" : steer ? "steer" : "send"}
         </button>
       </div>
+    {props.commandOutput}
     </form>
   );
 }
