@@ -612,7 +612,7 @@ try {
       name: "page show-more non-final",
       run: async () => {
         await reloadShell();
-        const links = page.locator(".page-list a");
+        const links = page.locator(".page-list a[data-page-id]");
         const showMore = page.getByRole("button", { name: "show more pages" });
         await gateWait.playwright(showMore, "waitFor");
         const before = await links.count();
@@ -628,7 +628,7 @@ try {
       name: "page show-more final",
       run: async () => {
         await reloadShell();
-        const links = page.locator(".page-list a");
+        const links = page.locator(".page-list a[data-page-id]");
         const showMore = page.getByRole("button", { name: "show more pages" });
         await gateWait.playwright(showMore, "waitFor");
         const beforeFirst = await links.count();
@@ -648,7 +648,7 @@ try {
       name: "page continuation retry",
       run: async () => {
         await reloadShell();
-        const links = page.locator(".page-list a");
+        const links = page.locator(".page-list a[data-page-id]");
         const showMore = page.getByRole("button", { name: "show more pages" });
         await gateWait.playwright(showMore, "waitFor");
         const before = await links.count();
@@ -688,7 +688,7 @@ try {
           await route.continue();
         };
         await page.route("**/api/pages?**", holdContinuation);
-        const links = page.locator(".page-list a");
+        const links = page.locator(".page-list a[data-page-id]");
         const before = await links.count();
         const search = page.locator(".chat-search input");
         try {
@@ -873,11 +873,11 @@ try {
     await page.screenshot({ path: join(screenshotDir, "page-index-390x760.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
   }
-  console.log("page links at create completion", await page.locator(".page-list a").evaluateAll((links) => links.map((link) => ({ href: (link as HTMLAnchorElement).href, text: link.textContent }))));
+  console.log("page links at create completion", await page.locator(".page-list a[data-page-id]").evaluateAll((links) => links.map((link) => ({ href: (link as HTMLAnchorElement).href, text: link.textContent }))));
   console.log("tool call names", await page.locator('[data-part="timeline-frame"]').evaluateAll((frames) => [...new Set(frames.flatMap((frame) => frame.textContent?.match(/(?:achilles__)?create_page/g) ?? []))]));
   const pageSection = page.locator(".page-list");
   const pageHeading = pageSection.locator(":scope > .list-head");
-  const pageRowHeight = await page.locator(".page-list a").first().evaluate((element) => element.getBoundingClientRect().height);
+  const pageRowHeight = await page.locator(".page-list a[data-page-id]").first().evaluate((element) => element.getBoundingClientRect().height);
   const pageSectionHeight = await pageSection.evaluate((element) => element.clientHeight);
   if (pageSectionHeight < pageRowHeight * 3 || !(await pageHeading.isVisible())) throw new Error(`page section is too short or heading is hidden: ${pageSectionHeight}px for ${pageRowHeight}px rows`);
   const pageCount = pageHeading.locator("b");
