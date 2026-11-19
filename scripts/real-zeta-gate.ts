@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
-import { gateShell } from "./gate-shell";
+import { gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
@@ -13,6 +13,7 @@ import { gateVim } from "./gate-vim";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
+import { surfaceRoutes } from "../apps/web/src/surface/routes";
 import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
 
@@ -407,7 +408,8 @@ with _database() as db:
   const telemetryHttp: string[] = [];
   const recordTelemetryRequest = (request: Request) => telemetryHttp.push(`${request.method()} ${new URL(request.url()).pathname}`);
   const telemetryMethods: string[] = [];
-  const forbiddenHttp = () => telemetryHttp.find((value) => value === "GET /api/pages/telemetry" || value === "GET /api/pages/telemetry/credential");
+  let telemetryConnections = 0;
+  const forbiddenHttp = () => telemetryHttp.find((value) => value.startsWith("GET /api/pages/telemetry"));
   const forbiddenMethods = new Set(["resume", "status", "session_settings", "set_settings", "session_history_and_subscribe", "session_history", "mcp_refresh_tools", "new_session", "abort", "delivery_status", "send", "steer", "approve", "deny"]);
   let telemetryHello = false;
   const decodeFrame = (payload: string | Buffer): { id?: string | number; method?: string; result?: unknown } | null => {
@@ -428,6 +430,7 @@ with _database() as db:
   await legacyTelemetry(telemetryPage);
   telemetryPage.on("request", recordTelemetryRequest);
   telemetryPage.on("websocket", (socket) => {
+    telemetryConnections += 1;
     let helloId: string | number | undefined;
     socket.on("framesent", ({ payload }) => {
       const frame = decodeFrame(payload);
@@ -441,12 +444,14 @@ with _database() as db:
     });
   });
   try {
-    await telemetryPage.goto(`${origin}/telemetry`);
+    await telemetryPage.goto(`${origin}/telemetry/sessions/x`);
     await waitFor(async () => telemetryHello, "telemetry hello");
     const newerZeta = telemetryPage.getByText("telemetry · needs a newer zeta", { exact: true });
     // Let attachment win the race on old builds so the assertion names the side effect, not missing copy.
     await waitFor(async () => Boolean(forbiddenHttp()) || await newerZeta.isVisible(), "telemetry route milestone");
     await telemetryPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "telemetry") throw new Error("telemetry child URL did not select telemetry");
+    if (telemetryConnections !== 1) throw new Error(`telemetry child opened ${telemetryConnections} connections`);
     const attachment = forbiddenHttp();
     if (attachment) throw new Error(`telemetry route started page attachment: ${attachment}`);
     const agentMethods = telemetryMethods.filter((method) => forbiddenMethods.has(method));
@@ -900,6 +905,9 @@ with _database() as db:
   if (new URL(connected.url).port !== String(own.port)) throw new Error("achilles connected to the shared zeta serve");
   const firstSetSettingsBeforeReopen = requests().filter((frame) => frame.method === "set_settings" && frame.params?.session_id === first).length;
   const second = await gateShell(page, first, waitFor, gateWait);
+  const stablePlace = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try { await gateStablePlace(stablePlace, origin, gateWait); }
+  finally { await stablePlace.close(); }
   const focusPaginationSeed = start("uv", ["run", "python", "-c", "from achilles.web import _database; db=_database(); db.executemany(\"INSERT INTO chat(session_id,page_id,title,created_at,updated_at) VALUES(?,'home',?,'2020-01-01T00:00:00Z',?)\", [(f'older-{i:03}', f'older chat {i:02}', f'2020-01-01T00:{i:02}:00Z') for i in range(55)]); db.commit(); db.close()"], env);
   if (!(await waitForExit(focusPaginationSeed, 10_000)) || focusPaginationSeed.exitCode !== 0)
     throw new Error(`focus pagination seed exited ${focusPaginationSeed.exitCode}`);
@@ -1246,6 +1254,13 @@ with _database() as db:
     throw new Error(
       `backend did not receive achilles__create_tool catalog: ${JSON.stringify(backendSchemas)}`,
     );
+  for (const [index, { path }] of surfaceRoutes.entries()) {
+    const refused = await homeMcp(100 + index, "tools/call", {
+      name: "create_page", arguments: { route: path, title: "reserved route probe", layout: { blocks: [] } },
+    });
+    if (!refused.result?.isError || (await fetch(`${origin}/api/pages${path}`)).status !== 404)
+      throw new Error(`create_page did not refuse reserved route ${path}`);
+  }
   const createApproval = page.locator('[data-part="approval"][data-state="pending"]', { hasText: "create_page" });
   const createApprovalBefore = await createApproval.count();
   const createRequestBefore = (JSON.parse(await Bun.file(control).text()).request_count ?? 0) as number;
