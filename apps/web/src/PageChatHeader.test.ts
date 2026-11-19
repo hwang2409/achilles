@@ -1,7 +1,7 @@
 import "./test-dom";
 import { expect, test } from "bun:test";
 import { act, createElement } from "react";
-import { PageChatCatalog, type Chat } from "./AppShell";
+import { PageChatCatalog, type Chat } from "./surface/AgentNavAdapter";
 import { PageChatHeader } from "./PageChatHeader";
 
 const { fireEvent, render } = await import("@testing-library/react");

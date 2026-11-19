@@ -1,62 +1,38 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
-import { firstFocusable, hasAppModifier, isEditableTarget, isMac, modKey, restorableFocus, useModalFocus } from "./keyboard";
-import { PageChatCatalog, pageHref, useAgentNavAdapter, type Chat, type PageLink } from "./surface/AgentNavAdapter";
+import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFocus, useFocusAfterCommit, useModalFocus } from "./keyboard";
+import { PageChatCatalog, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
-export { PageChatCatalog, timeLabel, titleOf, type Chat } from "./surface/AgentNavAdapter";
+import { SurfaceNav } from "./surface/SurfaceNav";
+import type { SurfaceRoute } from "./surface/routes";
+
+type WorkspaceActions = {
+  canWrite: boolean;
+  serverForcesAsk?: boolean;
+  createEnabled?: boolean;
+  onNewChat: () => Promise<void>;
+  onToggleCreateMode: () => Promise<unknown>;
+};
 
 type Props = {
-  page: PageLink | null;
-  sessionId: string | null;
-  waiting: number;
-  serverForcesAsk?: boolean;
-  canWrite?: boolean;
-  hasComposer: boolean;
+  current: SurfaceRoute;
+  nav: ReturnType<typeof useAgentNavAdapter>;
+  workspace?: WorkspaceActions;
+  connectionStatus: { label: string; connected: boolean };
+  hasComposer?: boolean;
   banner?: ReactNode;
   header?: ReactNode;
   children: ReactNode;
-  refreshKey: number;
-  pageRefreshKey: number;
-} & (
-  | {
-      agentActions?: true;
-      onNewChat: () => Promise<void>;
-      onToggleCreateMode: () => Promise<unknown>;
-      onSelectChat: (chat: Chat) => void;
-      onRenameChat: (chat: Chat, title: string) => void;
-    }
-  | {
-      agentActions: false;
-      onNewChat?: never;
-      onToggleCreateMode?: never;
-      onSelectChat?: never;
-      onRenameChat?: never;
-    }
-);
+};
 
-export const isTelemetryPath = (pathname: string) => pathname === "/telemetry" || pathname.startsWith("/telemetry/");
-
-function useFocusAfterCommit() {
-  const pending = useRef<(() => HTMLElement | null) | null>(null);
-  useLayoutEffect(() => {
-    const target = pending.current;
-    pending.current = null;
-    target?.()?.focus();
-  });
-  const [, commit] = useState(0);
-  return (target: () => HTMLElement | null) => {
-    pending.current = target;
-    commit((value) => value + 1);
-  };
-}
-
-// short heights use the drawer too: a phone on its side cannot spare 288px for the sidebar. matches style.css.
+// Short screens use a drawer too. Keep this breakpoint in sync with shell.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, canWrite = false, hasComposer, banner, header, children, agentActions, onNewChat, onToggleCreateMode, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: Props) {
+export function AppShell({ current, nav, workspace, connectionStatus, hasComposer, banner, header, children }: Props) {
+  const { canWrite = false, serverForcesAsk = false, onNewChat, onToggleCreateMode } = workspace ?? {};
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -70,7 +46,9 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
   const paletteOpener = useRef<Element | null>(null);
   const shortcutsOpener = useRef<Element | null>(null);
   const requestFocus = useFocusAfterCommit();
-  const { loading, query, clearSearch, searchControl, lists, catalog, pageEntries, searchChats } = useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat, onRenameChat, refreshKey, pageRefreshKey, onSelect: () => setDrawer(false), requestFocus });
+  const { loading, query, clearSearch, catalog, pageEntries } = nav;
+  const collapse = () => setCollapsed((value) => !value);
+  const dismissDrawer = () => setDrawer(false);
   const closeDrawer = () => { requestFocus(() => restorableFocus(menuButton.current)); setDrawer(false); };
   const openSettings = (opener: Element | null) => {
     setSettingsOpen((open) => {
@@ -132,69 +110,61 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
       } else if (key === "b") {
         event.preventDefault();
         event.stopPropagation();
-        if (!narrow) setCollapsed((value) => !value);
-      } else if (agentActions !== false && event.key === ",") {
+        if (!narrow) collapse();
+      } else if (workspace && event.key === ",") {
         event.preventDefault();
         event.stopPropagation();
         const opener = paletteOpen ? paletteOpener.current : (document.activeElement instanceof Element ? document.activeElement : null);
         if (paletteOpen) closePalette();
         openSettings(opener);
-      } else if (agentActions !== false && event.shiftKey && key === "o") {
+      } else if (workspace && event.shiftKey && key === "o") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading && canWrite) void onNewChat();
-      } else if (agentActions !== false && event.key === ".") {
+        if (!loading && canWrite) void onNewChat?.();
+      } else if (workspace && event.key === ".") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading && canWrite) void onToggleCreateMode();
+        if (!loading && canWrite) void onToggleCreateMode?.();
       }
     };
     addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
-  }, [agentActions, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
+  }, [workspace, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (isEditableTarget(event)) return;
-      if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); }
-      if (agentActions !== false && event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
+      if (event.key === "/") {
+        event.preventDefault();
+        const search = restorableFocus(sidebar.current?.querySelector(".chat-search input") ?? null);
+        if (search) search.focus(); else openPalette();
+      }
+      if (workspace && event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); openShortcuts(activeElement()); }
     };
     addEventListener("keydown", key); return () => removeEventListener("keydown", key);
-  }, [agentActions, shortcutsOpen]);
+  }, [workspace, shortcutsOpen, paletteOpen]);
 
-  const commands: PaletteEntry[] = agentActions === false ? [] : [
-    ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
-    ...loading || !page || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
-    { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
+  const commands: PaletteEntry[] = !workspace ? [] : [
+    ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat?.(); } }],
+    ...loading || workspace.createEnabled === undefined || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode?.() }],
+    { id: "display-settings", label: "display settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
     { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
   ];
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <aside ref={sidebar} className="sidebar" aria-label="sidebar" aria-hidden={narrow && !drawer ? "true" : undefined} inert={narrow && !drawer ? true : undefined}>
-      <div className="brand-row"><span className="brand-mark" /><strong>achilles</strong></div>
-      {agentActions !== false && <button className="new-chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : undefined} onClick={() => { setDrawer(false); if (canWrite) void onNewChat(); }}><span>+</span><b>new chat</b><kbd>⌘⇧O</kbd></button>}
-      {searchControl}
-      <nav className="place-nav" aria-label="places">
-        <a className="telemetry-link" href={pageHref("/telemetry")} aria-current={isTelemetryPath(location.pathname) ? "page" : undefined}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-            <path d="M1 8h3l2-4 3 8 2-4h4" />
-          </svg>
-          <b>telemetry</b>
-        </a>
-      </nav>
-      {lists}
-      <footer>{agentActions !== false && <SettingsControl onOpen={openSettings} className="settings-button" />}<button type="button" className="palette-button" aria-label="command palette" aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"} onClick={openPalette}><kbd>{modKey("K")}</kbd></button></footer>
-    </aside>
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createEnabled={workspace?.createEnabled}
+      action={workspace && <button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={() => { setDrawer(false); if (canWrite) void onNewChat?.(); }}><span aria-hidden="true">+</span><b>new chat</b><kbd>{modKey("⇧O")}</kbd></button>}
+      search={nav.searchControl(dismissDrawer)} catalog={current.id !== "pages" && nav.pages()} recent={nav.recent(dismissDrawer)} settings={workspace && <SettingsControl onOpen={openSettings} className="settings-button" />} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className="shell-header">
-        <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
+        <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
       <PageChatCatalog.Provider value={catalog}>{children}</PageChatCatalog.Provider>
     </main>
-    {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
-    {agentActions !== false && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
-    {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={searchChats} onClose={closePalette} />}
+    {workspace && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
+    {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
+    {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} onClose={closePalette} />}
   </div>;
 }

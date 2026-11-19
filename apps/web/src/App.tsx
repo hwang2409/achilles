@@ -7,8 +7,9 @@ import { CodeFence } from "./chat/CodeFence";
 import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { TelemetryModule } from "./telemetry/TelemetryModule";
-import { AppShell, isTelemetryPath, titleOf } from "./AppShell";
+import { AppShell } from "./AppShell";
+import { titleOf, useAgentNavAdapter } from "./surface/AgentNavAdapter";
+import type { SurfaceRoute } from "./surface/routes";
 import { AuthErrorRecovery } from "./chat/AuthErrorRecovery";
 import { CommandOutput, useComposerCommands } from "./composer/ComposerCommands";
 import { PlainComposer } from "./composer/PlainComposer";
@@ -22,7 +23,7 @@ import { EmptyChat } from "./EmptyChat";
 import { isEditableTarget, keyboardFocusToComposer, useModalFocus } from "./keyboard";
 import { useSettings } from "./settings";
 import { createApprovalDecider } from "./zeta/approvals";
-import { backoff, createConnection, isObserverPresentation, supportsFeature, type Connection, type ConnectionState } from "./zeta";
+import { backoff, supportsFeature, type Connection, type ConnectionState } from "./zeta";
 import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
@@ -189,39 +190,11 @@ function connectionFailure(state: ConnectionState): string | null {
   }
 }
 
-export function App() {
-  const [{ connection, readOnly }] = useState(() => {
-    // Navigation between telemetry and chat loads a new document.
-    const readOnly = isTelemetryPath(location.pathname);
-    return { connection: createConnection({ origin: location.origin, readOnly }), readOnly };
-  });
-  const [client, setClient] = useState(connection.client);
-  const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
-  useEffect(() => {
-    setClient(connection.client);
-    const unsubscribe = connection.subscribe(() => setClient(connection.client));
-    return () => { unsubscribe(); connection.stop(); };
-  }, [connection]);
-  const observer = isObserverPresentation(connectionState, connection.observerPresentation);
-  const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
-  if (readOnly) {
-    const connecting = connectionState.phase === "connected" || (connectionState.phase === "connecting" && connectionState.attempt === 0);
-    return (
-      <AppShell agentActions={false} banner={observerBanner} page={null} sessionId={null} waiting={0} hasComposer={false} refreshKey={0} pageRefreshKey={0}>
-        {client ? <TelemetryModule client={client} pathname={location.pathname} /> : (
-          <div className="full-state"><p role="status">{connecting ? "connecting to zeta…" : "could not connect to zeta · retrying automatically"}</p></div>
-        )}
-      </AppShell>
-    );
-  }
-  return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} />;
-}
-
-function AgentSurface({ connection, client, connectionState, observerBanner }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode }) {
+export function AgentSurface({ connection, client, connectionState, observerBanner, current, homeAlias, connectionStatus }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode; current: SurfaceRoute; homeAlias?: string; connectionStatus: { label: string; connected: boolean } }) {
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
   const readOnlyReason = READ_ONLY_REASON;
-  const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite);
+  const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias);
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
@@ -442,7 +415,14 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
         </div>
       </RunProvider>}
   </>;
-  return <AppShell banner={observerBanner} header={activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  const nav = useAgentNavAdapter({
+    sessionId: ready?.sessionId ?? null, waiting, canWrite, onSelectChat: active.selectChat,
+    onRenameChat: (chat, text) => { if (canWrite) void active.rename(chat.session_id, text); },
+    refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
+  });
+  return <AppShell current={current} nav={nav} connectionStatus={connectionStatus} banner={observerBanner} hasComposer={hasComposer}
+    workspace={{ canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createEnabled: activePage?.create_mode, onNewChat: active.newChat, onToggleCreateMode: active.toggle }}
+    header={activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}>{content}</AppShell>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {
@@ -534,24 +514,6 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
   auth_failed: "zeta refused this page",
   incompatible: "zeta version mismatch",
 };
-
-function ObserverBanner({ connection, readOnly }: { connection: Connection; readOnly: boolean }) {
-  const [working, setWorking] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const takeControl = async () => {
-    setWorking(true); setFeedback(null);
-    const reason = await connection.takeControl();
-    setWorking(false);
-    setFeedback(reason);
-  };
-  return <aside className="observer-banner" aria-label="observer mode">
-    <div>
-      <strong>{readOnly ? "this page is read-only" : "another tab controls zeta"}</strong>
-      <span>{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
-    </div>
-    {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => void takeControl()} disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div>}
-  </aside>;
-}
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {
   const text = connectionFailure(state) ?? "connecting to zeta…";

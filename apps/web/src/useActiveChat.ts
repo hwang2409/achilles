@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
-import type { Chat } from "./AppShell";
+import type { Chat } from "./surface/AgentNavAdapter";
 import { supportsFeature } from "./zeta";
 import { getSettings } from "./settings";
 import { draftStore } from "./draftStore";
@@ -226,7 +226,7 @@ export async function attachPage(
 }
 
 const selectedFromUrl = () => new URLSearchParams(location.search).get("chat");
-const keyFromPath = () => location.pathname === "/" ? "home" : location.pathname.slice(1);
+const keyFromPath = (homeAlias?: string) => location.pathname === "/" || location.pathname === homeAlias ? "home" : location.pathname.slice(1);
 const routeWithChat = (route: string, sessionId: string) => {
   const url = new URL(route, location.href);
   url.search = location.search;
@@ -473,7 +473,7 @@ export async function confirmSteerDelivery(
   }
 }
 
-export function useActiveChat(client: ZetaClient | null, connected: boolean, clock: AttachmentClock = attachmentClock, canWrite = false) {
+export function useActiveChat(client: ZetaClient | null, connected: boolean, clock: AttachmentClock = attachmentClock, canWrite = false, homeAlias?: string) {
   const [selectedId, setSelectedId] = useState(selectedFromUrl);
   const [state, setState] = useState<State>({ phase: "loading" });
   const [attachSlow, setAttachSlow] = useState(false);
@@ -532,7 +532,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     // read before the offline return: a retry clicked while offline must not stay set for a later, unrelated attach
     const retrying = retryingCreation.current; retryingCreation.current = false;
     if (!client || !connected) return;
-    const token = owner.current.begin(`${keyFromPath()}:${selectedId ?? "default"}`, true);
+    const token = owner.current.begin(`${keyFromPath(homeAlias)}:${selectedId ?? "default"}`, true);
     // Selecting a chat whose tool refresh failed re-attaches it; its retry notice stays until a refresh succeeds.
     setApprovalChange(null);
     const stale = modeToggle.current.stale();
@@ -543,7 +543,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setAttachSlow(false);
     setState((current) => current.phase === "ready" || (retrying && current.phase === "empty") ? current : { phase: "loading" });
     const slowTimer = clock.setTimeout(() => { if (owner.current.current(token)) setAttachSlow(true); }, ATTACH_SLOW_MS);
-    void attachPage(client, keyFromPath(), selectedId, owner.current, creation.current, token, false, canWrite ? applyPendingCreateMode : undefined, async (next) => {
+    void attachPage(client, keyFromPath(homeAlias), selectedId, owner.current, creation.current, token, false, canWrite ? applyPendingCreateMode : undefined, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token);
       else setState(shownCreateMode(modeToggle.current, next));
@@ -564,7 +564,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (owner.current.current(token)) setAttachSlow(false);
     });
     return () => { clock.clearTimeout(slowTimer); owner.current.clear(token); };
-  }, [applyPendingCreateMode, canWrite, client, clock, connected, publishReady, routeRefresh, selectedId, showBusy]);
+  }, [applyPendingCreateMode, canWrite, client, clock, connected, homeAlias, publishReady, routeRefresh, selectedId, showBusy]);
 
   useEffect(() => {
     const pop = () => { owner.current.clear(); setState({ phase: "loading" }); setSelectedId(selectedFromUrl()); };
@@ -583,12 +583,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (state.phase !== "ready") { if (`${location.pathname}${location.search}` !== target) history.pushState({}, "", target); setRouteRefresh((value) => value + 1); }
       return;
     }
-    owner.current.begin(`${keyFromPath()}:${chat.session_id}`);
+    owner.current.begin(`${keyFromPath(homeAlias)}:${chat.session_id}`);
     setState({ phase: "loading" });
     history.pushState({}, "", target);
     setFocusSessionId(null);
     setSelectedId(chat.session_id);
-  }, [selectedId, state.phase]);
+  }, [homeAlias, selectedId, state.phase]);
 
   const continueWaitingChat = useCallback(async () => {
     if (!canWrite) return;
@@ -683,7 +683,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       let handedOff = null as ReadyState | null;
       const attached = await attachPage(
         client,
-        keyFromPath(),
+        keyFromPath(homeAlias),
         null,
         owner.current,
         creation.current,
@@ -703,7 +703,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     } finally {
       focusClaim.release();
     }
-  }, [applyPendingCreateMode, client, publishReady, showBusy]);
+  }, [applyPendingCreateMode, client, homeAlias, publishReady, showBusy]);
 
   // the open chat's work for when zeta is idle (re-send the page binding, apply a pending mode); see createTurnEndOwner
   const turnEnd = useRef<ReturnType<typeof createTurnEndOwner> | null>(null);

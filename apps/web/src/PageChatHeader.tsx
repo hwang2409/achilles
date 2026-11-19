@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
-import { PageChatCatalog, timeLabel, titleOf, type Chat } from "./AppShell";
+import { PageChatCatalog, timeLabel, titleOf, type Chat } from "./surface/AgentNavAdapter";
 import { restorableFocus } from "./keyboard";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./page-chat-header.css";

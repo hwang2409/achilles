@@ -2,6 +2,9 @@ import { createContext, useEffect, useMemo, useRef, useState, type KeyboardEvent
 import { Highlight, type PaletteEntry } from "../CommandPalette";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "../pageList";
 import { useInlineRename } from "../useInlineRename";
+import { useFocusAfterCommit } from "../keyboard";
+import { surfaceHref } from "./routes";
+import { ModuleState } from "./ModuleState";
 import { WRITE_SURFACE } from "../writeSurfaces";
 
 export type PageLink = { id: string; route: string; title: string };
@@ -30,14 +33,8 @@ export const PageChatCatalog = createContext<{
   clearSearch: () => void;
 } | null>(null);
 
-export const pageHref = (route: string) => {
-  const url = new URL(route === "/" ? "/" : route, location.href);
-  url.search = location.search;
-  url.searchParams.delete("chat");
-  return `${url.pathname}${url.search}`;
-};
 const chatHref = (chat: Chat) => {
-  const url = new URL(pageHref(chat.page_route), location.href);
+  const url = new URL(surfaceHref(chat.page_route), location.href);
   url.searchParams.set("chat", chat.session_id);
   return `${url.pathname}${url.search}`;
 };
@@ -80,7 +77,8 @@ const initialPageListState = initialListState<PageLink, null>(null);
 const initialChatListState = initialListState<Chat, number>(0);
 const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : state.loading || state.items === null ? "loading" : "ready";
 
-export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat, onRenameChat, refreshKey, pageRefreshKey, onSelect, requestFocus }: { sessionId: string | null; waiting: number; canWrite: boolean; onSelectChat?: (chat: Chat) => void; onRenameChat?: (chat: Chat, title: string) => void; refreshKey: number; pageRefreshKey: number; onSelect: () => void; requestFocus: (target: () => HTMLElement | null) => void }) {
+export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: { sessionId: string | null; waiting: number; canWrite: boolean; onSelectChat?: (chat: Chat) => void; onRenameChat?: (chat: Chat, title: string) => void; refreshKey: number; pageRefreshKey: number }) {
+  const requestFocus = useFocusAfterCommit();
   const [pagesOpen, setPagesOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -122,15 +120,15 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     for (const chat of chats ?? []) { const group = groupLabel(chat.updated_at); values.set(group, [...(values.get(group) ?? []), chat]); }
     return [...values];
   }, [chats]);
-  const select = (chat: Chat) => {
-    onSelect();
+  const select = (chat: Chat, close: () => void) => {
+    close();
     if (onSelectChat) onSelectChat(chat);
     else location.assign(chatHref(chat));
   };
   // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.
-  const pageEntries = pageRows.map((item): PaletteEntry => ({ id: `page:${item.id}`, label: item.title, detail: item.route, run: () => location.assign(pageHref(item.route)) }));
-  const searchChats = (search: string, before: string | null, signal: AbortSignal, limit = 20) => chatPage(() => null)(search, before, signal, limit)
-    .then((result) => ({ ...result, items: result.items.map((chat): PaletteEntry => ({ id: chat.session_id, label: titleOf(chat), detail: `${chat.page_title} · ${timeLabel(chat.updated_at)}`, run: () => select(chat) })) }));
+  const pageEntries = pageRows.map((item): PaletteEntry => ({ id: `page:${item.id}`, label: item.title, detail: item.route, run: () => location.assign(surfaceHref(item.route)) }));
+  const searchChats = (close: () => void) => (search: string, before: string | null, signal: AbortSignal, limit = 20) => chatPage(() => null)(search, before, signal, limit)
+    .then((result) => ({ ...result, items: result.items.map((chat): PaletteEntry => ({ id: chat.session_id, label: titleOf(chat), detail: `${chat.page_title} · ${timeLabel(chat.updated_at)}`, run: () => select(chat, close) })) }));
   // a row rename (F2 or the pencil) hands focus back to its row: once the editor closes, and again after the
   // list refresh moves the row; it lets go as soon as focus lands anywhere else.
   const renamedRow = useRef<string | null>(null);
@@ -150,7 +148,14 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     const first = chats[0]?.session_id === sessionId;
     const shown = shownCurrent.current;
     shownCurrent.current = { id: sessionId, first };
-    if (shown.id !== sessionId || (first && !shown.first)) row.scrollIntoView({ block: "nearest" });
+    const list = chatListElement.current;
+    if (!list || (shown.id === sessionId && (!first || shown.first))) return;
+    // Only the chat list moves; its selected row must not scroll the places out of view.
+    const item = row.getBoundingClientRect();
+    const bounds = list.getBoundingClientRect();
+    const top = bounds.top + parseFloat(getComputedStyle(list).scrollPaddingTop);
+    if (item.top < top) list.scrollTop += item.top - top;
+    else if (item.bottom > bounds.bottom) list.scrollTop += item.bottom - bounds.bottom;
   }, [sessionId, chats]);
   useEffect(() => { if (returnRowFocus()) renamedRow.current = null; }, [chats]);
   useEffect(() => {
@@ -175,10 +180,10 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     }
     if (next >= 0 && next < rows.length) rows[next].focus();
   };
-  const searchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+  const searchKey = (close: () => void) => (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (!search || !chats?.length) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveResult((value) => (value + (event.key === "ArrowDown" ? 1 : -1) + chats.length) % chats.length); }
-    if (event.key === "Enter") { event.preventDefault(); select(chats[activeResult] ?? chats[0]); }
+    if (event.key === "Enter") { event.preventDefault(); select(chats[activeResult] ?? chats[0], close); }
   };
   const loadOlder = async (initiator: HTMLButtonElement) => {
     const firstPage = await pageListOwner.current!.more();
@@ -199,20 +204,26 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
   return {
     loading, query, pageEntries, searchChats,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
-    searchControl: <>{loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}{waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}</>,
-    lists: <>
-      <section className={`page-list ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`} data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
-        <button className="list-head" onClick={() => setPagesOpen((value) => !value)}><span>pages</span><b>{pageList.error ? "!" : pageList.items === null ? "" : pageList.next ? "20+" : pageRows.length}</b></button>
+    searchControl: (close: () => void) => <>{loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="search chats and pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}{waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}</>,
+    pages: (full = false) => {
+      if (full) {
+        if (pageList.error) return <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: () => void pageListOwner.current!.reload(null) }} />;
+        if (pageList.items === null) return <ModuleState kind="loading" title="reading pages…" />;
+        if (!pageRows.length) return <ModuleState kind="empty" title="no pages yet" />;
+      }
+      return <section className={`page-list ${full ? "catalog-pages" : ""} ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`} data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
+        {!full && <button className="list-head" aria-expanded={pagesOpen} onClick={() => setPagesOpen((value) => !value)}><span>page catalog</span><b>{pageList.error ? "!" : pageList.items === null ? "" : pageList.next ? "20+" : pageRows.length}</b></button>}
         <div className="page-list-scroll">
-          {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload(null)}>retry</button></div> : pageList.items === null ? <SidebarSkeleton count={2} /> : pagesOpen && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={pageHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}</>}
+          {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload(null)}>retry</button></div> : pageList.items === null ? <SidebarSkeleton count={2} /> : (full || pagesOpen) && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={surfaceHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}</>}
         </div>
-      </section>
+      </section>;
+    },
+    recent: (close: () => void) =>
       <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
-        <div className="list-head"><span>chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? select : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? select : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        <div className="list-head"><span>recent chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
-      </section>
-    </>,
+      </section>,
     catalog: {
         chats: search ? [] : chats, loading: Boolean(search) || loading || chatList.loading,
         error: !search && Boolean(chatList.error), next: search ? null : chatList.next,

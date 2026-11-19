@@ -6,9 +6,16 @@ import { cleanup, render } from "@testing-library/react";
 import { createRunStore } from "@fulcrum/core";
 import { RunProvider } from "@fulcrum/react";
 import { AppShell } from "../AppShell";
+import { useAgentNavAdapter } from "../surface/AgentNavAdapter";
+import { chatsRoute } from "../surface/routes";
 import { VimComposer } from "./VimComposer";
 
 afterEach(cleanup);
+
+function VimTestShell({ children }: { children: React.ReactNode }) {
+  const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
+  return React.createElement(AppShell, { current: chatsRoute, nav, connectionStatus: { label: "zeta connected", connected: true }, hasComposer: true }, children);
+}
 
 let chatSeq = 0;
 
@@ -71,18 +78,7 @@ test("app ctrl+b toggles the sidebar from vim normal mode", async () => {
     let container!: HTMLElement;
     await act(async () => {
       const result = render(
-        React.createElement(AppShell, {
-          page: null,
-          sessionId: null,
-          waiting: 0,
-          hasComposer: true,
-          onNewChat: async () => {},
-          onToggleCreateMode: async () => {},
-          onSelectChat: () => {},
-          onRenameChat: () => {},
-          refreshKey: 0,
-          pageRefreshKey: 0,
-        }, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
+        React.createElement(VimTestShell, null, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
           state: "idle" as const,
           onSubmit: async () => {},
           onDraftChange: () => {},
@@ -118,11 +114,7 @@ test("mac ctrl+b stays with vim instead of collapsing the sidebar", async () => 
     let container!: HTMLElement;
     await act(async () => {
       const result = render(
-        React.createElement(AppShell, {
-          page: null, sessionId: null, waiting: 0, hasComposer: true,
-          onNewChat: async () => {}, onToggleCreateMode: async () => {}, onSelectChat: () => {}, onRenameChat: () => {},
-          refreshKey: 0, pageRefreshKey: 0,
-        }, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
+        React.createElement(VimTestShell, null, React.createElement(RunProvider, { store }, React.createElement(VimComposer, {
           state: "idle" as const, onSubmit: async () => {}, onDraftChange: () => {}, onDraftSubmit: () => {},
           chatId: `vim-mac-shell-test-${chatSeq++}`, label: "message",
         }))),

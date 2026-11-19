@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { modKey, wrapTab } from "./keyboard";
 import { createListOwner, initialListState, type ListOwner, type ListPage } from "./pageList";
+import { surfaceHref, surfaceRoutes } from "./surface/routes";
 import "./command-palette.css";
 
 export type PaletteEntry = { id: string; label: string; detail?: string; shortcut?: string; run: () => void };
@@ -44,7 +45,8 @@ export function CommandPalette({ commands, pages, searchChats, onClose }: { comm
 
   const needle = query.trim();
   const match = (entry: PaletteEntry) => entry.label.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
-  const groups: Array<[string, PaletteEntry[]]> = ([["commands", commands.filter(match)], ["pages", pages.filter(match)], ["chats", chats.items ?? []]] as Array<[string, PaletteEntry[]]>).filter(([, entries]) => entries.length);
+  const places = surfaceRoutes.map((route): PaletteEntry => ({ id: `place:${route.id}`, label: route.label, detail: route.path, run: () => location.assign(surfaceHref(route.path)) }));
+  const groups: Array<[string, PaletteEntry[]]> = ([["commands", commands.filter(match)], ["places", places.filter(match)], ["pages", pages.filter(match)], ["chats", chats.items ?? []]] as Array<[string, PaletteEntry[]]>).filter(([, entries]) => entries.length);
   const entries = groups.flatMap(([, rows]) => rows);
   const current = Math.min(active, Math.max(0, entries.length - 1));
   useEffect(() => { list.current?.querySelector(`#palette-option-${current}`)?.scrollIntoView({ block: "nearest" }); }, [current]);
