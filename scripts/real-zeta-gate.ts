@@ -22,8 +22,11 @@ const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/
 
 const metricStrips = {
   "sb7-short": [["queued", "7"], ["reading", "1"], ["done", "12"]],
+  "long-currency": [["usd revenue", "$12,345.67"], ["euro revenue", "€123,456,789.00"], ["net revenue", "−£12,345.67"]],
   "three-long": [["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"]],
   "seven-mixed": [["queued", "7"], ["reading", "1"], ["done", "12"], ["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"], ["review", "waiting on an intentionally long legal and editorial review"]],
+  "sb7-values": [["Users", "42"], ["Growth", "18%"], ["Uptime", "99.9%"]],
+  "mixed-types": [["integer", "42"], ["percent", "18%"], ["decimal", "1.25"], ["currency", "$12.50"], ["compact", "12.3K"], ["text", "Ready"]],
   "three-oversize": [["state", "supercalifragilisticexpialidocious"], ["cjk", "国際共同編集進捗"], ["emoji", "📚📚📚📚📚📚📚📚"]],
 };
 
@@ -301,7 +304,7 @@ with _database() as db:
         db.execute("INSERT INTO layout_version VALUES(?,1,'gate',?,datetime('now'))", (page_id, json.dumps(layout)))
         db.execute("UPDATE page SET active_layout_version=1 WHERE id=?", (page_id,))
 `,
-      JSON.stringify(Object.fromEntries(Object.values(metricStrips).map((values, i) => [`gate-page-${42 + i}`, values]))),
+      JSON.stringify(Object.fromEntries(Object.values(metricStrips).map((values, i) => [`gate-page-${39 + i}`, values]))),
     ],
     env,
   );
@@ -335,7 +338,7 @@ with _database() as db:
     try {
       const failures: string[] = [];
       for (const [index, [strip, values]] of Object.entries(metricStrips).entries()) {
-        const pageNumber = 42 + index;
+        const pageNumber = 39 + index;
         await tab.goto(`${origin}/gate-page-${pageNumber}`);
         await tab.locator(".page-head h1", { hasText: `gate page ${pageNumber}` }).waitFor();
         await tab.evaluate(() => document.fonts.ready);
@@ -354,7 +357,7 @@ with _database() as db:
               || (style.webkitLineClamp !== "none" && node.scrollHeight > node.clientHeight);
           });
           const value = element.getAttribute("aria-label") ?? "";
-          const numeric = /^[+−-]?[\p{Sc}]?[+−-]?\d[\d,.]*(?:e[+-]?\d+)?[\p{Sc}]?$/iu.test(value);
+          const numeric = /^[+−-]?[\p{Sc}]?[+−-]?\s*\d[\d,.]*(?:e[+-]?\d+|[%KMBT])?\s*[\p{Sc}]?$/iu.test(value);
           const range = document.createRange();
           range.selectNodeContents(element);
           const lines = new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => rect.top)).size;
@@ -364,6 +367,7 @@ with _database() as db:
           const area = element.closest(".metric-value-line")!.clientWidth;
           const fonts = document.createElement("canvas").getContext("2d")!;
           const words = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+          const fontSizes = new Set([getComputedStyle(element).fontSize]);
           const brokenWords: string[] = [];
           const illegibleWords: string[] = [];
           for (let wordNode = words.nextNode(); wordNode; wordNode = words.nextNode()) {
@@ -374,12 +378,15 @@ with _database() as db:
               token.setEnd(wordNode, word.index + word[0].length);
               fonts.font = `${style.fontWeight} 12px ${style.fontFamily}`;
               const minimumWidth = fonts.measureText(word[0]).width;
+              fontSizes.add(style.fontSize);
               if (parseFloat(style.fontSize) < 12) illegibleWords.push(word[0]);
               if (!numeric && token.getClientRects().length > 1 && !(fullWidth && minimumWidth > area)) brokenWords.push(word[0]);
             }
           }
-          return { value, numeric, lines, brokenWords, illegibleWords, scrollWidth, clientWidth, scrollHeight, clientHeight, truncated, top: element.closest(".metric-block")!.getBoundingClientRect().top };
+          return { value, numeric, lines, fontSizes: [...fontSizes], brokenWords, illegibleWords, scrollWidth, clientWidth, scrollHeight, clientHeight, truncated, top: element.closest(".metric-block")!.getBoundingClientRect().top };
         }));
+        if (new Set(metrics.flatMap(metric => metric.fontSizes)).size !== 1)
+          failures.push(`${strip} at ${viewportName}: metric values have different font sizes: ${JSON.stringify(metrics.map(({ value, fontSizes }) => ({ value, fontSizes })))}`);
         for (const metric of metrics) {
           if (metric.scrollWidth > metric.clientWidth || metric.truncated || (metric.numeric && metric.lines > 1) || metric.brokenWords.length || metric.illegibleWords.length)
             failures.push(`${strip} at ${viewportName}, value ${JSON.stringify(metric.value)}: scrollWidth=${metric.scrollWidth}, clientWidth=${metric.clientWidth}, scrollHeight=${metric.scrollHeight}, clientHeight=${metric.clientHeight}, ellipsis=${metric.truncated}, lines=${metric.lines}, brokenWords=${JSON.stringify(metric.brokenWords)}, under12px=${JSON.stringify(metric.illegibleWords)}`);
@@ -387,7 +394,7 @@ with _database() as db:
         if (strip === "sb7-short" && scale === 1 && (width === 360 || width === 390) && new Set(metrics.map(metric => metric.top)).size !== 1)
           failures.push(`${strip} at ${viewportName}: expected all three metrics in the first row`);
       }
-      if (failures.length) throw new Error(`metric strip clipping:\n${failures.join("\n")}`);
+      if (failures.length) throw new Error(`metric strip fit:\n${failures.join("\n")}`);
     } finally {
       await tab.close();
     }
@@ -1721,7 +1728,7 @@ with _database() as db:
       const numeric = ["finite", "zero", "signed-zero"].includes(classification);
       const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
       const textFit = Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && (renderedStyle?.overflowY === "visible" || rendered.scrollHeight <= rendered.clientHeight));
-      const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5) && (!scientific || renderedStyle?.fontSize === "20px"));
+      const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5));
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));

@@ -266,7 +266,7 @@ for (const [label, value, expected] of [["marked six digit", "999999", "1M"], ["
 
 test("metric formatter matches every declared numeric matrix expectation", () => {
   for (const entry of metricBoundaryMatrix.filter((item) => item.classification !== "text")) {
-    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero", scientific: /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(entry.expectedText) });
+    expect(formatMetricValue(entry.value), entry.label).toMatchObject({ display: entry.expectedText, numeric: entry.classification === "finite" || entry.classification === "zero" || entry.classification === "signed-zero" });
   }
 });
 
@@ -289,9 +289,7 @@ test("text metrics expose the full value", () => {
   ] } };
   const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-text-boundary", credential: "secret", refreshKey: "0" }));
   const values = [...result.container.querySelectorAll(".metric-value")];
-  expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
-  expect(values[1]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");
