@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
-import { gateShell, gateStablePlace } from "./gate-shell";
+import { gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
@@ -3448,6 +3448,7 @@ with _database() as db:
     }, null, 2) + "\n");
     await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png, observer-refused-390x844.png, observer-refused-1440x900.png, observer-settings-1440x900.png, observer-takeover-no-reload-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
   }
+  await gateCreatePlace(observerPage, origin, gateWait);
   if (process.env.SCREENSHOT_PATH) await observerPage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   passed = true;
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);

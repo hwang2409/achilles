@@ -1,0 +1,52 @@
+.create-split { display: flex; border: 1px solid var(--fulcrum-border); min-height: 36px; }
+.create-split[data-mode="on"], .create-split:has([aria-current="page"]) { border-color: var(--fulcrum-accent); }
+.create-split > .place-link { flex: 1; padding-inline: 9px; min-height: 100%; }
+.create-split button { border-width: 0 0 0 1px; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; min-width: 88px; padding-inline: 6px; }
+.create-split button[aria-pressed="true"] { color: var(--fulcrum-accent); }
+.create-heading { min-height: 56px; flex: none; border-bottom: 1px solid var(--fulcrum-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; }
+.create-heading a { border: 1px solid var(--fulcrum-border); padding: 8px 12px; }
+.create-heading a, .create-landing a { color: inherit; text-decoration: none; }
+.create-heading a:hover, .create-landing a:hover { color: var(--fulcrum-accent); }
+.create-scroll { min-height: 0; overflow: auto; flex: 1; }
+.create-landing { max-width: 928px; margin: 0 auto; padding: 40px 24px; font-size: 14px; }
+.create-landing h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.25; text-wrap: balance; }
+.create-landing p { margin: 0 0 16px; color: var(--fulcrum-muted); text-wrap: pretty; }
+.create-landing form { border: 1px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-fg) 4%, transparent); padding: 10px 12px 0; }
+.create-landing textarea { display: block; width: 100%; resize: vertical; min-height: 56px; padding: 4px; color: inherit; background: transparent; border: 0; font: inherit; }
+.create-landing textarea:focus-visible { outline: 1px solid var(--fulcrum-accent); }
+.create-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
+.create-form-actions span, .create-build-status { color: var(--fulcrum-muted); font-size: 12px; }
+.create-form-actions button { min-width: 112px; min-height: 36px; background: var(--fulcrum-accent); color: var(--fulcrum-bg); padding-inline: 12px; }
+.create-form-actions button[aria-disabled="true"] { opacity: .62; cursor: default; }
+.create-build-status { min-height: 24px; padding-top: 4px; }
+.create-build-status[role="alert"] { color: var(--fulcrum-error, #f78477); }
+.create-starters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.create-starters button { min-height: 36px; padding: 4px 12px; font-size: 12px; }
+.create-landing section { margin-top: 32px; }
+.create-landing section header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.create-landing section header :is(a, span), .create-landing small { color: var(--fulcrum-muted); font-size: 12px; }
+.create-landing h2 { margin: 0; font-size: 15px; }
+.create-landing ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.create-landing li > a { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; }
+.create-landing li[data-state] { border-left: 2px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 6%, transparent); }
+.create-landing li[data-state="approval"] { border-color: #e7b957; background: color-mix(in srgb, #e7b957 9%, transparent); }
+.create-landing li[data-state="failed"] { border-color: var(--fulcrum-error, #f78477); }
+.create-landing li span, .create-landing .create-made a { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.create-landing li span + span { text-align: right; }
+.create-landing li b { font-size: 12px; }
+.create-landing .create-made { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.create-made li { border: 1px solid var(--fulcrum-border); }
+@media (min-width: 761px) and (min-height: 501px) {
+  .sidebar-collapsed .create-split button { display: none; }
+}
+@media (max-width: 760px), (max-height: 500px) {
+  .create-split { flex: 1; min-height: 44px; }
+  .create-split button { min-width: 44px; }
+  .create-split button span { display: none; }
+  .create-heading { min-height: 48px; padding-inline: 16px; }
+  .create-heading a { min-height: 40px; display: flex; align-items: center; }
+  .create-landing { padding: 24px 16px; }
+  .create-landing textarea { font-size: 16px; }
+  .create-landing button { min-height: 44px; }
+  .create-landing .create-made { grid-template-columns: 1fr; }
+}

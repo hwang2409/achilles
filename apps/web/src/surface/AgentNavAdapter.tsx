@@ -7,7 +7,7 @@ import { surfaceHref } from "./routes";
 import { ModuleState } from "./ModuleState";
 import { WRITE_SURFACE } from "../writeSurfaces";
 
-export type PageLink = { id: string; route: string; title: string };
+export type PageLink = { id: string; route: string; title: string; created_by_route?: string | null };
 
 export type Chat = {
   session_id: string;
@@ -33,7 +33,7 @@ export const PageChatCatalog = createContext<{
   clearSearch: () => void;
 } | null>(null);
 
-const chatHref = (chat: Chat) => {
+export const chatHref = (chat: Chat) => {
   const url = new URL(surfaceHref(chat.page_route), location.href);
   url.searchParams.set("chat", chat.session_id);
   return `${url.pathname}${url.search}`;
@@ -202,6 +202,7 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
 
   return {
     loading, query, pageEntries, searchChats,
+    pageCatalog: pageList,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
     searchControl: (close: () => void) => <>{loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="search chats / pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}{waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}</>,
     counts: {

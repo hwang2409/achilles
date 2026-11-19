@@ -5,7 +5,7 @@ import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, type Connection } from "../zeta";
 import { useAgentNavAdapter } from "./AgentNavAdapter";
 import { ModuleFrame, ModuleState } from "./ModuleState";
-import { chatsRoute, matchSurfaceRoute, type SurfaceRoute } from "./routes";
+import { chatsRoute, createRoute, matchSurfaceRoute, type SurfaceRoute } from "./routes";
 
 const connectionLabels: Partial<Record<Connection["state"]["phase"], string>> = { connected: "zeta connected", connecting: "connecting to zeta", not_running: "zeta is not running" };
 
@@ -13,7 +13,7 @@ export function SurfaceRouter() {
   const [{ route, pathname, connection, readOnly }] = useState(() => {
     const pathname = location.pathname;
     const route = matchSurfaceRoute(pathname);
-    const readOnly = route !== undefined && (route.capability !== "agent" || route.id !== "chats");
+    const readOnly = route !== undefined && route !== chatsRoute && route !== createRoute;
     return { route, pathname, connection: createConnection({ origin: location.origin, readOnly }), readOnly };
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -23,10 +23,11 @@ export function SurfaceRouter() {
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
-  if (!route || route.id === "chats") {
+  if (!readOnly) {
     return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner}
-      current={chatsRoute} homeAlias={route?.path} connectionStatus={connectionStatus} />;
+      current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} />;
   }
+  if (!route) return null;
   const connecting = phase === "connected" || (phase === "connecting" && connectionState.attempt === 0);
   let content: ReactNode;
   if (route.id === "telemetry") {

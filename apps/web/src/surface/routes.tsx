@@ -31,7 +31,7 @@ export const surfaceRoutes = ([
 export type SurfaceRoute = (typeof surfaceRoutes)[number];
 export const matchSurfaceRoute = (pathname: string) => surfaceRoutes.find((route) => route.match(pathname));
 export const chatsRoute = surfaceRoutes[0];
-export const createRoute = surfaceRoutes.find((route) => !route.group)!;
+export const createRoute = surfaceRoutes.find((route) => route.id === "create")!;
 
 export const surfaceHref = (path: string) => {
   const url = new URL(path, location.href);

@@ -1,4 +1,5 @@
 import type { ReactNode, Ref } from "react";
+import type { CreateModeOwner } from "../create/createMode";
 import { isMac, modKey } from "../keyboard";
 import { createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./routes";
 
@@ -11,7 +12,7 @@ function PlaceLink({ route, current, detail, count }: { route: SurfaceRoute; cur
   </a>;
 }
 
-export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createEnabled, action, search, counts, recent, connectionStatus }: {
+export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus }: {
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
   narrow: boolean;
@@ -20,7 +21,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   onClose: () => void;
   onCollapse: () => void;
   openPalette: () => void;
-  createEnabled?: boolean;
+  createMode?: CreateModeOwner;
   action?: ReactNode;
   search: ReactNode;
   counts: Partial<Record<string, string>>;
@@ -36,7 +37,14 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
     <div className="sidebar-scroll">
       <div className="surface-actions">
         {action}
-        <PlaceLink route={createRoute} current={current} detail={createEnabled ? "on · this page" : undefined} />
+        <div className="create-split" data-mode={createMode?.enabled ? "on" : undefined}>
+          <PlaceLink route={createRoute} current={current} />
+          {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
+            aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
+            title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>
+            {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}<span aria-hidden="true"> {createMode.error ? "!" : "· this page"}</span>
+          </button>}
+        </div>
       </div>
       <div className="surface-search">
         {search}

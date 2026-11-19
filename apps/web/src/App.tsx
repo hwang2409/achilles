@@ -9,7 +9,9 @@ import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, 
 import type { ZetaClient } from "@fulcrum/zeta";
 import { AppShell } from "./AppShell";
 import { titleOf, useAgentNavAdapter } from "./surface/AgentNavAdapter";
-import type { SurfaceRoute } from "./surface/routes";
+import { chatsRoute, createRoute, type SurfaceRoute } from "./surface/routes";
+import { CreateLanding } from "./create/CreateLanding";
+import type { CreateModeOwner } from "./create/createMode";
 import { AuthErrorRecovery } from "./chat/AuthErrorRecovery";
 import { CommandOutput, useComposerCommands } from "./composer/ComposerCommands";
 import { PlainComposer } from "./composer/PlainComposer";
@@ -194,7 +196,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
   const readOnlyReason = READ_ONLY_REASON;
-  const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias);
+  const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias, createRoute.path);
+  const landing = location.pathname === createRoute.path;
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
   const busyPage = active.state.phase === "busy" ? active.state : null;
@@ -367,9 +370,19 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     : active.creatingChat ? "creating chat…" : empty || (ready && !ready.sent) ? "already in a new chat"
     : state === "running" || state === "approval" || active.busy ? "wait for the running chat to finish" : undefined;
   const [createReceipt, setCreateReceipt] = useState<{ pageId: string; sessionId?: string; enabled: boolean; at: Date } | null>(null);
+  const createMode: CreateModeOwner | undefined = !landing && activePage ? {
+    available: connected && canWrite && !active.creatingChat && (!active.toggleBlocked || active.toggleRetryable),
+    enabled: activePage.create_mode, pending: active.toggling, error: active.toggleError,
+    async toggle() {
+      if (!createMode?.available || createMode.pending) return;
+      setCreateReceipt(null);
+      const result = await active.toggle();
+      if (result && !result.error && result.createMode !== null) setCreateReceipt({ pageId: activePage!.id, sessionId: ready?.sessionId, enabled: result.createMode, at: new Date() });
+    },
+  } : undefined;
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
-    {activePage && active.toggleError && <div className="create-mode-alert" role="alert" hidden={hasBlocks && !active.toggleRetryable}><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
+    {activePage && active.toggleError && <div className="create-mode-alert" role="alert" hidden={hasBlocks && !active.toggleRetryable}><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={createMode?.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
@@ -393,15 +406,11 @@ export function AgentSurface({ connection, client, connectionState, observerBann
             reason: !canWrite ? readOnlyReason : (ready ?? empty)?.serverApprovalMode === "ask" ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
             pending: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
             error: active.approvalChange?.error, savedAt: active.approvalChange?.savedAt }}
-          create={{ checked: activePage.create_mode, action: canWrite ? async () => {
-            setCreateReceipt(null);
-            const result = await active.toggle();
-            if (result && !result.error && result.createMode !== null) setCreateReceipt({ pageId: activePage.id, sessionId: ready?.sessionId, enabled: result.createMode, at: new Date() });
-          } : undefined, reason: !canWrite ? readOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined,
-            pending: active.toggling ? "saving…" : undefined, error: active.toggleError,
+          create={{ checked: createMode?.enabled ?? false, action: createMode?.available ? createMode.toggle : undefined, reason: !canWrite ? readOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined,
+            pending: createMode?.pending ? "saving…" : undefined, error: createMode?.error,
             savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
           close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={async () => { await active.toggle(); }} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={createMode?.toggle ?? (async () => {})} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <AuthRecoveryContext.Provider value={recovery}><Timeline renderers={appRenderers} virtual followRequest={followRequest} /></AuthRecoveryContext.Provider>}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -420,9 +429,11 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     onRenameChat: (chat, text) => { if (canWrite) void active.rename(chat.session_id, text); },
     refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
   });
-  return <AppShell current={current} nav={nav} connectionStatus={connectionStatus} banner={observerBanner} hasComposer={hasComposer}
-    workspace={{ canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createEnabled: activePage?.create_mode, onNewChat: active.newChat, onToggleCreateMode: active.toggle }}
-    header={activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}>{content}</AppShell>;
+  return <AppShell current={landing ? createRoute : current === createRoute ? chatsRoute : current} nav={nav} connectionStatus={connectionStatus} banner={observerBanner} hasComposer={!landing && hasComposer}
+    workspace={landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", onNewChat: active.newChat, createMode }}
+    header={!landing && activePage && createMode && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} createMode={createMode} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}>
+    {landing ? <CreateLanding build={active.build} nav={nav} /> : content}
+  </AppShell>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {
@@ -445,7 +456,7 @@ function runStateLabel(state: string, queued: number) {
   return state === "approval" ? "needs you" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state;
 }
 
-function ChatHeader({ page, docked, sessionId, title, state, queued, toggling, disabled, toggle, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
+function ChatHeader({ page, docked, sessionId, title, state, queued, createMode, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; queued: number; createMode: CreateModeOwner; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
   const [overflow, setOverflow] = useState(false);
   const overflowButton = useRef<HTMLButtonElement>(null);
   const actions = useRef<HTMLDivElement>(null);
@@ -492,8 +503,8 @@ function ChatHeader({ page, docked, sessionId, title, state, queued, toggling, d
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, [onRename, rename.editing, sessionId, title]);
-  const modeLabel = toggling ? `turning ${page.create_mode ? "off" : "on"} create mode…` : `◻ create mode${page.create_mode ? " on" : ""}`;
-  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" data-write-surface={WRITE_SURFACE.headerCreate} aria-label={toggling ? modeLabel : page.create_mode ? "create mode on" : "create mode off"} aria-pressed={page.create_mode ? "true" : "false"} disabled={disabled} onClick={() => { if (inMenu) closeOverflow(); toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button>}</>;
+  const modeLabel = createMode.pending ? `turning ${createMode.enabled ? "off" : "on"} create mode…` : `◻ create ${createMode.enabled ? "on" : "off"}`;
+  const controls = (inMenu: boolean, withHistory = true) => <><span className={`approval-mode mode-${page.approval_mode ?? "ask"}`} aria-label={page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}>{page.approval_mode === "allow" ? "auto-approve" : "ask before tools"}</span><button type="button" data-write-surface={WRITE_SURFACE.headerCreate} aria-label={createMode.pending ? modeLabel : createMode.enabled ? "create mode on" : "create mode off"} aria-pressed={createMode.enabled ? "true" : "false"} disabled={!createMode.available || createMode.pending} onClick={() => { if (inMenu) closeOverflow(); void createMode.toggle(); }}>{modeLabel}</button>{withHistory && <button type="button" onClick={(event) => { if (inMenu) closeOverflow(); onHistory(inMenu ? overflowButton.current : event.currentTarget); }}>history</button>}</>;
   const titleNode = rename.editing
     ? <input className="chat-title-edit" aria-label="chat title" {...rename.bind()} />
     : <strong ref={titleControl} title={title} aria-label={title} data-write-surface={WRITE_SURFACE.headerRename} data-session-id={sessionId ?? undefined} role={onRename ? "button" : undefined} tabIndex={onRename ? 0 : undefined} onClick={startRename} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startRename(); } }}>{title}</strong>;
@@ -502,7 +513,7 @@ function ChatHeader({ page, docked, sessionId, title, state, queued, toggling, d
   // when the header is tight the CSS-hidden .fold-long parts drop: "auto-approve" becomes "auto" and
   // "create mode" becomes its hollow square alone; role="img" plus aria-label keeps the full name for screen readers.
   const autoApprove = page.approval_mode === "allow";
-  const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
+  const foldMarkers = (autoApprove || createMode.enabled) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{createMode.enabled && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
   const routeLabel = page.route === "/" ? "home" : page.route.replace(/^\//, "");
   if (docked) return <header className="chat-header"><div className="chat-heading"><span title={routeLabel}>pages / {routeLabel}</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button></div></header>;
   return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status">{runStateLabel(state, queued)}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;

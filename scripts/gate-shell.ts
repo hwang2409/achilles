@@ -205,3 +205,93 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
     }
   }
 }
+
+export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateWait) {
+  type Rpc = { method?: string; params?: { session_id?: string; delivery_id?: string; text?: string } };
+  const requests: Rpc[] = [];
+  tab.on("websocket", (socket) => socket.on("framesent", ({ payload }) => requests.push(JSON.parse(String(payload)) as Rpc)));
+  const capture = async (state: string, width: number, height = width === 390 ? 844 : 900) => {
+    if (process.env.SCREENSHOT_DIR) await tab.screenshot({ path: `${process.env.SCREENSHOT_DIR}/v5-create-${state}-${width}x${height}.png`, animations: "disabled" });
+  };
+  const theme = "?theme=gruvbox-dark";
+  const landingUrl = `${origin}/create${theme}`;
+  const readHome = async () => {
+    const response = await tab.request.get(`${origin}/api/pages/home`);
+    if (!response.ok()) throw new Error(`home lookup failed: ${response.status()}`);
+    return await response.json() as { id: string; create_mode: boolean };
+  };
+  await tab.goto(landingUrl);
+  const connected = tab.locator('.surface-connection[data-connected="true"]');
+  await gateWait.playwright(connected, "waitFor", { state: "attached" });
+  if (await tab.locator('.create-split a[aria-current="page"]').getAttribute("href") !== `/create${theme}` || await tab.locator(".create-split button").count()) throw new Error("create is not selected as a place without a switch");
+  await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });
+  const build = tab.getByRole("button", { name: "build page", exact: true });
+  const prompt = tab.getByRole("textbox", { name: "describe your page" });
+  await tab.setViewportSize({ width: 390, height: 844 });
+  await tab.getByRole("button", { name: "a reading list with statuses" }).click();
+  if (await prompt.inputValue() !== "a reading list with statuses" || !await prompt.evaluate((element) => element === document.activeElement) || requests.some(({ method }) => method === "send" || method === "new_session")) throw new Error("starter did more than fill and focus the prompt");
+  const measure: number[] = [];
+  for (const width of [390, 1280, 1440, 1920]) {
+    const height = width === 390 ? 844 : 900;
+    await tab.setViewportSize({ width, height });
+    await tab.evaluate(() => document.fonts.ready.then(() => undefined));
+    if (await tab.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error(`create page overflow at ${width}px`);
+    measure.push((await tab.locator(".create-landing").boundingBox())!.width);
+    await capture("landing", width);
+    if (width === 390) {
+      await tab.getByRole("button", { name: "open menu" }).press("Enter");
+      await capture("drawer", width);
+      await tab.keyboard.press("Escape");
+      await tab.setViewportSize({ width, height: 430 });
+      await prompt.focus();
+      await build.scrollIntoViewIfNeeded();
+      if (!(await build.evaluate((element) => element.getBoundingClientRect().bottom <= innerHeight))) throw new Error("build button is unreachable in a short mobile viewport");
+    }
+  }
+  if (measure[2] !== measure[3]) throw new Error(`create content stretched: ${measure.join(", ")}`);
+  await tab.setViewportSize({ width: 1440, height: 900 });
+  const draft = "  a synthetic reading list\nwith tags  ";
+  await prompt.fill(draft);
+  const home = await readHome();
+  const modePath = `${origin}/api/pages/${home.id}/create-mode`;
+  if (home.create_mode) {
+    const disabled = await tab.request.post(modePath, { data: { enabled: false } });
+    if (!disabled.ok()) throw new Error("could not set up create-off home fixture");
+  }
+  const mode: unknown[] = [];
+  const registrations: Array<{ pageId: string; sessionId: string }> = [];
+  tab.on("request", (request) => {
+    const path = new URL(request.url()).pathname.match(/^\/api\/pages\/([^/]+)\/chats$/);
+    if (path && request.method() === "POST") registrations.push({ pageId: path[1], sessionId: request.postDataJSON().session_id });
+  });
+  await tab.route(modePath, async (route) => {
+    mode.push(route.request().postDataJSON());
+    if (mode.length === 1) {
+      await capture("pending", 1440);
+      await route.fulfill({ status: 503, json: { error: "synthetic refusal" } });
+    } else await route.continue();
+  });
+  await build.evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });
+  await gateWait.playwright(tab.getByRole("alert").filter({ hasText: "could not update create mode (503)" }), "waitFor");
+  if (tab.url() !== landingUrl || await prompt.inputValue() !== draft || registrations.length !== 1 || requests.filter(({ method }) => method === "new_session").length !== 1 || requests.some(({ method }) => method === "send") || mode.length !== 1) throw new Error("refused build changed route/draft or duplicated a write");
+  await gateWait.playwright(tab, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "describe your page");
+  await capture("refused", 1440);
+  await tab.getByRole("button", { name: "retry build" }).click();
+  const sessionId = registrations[0].sessionId;
+  const target = `${origin}/${theme}&chat=${encodeURIComponent(sessionId)}`;
+  await gateWait.playwright(tab, "waitForURL", target);
+  await gateWait.playwright(tab.locator(`[data-session-id="${sessionId}"]`).first(), "waitFor", { state: "visible" });
+  const sends = requests.filter(({ method }) => method === "send" || method === "steer");
+  if (registrations.length !== 1 || registrations[0].pageId !== home.id || requests.filter(({ method }) => method === "new_session").length !== 1 || JSON.stringify(mode) !== '[{"enabled":true},{"enabled":true}]' || !(await readHome()).create_mode || sends.length !== 1 || sends[0].params?.session_id !== sessionId || sends[0].params?.text !== draft || !/^[0-9a-f-]{36}$/.test(sends[0].params?.delivery_id ?? "")) throw new Error("build did not deliver exactly once to its registered home chat in create mode");
+  const toggle = tab.getByRole("button", { name: "toggle create mode for this page" });
+  if (await toggle.getAttribute("aria-pressed") !== "true") throw new Error("contextual switch did not reflect build mode");
+  await capture("chat-on", 1440);
+  await tab.setViewportSize({ width: 390, height: 844 });
+  await capture("chat-on", 390);
+  await tab.setViewportSize({ width: 1280, height: 900 });
+  await gateWait.playwright(tab.locator(".run-state.state-running"), "waitFor", { state: "hidden" });
+  await toggle.click();
+  await gateWait.playwright(tab.locator('.create-split button[aria-pressed="false"]'), "waitFor");
+  await tab.getByRole("button", { name: "collapse sidebar" }).click();
+  await capture("chat-off-rail", 1280);
+}

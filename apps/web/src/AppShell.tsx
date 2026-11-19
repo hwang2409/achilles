@@ -8,14 +8,14 @@ import { WRITE_SURFACE } from "./writeSurfaces";
 
 import { ModuleFrame, ModuleState } from "./surface/ModuleState";
 import { SurfaceNav } from "./surface/SurfaceNav";
+import type { CreateModeOwner } from "./create/createMode";
 import type { SurfaceRoute } from "./surface/routes";
 
 type WorkspaceActions = {
   canWrite: boolean;
   serverForcesAsk?: boolean;
-  createEnabled?: boolean;
+  createMode?: CreateModeOwner;
   onNewChat: () => Promise<void>;
-  onToggleCreateMode: () => Promise<unknown>;
 };
 
 type Props = {
@@ -33,7 +33,7 @@ type Props = {
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
 export function AppShell({ current, nav, workspace, connectionStatus, hasComposer, banner, header, children }: Props) {
-  const { canWrite = false, serverForcesAsk = false, onNewChat, onToggleCreateMode } = workspace ?? {};
+  const { canWrite = false, serverForcesAsk = false, onNewChat, createMode } = workspace ?? {};
   const settingsPlace = current.id === "settings";
   const displaySettings = Boolean(workspace) || settingsPlace;
   const [collapsed, setCollapsed] = useState(false);
@@ -124,14 +124,14 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
         event.preventDefault();
         event.stopPropagation();
         if (!loading && canWrite) void onNewChat?.();
-      } else if (workspace && event.key === ".") {
+      } else if (createMode && event.key === ".") {
         event.preventDefault();
         event.stopPropagation();
-        if (!loading && canWrite) void onToggleCreateMode?.();
+        if (!loading) void createMode.toggle();
       }
     };
     addEventListener("keydown", key, true); return () => removeEventListener("keydown", key, true);
-  }, [workspace, displaySettings, canWrite, loading, narrow, onNewChat, onToggleCreateMode, paletteOpen, drawer]);
+  }, [workspace, displaySettings, canWrite, loading, narrow, onNewChat, createMode, paletteOpen, drawer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (isEditableTarget(event)) return;
@@ -147,7 +147,7 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
 
   const commands: PaletteEntry[] = [
     ...loading || !canWrite || !workspace ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat?.(); } }],
-    ...loading || workspace?.createEnabled === undefined || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode?.() }],
+    ...loading || !createMode?.available || createMode.pending ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), detail: createMode.enabled ? "on · this page" : "off · this page", run: () => void createMode.toggle() }],
     ...displaySettings ? [{ id: "display-settings", label: "display settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) }] : [],
     ...workspace ? [
       { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) },
@@ -157,7 +157,7 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createEnabled={workspace?.createEnabled}
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode}
       action={workspace && <button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={() => { setDrawer(false); if (canWrite) void onNewChat?.(); }}><span aria-hidden="true">+</span><b>new chat</b><kbd>{modKey("⇧O")}</kbd></button>}
       search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
