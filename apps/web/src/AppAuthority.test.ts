@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 type Options = { browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
@@ -47,16 +47,16 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
       requests.push(method);
       if (!reads.has(method)) writes.push(method);
       const custom = options.rpc?.[method]?.(params, requests);
-      const response = custom ?? (method === "hello" && authority === "observer" && params.role === "controller"
+      const response = method === "hello" && authority === "observer" && params.role === "controller"
         ? { error: { code: -32001, message: "controller occupied" } }
-        : { result: ({
+        : custom ?? { result: ({
           hello: { protocol_version: "1.2", capabilities: { features: params.features } },
           new_session: { session: { session_id: "session" } },
           resume: { session: { session_id: "session" } },
           session_settings: { approval_mode: "allow" }, status,
           send: { accepted: true }, steer: { accepted: true }, delivery_status: { status: "delivered" },
           session_history_and_subscribe: { messages: [], next_before: null, status, ...options.joined },
-        } as Record<string, unknown>)[method] ?? {} });
+        } as Record<string, unknown>)[method] ?? {} };
       void Promise.resolve(response).then((reply) => emit({ jsonrpc: "2.0", id, ...reply }));
     }
   }
@@ -216,6 +216,36 @@ const approval = (action: "approve" | "deny"): Row => button(`[data-part="approv
 const modify = { ...insert, name: "edit_book", operation: "update" };
 const existingBook = { record_id: "book-id", revision: 1, title: "Old book" };
 
+const accountFixture: Options = {
+  attached: true,
+  joined: { messages: [{ id: "prompt", role: "user", content: [{ type: "text", text: "fixture prompt" }], failed_turn: { code: "auth_error", message: "fixture login failed" } }] },
+  rpc: {
+    hello: (params) => params.role === "observer"
+      ? { result: { protocol_version: "1.2", capabilities: { features: params.features } } }
+      : { result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["account_list", "account_switch", "login_start", "login_status"] } } },
+    account_list: () => ({ result: { accounts: [
+      { account: "anthropic:default", current: true, available: true },
+      { account: "anthropic:personal", current: false, available: true },
+    ] } }),
+    login_start: (params) => ({ result: params.provider === "claude" ? { state: "succeeded" } : { state: "failed" } }),
+  },
+};
+const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "visible", options: accountFixture, check: async (app, authority, writes, requests) => {
+  const card = select(app, ".transcript .chat-auth-error");
+  const control = select(app, tag(id));
+  expect(disabled(control)).toBe(authority === "observer");
+  await click(control);
+  if (authority === "observer") {
+    expect(card.textContent).toContain("this chat is pinned to its account, which failed to sign in.");
+    expect(card.textContent).toContain("read-only");
+    expect(card.textContent).not.toContain("anthropic:");
+    expect(requests).not.toContain("account_list");
+  } else {
+    didWrite(writes, request);
+    if (id === "auth.login") expect(card.textContent).toContain("logged in. send your message again");
+  }
+} });
+
 const rows: Record<WriteSurfaceId, Row> = {
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
@@ -256,6 +286,27 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/edit_book/invoke");
   } },
 
+  "auth.login": recoveryWrite("auth.login", "login_start"),
+  "auth.switch": recoveryWrite("auth.switch", "account_switch"),
+  "auth.new-chat": recoveryWrite("auth.new-chat", "new_session"),
+  "composer.account-switch": { kind: "command", options: accountFixture, check: async (app, authority, writes, requests) => {
+    const run = async (text: string) => {
+      const field = select(app, '[data-part="composer"] textarea');
+      await change(field, text);
+      await keydown(field, "Enter");
+    };
+    if (authority === "observer") {
+      expect(select(app, '[data-part="composer-reason"]').textContent).toContain("read-only");
+      expect(requests).not.toContain("account_list");
+      return;
+    }
+    await run("/accounts");
+    await click(select(app, tag("composer.account-switch")));
+    expect(writes.filter((write) => write === "account_switch")).toHaveLength(1);
+    await run("/accounts anthropic:personal");
+    expect(writes.filter((write) => write === "account_switch")).toHaveLength(2);
+    expect(writes).not.toContain("send");
+  } },
   "settings.theme": setting("settings.theme", "theme", ' button[aria-selected="false"]'),
   "settings.ui-font": setting("settings.ui-font", "uiFont", ' button[aria-pressed="false"]'),
   "settings.code-font": setting("settings.code-font", "codeFont", ' button[aria-pressed="false"]'),

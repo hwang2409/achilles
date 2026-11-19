@@ -180,5 +180,6 @@ function InteractiveVimComposer(props: ComposerAdapterProps) {
       {running && onStop ? <button ref={stopButtonRef} type="button" data-part="composer-stop" data-write-surface={WRITE_SURFACE.composerAbort} data-action="stop" aria-label="stop the running turn" aria-disabled={model.stopping || undefined} onClick={stop}>{model.stopping ? "stopping" : "stop"}</button> : null}
       <button type="submit" data-part="composer-submit" data-write-surface={steer ? WRITE_SURFACE.composerSteer : WRITE_SURFACE.composerSend} data-action={queues ? "queue" : steer ? "steer" : "send"} aria-label={queues ? "queue message" : steer ? "steer the running turn" : "send message"} aria-disabled={!action || undefined}>{queues ? "queue" : steer ? "steer" : "send"}</button>
     </div>}
-  </form>;
+  {props.commandOutput}
+    </form>;
 }
