@@ -48,7 +48,7 @@ const nativeModal = (event: KeyboardEvent) => {
   }
 };
 
-export function useModalFocus(open: boolean, container: RefObject<HTMLElement | null>, initial?: RefObject<HTMLElement | null>) {
+export function useModalFocus(open: boolean, container: RefObject<HTMLElement | null>, initial?: RefObject<HTMLElement | null>, preserveFocus = false) {
   useLayoutEffect(() => {
     if (!open) return;
     const node = container.current;
@@ -58,9 +58,9 @@ export function useModalFocus(open: boolean, container: RefObject<HTMLElement | 
       wrapTab(event, node);
     };
     window.addEventListener("keydown", key, true);
-    (initial?.current ?? firstFocusable(node))?.focus();
+    if (!preserveFocus || !node.contains(document.activeElement)) (initial?.current ?? firstFocusable(node))?.focus();
     return () => window.removeEventListener("keydown", key, true);
-  }, [open, container, initial]);
+  }, [open, container, initial, preserveFocus]);
 }
 
 export function wrapTab(event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault">, container: HTMLElement) {
