@@ -344,7 +344,7 @@ try {
     };
     return {
       viewport: { width: innerWidth, height: innerHeight },
-      mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches,
+      mobileQuery: matchMedia("(width < 1280px)").matches,
       pageChat: describe(document.querySelector(".page-chat")),
       surface: describe(document.querySelector(".page-chat-surface")),
       transcript: describe(document.querySelector(".transcript")),
@@ -944,6 +944,46 @@ try {
   await field.press("Enter", { timeout: 20_000 });
   await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (screenshotDir) {
+    const captureInsets = async (width: number) => {
+      const surface = page.locator(".page-chat-docked .page-chat-surface");
+      const user = surface.locator('[data-part="message-content"]').filter({ hasText: /^open created page$/ });
+      await gateWait.playwright(user, "waitFor", { state: "visible" });
+      const insets = await surface.evaluate((node) => {
+        const user = [...node.querySelectorAll('[data-part="message-content"]')].find((row) => row.textContent === "open created page")!.closest('[data-virtual-id]')!;
+        const reply = [...node.querySelectorAll('[data-part="message"][data-role="assistant"]')].find((row) => row.textContent === "new page ready")!;
+        const transcript = node.querySelector(".transcript")!;
+        const left = node.getBoundingClientRect().left;
+        return { user: user.getBoundingClientRect().left - left, reply: reply.getBoundingClientRect().left - left, transcript: transcript.getBoundingClientRect().left - left };
+      });
+      console.log(`page chat message insets at ${width}px: ${JSON.stringify(insets)}`);
+      if (screenshotDir) await page.screenshot({ path: join(screenshotDir, `page-chat-transcript-${width}.png`), animations: "disabled" });
+    };
+    // Capture the narrow fixture via its manual opener; the focused resize is tested below.
+    await field.evaluate((composer) => (composer as HTMLElement).blur());
+    for (const width of [1280, 1440, 1920, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      if (width === 390) await page.locator(".page-chat-bar").click();
+      await captureInsets(width);
+    }
+    await page.getByRole("button", { name: "close page chat", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+  const resizeComposer = await field.elementHandle();
+  if (!resizeComposer) throw new Error("page chat resize: no composer before resize");
+  const resizeDraft = "draft survives resize";
+  await field.fill(resizeDraft);
+  await field.focus();
+  for (const width of [1000, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const state = await resizeComposer.evaluate((composer) => ({ focused: document.activeElement === composer, active: document.activeElement?.tagName, draft: (composer as HTMLTextAreaElement).value }));
+    if (!state.focused || state.draft !== resizeDraft)
+      throw new Error(`page chat resize to ${width}px did not keep the same composer focused with its draft: ${JSON.stringify(state)}`);
+  }
+  await resizeComposer.dispose();
+  await field.fill("");
+  console.log("page chat resize kept the same composer focused and retained its draft in both directions");
   if (await chatCount() !== chatsBeforeReading + 1) throw new Error("first created-page send did not create exactly one chat");
   if (zetaSessionCount() !== sessionsBeforeReading + 1) throw new Error("first created-page send did not create exactly one zeta session");
   await page.goto(origin);
@@ -1366,7 +1406,26 @@ try {
       throw new Error(`closed frame target is not visible and unobscured: ${JSON.stringify(frame)}`);
   };
   await captureBlockState("page-chat-closed", page.locator(".record-form-actions button.primary:not(:disabled)"), 844, 900, async (viewport) => {
-    if (viewport === "390px") await assertClosedFrame(viewport);
+    if (viewport === "390px") {
+      await assertClosedFrame(viewport);
+      return;
+    }
+    const dock = await page.locator(".page-view.docked").evaluate((grid) => {
+      const pane = grid.querySelector<HTMLElement>(":scope > .page-content")!;
+      const rail = grid.querySelector<HTMLElement>(":scope > .page-chat")!;
+      return {
+        tracks: getComputedStyle(grid).gridTemplateColumns,
+        paneWidth: pane.getBoundingClientRect().width,
+        railWidth: rail.getBoundingClientRect().width,
+        divider: getComputedStyle(rail).borderLeftWidth,
+        modal: Boolean(rail.querySelector('[role="dialog"], [aria-modal], .page-chat-backdrop, [aria-label="close page chat"]')),
+        composers: rail.querySelectorAll("#message-composer").length,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    if (dock.tracks !== `${dock.paneWidth}px 360px` || dock.railWidth !== 360 || dock.divider !== "1px" || dock.modal || dock.composers !== 1 || dock.overflow)
+      throw new Error(`${viewport} page chat has incorrect dock geometry: ${JSON.stringify(dock)}`);
+    console.log(`${viewport} page chat dock: ${JSON.stringify(dock)}`);
   });
   await page.setViewportSize({ width: 390, height: 760 });
   const pageChatBar = page.locator(".page-chat-bar");
@@ -1411,7 +1470,7 @@ try {
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
-  const focusAfterChatClick = await page.evaluate(() => ({ active: { tag: document.activeElement?.tagName, id: (document.activeElement as HTMLElement | null)?.id, className: (document.activeElement as HTMLElement | null)?.className, aria: document.activeElement?.getAttribute("aria-label"), insideModal: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')) }, barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), layout: { mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop, surface: (() => { const node = document.querySelector<HTMLElement>(".page-chat-surface"); const style = node && getComputedStyle(node); return node && style ? { connected: node.isConnected, visibility: style.visibility, transform: style.transform, transition: style.transition } : null; })() } }));
+  const focusAfterChatClick = await page.evaluate(() => ({ active: { tag: document.activeElement?.tagName, id: (document.activeElement as HTMLElement | null)?.id, className: (document.activeElement as HTMLElement | null)?.className, aria: document.activeElement?.getAttribute("aria-label"), insideModal: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')) }, barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), layout: { mobileQuery: matchMedia("(width < 1280px)").matches, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop, surface: (() => { const node = document.querySelector<HTMLElement>(".page-chat-surface"); const style = node && getComputedStyle(node); return node && style ? { connected: node.isConnected, visibility: style.visibility, transform: style.transform, transition: style.transition } : null; })() } }));
   if (!focusAfterChatClick.active.insideModal || focusAfterChatClick.active.aria !== "close page chat") throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify({ preChatClick, focusAfterChatClick, chat: await pageChatLayout() })}`);
   const preTabFocus = await page.evaluate(() => ({
     inside: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')),
@@ -2711,12 +2770,13 @@ try {
           const rect = element.getBoundingClientRect();
           return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
         };
+        const rail = surface?.closest(".page-chat-docked");
         const evidenceRect = evidenceElement?.getBoundingClientRect();
         const point = evidenceRect && document.elementFromPoint(evidenceRect.left + Math.min(8, evidenceRect.width / 2), evidenceRect.top + Math.min(8, evidenceRect.height / 2));
         return {
-          mobileQuery: matchMedia("(max-width: 1099px) and (min-height: 501px)").matches,
+          mobileQuery: matchMedia("(width < 1280px)").matches,
           barVisible: visible(bar),
-          docked: Boolean(surface?.closest(".page-view.docked")),
+          docked: rail?.getBoundingClientRect().width === 360 && getComputedStyle(rail).borderLeftWidth === "1px",
           surfaceVisible: visible(surface),
           surfaceRole: surface?.getAttribute("role"),
           surfaceAriaModal: surface?.getAttribute("aria-modal"),
@@ -2803,10 +2863,10 @@ try {
       origin,
       zeta: zetaRef,
       timestamps: { started: new Date().toISOString(), completed: new Date().toISOString() },
-      viewports: ["390x760", "1440x900"],
+      viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored"],
-      artifacts: ["observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png"],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
