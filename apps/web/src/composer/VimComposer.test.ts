@@ -14,7 +14,7 @@ afterEach(cleanup);
 
 function VimTestShell({ children }: { children: React.ReactNode }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
-  return React.createElement(AppShell, { current: chatsRoute, nav, connectionStatus: { label: "zeta connected", connected: true }, hasComposer: true }, children);
+  return React.createElement(AppShell, { current: chatsRoute, nav, newChat: { available: false, run: () => {} }, connectionStatus: { label: "zeta connected", connected: true }, hasComposer: true }, children);
 }
 
 let chatSeq = 0;
