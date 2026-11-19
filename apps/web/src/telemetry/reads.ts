@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ZetaClient } from "@fulcrum/zeta";
+import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
 import { errorKey, mergePage, modelKey, modelTrends, toolKey, type AggregateTab } from "./aggregates";
+import { readDetail, type DetailData, type DetailTarget } from "./detail-read";
 import type { SessionsQuery } from "./Sessions";
 import { telemetryClient, type Window } from "./telemetry-client";
 import type { ErrorPage, ErrorRow, ModelRow, Operation, Page, SeriesPoint, SeriesRow, TelemetryOverview, TelemetrySession, TelemetryStatus, ToolRow } from "./telemetry-types";
@@ -19,7 +20,7 @@ const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (now
  * What a read asks for: a new object per user choice, so a reply answers the choice on screen only when its `ask` is
  * that object. `window` is set while paging, because zeta ties a cursor to the window and filters that issued it.
  */
-export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window | null; aggregate?: AggregateChoice };
+export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window | null; aggregate?: AggregateChoice; detail?: DetailTarget };
 
 type AggregatePage =
   | { tab: "models"; page: Page<ModelRow>; trends: ReturnType<typeof modelTrends> }
@@ -30,6 +31,7 @@ type AggregateChoice = { tab: Tab; operation: Operation | null; prefix?: Aggrega
 
 export type Loaded =
   | AggregateLoaded
+  | ({ ask: Ask; tab: "detail" } & DetailData)
   | { ask: Ask; tab: "overview"; status: TelemetryStatus; overview: TelemetryOverview }
   | { ask: Ask; tab: "sessions"; status: TelemetryStatus; total: number; page: Page<TelemetrySession>; window: Window };
 
@@ -55,43 +57,61 @@ export const browserEnv: ReadEnv = {
 };
 
 /** The newest reply (`data`, read at `updatedAt`, epoch ms) stays after a failed or running read. */
-type Snapshot = { data?: Loaded; updatedAt?: number; error?: unknown; reading: boolean; hidden: boolean };
+type Snapshot = { data?: Loaded; updatedAt?: number; error?: unknown; errorAsk?: Ask; retrying?: boolean; reading: boolean; hidden: boolean };
+
+/** A read can heal after a dropped connection, timeout, or a transient serve error. */
+function canRetryRead(error: unknown): boolean {
+  if (error instanceof ZetaError) return error.kind === "closed" || error.kind === "output_overflow";
+  const rpc = error as { code?: unknown; data?: { retryable?: unknown; reason?: unknown } } | null;
+  switch (rpc?.code) {
+    case -32004: return rpc.data?.reason !== "parked_limit"; // active work can finish
+    case -32005: // unavailable state (including telemetry not yet initialized)
+    case -32008: // account lock timeout, not an observer permission error
+    case -32009: return rpc.data?.retryable === true; // stale snapshot or settings writer, not a stale revision
+    case -32011: return true; // output overflow closes the socket
+    default: return rpc?.code === undefined && error instanceof Error
+      && (error.message === "transport closed" || error.message === "request timed out");
+  }
+}
 
 /**
  * The one owner of telemetry reads. It reads the current ask now, then every `POLL_MS` while the page is visible, and
  * again on focus, `want()` or a new ask. At most one read runs: anything asked for during a read becomes one follow-up
- * read after it. A hidden page reads nothing and drops that follow-up; showing it again reads at once. `stop()` drops
- * the reply in flight.
+ * read after it. A hidden page reads nothing and drops that follow-up. A non-retryable error waits for `want()` or
+ * a new ask, even after focus or visibility changes. `stop()` drops the reply in flight.
  */
 function createReader(load: (ask: Ask) => Promise<Loaded>, ask: Ask, env: ReadEnv, onChange: (snapshot: Snapshot) => void) {
   let snapshot: Snapshot = { reading: false, hidden: !env.visible() };
-  let queued = false;
+  let queued: "auto" | "explicit" | undefined;
   let timer: unknown = null;
   let stopped = false;
   const emit = (patch: Partial<Snapshot>) => { snapshot = { ...snapshot, ...patch, hidden: !env.visible() }; onChange(snapshot); };
   const clear = () => { if (timer !== null) { env.clearTimer(timer); timer = null; } };
-  const want = () => {
+  const autoAllowed = () => snapshot.errorAsk !== ask || snapshot.retrying;
+  const want = (explicit = true) => {
     if (stopped) return;
     clear();
-    if (!env.visible()) { queued = false; emit({}); return; }
-    if (snapshot.reading) { queued = true; return; }
+    if (!env.visible()) { queued = undefined; emit({}); return; }
+    if (snapshot.reading) { queued = explicit ? "explicit" : queued ?? "auto"; return; }
+    if (!explicit && !autoAllowed()) { emit({}); return; }
     void read();
   };
   const read = async () => {
-    queued = false;
+    queued = undefined;
     emit({ reading: true });
+    const request = ask;
     let result: Partial<Snapshot>;
-    try { result = { data: await load(ask), updatedAt: Date.now(), error: undefined }; }
-    catch (error) { result = { error }; }
+    try { result = { data: await load(request), updatedAt: Date.now(), error: undefined, errorAsk: undefined, retrying: false }; }
+    catch (error) { result = { error, errorAsk: request, retrying: canRetryRead(error) }; }
     if (stopped) return;
     emit({ ...result, reading: false });
-    if (queued) want();
-    else if (env.visible()) timer = env.setTimer(() => { timer = null; want(); }, POLL_MS);
+    if (queued) want(queued === "explicit");
+    else if (env.visible() && autoAllowed()) timer = env.setTimer(() => { timer = null; want(false); }, POLL_MS);
   };
   const unwatch = env.watch((event) => {
-    if (event !== "hidden") return want();
+    if (event !== "hidden") return want(false);
     clear();
-    queued = false;
+    queued = undefined;
     emit({});
   });
   want();
@@ -103,9 +123,9 @@ function createReader(load: (ask: Ask) => Promise<Loaded>, ask: Ask, env: ReadEn
   };
 }
 
-async function loadTelemetry(client: ZetaClient, ask: Ask): Promise<Loaded> {
-  const reads = telemetryClient(client);
+async function loadTelemetry(reads: ReturnType<typeof telemetryClient>, ask: Ask): Promise<Loaded> {
   const { range, query } = ask;
+  if (ask.detail) return { ask, tab: "detail", ...await readDetail(reads, ask.detail) };
   if (ask.tab === "overview") {
     const overview = await reads.overview(windowOf(range), RANGES[range].bucket);
     return { ask, tab: "overview", status: overview.status, overview };
@@ -149,7 +169,7 @@ async function loadModelTrends(reads: ReturnType<typeof telemetryClient>, window
 }
 
 const firstPage: SessionsQuery = { cursors: [null], errorsOnly: false, profile: null, model: null };
-type Choice = Omit<Ask, "tab">;
+type Choice = Omit<Ask, "tab" | "detail" | "aggregate">;
 
 /**
  * The read state of the telemetry pages. `phase` is `loading` (a read runs and this tab has nothing to show),
@@ -159,23 +179,28 @@ type Choice = Omit<Ask, "tab">;
  * fresh window; paging is off until the reply for the current ask arrives, and a cursor goes out only with the
  * filters and window of the page that issued it.
  */
-export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = browserEnv) {
+export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = browserEnv, detail?: DetailTarget) {
   const [choice, setChoice] = useState<Choice>({ range: "24h", query: firstPage, window: null });
   const [aggregate, setAggregate] = useState<AggregateChoice>({ tab, operation: null });
-  const ask = useMemo<Ask>(() => ({ ...choice, tab, aggregate: aggregate.tab === tab ? aggregate : undefined }), [choice, tab, aggregate]);
+  const ask = useMemo<Ask>(() => ({ ...choice, tab, detail, aggregate: aggregate.tab === tab ? aggregate : undefined }), [choice, tab, detail, aggregate]);
   const [snapshot, setSnapshot] = useState<Snapshot>({ reading: false, hidden: false });
   const reader = useRef<ReturnType<typeof createReader> | null>(null);
   const latest = useRef(ask);
   latest.current = ask;
   useEffect(() => {
-    const current = createReader((next) => loadTelemetry(client, next), latest.current, env, setSnapshot);
+    const reads = telemetryClient(client);
+    const current = createReader((next) => loadTelemetry(reads, next), latest.current, env, setSnapshot);
     reader.current = current;
     return () => { current.stop(); reader.current = null; };
   }, [client, env]);
   useEffect(() => reader.current?.ask(ask), [ask]);
 
-  const { data, error } = snapshot;
-  const mine = data?.ask.tab === tab ? data : undefined;
+  const matchesRoute = (other?: Ask) => other?.tab === tab && other.detail?.sessionId === detail?.sessionId;
+  const data = snapshot.data;
+  const error = detail || snapshot.errorAsk?.detail
+    ? (snapshot.errorAsk === ask ? snapshot.error : undefined)
+    : snapshot.error;
+  const mine = data && matchesRoute(data.ask) ? data : undefined;
   const shown = mine && { data: mine, stale: mine.ask !== ask || error !== undefined, label: RANGES[mine.ask.range].label, bucket: RANGES[mine.ask.range].bucket };
   const phase = snapshot.reading ? (mine ? "refreshing" : "loading") : snapshot.hidden ? "hidden" : "idle";
   const answered = mine?.ask === ask ? mine : undefined;
@@ -187,6 +212,7 @@ export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = b
     data,
     shown,
     error,
+    retrying: error !== undefined && snapshot.retrying === true,
     updatedAt: snapshot.updatedAt,
     range: choice.range,
     query: choice.query,
@@ -194,7 +220,7 @@ export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = b
     chooseRange: (range: Range) => { setAggregate({ tab, operation: aggregate.tab === tab ? aggregate.operation : null }); restart({ range }); },
     operation: ask.aggregate?.operation ?? null,
     chooseOperation: (operation: Operation | null) => setAggregate({ tab, operation }),
-    aggregateNext: answered && answered.tab !== "overview" && answered.tab !== "sessions" && answered.page.next_cursor
+    aggregateNext: answered && answered.tab !== "overview" && answered.tab !== "sessions" && answered.tab !== "detail" && answered.page.next_cursor
       ? () => {
         // The original cursor owns both the already displayed prefix and its fixed window.
         const prefix = { ...answered, ask: { ...answered.ask, aggregate: undefined } };
