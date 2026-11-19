@@ -100,12 +100,12 @@ function TelemetryPages({ client, tab, tabs, go, sessionId, openTelemetrySetting
     const missingTrace = problem?.code === "trace_not_found";
     return <Frame detail tools={<Tools status={reply?.status} refreshing={reads.phase === "refreshing"} refresh={reads.refresh} />} tabs={tabs}>
       {missingTrace ? <section className="tm-banner" role="alert"><div><h2>trace not found</h2><p>the selected trace may have expired.{reply && " showing the last available data."}</p></div><button type="button" className="tm-button" onClick={traceId ? () => setTrace(undefined) : reads.refresh}>{traceId ? "show latest trace" : "retry now"}</button></section>
-        : problem && <FailedBanner problem={problem} updatedAt={reply ? reads.updatedAt : undefined} retry={reads.refresh} />}
+        : problem && <FailedBanner problem={problem} updatedAt={reply ? reads.updatedAt : undefined} retrying={reads.retrying} retry={reads.refresh} />}
       {reply ? <div className={shown?.stale ? "tm-stale" : undefined} aria-busy={shown?.stale && !problem || undefined}><SessionDetail key={sessionId} data={reply} sessionId={sessionId} back={back} chooseTrace={(id) => setTrace({ sessionId, id })} /></div>
         : problem ? <div className="td-state"><SessionBackLink back={back} /></div> : <DetailLoading back={back} />}
     </Frame>;
   }
-  const banner = problem && <FailedBanner problem={problem} updatedAt={shown ? reads.updatedAt : undefined} retry={reads.refresh} />;
+  const banner = problem && <FailedBanner problem={problem} updatedAt={shown ? reads.updatedAt : undefined} retrying={reads.retrying} retry={reads.refresh} />;
   return (
     <Frame tools={<Tools status={status} refreshing={reads.phase === "refreshing"} range={range} chooseRange={reads.chooseRange} refresh={reads.refresh} />} tabs={tabs}>
       {banner}
@@ -197,15 +197,15 @@ const FAILURE_TITLES: Record<string, string> = {
 };
 
 /** One failure rule: keep the last good numbers, dim them, and say how old they are. */
-function FailedBanner({ problem, updatedAt, retry }: { problem: TelemetryProblem; updatedAt?: number; retry: () => void }) {
+function FailedBanner({ problem, updatedAt, retrying, retry }: { problem: TelemetryProblem; updatedAt?: number; retrying: boolean; retry: () => void }) {
   const title = (problem.code && FAILURE_TITLES[problem.code]) ?? "telemetry could not be read";
   return (
     <section className="tm-banner" role="alert">
       <div>
         <h2>{title}</h2>
         <p>
-          {updatedAt !== undefined ? <>showing data from {formatHour(updatedAt * 1e6)} · {formatAgo(updatedAt * 1e6).replace(" ago", " old")} · </> : <>{problem.message} · </>}
-          retrying every 5 s
+          {updatedAt !== undefined ? <>showing data from {formatHour(updatedAt * 1e6)} · {formatAgo(updatedAt * 1e6).replace(" ago", " old")}</> : problem.message}
+          {retrying && " · retrying every 5 s"}
         </p>
       </div>
       <button type="button" className="tm-button tm-danger-button" onClick={retry}>retry now</button>

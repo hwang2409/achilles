@@ -67,7 +67,7 @@ export function telemetryClient(client: Rpc) {
 export type TelemetryProblem = { kind: "off" | "failed"; message: string; code?: string };
 
 /**
- * Sorts a rejected read into what the page shows: telemetry off, or a failure the user can retry. An old zeta is known
+ * Sorts a rejected read into what the page shows: telemetry off, or a failure. An old zeta is known
  * from the granted hello features, so a `-32601` after the feature was granted is a failure too.
  */
 export function telemetryProblem(error: unknown): TelemetryProblem {

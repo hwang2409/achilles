@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ZetaClient } from "@fulcrum/zeta";
+import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
 import { errorKey, mergePage, modelKey, modelTrends, toolKey, type AggregateTab } from "./aggregates";
 import { readDetail, type DetailData, type DetailTarget } from "./detail-read";
 import type { SessionsQuery } from "./Sessions";
@@ -57,44 +57,61 @@ export const browserEnv: ReadEnv = {
 };
 
 /** The newest reply (`data`, read at `updatedAt`, epoch ms) stays after a failed or running read. */
-type Snapshot = { data?: Loaded; updatedAt?: number; error?: unknown; errorAsk?: Ask; reading: boolean; hidden: boolean };
+type Snapshot = { data?: Loaded; updatedAt?: number; error?: unknown; errorAsk?: Ask; retrying?: boolean; reading: boolean; hidden: boolean };
+
+/** A read can heal after a dropped connection, timeout, or a transient serve error. */
+function canRetryRead(error: unknown): boolean {
+  if (error instanceof ZetaError) return error.kind === "closed" || error.kind === "output_overflow";
+  const rpc = error as { code?: unknown; data?: { retryable?: unknown; reason?: unknown } } | null;
+  switch (rpc?.code) {
+    case -32004: return rpc.data?.reason !== "parked_limit"; // active work can finish
+    case -32005: // unavailable state (including telemetry not yet initialized)
+    case -32008: // account lock timeout, not an observer permission error
+    case -32009: return rpc.data?.retryable === true; // stale snapshot or settings writer, not a stale revision
+    case -32011: return true; // output overflow closes the socket
+    default: return rpc?.code === undefined && error instanceof Error
+      && (error.message === "transport closed" || error.message === "request timed out");
+  }
+}
 
 /**
  * The one owner of telemetry reads. It reads the current ask now, then every `POLL_MS` while the page is visible, and
  * again on focus, `want()` or a new ask. At most one read runs: anything asked for during a read becomes one follow-up
- * read after it. A hidden page reads nothing and drops that follow-up; showing it again reads at once. `stop()` drops
- * the reply in flight.
+ * read after it. A hidden page reads nothing and drops that follow-up. A non-retryable error waits for `want()` or
+ * a new ask, even after focus or visibility changes. `stop()` drops the reply in flight.
  */
 function createReader(load: (ask: Ask) => Promise<Loaded>, ask: Ask, env: ReadEnv, onChange: (snapshot: Snapshot) => void) {
   let snapshot: Snapshot = { reading: false, hidden: !env.visible() };
-  let queued = false;
+  let queued: "auto" | "explicit" | undefined;
   let timer: unknown = null;
   let stopped = false;
   const emit = (patch: Partial<Snapshot>) => { snapshot = { ...snapshot, ...patch, hidden: !env.visible() }; onChange(snapshot); };
   const clear = () => { if (timer !== null) { env.clearTimer(timer); timer = null; } };
-  const want = () => {
+  const autoAllowed = () => snapshot.errorAsk !== ask || snapshot.retrying;
+  const want = (explicit = true) => {
     if (stopped) return;
     clear();
-    if (!env.visible()) { queued = false; emit({}); return; }
-    if (snapshot.reading) { queued = true; return; }
+    if (!env.visible()) { queued = undefined; emit({}); return; }
+    if (snapshot.reading) { queued = explicit ? "explicit" : queued ?? "auto"; return; }
+    if (!explicit && !autoAllowed()) { emit({}); return; }
     void read();
   };
   const read = async () => {
-    queued = false;
+    queued = undefined;
     emit({ reading: true });
     const request = ask;
     let result: Partial<Snapshot>;
-    try { result = { data: await load(request), updatedAt: Date.now(), error: undefined, errorAsk: undefined }; }
-    catch (error) { result = { error, errorAsk: request }; }
+    try { result = { data: await load(request), updatedAt: Date.now(), error: undefined, errorAsk: undefined, retrying: false }; }
+    catch (error) { result = { error, errorAsk: request, retrying: canRetryRead(error) }; }
     if (stopped) return;
     emit({ ...result, reading: false });
-    if (queued) want();
-    else if (env.visible()) timer = env.setTimer(() => { timer = null; want(); }, POLL_MS);
+    if (queued) want(queued === "explicit");
+    else if (env.visible() && autoAllowed()) timer = env.setTimer(() => { timer = null; want(false); }, POLL_MS);
   };
   const unwatch = env.watch((event) => {
-    if (event !== "hidden") return want();
+    if (event !== "hidden") return want(false);
     clear();
-    queued = false;
+    queued = undefined;
     emit({});
   });
   want();
@@ -195,6 +212,7 @@ export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = b
     data,
     shown,
     error,
+    retrying: error !== undefined && snapshot.retrying === true,
     updatedAt: snapshot.updatedAt,
     range: choice.range,
     query: choice.query,

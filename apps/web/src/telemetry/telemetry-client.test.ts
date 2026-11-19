@@ -29,7 +29,7 @@ test("overview sends its exact params", async () => {
   ]);
 });
 
-test("rejected reads become off or a retryable failure, -32601 included", () => {
+test("rejected reads become off or a failure, -32601 included", () => {
   const rpc = (code: number, message: string, data?: object) => Object.assign(new Error(message), { code, data });
   expect(telemetryProblem(rpc(-32005, "state unavailable", { code: "telemetry_off", retryable: true })).kind).toBe("off");
   expect(telemetryProblem(rpc(-32601, "method not found: telemetry_overview")).kind).toBe("failed");
