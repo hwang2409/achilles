@@ -50,7 +50,7 @@
 .record-list th:nth-child(4), .record-list td:nth-child(4) { width: 16%; }
 .record-list td { height: 40px; min-width: 0; overflow: hidden; padding: 0 8px; border-top: 1px solid var(--fulcrum-border); white-space: nowrap; text-overflow: ellipsis; }
 .record-list td:first-child, .record-list th:first-child { padding-left: 12px; }
-.record-list td:not(:first-child) { color: var(--fulcrum-muted); }
+.record-list td:not(:first-child), .record-empty-value { color: var(--fulcrum-muted); }
 .record-status { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .record-status .record-mark { margin: 0; }
 .record-updated-cell { text-align: right; }
