@@ -1294,20 +1294,65 @@ with _database() as db:
   if ((await page.getByText("loading chat…", { exact: true }).count()) || await chatCount() !== chatsBeforeReading || zetaSessionCount() !== sessionsBeforeReading)
     throw new Error("created page layout did not appear before chat creation");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "created-page-before-first-send.png"), fullPage: true, timeout: 20_000 });
-  await field.fill("open created page", { timeout: 20_000 });
-  await field.press("Enter", { timeout: 20_000 });
-  await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
-  await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
-  const readingChat = await page.locator("[data-session-id]").getAttribute("data-session-id");
-  if (!readingChat || new URL(page.url()).searchParams.get("chat") !== readingChat) throw new Error("the page opened from /pages did not select the active chat after the first send");
-  const readingChatRow = page.locator(`[data-chat-id="${readingChat}"]`);
-  await gateWait.playwright(readingChatRow.and(page.locator('[aria-current="page"]')), "waitFor");
-  await readingChatRow.and(page.locator('[aria-current="page"]')).press("F2");
-  const readingRename = readingChatRow.getByRole("textbox", { name: /^rename / });
-  await readingRename.fill("reading catalog notes");
-  await readingRename.press("Enter");
-  await gateWait.playwright(readingChatRow.getByText("reading catalog notes", { exact: true }), "waitFor");
-  console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
+  // Let the selected-chat attach read the old title before the sidebar PATCH, but deliver it afterward.
+  let heldAttach: { chatId: string; release: (deliver: boolean) => void } | undefined;
+  const selectedCatalogue = (url: URL) => url.pathname === "/api/chats" && url.searchParams.get("limit") === "200" && url.searchParams.has("include");
+  const holdSelectedAttach = async (route: Route) => {
+    // Creation itself looks up the chat before it writes the chat to the address.
+    const selected = new URL(page.url()).searchParams.get("chat");
+    if (heldAttach || !selected || selected !== new URL(route.request().url()).searchParams.get("include")) return route.fallback();
+    const response = await route.fetch({ timeout: 20_000 });
+    const deliver = await new Promise<boolean>((resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error("waiting for the gate to release the selected-chat catalogue")), 30_000);
+      heldAttach = { chatId: selected, release: (value) => { clearTimeout(deadline); resolve(value); } };
+    });
+    if (deliver) await route.fulfill({ response }); else await route.abort();
+  };
+  await page.route(selectedCatalogue, holdSelectedAttach);
+  try {
+    await field.fill("open created page", { timeout: 20_000 });
+    await field.press("Enter", { timeout: 20_000 });
+    // A fast scripted reply can move from running to idle in one browser render.
+    await waitFor(async () => JSON.parse(await Bun.file(control).text()).page_open_turn_barrier === "held", "held first page turn");
+    await gateWait.playwright(page.locator(".run-state.state-running"), "waitFor", { timeout: 20_000 });
+    const firstPageChat = await homeSessionId();
+    await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
+    if (!zetaProcess.kill("SIGUSR2")) throw new Error("could not release the first page turn");
+    await waitFor(async () => Boolean(heldAttach), "old selected-chat attach catalogue held");
+    const { chatId, release } = heldAttach!;
+    if (chatId !== firstPageChat || new URL(page.url()).searchParams.get("chat") !== firstPageChat) throw new Error("the page opened from /pages did not select the active chat after the first send");
+    const row = page.locator(`[data-chat-id="${chatId}"]`);
+    const currentRow = row.and(page.locator('[aria-current="page"]'));
+    await gateWait.playwright(currentRow, "waitFor", { timeout: 20_000 });
+    const title = "reading catalog notes";
+    await currentRow.press("F2", { timeout: 20_000 });
+    const input = row.getByRole("textbox", { name: /^rename / });
+    await input.fill(title, { timeout: 20_000 });
+    const patch = page.waitForResponse((reply) => new URL(reply.url()).pathname === `/api/chats/${chatId}` && reply.request().method() === "PATCH" && reply.request().postDataJSON()?.titled_by_user === true, { timeout: 20_000 });
+    await input.press("Enter", { timeout: 20_000 });
+    if (!(await patch).ok()) throw new Error("current row rename PATCH failed");
+    await gateWait.playwright(row.getByText(title, { exact: true }), "waitFor", { timeout: 20_000 });
+    const dockTitle = dockHead(page).getByText(title, { exact: true });
+    await gateWait.playwright(dockTitle, "waitFor", { state: "visible" });
+    const frameStart = requests().length;
+    release(true);
+    await waitFor(async () => {
+      const frames = requests().slice(frameStart);
+      const join = frames.findIndex((frame) => frame.method === "session_history_and_subscribe" && frame.params?.session_id === chatId);
+      // The idle replay reads status after its join. Wait for the reply before checking the committed view.
+      const status = join < 0 ? undefined : frames.slice(join + 1).find((frame) => frame.method === "status");
+      return Boolean(status && frames.some((frame) => frame.id === status.id && frame.result));
+    }, "released selected-chat attach finished replay");
+    await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+    await gateWait.playwright(page, "waitForFunction", () => new Promise<boolean>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))), undefined, { timeout: 20_000 });
+    if (!await dockTitle.isVisible()) throw new Error(`stale attach reverted the visible dock title: ${await dockHead(page).locator("strong").innerText()}`);
+    console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
+    console.log("forced title order: rename PATCH succeeded; stale attach released; visible dock title stayed renamed");
+  } finally {
+    heldAttach?.release(false);
+    await page.unroute(selectedCatalogue, holdSelectedAttach);
+  }
   if (screenshotDir) {
     const readingUrl = page.url();
     const oneChat = async (tab: Page, name: string) => {

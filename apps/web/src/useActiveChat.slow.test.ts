@@ -6,6 +6,7 @@ import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT } from "./composer/composer-machine";
 import { draftStore } from "./draftStore";
 import { useActiveChat } from "./useActiveChat";
+import type { Chat } from "./surface/AgentNavAdapter";
 
 
 const EXPECTED_ATTACH_SLOW_MS = 15_000;
@@ -916,5 +917,115 @@ test.each(unsentRows)("unsent rows across a page load: $name", async (row) => {
   } finally {
     close();
     for (const key of ["new:home", "chat", "s1"]) draftStore.set(key, "");
+  }
+});
+
+test.each([
+  "success",
+  "rename then stale attach",
+  "stale takeover refusal after a newer selection",
+  "duplicate ready",
+  "failed attach after a rename, then retry",
+  "switch chat during attach",
+] as const)("active chat publication: %s", async (row) => {
+  const old: Chat = { ...chat, title: "old title", page_route: "/", page_title: "home", titled_by_user: true, created_at: "", updated_at: "", last_state: "idle" };
+  const other = { ...old, session_id: "other", title: "other title" };
+  let stored = old;
+  const duplicate = row === "duplicate ready";
+  const storage = new MemoryStorage();
+  if (duplicate) storage.setItem("achilles-pending-chats", JSON.stringify([{ sessionId: "chat", pageId: "home", mode: "allow", stage: "attached" }]));
+  let holdCatalogue = duplicate;
+  let pushes = 0;
+  let reads = 0;
+  let heldCatalogue = false;
+  let heldResume = false;
+  let canWrite = row !== "stale takeover refusal after a newer selection";
+  const catalogue = deferred<void>();
+  const resume = deferred<void>();
+  setGlobals({
+    localStorage: storage,
+    location: { pathname: "/", search: duplicate ? "" : "?chat=chat", href: "http://achilles.test/" },
+    history: { pushState() { pushes += 1; }, replaceState() {} },
+    addEventListener() {}, removeEventListener() {},
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/pages/home") return Response.json(page);
+      if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
+      if (url.startsWith("/api/chats?")) {
+        const snapshot = Response.json({ chats: [stored, other], next: null });
+        if (url.includes("include=chat")) reads += 1;
+        if (holdCatalogue && reads >= (duplicate ? 2 : 1) && url.includes("include=chat")) {
+          holdCatalogue = false; heldCatalogue = true;
+          await catalogue.promise;
+          if (row === "failed attach after a rename, then retry") throw new Error("forced catalogue failure");
+        }
+        return snapshot;
+      }
+      if (url === "/api/chats/chat" && init?.method === "PATCH") {
+        stored = { ...stored, ...JSON.parse(String(init.body)) };
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+  const base = client();
+  const zeta = {
+    ...base,
+    request: async (method: string, params?: { session_id?: string }) => {
+      if (row === "stale takeover refusal after a newer selection" && method === "resume" && params?.session_id === "chat") {
+        heldResume = true;
+        await resume.promise;
+        throw TURN_RUNNING_ERROR();
+      }
+      return base.request(method);
+    },
+  };
+  const clock = new ManualClock();
+  let active!: ReturnType<typeof useActiveChat>;
+  const Harness = () => { active = useActiveChat(zeta as never, true, clock as never, canWrite); return null; };
+  const expectTitle = (title: string) => expect(active.state).toMatchObject({ phase: "ready", title });
+  try {
+    await act(async () => { mounted = render(createElement(Harness)); });
+    await flushUntil(() => active.state.phase === "ready");
+    expectTitle("old title");
+    if (row === "success") return;
+    if (duplicate) {
+      // Recovery publishes ready in its handoff and returns that same ready to the attach effect.
+      await flushUntil(() => heldCatalogue);
+      expect(pushes).toBe(1);
+      expect(active.listRefresh).toBe(1);
+      expect(active.selectedId).toBe("chat");
+      return;
+    }
+
+    if (row === "stale takeover refusal after a newer selection") {
+      canWrite = true;
+      await act(async () => { mounted!.rerender(createElement(Harness)); });
+      await flushUntil(() => heldResume);
+    } else {
+      holdCatalogue = true;
+      await act(async () => { active.retryAttachment(); });
+      await flushUntil(() => heldCatalogue);
+    }
+    const renamed = row === "rename then stale attach" || row === "failed attach after a rename, then retry";
+    if (renamed) {
+      await act(async () => { expect(await active.rename("chat", "new title")).toBe(true); });
+      expectTitle("new title");
+    }
+    const switched = row === "switch chat during attach" || row === "stale takeover refusal after a newer selection";
+    if (switched) {
+      await act(async () => { active.selectChat(other); });
+      await flushUntil(() => active.state.phase === "ready" && active.state.sessionId === "other");
+    }
+    await act(async () => { catalogue.resolve(); resume.resolve(); });
+    if (row === "failed attach after a rename, then retry") {
+      expect(active.state).toEqual({ phase: "error", error: "forced catalogue failure" });
+      await act(async () => { active.retryAttachment(); });
+      await flushUntil(() => active.state.phase === "ready");
+    }
+    expectTitle(switched ? "other title" : renamed ? "new title" : "old title");
+    expect(active.busy).toBeNull();
+  } finally {
+    await act(async () => { catalogue.resolve(); resume.resolve(); });
   }
 });
