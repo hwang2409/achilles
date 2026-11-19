@@ -21,6 +21,7 @@ from zeta.server.server import ZetaServer
 from zeta.storage_format import advance
 
 inspect_turn_release = asyncio.Event()
+page_open_turn_release = asyncio.Event()
 METRIC_BOUNDARY_MATRIX = json.loads(
     (Path(__file__).parent.parent / "apps/web/src/metric-boundary-matrix.json").read_text()
 )
@@ -72,7 +73,8 @@ class BarrierBackend(FakeBackend):
 
     @owned_completion
     async def complete(self, messages, tool_schemas):
-        backend = self.opening.get(self.opening_prompt(messages), self)
+        opening_prompt = self.opening_prompt(messages)
+        backend = self.opening.get(opening_prompt, self)
         turn_index = len(self.calls)
         stream = FakeBackend.complete.__wrapped__(backend, messages, tool_schemas)
         async for event in stream:
@@ -92,6 +94,15 @@ class BarrierBackend(FakeBackend):
                     document["inspect_turn_barrier"] = "held"
                     write_control(self.control, document)
                     await asyncio.wait_for(inspect_turn_release.wait(), 30)
+                elif opening_prompt == "open created page":
+                    document["page_open_turn_barrier"] = "held"
+                    write_control(self.control, document)
+                    try:
+                        await asyncio.wait_for(page_open_turn_release.wait(), 30)
+                    except TimeoutError as error:
+                        raise TimeoutError(
+                            "waiting for the gate to release the first page turn"
+                        ) from error
                 elif turn_index == 4:
                     await hold(self.control, "turn_barrier")
             yield event
@@ -624,6 +635,7 @@ def make_server() -> tuple[ZetaServer, Path, str]:
 
 async def main(server: ZetaServer, control: Path, pending_session: str) -> None:
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, inspect_turn_release.set)
+    asyncio.get_running_loop().add_signal_handler(signal.SIGUSR2, page_open_turn_release.set)
     original_event = server.control._event
 
     async def held_event(event, *args, **kwargs):

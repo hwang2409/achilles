@@ -1322,23 +1322,32 @@ with _database() as db:
     // Creation itself looks up the chat before it writes the chat to the address.
     const selected = new URL(page.url()).searchParams.get("chat");
     if (heldAttach || !selected || selected !== new URL(route.request().url()).searchParams.get("include")) return route.fallback();
-    const response = await route.fetch();
-    const deliver = await new Promise<boolean>((release) => { heldAttach = { chatId: selected, release }; });
+    const response = await route.fetch({ timeout: 20_000 });
+    const deliver = await new Promise<boolean>((resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error("waiting for the gate to release the selected-chat catalogue")), 30_000);
+      heldAttach = { chatId: selected, release: (value) => { clearTimeout(deadline); resolve(value); } };
+    });
     if (deliver) await route.fulfill({ response }); else await route.abort();
   };
   await page.route(selectedCatalogue, holdSelectedAttach);
   try {
     await field.fill("open created page", { timeout: 20_000 });
     await field.press("Enter", { timeout: 20_000 });
+    // A fast scripted reply can move from running to idle in one browser render.
+    await waitFor(async () => JSON.parse(await Bun.file(control).text()).page_open_turn_barrier === "held", "held first page turn");
+    await gateWait.playwright(page.locator(".run-state.state-running"), "waitFor", { timeout: 20_000 });
+    const firstPageChat = await homeSessionId();
+    await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
+    if (!zetaProcess.kill("SIGUSR2")) throw new Error("could not release the first page turn");
     await waitFor(async () => Boolean(heldAttach), "old selected-chat attach catalogue held");
     const { chatId, release } = heldAttach!;
     const row = page.locator(`[data-chat-id="${chatId}"]`);
     const title = "reading catalog notes";
-    await row.locator(".chat-row-rename").click();
+    await row.locator(".chat-row-rename").click({ timeout: 20_000 });
     const input = row.locator(".chat-row-edit");
-    await input.fill(title);
+    await input.fill(title, { timeout: 20_000 });
     const patch = page.waitForResponse((reply) => new URL(reply.url()).pathname === `/api/chats/${chatId}` && reply.request().method() === "PATCH" && reply.request().postDataJSON()?.titled_by_user === true, { timeout: 20_000 });
-    await input.press("Enter");
+    await input.press("Enter", { timeout: 20_000 });
     if (!(await patch).ok()) throw new Error("current row rename PATCH failed");
     const dockTitle = dockHead(page).getByText(title, { exact: true });
     await gateWait.playwright(dockTitle, "waitFor", { state: "visible" });
@@ -1353,7 +1362,7 @@ with _database() as db:
     }, "released selected-chat attach finished replay");
     await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
     await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await gateWait.playwright(page, "waitForFunction", () => new Promise<boolean>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))), undefined, { timeout: 20_000 });
     if (!await dockTitle.isVisible()) throw new Error(`stale attach reverted the visible dock title: ${await dockHead(page).locator("strong").innerText()}`);
     console.log("forced title order: rename PATCH succeeded; stale attach released; visible dock title stayed renamed");
   } finally {
