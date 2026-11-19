@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { focusable } from "../apps/web/src/focusable";
 import { appShortcut, type GateWait } from "./gate-diagnostics";
 
 const theme = (page: Page) => page.locator("html").getAttribute("data-fulcrum-theme");
@@ -84,8 +85,9 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "true");
   const menuButton = page.getByRole("button", { name: "open menu" });
   await menuButton.click();
-  const settingsButton = page.locator("aside.sidebar").getByRole("button", { name: /settings/ });
-  await settingsButton.click();
+  const settingsLink = page.getByRole("navigation", { name: "places" }).getByRole("link", { name: "settings", exact: true });
+  await settingsLink.focus();
+  await openSettings(page, gateWait);
   const narrowDialog = page.getByRole("dialog", { name: "settings" });
   if (await narrowDialog.count() !== 1) throw new Error("narrow settings button did not expose a named dialog");
   const narrowTargets = await narrowDialog.locator("button").evaluateAll((controls) => controls.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
@@ -102,7 +104,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.keyboard.press("Escape");
   if (await narrowDialog.isVisible()) throw new Error("narrow settings escape did not close the dialog");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") === "true") throw new Error("settings escape closed the drawer before the dialog");
-  await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.classList.contains("settings-button")).catch(() => { throw new Error("narrow settings escape did not restore opener focus"); });
+  await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("href")?.startsWith("/settings")).catch(() => { throw new Error("narrow settings escape did not restore opener focus"); });
   await page.keyboard.press("Escape");
   if (await page.locator("aside.sidebar").getAttribute("aria-hidden") !== "true") throw new Error("second escape did not close the drawer");
   await gateWait.playwright(page, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "open menu").catch(() => { throw new Error("drawer escape did not restore menu focus"); });
@@ -118,14 +120,14 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await sidebar.evaluate((element) => Promise.all(element.getAnimations().map(async (animation) => { animation.pause(); await animation.ready; animation.currentTime = 0; })));
   await gateWait.playwright(page, "waitForFunction", () => document.querySelector(".sidebar")?.contains(document.activeElement)).catch(() => { throw new Error("opening the drawer did not move focus into it"); });
   const first = await page.evaluateHandle(() => document.activeElement);
-  const last = page.locator(".sidebar .palette-button");
+  const last = await sidebar.evaluateHandle((element, selector) => Array.from(element.querySelectorAll<HTMLElement>(selector)).filter((control) => control.tabIndex >= 0 && control.checkVisibility({ visibilityProperty: true })).at(-1)!, focusable);
   await last.focus();
   await page.keyboard.press("Tab");
-  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control escaped the sidebar (last control: the palette button)");
+  if (!await first.evaluate((node) => node === document.activeElement)) throw new Error("drawer Tab from the last control escaped the sidebar (last control)");
   await page.keyboard.press("Shift+Tab");
-  if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control, the palette button");
+  if (!await last.evaluate((node) => node === document.activeElement)) throw new Error("drawer reverse Tab did not wrap to the last control");
   await sidebar.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
-  await page.getByRole("button", { name: "settings" }).click();
+  await openSettings(page, gateWait);
   const drawerSettings = page.getByRole("dialog", { name: "settings" });
   await gateWait.playwright(drawerSettings, "waitFor", { state: "visible" });
   const drawerSettingsInitial = drawerSettings.locator("button:not(:disabled):not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])").first();

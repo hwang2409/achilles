@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
-import { SettingsControl, SettingsDialog } from "./SettingsDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
 import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFocus, useFocusAfterCommit, useModalFocus } from "./keyboard";
 import { PageChatCatalog, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
@@ -61,7 +61,7 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
       opener.current,
       drawer ? firstFocusable(sidebar.current) : null,
       document.querySelector(".main-pane textarea[aria-label='message']"),
-      document.querySelector(".settings-button"),
+      menuButton.current,
     );
     opener.current = null;
     return target;
@@ -154,7 +154,7 @@ export function AppShell({ current, nav, workspace, connectionStatus, hasCompose
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createEnabled={workspace?.createEnabled}
       action={workspace && <button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!canWrite} title={!canWrite ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={() => { setDrawer(false); if (canWrite) void onNewChat?.(); }}><span aria-hidden="true">+</span><b>new chat</b><kbd>{modKey("⇧O")}</kbd></button>}
-      search={nav.searchControl(dismissDrawer)} catalog={current.id !== "pages" && nav.pages()} recent={nav.recent(dismissDrawer)} settings={workspace && <SettingsControl onOpen={openSettings} className="settings-button" />} />
+      search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className="shell-header">

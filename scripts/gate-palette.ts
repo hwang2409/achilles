@@ -99,9 +99,9 @@ export async function gatePalette(page: Page, chatId: string, waitFor: WaitFor, 
   await gateWait.playwright(sheet, "waitFor", { state: "hidden", timeout: 10_000 });
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  const otherPage = await page.locator("[data-page-id]").evaluateAll((links) => links.find((link) => new URL((link as HTMLAnchorElement).href).pathname !== "/")?.getAttribute("title"));
-  if (!otherPage) throw new Error("no second page to go to");
   await page.keyboard.press("ControlOrMeta+k");
+  const otherPage = await palette.getByRole("group", { name: "pages" }).getByRole("option").evaluateAll((options) => options.find((option) => option.querySelector("small")?.textContent !== "/")?.querySelector("span")?.textContent);
+  if (!otherPage) throw new Error("no second page in the palette");
   await runCommand(otherPage, otherPage);
   await waitFor(async () => new URL(page.url()).pathname !== "/" && await page.getByRole("textbox", { name: "message", exact: true }).count() === 1, `palette goes to page ${otherPage}`);
   await page.keyboard.press("ControlOrMeta+k");

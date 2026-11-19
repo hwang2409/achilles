@@ -43,7 +43,7 @@ export function SurfaceRouter() {
 function CatalogShell({ route, connectionStatus, banner, children }: { route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
   return <AppShell current={route} nav={nav} banner={banner} connectionStatus={connectionStatus}>
-    {route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages(true)}</ModuleFrame> : children}
+    {route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages()}</ModuleFrame> : children}
   </AppShell>;
 }
 

@@ -11,10 +11,12 @@ export async function gateShell(
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => { const url = new URL(location.href); url.searchParams.set("theme", "gruvbox-light"); history.replaceState({}, "", url); });
   const places = page.getByRole("navigation", { name: "places" });
-  const grouped = await places.locator("section").evaluateAll((sections) => sections.map((section) => [section.getAttribute("aria-label"), [...section.querySelectorAll("a")].map((link) => link.textContent)]));
+  const grouped = await places.locator("section").evaluateAll((sections) => sections.map((section) => [section.getAttribute("aria-label"), [...section.querySelectorAll("a")].map((link) => link.querySelector("span")?.textContent)]));
   const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "mcp connections"]]];
   if (JSON.stringify(grouped) !== JSON.stringify(expected)) throw new Error(`unexpected place order: ${JSON.stringify(grouped)}`);
-  if (await places.locator('[aria-current="page"]').innerText() !== "chats") throw new Error("home did not select chats");
+  if (!(await places.getByRole("link", { name: "chats", exact: true }).getAttribute("aria-current"))) throw new Error("home did not select chats");
+  if (await page.locator('.sidebar .page-list, .sidebar .settings-button').count()) throw new Error("sidebar duplicated a stable place");
+  await waitFor(async () => await places.locator("small").count() === 2, "only chats and pages have catalog counts");
   await page.keyboard.press(appShortcut("k"));
   const palette = page.getByRole("dialog", { name: "command palette" });
   const catalogPlaces = await palette.getByRole("option").evaluateAll((options) => options.flatMap((option) => {

@@ -79,7 +79,6 @@ const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : sta
 
 export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat, onRenameChat, refreshKey, pageRefreshKey }: { sessionId: string | null; waiting: number; canWrite: boolean; onSelectChat?: (chat: Chat) => void; onRenameChat?: (chat: Chat, title: string) => void; refreshKey: number; pageRefreshKey: number }) {
   const requestFocus = useFocusAfterCommit();
-  const [pagesOpen, setPagesOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [chatList, setChatList] = useState(initialChatListState);
@@ -205,17 +204,17 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     loading, query, pageEntries, searchChats,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
     searchControl: (close: () => void) => <>{loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="search chats / pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>}{waitingTotal > 0 && <div className="waiting-count" aria-label={`${waitingTotal} waiting approvals`}>{waitingTotal}</div>}</>,
-    pages: (full = false) => {
-      if (full) {
-        if (pageList.error) return <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: () => void pageListOwner.current!.reload(null) }} />;
-        if (pageList.items === null) return <ModuleState kind="loading" title="reading pages…" />;
-        if (!pageRows.length) return <ModuleState kind="empty" title="no pages yet" />;
-      }
-      return <section className={`page-list ${full ? "catalog-pages" : ""} ${pagesOpen && pageRows.length >= 3 ? "has-pages" : ""}`} data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
-        {!full && <button className="list-head" aria-expanded={pagesOpen} onClick={() => setPagesOpen((value) => !value)}><span>page catalog</span><b>{pageList.error ? "!" : pageList.items === null ? "" : pageList.next ? "20+" : pageRows.length}</b></button>}
-        <div className="page-list-scroll">
-          {pageList.error ? <div className="page-list-error"><span>could not load pages</span><button onClick={() => void pageListOwner.current!.reload(null)}>retry</button></div> : pageList.items === null ? <SidebarSkeleton count={2} /> : (full || pagesOpen) && <>{pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={surfaceHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}{pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}</>}
-        </div>
+    counts: {
+      pages: pageList.items && !pageList.error ? `${pageRows.length}${pageList.next ? "+" : ""}` : undefined,
+      chats: !search && chatList.items && !chatList.error ? `${chats.length}${chatList.next ? "+" : ""}` : undefined,
+    },
+    pages: () => {
+      if (pageList.error) return <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: () => void pageListOwner.current!.reload(null) }} />;
+      if (pageList.items === null) return <ModuleState kind="loading" title="reading pages…" />;
+      if (!pageRows.length) return <ModuleState kind="empty" title="no pages yet" />;
+      return <section className="page-list" aria-label="page catalog" data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
+        {pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={surfaceHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}
+        {pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}
       </section>;
     },
     recent: (close: () => void) =>

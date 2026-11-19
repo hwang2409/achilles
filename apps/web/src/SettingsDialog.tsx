@@ -108,7 +108,3 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
     </div>
   </dialog>;
 }
-
-export function SettingsControl({ onOpen, className = "settings-entry" }: { onOpen(opener: HTMLElement): void; className?: string }) {
-  return <button className={className} type="button" onClick={(event) => onOpen(event.currentTarget)}><span aria-hidden="true">☼</span><span className="settings-label">settings</span><kbd>{navigator.platform.includes("Mac") ? "⌘," : "ctrl+,"}</kbd></button>;
-}

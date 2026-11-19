@@ -4,14 +4,14 @@ import { createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./ro
 
 const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))];
 
-function PlaceLink({ route, current, detail }: { route: SurfaceRoute; current: SurfaceRoute; detail?: string }) {
+function PlaceLink({ route, current, detail, count }: { route: SurfaceRoute; current: SurfaceRoute; detail?: string; count?: string }) {
   return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={detail ? `${route.label} (${detail})` : route.label} title={route.label}>
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>
-    <span>{route.label}</span>{detail && <small>{detail}</small>}
+    <span>{route.label}</span>{(detail ?? count) && <small>{detail ?? count}</small>}
   </a>;
 }
 
-export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createEnabled, action, search, catalog, recent, settings, connectionStatus }: {
+export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createEnabled, action, search, counts, recent, connectionStatus }: {
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
   narrow: boolean;
@@ -23,9 +23,8 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   createEnabled?: boolean;
   action?: ReactNode;
   search: ReactNode;
-  catalog: ReactNode;
+  counts: Partial<Record<string, string>>;
   recent: ReactNode;
-  settings?: ReactNode;
   connectionStatus: { label: string; connected: boolean };
 }) {
   return <aside ref={sidebar} id="surface-sidebar" className="sidebar" aria-label={narrow ? "navigation menu" : "sidebar"} role={narrow && drawer ? "dialog" : undefined} aria-modal={narrow && drawer || undefined} aria-hidden={narrow && !drawer ? true : undefined} inert={narrow && !drawer || undefined}>
@@ -46,15 +45,13 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
       <nav className="place-nav" aria-label="places">
         {groups.map((group) => <section aria-label={group} key={group}>
           <h2>{group}</h2>
-          {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} />)}
+          {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} count={counts[route.id]} />)}
         </section>)}
       </nav>
       {recent}
-      {catalog}
     </div>
-    <footer>
-      {!narrow && <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span><kbd>{modKey("B")}</kbd></button>}
-      {settings}
-    </footer>
+    {!narrow && <footer>
+      <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span><kbd>{modKey("B")}</kbd></button>
+    </footer>}
   </aside>;
 }

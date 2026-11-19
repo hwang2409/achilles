@@ -19,7 +19,6 @@
 .chat-row-meta { overflow: hidden; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
 .chat-row i { margin-left: auto; flex: 0 0 auto; white-space: nowrap; font-style: normal; }
 .chat-row.current { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
-.sidebar > footer > .settings-button { border-color: transparent; background: transparent; }
 .chat-row.state-running { border-left-color: var(--fulcrum-accent); }
 .chat-row.state-approval { border-left-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 10%, transparent); }
 .chat-row.state-failed { border-left-color: var(--fulcrum-danger); }
@@ -37,9 +36,6 @@
 .chat-search input::placeholder { color: var(--fulcrum-muted); }
 .chat-search:focus-within { border-color: var(--fulcrum-accent); }
 .list-head b { color: var(--fulcrum-accent); }
-.page-list { flex: 0 0 auto; min-height: 0;  display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--fulcrum-border); border-bottom: 1px solid var(--fulcrum-border); padding-bottom: 8px; }
-.page-list.has-pages { min-height: 168px; }
-.page-list-scroll { min-height: 0; overflow-y: auto; }
 .page-list-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; color: var(--fulcrum-muted); font-size: 12px; }
 .page-list-error button { min-height: 40px; padding: 8px 0; color: var(--fulcrum-accent); }
 /* no scroll snap here: a row inserted on top re-snapped the list to the old first row, under the sticky heads.
@@ -246,7 +242,6 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 /* the collapsed rail is a desktop-only layout; the mobile drawer never collapses (see @media (max-width: 760px), (max-height: 500px) below) */
 @media (min-width: 761px) and (min-height: 501px) {
   .app-shell.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
-
 }
 
 @media (max-width: 760px), (max-height: 500px) {
