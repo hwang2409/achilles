@@ -270,7 +270,17 @@ test("numeric metric displays stay within the declared matrix boundary", () => {
   }
 });
 
-test("metric values keep words intact and expose long values once", () => {
+test("long currency metrics render without ellipsis markup", () => {
+  const value = "€1,234,567";
+  const page = { title: "page", route: "/page", layout: { blocks: [{ type: "metric", label: "revenue", value }] } };
+  const result = render(React.createElement(PageView, { page, pageId: "long-currency", credential: "secret", refreshKey: "0" }));
+  const metric = result.container.querySelector("strong.metric-value")!;
+  expect(metric.textContent).toBe(value);
+  expect(metric.querySelector(".metric-value-text-token") === null).toBe(true);
+  expect(metric.classList.contains("metric-value-text-single")).toBe(false);
+});
+
+test("text metrics expose the full value", () => {
   const page = { title: "page", route: "/page", layout: { blocks: [
     { type: "metric", label: "description", value: "intentionally editorial text" },
     { type: "metric", label: "single token", value: "supercalifragilisticexpialidocious" },
@@ -279,7 +289,7 @@ test("metric values keep words intact and expose long values once", () => {
   const values = [...result.container.querySelectorAll(".metric-value")];
   expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
-  expect(values[1]?.classList.contains("metric-value-text-single")).toBe(true);
+  expect(values[1]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");

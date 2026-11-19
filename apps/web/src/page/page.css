@@ -10,14 +10,12 @@
 .metric-block { min-width: 0; display: flex; align-items: flex-start; gap: 10px; min-height: 86px; padding: 14px 16px; background: var(--fulcrum-surface); box-shadow: inset -1px 0 var(--fulcrum-border), inset 0 -1px var(--fulcrum-border); }
 .metric-block > div { min-width: 0; padding-inline-end: 6px; display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
-.metric-block strong { min-width: 0; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.metric-block strong.metric-value-scientific { font-size: 20px; line-height: 34px; }
-.metric-block strong.metric-value-text { font-size: 16px; line-height: 24px; font-weight: 400; white-space: normal; overflow: hidden; overflow-wrap: normal; word-break: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.metric-block strong.metric-value-text-single { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.metric-value-text-token { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-
-.metric-block small, .metric-delta { color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
-.metric-delta { white-space: nowrap; }
+.metric-value-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
+/* Keep the type scale and let values grow vertically instead of clipping at a track edge. */
+.metric-block strong { min-width: 0; max-width: 100%; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.metric-block strong.metric-value-scientific { font-size: 20px; }
+.metric-block strong.metric-value-text { font-size: 16px; line-height: 24px; font-weight: 400; }
+.metric-block small, .metric-delta { min-width: 0; overflow-wrap: anywhere; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-warn { color: var(--fulcrum-warn); }
 .record-mark { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; margin: 5px 2px 0 0; outline: 1px solid var(--fulcrum-muted); outline-offset: -1px; vertical-align: 1px; }
 .record-mark-reading, .record-mark-in-progress { background: linear-gradient(90deg, var(--fulcrum-accent) 50%, transparent 50%); outline-color: var(--fulcrum-accent); }
@@ -74,7 +72,6 @@
   .metric-block > div { padding-inline-end: 0; }
 }
 @media (width < 360px) { .metric-strip { grid-template-columns: repeat(auto-fit, minmax(min(100%, 128px), 1fr)); } }
-.metric-value-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .record-count { font-weight: 400; }
 .record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
 .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }

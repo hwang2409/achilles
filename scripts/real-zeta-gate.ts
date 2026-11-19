@@ -19,6 +19,12 @@ const root = new URL("..", import.meta.url).pathname;
 
 const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
 
+const metricStrips = {
+  "sb7-short": [["queued", "7"], ["reading", "1"], ["done", "12"]],
+  "three-long": [["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"]],
+  "seven-mixed": [["queued", "7"], ["reading", "1"], ["done", "12"], ["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"], ["review", "waiting on an intentionally long legal and editorial review"]],
+};
+
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -200,6 +206,22 @@ try {
       code === 0 ? resolve() : reject(new Error(`seed exited ${code}`)),
     );
   });
+  const metricSeed = start("uv", ["run", "python", "-c", `
+import json, sys
+from achilles.pages import PageStore
+from achilles.web import _home
+store = PageStore(_home())
+store.set_create_mode("home", True)
+try:
+    for name, values in json.loads(sys.argv[1]).items():
+        store.create_page(f"/{name}", name, {"blocks": [
+            {"type": "metric", "label": label, "value": value} for label, value in values
+        ]})
+finally:
+    store.set_create_mode("home", False)
+`, JSON.stringify(metricStrips)], env);
+  if (!await waitForExit(metricSeed, 15_000) || metricSeed.exitCode !== 0)
+    throw new Error("could not seed metric strip fixtures");
   let app = start(
     "uv",
     ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)],
@@ -224,6 +246,38 @@ try {
     console.log(`verified worktree listener pid=${pid} port=${port}`);
   }
   browser = await chromium.launch({ headless: true });
+  for (const [width, height, scale] of [[360, 780, 1], [390, 844, 1], [1440, 900, 1], [390, 844, 2]]) {
+    const viewport = { width: width / scale, height: height / scale };
+    const tab = await browser.newPage({ viewport, deviceScaleFactor: scale });
+    try {
+      const failures: string[] = [];
+      for (const [strip, values] of Object.entries(metricStrips)) {
+        await tab.goto(`${origin}/${strip}`);
+        await tab.waitForFunction((count) => document.querySelectorAll(".metric-strip .metric-value").length === count, values.length);
+        await tab.evaluate(() => document.fonts.ready);
+        const metrics = await tab.locator(".metric-strip .metric-value").evaluateAll(elements => elements.map(element => {
+          const { scrollWidth, clientWidth, scrollHeight, clientHeight } = element;
+          const truncated = [element, ...element.querySelectorAll("*")].some(node => {
+            const style = getComputedStyle(node);
+            return (style.textOverflow === "ellipsis" && node.scrollWidth > node.clientWidth)
+              || (style.webkitLineClamp !== "none" && node.scrollHeight > node.clientHeight);
+          });
+          return { value: element.getAttribute("aria-label"), scrollWidth, clientWidth, scrollHeight, clientHeight, truncated, top: element.closest(".metric-block")!.getBoundingClientRect().top };
+        }));
+        const viewportName = `${width}px${scale === 2 ? " at 200% (195 CSS px)" : ""}`;
+        for (const metric of metrics) {
+          if (metric.scrollWidth > metric.clientWidth || metric.truncated)
+            failures.push(`${strip} at ${viewportName}, value ${JSON.stringify(metric.value)}: scrollWidth=${metric.scrollWidth}, clientWidth=${metric.clientWidth}, scrollHeight=${metric.scrollHeight}, clientHeight=${metric.clientHeight}, ellipsis=${metric.truncated}`);
+        }
+        if (strip === "sb7-short" && scale === 1 && width <= 390 && new Set(metrics.map(metric => metric.top)).size !== 1)
+          failures.push(`${strip} at ${viewportName}: expected all three metrics in the first row`);
+      }
+      if (failures.length) throw new Error(`metric strip clipping:\n${failures.join("\n")}`);
+    } finally {
+      await tab.close();
+    }
+  }
+  console.log("metric strips fit at 360px, 390px, 1440px and effective 200% zoom");
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -1531,35 +1585,12 @@ try {
       const painted = valueBox && rendered ? { top: valueBox.top, right: valueBox.right, bottom: valueBox.bottom, left: valueBox.left } : null;
       const numeric = ["finite", "zero", "signed-zero"].includes(classification);
       const scientific = /^[-+]?\d(?:\.\d+)?e[-+]?\d+$/.test(rendered?.innerText ?? "");
-      const numericFit = !numeric || Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && renderedStyle?.textOverflow !== "ellipsis" && renderedStyle?.overflow !== "hidden" && renderedStyle?.whiteSpace === "nowrap" && rendered.innerText.length <= (scientific ? 7 : 5) && (!scientific || renderedStyle.fontSize === "20px"));
-      const tokenClipping = !numeric && rendered ? (() => {
-        const walker = document.createTreeWalker(rendered, NodeFilter.SHOW_TEXT);
-        const tokens: Range[] = [];
-        let node: Node | null;
-        while ((node = walker.nextNode())) for (const match of (node.textContent ?? "").matchAll(/\S+/g)) {
-          const range = document.createRange();
-          range.setStart(node, match.index ?? 0);
-          range.setEnd(node, (match.index ?? 0) + match[0].length);
-          tokens.push(range);
-        }
-        const renderedStyle = getComputedStyle(rendered);
-        return tokens.some((range) => {
-          const owner = range.startContainer.parentElement?.closest<HTMLElement>(".metric-value-text-token");
-          const measure = document.createElement("span");
-          measure.textContent = range.toString();
-          measure.style.cssText = `position:absolute; visibility:hidden; white-space:nowrap; font:${renderedStyle.font}; letter-spacing:${renderedStyle.letterSpacing};`;
-          document.body.append(measure);
-          const naturalWidth = measure.getBoundingClientRect().width;
-          measure.remove();
-          const ownerStyle = owner && getComputedStyle(owner);
-          return naturalWidth > rendered.clientWidth + 0.5 && (!owner || ownerStyle?.overflow !== "hidden" || ownerStyle.textOverflow !== "ellipsis" || ownerStyle.whiteSpace !== "nowrap");
-        });
-      })() : false;
-      const textFit = numeric || Boolean(rendered && (rendered.scrollHeight <= rendered.clientHeight || (rendered.classList.contains("metric-value-text") && rendered.clientHeight <= 48))) && !tokenClipping;
+      const textFit = Boolean(rendered && rendered.scrollWidth <= rendered.clientWidth && (renderedStyle?.overflowY === "visible" || rendered.scrollHeight <= rendered.clientHeight));
+      const numericFit = !numeric || Boolean(rendered && rendered.innerText.length <= (scientific ? 7 : 5) && (!scientific || renderedStyle?.fontSize === "20px"));
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
-      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, tokenClipping, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
       });
       return { entries, gridDiagnostics };
     }, metricBoundaryMatrix);
@@ -1574,7 +1605,6 @@ try {
       const right = entries[next].painted;
       if (left && right && left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top) failures.push(`${entries[index].label} overlaps ${entries[next].label}: ${JSON.stringify({ left, right })}`);
     }
-    if (entries.some((entry) => entry.tokenClipping)) failures.push("overlong word clipped without ellipsis");
     if (!Object.values(gridDiagnostics.checks).every(Boolean)) failures.push(`row/column edge assertion: metric grid separators are not continuous ${JSON.stringify(gridDiagnostics)}`);
     for (const entry of entries) {
       const counterpart = entry.label.startsWith("marked ") ? entries.find((candidate) => candidate.label === entry.label.replace("marked ", "unmarked ")) : entry.label.startsWith("unmarked ") ? entries.find((candidate) => candidate.label === entry.label.replace("unmarked ", "marked ")) : undefined;
