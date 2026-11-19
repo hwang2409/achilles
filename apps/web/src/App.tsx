@@ -1,3 +1,4 @@
+import { PageChatHeader } from "./PageChatHeader";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
@@ -294,8 +295,9 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
     }
     mobileChatWasOpen.current = true;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
+      event.stopPropagation();
       setMobileChatOpen(false);
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -354,9 +356,13 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
   const state = headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent));
   const title = ready?.title ?? "new chat";
+  const newPageChatReason = !connected ? "new chat is off until zeta is back" : !canWrite ? readOnlyReason
+    : active.creatingChat ? "creating chat…" : empty || (ready && !ready.sent) ? "already in a new chat"
+    : state === "running" || state === "approval" || active.busy ? "wait for the running chat to finish" : undefined;
+  const [createReceipt, setCreateReceipt] = useState<{ pageId: string; sessionId?: string; enabled: boolean; at: Date } | null>(null);
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
-    {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
+    {activePage && active.toggleError && <div className="create-mode-alert" role="alert" hidden={hasBlocks && !active.toggleRetryable}><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
     {lost && ready && failure && <ConnectionBanner state={connectionState} connection={connection} compact />}
     {unsentNew > 0 && <div className="create-mode-alert" role="status"><span>{unsentNew === 1 ? "1 unsent message" : `${unsentNew} unsent messages`} for a new chat</span><button type="button" onClick={active.openNewChat}>open</button></div>}
     {active.busy && <BusyNotice busy={active.busy} openSessionId={ready?.sessionId ?? null} onOpen={active.openBusyChat} onRetry={active.retryBusy} canWrite={canWrite} />}
@@ -373,9 +379,22 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetClosed ? " page-chat-sheet-closed" : ""}`}>
         {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{runStateLabel(state, composerActivity.queued)}</span><span aria-hidden="true">⌃</span></button>}
         {pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
-        <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen ? "true" : undefined} aria-labelledby={pageChatSheetOpen ? "page-chat-title" : undefined} inert={pageChatSheetClosed}>
-        {hasBlocks && <div className="page-chat-head"><strong id="page-chat-title" title={mobilePageChat ? undefined : title}>{mobilePageChat ? "page chat" : title}</strong><span className={`page-chat-status state-${state}`}>{runStateLabel(state, composerActivity.queued)}</span>{pageChatSheetOpen && <button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button>}</div>}
-        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
+        <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={pageChatSheetOpen ? "dialog" : undefined} aria-modal={pageChatSheetOpen ? "true" : undefined} aria-label={pageChatSheetOpen ? "page chat" : undefined} inert={pageChatSheetClosed}>
+        {hasBlocks && <PageChatHeader key={`${activePage.id}:${ready?.sessionId ?? "new"}:${pageChatSheetClosed}`} pageId={activePage.id} sessionId={ready?.sessionId ?? null} title={ready ? title : "page chat"} state={state} stateLabel={runStateLabel(state, composerActivity.queued)}
+          onSelect={active.selectChat} newChat={newPageChatReason ? undefined : active.newChat} newReason={newPageChatReason}
+          approval={{ checked: (activePage.approval_mode ?? "allow") === "allow", action: canWrite ? active.toggleApprovalMode : undefined,
+            reason: !canWrite ? readOnlyReason : (ready ?? empty)?.serverApprovalMode === "ask" ? "this server requires tool approval" : !ready ? "start a chat to change tool approval" : undefined,
+            pending: ready?.pendingApprovalMode && active.approvalChange?.pending ? "waiting for the turn to finish…" : active.approvalChange?.pending ? "saving…" : undefined,
+            error: active.approvalChange?.error, savedAt: active.approvalChange?.savedAt }}
+          create={{ checked: activePage.create_mode, action: canWrite ? async () => {
+            setCreateReceipt(null);
+            const result = await active.toggle();
+            if (result && !result.error && result.createMode !== null) setCreateReceipt({ pageId: activePage.id, sessionId: ready?.sessionId, enabled: result.createMode, at: new Date() });
+          } : undefined, reason: !canWrite ? readOnlyReason : active.creatingChat ? "creating chat…" : active.toggleBlocked && !active.toggleRetryable ? "wait for page tools to refresh" : undefined,
+            pending: active.toggling ? "saving…" : undefined, error: active.toggleError,
+            savedAt: createReceipt?.pageId === activePage.id && createReceipt?.sessionId === ready?.sessionId && createReceipt?.enabled === activePage.create_mode ? createReceipt.at : undefined }}
+          close={pageChatSheetOpen ? () => setMobileChatOpen(false) : undefined} closeRef={pageChatClose} />}
+        <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={async () => { await active.toggle(); }} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
           setFollowRequest((value) => value + 1);
@@ -389,7 +408,7 @@ function AgentSurface({ connection, client, connectionState, observerBanner }: {
         </div>
       </RunProvider>}
   </>;
-  return <AppShell banner={observerBanner} header={activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell banner={observerBanner} header={activePage && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {
@@ -412,7 +431,7 @@ function runStateLabel(state: string, queued: number) {
   return state === "approval" ? "needs you" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state;
 }
 
-function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled, toggle, onRename, onHistory }: { page: Page; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
+function ChatHeader({ page, docked, sessionId, title, state, queued, toggling, disabled, toggle, onRename, onHistory }: { page: Page; docked: boolean; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
   const [overflow, setOverflow] = useState(false);
   const overflowButton = useRef<HTMLButtonElement>(null);
   const actions = useRef<HTMLDivElement>(null);
@@ -471,6 +490,7 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
   const autoApprove = page.approval_mode === "allow";
   const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
   const routeLabel = page.route === "/" ? "home" : page.route.replace(/^\//, "");
+  if (docked) return <header className="chat-header"><div className="chat-heading"><span title={routeLabel}>pages / {routeLabel}</span>{titleNode}</div><div className="chat-actions"><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button></div></header>;
   return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status">{runStateLabel(state, queued)}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 

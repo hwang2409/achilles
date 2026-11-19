@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { CommandPalette, Highlight, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsControl, SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
@@ -23,6 +23,16 @@ export type Chat = {
   titled_by_user?: boolean;
 };
 
+export const PageChatCatalog = createContext<{
+  chats: readonly Chat[];
+  loading: boolean;
+  error: boolean;
+  next: string | null;
+  reload: () => void;
+  more: () => void;
+  clearSearch: () => void;
+} | null>(null);
+
 type Props = {
   page: PageLink | null;
   sessionId: string | null;
@@ -39,7 +49,7 @@ type Props = {
   | {
       agentActions?: true;
       onNewChat: () => Promise<void>;
-      onToggleCreateMode: () => Promise<void>;
+      onToggleCreateMode: () => Promise<unknown>;
       onSelectChat: (chat: Chat) => void;
       onRenameChat: (chat: Chat, title: string) => void;
     }
@@ -93,7 +103,7 @@ function groupLabel(value: string) {
 }
 
 // one lowercase style for every age: "10:23 pm", "mon", "nov 7"
-function timeLabel(value: string) {
+export function timeLabel(value: string) {
   const date = new Date(value);
   const group = groupLabel(value);
   const label = group === "today" ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : group === "yesterday" || group === "this week" ? date.toLocaleDateString([], { weekday: "short" }) : date.toLocaleDateString([], { month: "short", day: "numeric" });
@@ -209,7 +219,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
     const top = layers.at(-1);
     if (!top) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename]"))) return;
+      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename], .page-chat-head[data-popup]"))) return;
       event.preventDefault();
       event.stopPropagation();
       top();
@@ -381,7 +391,12 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
         <button ref={menuButton} className="menu-button" aria-label="open menu" onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
-      {children}
+      <PageChatCatalog.Provider value={{
+        chats: search ? [] : chats, loading: Boolean(search) || loading || chatList.loading,
+        error: !search && Boolean(chatList.error), next: search ? null : chatList.next,
+        reload: () => void chatListOwner.current!.reload(search), more: () => void chatListOwner.current!.more(),
+        clearSearch: () => { setQuery(""); setSearch(""); },
+      }}>{children}</PageChatCatalog.Provider>
     </main>
     {agentActions !== false && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {agentActions !== false && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
