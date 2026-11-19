@@ -50,7 +50,6 @@
 }
 @media (width <= 480px) {
   .page-chat-head { gap: 4px; }
-  .page-chat-head { padding-inline: 8px; }
   .page-chat-readouts { flex: none; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.25; }
   .page-chat-readouts .page-chat-status { max-width: 86px; }
   .page-chat-modes { gap: 4px; font-size: 10px; }
