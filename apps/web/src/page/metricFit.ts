@@ -1,4 +1,4 @@
-const minimumSize = "12px";
+const minimumSize = 12;
 
 export function observeMetricFit(strip: HTMLElement): () => void {
   if (typeof ResizeObserver === "undefined") return () => {};
@@ -19,7 +19,7 @@ function fitMetricStrip(strip: HTMLElement) {
   const stripStyle = getComputedStyle(strip);
   const usableWidth = strip.getBoundingClientRect().width - parseFloat(stripStyle.borderLeftWidth) - parseFloat(stripStyle.borderRightWidth);
   if (!(usableWidth > 0)) return;
-  let track = 0;
+  strip.style.removeProperty("--metric-value-size");
   const measures = [...strip.querySelectorAll<HTMLElement>(".metric-block")].flatMap(tile => {
     const style = getComputedStyle(tile);
     const inner = getComputedStyle(tile.querySelector(":scope > div")!);
@@ -32,24 +32,32 @@ function fitMetricStrip(strip: HTMLElement) {
     const tokens = [...tile.querySelectorAll<HTMLElement>(".metric-value-number, .metric-word")];
     return tokens.map((token, i) => ({ token, insets, word: token.textContent!, preceding: tokens[i - 1]?.textContent, probe: document.createElement("span") }));
   });
+  if (!measures.length) return;
   // Measure real DOM text, including font fallback and the browser's glyph rounding.
-  for (const { token, word, preceding, probe } of measures) {
+  for (const { token, word, probe } of measures) {
     probe.className = "metric-measure";
-    probe.textContent = preceding ? `${preceding} ${word}` : word;
+    probe.textContent = word;
     token.append(probe);
   }
-  for (const { insets, probe } of measures) track = Math.max(track, insets + probe.getBoundingClientRect().width);
-  for (const { word, probe } of measures) probe.textContent = word;
-  const oversized = measures.filter(({ probe, insets }) => probe.getBoundingClientRect().width > usableWidth - insets);
-  for (const { probe } of oversized) probe.style.fontSize = minimumSize;
-  const breakable = new Set(oversized.filter(({ token, probe, insets }) => token.classList.contains("metric-word") && probe.getBoundingClientRect().width > usableWidth - insets));
-  strip.style.setProperty("--metric-fit", `${Math.ceil(track)}px`);
-  const fitted = new Set(oversized);
-  for (const measure of measures) {
-    const { token, probe } = measure;
-    probe.remove();
-    if (fitted.has(measure)) token.style.setProperty("--metric-fitted-size", minimumSize);
-    else token.style.removeProperty("--metric-fitted-size");
-    token.toggleAttribute("data-metric-breakable", breakable.has(measure));
+  const fits = ({ probe, insets }: typeof measures[number]) => probe.getBoundingClientRect().width <= usableWidth - insets;
+  if (!measures.every(fits)) {
+    // Use the largest shared whole-pixel size that fits an unbroken token in one column.
+    let low = minimumSize;
+    let high = Math.floor(parseFloat(getComputedStyle(measures[0].token).fontSize));
+    while (low < high) {
+      const size = Math.ceil((low + high) / 2);
+      strip.style.setProperty("--metric-value-size", `${size}px`);
+      if (measures.every(fits)) low = size;
+      else high = size - 1;
+    }
+    strip.style.setProperty("--metric-value-size", `${low}px`);
   }
+  for (const measure of measures) {
+    const { token, preceding, word, probe } = measure;
+    token.toggleAttribute("data-metric-breakable", token.classList.contains("metric-word") && !fits(measure));
+    if (preceding) probe.textContent = `${preceding} ${word}`;
+  }
+  const track = Math.max(...measures.map(({ insets, probe }) => insets + probe.getBoundingClientRect().width));
+  strip.style.setProperty("--metric-fit", `${Math.ceil(track)}px`);
+  for (const { probe } of measures) probe.remove();
 }

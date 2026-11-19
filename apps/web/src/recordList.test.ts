@@ -277,9 +277,7 @@ test("text metrics expose the full value", () => {
   ] } };
   const result = render(React.createElement(PageView, { canWrite: true, page, pageId: "metric-text-boundary", credential: "secret", refreshKey: "0" }));
   const values = [...result.container.querySelectorAll(".metric-value")];
-  expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
-  expect(values[1]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");

@@ -127,7 +127,7 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
 function metricPresentation(block: Record<string, unknown>, count?: string) {
   const fullValue = block.count ? count ?? "…" : block.value == null ? "0" : String(block.value);
   const formatted = formatMetricValue(fullValue);
-  const number = formatted.numeric || formatted.currency;
+  const number = formatted.numeric;
   const words = number ? [] : formatted.display.split(/(\s+)/);
   return { block, fullValue, formatted, number, words };
 }
@@ -144,9 +144,8 @@ function MetricBlock({ block, fullValue, formatted, number, words }: Metric) {
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
   const displayValue = formatted.display;
   const isCompacted = displayValue !== fullValue;
-  const valueClass = formatted.scientific ? " metric-value-scientific" : formatted.numeric ? "" : " metric-value-text";
   const value = number ? displayValue : words.map((word, index) => word.trim() ? <span key={index} className="metric-word">{word}</span> : word);
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${valueClass}${number ? " metric-value-number" : ""}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{value}</span> : value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${number ? " metric-value-number" : ""}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{value}</span> : value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
