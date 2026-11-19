@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { DetailRecord, type DetailFilter } from "../DetailRecord";
 import { FormBlock, refreshSelection, selectRow, useRecordWrites, useSelectedRow } from "./RecordForm";
 import { extendWithRecordKeys, recordColumns, schemaColumns } from "./listColumns";
@@ -92,7 +92,10 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat, canW
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>
     </header>
     <div className="page-blocks">{groupBlocks(content).map((group, index) => {
-      if (group[0].type === "metric") return <div className="metric-strip" key={`metric-strip:${index}`}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} value={counts.get(metricQueryKey(block, pageId, credential) ?? "")} />)}</div>;
+      if (group[0].type === "metric") {
+        const metrics = group.map(block => metricPresentation(block, counts.get(metricQueryKey(block, pageId, credential) ?? "")));
+        return <div className="metric-strip" style={metricStripFit(metrics)} key={`metric-strip:${index}`}>{metrics.map(metric => <MetricBlock key={blockIdentity(metric.block, content)} {...metric} />)}</div>;
+      }
       return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} insertCapability={addFor(String(group[0].collection ?? ""))} onRegisterInsert={registerInsert} canWrite={canWrite} disabledReason={disabledReason} />;
     })}</div>
   </main>;
@@ -109,7 +112,6 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
-  if (block.type === "metric") return <MetricBlock block={block} value={block.count ? "…" : undefined} />;
   if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} onAskChat={onAskChat} insertCapability={insertCapability} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
@@ -121,15 +123,44 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
-function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
-  const fullValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
+function metricPresentation(block: Record<string, unknown>, count?: string) {
+  const fullValue = block.count ? count ?? "…" : block.value == null ? "0" : String(block.value);
+  const formatted = formatMetricValue(fullValue);
+  const number = formatted.numeric || formatted.currency;
+  const words = number ? [] : formatted.display.split(/(\s+)/);
+  return { block, fullValue, formatted, number, words };
+}
+
+type Metric = ReturnType<typeof metricPresentation>;
+const chars = (value: string) => [...value].length;
+const tokenWidth = (value: string) => ({ "--metric-token-chars": Math.max(1, chars(value)) }) as CSSProperties;
+
+function metricStripFit(metrics: Metric[]): CSSProperties {
+  let numberChars = 0, scientificChars = 0, textChars = 0;
+  for (const { formatted, number, words } of metrics) {
+    const length = chars(formatted.display);
+    if (formatted.scientific) scientificChars = Math.max(scientificChars, length);
+    else if (formatted.numeric) numberChars = Math.max(numberChars, length);
+    else if (number) textChars = Math.max(textChars, length);
+    else {
+      const tokens = words.filter(word => word.trim());
+      // Let neighboring words fit together where the strip has the room.
+      tokens.forEach((word, index) => {
+        textChars = Math.max(textChars, chars(index ? `${tokens[index - 1]} ${word}` : word));
+      });
+    }
+  }
+  return { "--metric-number-chars": numberChars, "--metric-scientific-chars": scientificChars, "--metric-text-chars": textChars } as CSSProperties;
+}
+
+function MetricBlock({ block, fullValue, formatted, number, words }: Metric) {
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  const formatted = formatMetricValue(fullValue);
   const displayValue = formatted.display;
   const isCompacted = displayValue !== fullValue;
   const valueClass = formatted.scientific ? " metric-value-scientific" : formatted.numeric ? "" : " metric-value-text";
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${valueClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : displayValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  const value = number ? displayValue : words.map((word, index) => word.trim() ? <span key={index} className="metric-word" style={tokenWidth(word)}>{word}</span> : word);
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${valueClass}${number ? " metric-value-number" : ""}`} style={number ? tokenWidth(displayValue) : undefined} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{value}</span> : value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {

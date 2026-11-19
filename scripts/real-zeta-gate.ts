@@ -23,6 +23,7 @@ const metricStrips = {
   "sb7-short": [["queued", "7"], ["reading", "1"], ["done", "12"]],
   "three-long": [["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"]],
   "seven-mixed": [["queued", "7"], ["reading", "1"], ["done", "12"], ["euro revenue", "€1,234,567"], ["units", "1,234,567"], ["usd revenue", "$12,345.67"], ["review", "waiting on an intentionally long legal and editorial review"]],
+  "three-oversize": [["state", "supercalifragilisticexpialidocious"], ["reading", "1"], ["done", "12"]],
 };
 
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
@@ -214,7 +215,7 @@ with _database() as db:
         db.execute("INSERT INTO layout_version VALUES(?,1,'gate',?,datetime('now'))", (page_id, json.dumps(layout)))
         db.execute("UPDATE page SET active_layout_version=1 WHERE id=?", (page_id,))
 `,
-      JSON.stringify(Object.fromEntries(Object.values(metricStrips).map((values, i) => [`gate-page-${43 + i}`, values]))),
+      JSON.stringify(Object.fromEntries(Object.values(metricStrips).map((values, i) => [`gate-page-${42 + i}`, values]))),
     ],
     env,
   );
@@ -243,30 +244,62 @@ with _database() as db:
     console.log(`verified worktree listener pid=${pid} port=${port}`);
   }
   browser = await chromium.launch({ headless: true });
-  for (const [width, height, scale] of [[360, 780, 1], [390, 844, 1], [1440, 900, 1], [390, 844, 2]]) {
+  for (const [width, height, scale] of [[320, 720, 1], [360, 780, 1], [390, 844, 1], [1440, 900, 1], [390, 844, 2]]) {
     const viewport = { width: width / scale, height: height / scale };
     const tab = await browser.newPage({ viewport, deviceScaleFactor: scale });
     try {
       const failures: string[] = [];
       for (const [index, [strip, values]] of Object.entries(metricStrips).entries()) {
-        await tab.goto(`${origin}/gate-page-${43 + index}`);
-        await tab.waitForFunction((count) => document.querySelectorAll(".metric-strip .metric-value").length === count, values.length);
+        const pageNumber = 42 + index;
+        await tab.goto(`${origin}/gate-page-${pageNumber}`);
+        await tab.locator(".page-head h1", { hasText: `gate page ${pageNumber}` }).waitFor();
         await tab.evaluate(() => document.fonts.ready);
-        const metrics = await tab.locator(".metric-strip .metric-value").evaluateAll(elements => elements.map(element => {
+        const viewportName = `${width}px${scale === 2 ? " at 200% (195 CSS px)" : ""}`;
+        const strips = tab.locator(".metric-strip");
+        const blocks = strips.locator(":scope > .metric-block");
+        const metricValues = blocks.locator(".metric-value");
+        const counts = { strips: await strips.count(), blocks: await blocks.count(), values: await metricValues.count() };
+        if (counts.strips !== 1 || counts.blocks !== values.length || counts.values !== values.length)
+          throw new Error(`${strip} at ${viewportName}: expected 1 strip, ${values.length} direct metric blocks and ${values.length} values, got ${JSON.stringify(counts)}`);
+        const metrics = await metricValues.evaluateAll(elements => elements.map(element => {
           const { scrollWidth, clientWidth, scrollHeight, clientHeight } = element;
           const truncated = [element, ...element.querySelectorAll("*")].some(node => {
             const style = getComputedStyle(node);
             return (style.textOverflow === "ellipsis" && node.scrollWidth > node.clientWidth)
               || (style.webkitLineClamp !== "none" && node.scrollHeight > node.clientHeight);
           });
-          return { value: element.getAttribute("aria-label"), scrollWidth, clientWidth, scrollHeight, clientHeight, truncated, top: element.closest(".metric-block")!.getBoundingClientRect().top };
+          const value = element.getAttribute("aria-label") ?? "";
+          const numeric = /^[+−-]?[\p{Sc}]?[+−-]?\d[\d,.]*(?:e[+-]?\d+)?[\p{Sc}]?$/iu.test(value);
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const lines = new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => rect.top)).size;
+          const tile = element.closest(".metric-block")!;
+          const strip = tile.closest(".metric-strip")!;
+          const fullWidth = Math.abs(tile.getBoundingClientRect().width - strip.clientWidth) < 1;
+          const area = element.closest(".metric-value-line")!.clientWidth;
+          const fonts = document.createElement("canvas").getContext("2d")!;
+          const words = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+          const brokenWords: string[] = [];
+          const illegibleWords: string[] = [];
+          for (let wordNode = words.nextNode(); wordNode; wordNode = words.nextNode()) {
+            const style = getComputedStyle(wordNode.parentElement!);
+            for (const word of (wordNode.textContent ?? "").matchAll(/\S+/g)) {
+              const token = document.createRange();
+              token.setStart(wordNode, word.index);
+              token.setEnd(wordNode, word.index + word[0].length);
+              fonts.font = `${style.fontWeight} 12px ${style.fontFamily}`;
+              const minimumWidth = fonts.measureText(word[0]).width;
+              if (parseFloat(style.fontSize) < 12) illegibleWords.push(word[0]);
+              if (!numeric && token.getClientRects().length > 1 && !(fullWidth && minimumWidth > area)) brokenWords.push(word[0]);
+            }
+          }
+          return { value, numeric, lines, brokenWords, illegibleWords, scrollWidth, clientWidth, scrollHeight, clientHeight, truncated, top: element.closest(".metric-block")!.getBoundingClientRect().top };
         }));
-        const viewportName = `${width}px${scale === 2 ? " at 200% (195 CSS px)" : ""}`;
         for (const metric of metrics) {
-          if (metric.scrollWidth > metric.clientWidth || metric.truncated)
-            failures.push(`${strip} at ${viewportName}, value ${JSON.stringify(metric.value)}: scrollWidth=${metric.scrollWidth}, clientWidth=${metric.clientWidth}, scrollHeight=${metric.scrollHeight}, clientHeight=${metric.clientHeight}, ellipsis=${metric.truncated}`);
+          if (metric.scrollWidth > metric.clientWidth || metric.truncated || (metric.numeric && metric.lines > 1) || metric.brokenWords.length || metric.illegibleWords.length)
+            failures.push(`${strip} at ${viewportName}, value ${JSON.stringify(metric.value)}: scrollWidth=${metric.scrollWidth}, clientWidth=${metric.clientWidth}, scrollHeight=${metric.scrollHeight}, clientHeight=${metric.clientHeight}, ellipsis=${metric.truncated}, lines=${metric.lines}, brokenWords=${JSON.stringify(metric.brokenWords)}, under12px=${JSON.stringify(metric.illegibleWords)}`);
         }
-        if (strip === "sb7-short" && scale === 1 && width <= 390 && new Set(metrics.map(metric => metric.top)).size !== 1)
+        if (strip === "sb7-short" && scale === 1 && (width === 360 || width === 390) && new Set(metrics.map(metric => metric.top)).size !== 1)
           failures.push(`${strip} at ${viewportName}: expected all three metrics in the first row`);
       }
       if (failures.length) throw new Error(`metric strip clipping:\n${failures.join("\n")}`);
@@ -274,7 +307,7 @@ with _database() as db:
       await tab.close();
     }
   }
-  console.log("metric strips fit at 360px, 390px, 1440px and effective 200% zoom");
+  console.log("metric strips fit at 320px, 360px, 390px, 1440px and effective 200% zoom");
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -1560,11 +1593,17 @@ with _database() as db:
         trackSizes: grid.strip ? getComputedStyle(grid.strip).gridTemplateColumns : null,
         rows: grid.rows.map((row) => row.map(({ x, y, width, height }) => ({ x, y, width, height }))),
       };
+      const pane = document.querySelector<HTMLElement>(".page-content")!;
+      const initialScroll = pane.scrollTop;
+      const paneBox = pane.getBoundingClientRect();
       const entries = expected.map(({ label, value, expectedText, status: expectedStatus, classification }) => {
       const element = Array.from(elements).find((candidate) => candidate.querySelector(".metric-label")?.textContent === label);
       const block = element as HTMLElement | undefined;
       const labelNode = element?.querySelector<HTMLElement>(".metric-label");
       const rendered = element?.querySelector<HTMLElement>(".metric-value");
+      const initialBox = block?.getBoundingClientRect();
+      if (initialBox && (initialBox.top < paneBox.top || initialBox.bottom > paneBox.bottom))
+        pane.scrollTop += (initialBox.top + initialBox.bottom - paneBox.top - paneBox.bottom) / 2;
       const blockBox = block?.getBoundingClientRect();
       const labelBox = labelNode?.getBoundingClientRect();
       const valueBox = rendered?.getBoundingClientRect();
@@ -1587,8 +1626,9 @@ with _database() as db:
       const overlays = [".page-chat-bar", ".page-chat-drawer", ".page-chat-backdrop", ".page-chat-surface"].flatMap((selector) => { const node = document.querySelector<HTMLElement>(selector); const box = node?.getBoundingClientRect(); return box && box.width > 0 && box.height > 0 ? [{ selector, box: { top: box.top, right: box.right, bottom: box.bottom, left: box.left } }] : []; });
       const intersects = (left: DOMRect, right: { top: number; right: number; bottom: number; left: number }) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
       const overlayHit = Boolean(blockBox && overlays.some(({ box }) => intersects(blockBox, box)));
-      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
+      return { label, value, expectedText, expectedStatus, classification, found: Boolean(element), text: rendered?.innerText, title: rendered?.title, aria: rendered?.getAttribute("aria-label"), mark: element?.querySelector(".record-mark")?.className ?? "", expectedMark, numeric, numericFit, textFit, painted: painted && { ...painted, top: painted.top + pane.scrollTop, bottom: painted.bottom + pane.scrollTop }, block: blockBox && { top: blockBox.top, right: blockBox.right, bottom: blockBox.bottom, left: blockBox.left }, clip: clip && { top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left }, contained: Boolean(blockBox && painted && painted.top >= blockBox.top && painted.right <= blockBox.right && painted.bottom <= blockBox.bottom && painted.left >= blockBox.left), clipContained: Boolean(blockBox && clip && blockBox.top >= clip.top && blockBox.right <= clip.right && blockBox.bottom <= clip.bottom && blockBox.left >= clip.left), hits, stacks, overlayHit, padding: style ? parseFloat(style.paddingInlineEnd) : -1, rightGap: blockBox && valueBox ? blockBox.right - valueBox.right : -1 };
       });
+      pane.scrollTop = initialScroll;
       return { entries, gridDiagnostics };
     }, metricBoundaryMatrix);
     const failures = entries.flatMap((entry) => {

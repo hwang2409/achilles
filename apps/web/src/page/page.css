@@ -6,15 +6,44 @@
 .page-layout-version { flex: 0 0 auto; align-self: flex-end; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; white-space: nowrap; }
 .page-blocks { display: grid; gap: 32px; }
 .page-text { margin: 0; color: var(--fulcrum-muted); font-size: 14px; line-height: 22px; }
-.metric-strip { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 0; border-top: 1px solid var(--fulcrum-border); border-left: 1px solid var(--fulcrum-border); background: transparent; }
-.metric-block { min-width: 0; display: flex; align-items: flex-start; gap: 10px; min-height: 86px; padding: 14px 16px; background: var(--fulcrum-surface); box-shadow: inset -1px 0 var(--fulcrum-border), inset 0 -1px var(--fulcrum-border); }
-.metric-block > div { min-width: 0; padding-inline-end: 6px; display: grid; gap: 2px; }
+.metric-strip {
+  --metric-track-floor: 150px;
+  --metric-repeat: auto-fit;
+  --metric-pad: 16px;
+  --metric-inner-pad: 6px;
+  --metric-mark-space: 0px;
+  --metric-insets: calc(2 * var(--metric-pad) + var(--metric-inner-pad) + var(--metric-mark-space));
+  container-type: inline-size;
+  /* ch is the zero's advance at the shared text size. Scale it for each numeric face. */
+  --metric-fit: calc(var(--metric-insets) + max(
+    var(--metric-number-chars, 0) * var(--metric-number-scale) * 1ch,
+    var(--metric-scientific-chars, 0) * var(--metric-scientific-scale) * 1ch,
+    var(--metric-text-chars, 0) * 1ch
+  ));
+  min-width: 0;
+  display: grid;
+  font-size: var(--metric-text-size);
+  grid-template-columns: repeat(var(--metric-repeat), minmax(min(100%, max(var(--metric-track-floor), var(--metric-fit))), 1fr));
+  border: 0;
+  border-top: 1px solid var(--fulcrum-border);
+  border-left: 1px solid var(--fulcrum-border);
+  background: transparent;
+}
+.metric-strip:has(> .metric-block > .record-mark) { --metric-mark-space: 22px; }
+.metric-strip, .metric-block { --metric-text-size: 16px; --metric-number-scale: 1.75; --metric-scientific-scale: 1.25; }
+.metric-block { min-width: 0; display: flex; align-items: flex-start; gap: 10px; min-height: 86px; padding: 14px var(--metric-pad, 16px); background: var(--fulcrum-surface); box-shadow: inset -1px 0 var(--fulcrum-border), inset 0 -1px var(--fulcrum-border); }
+.metric-block > div { min-width: 0; padding-inline-end: var(--metric-inner-pad, 6px); display: grid; gap: 2px; }
 .metric-label { min-width: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .metric-value-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
-/* Keep the type scale and let values grow vertically instead of clipping at a track edge. */
-.metric-block strong { min-width: 0; max-width: 100%; font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.metric-block strong.metric-value-scientific { font-size: 20px; }
-.metric-block strong.metric-value-text { font-size: 16px; line-height: 24px; font-weight: 400; }
+.metric-block strong { --metric-value-size: calc(var(--metric-text-size) * var(--metric-number-scale)); min-width: 0; max-width: 100%; font-size: var(--metric-value-size); line-height: 34px; font-variant-numeric: tabular-nums; }
+.metric-block strong.metric-value-scientific { --metric-value-size: calc(var(--metric-text-size) * var(--metric-scientific-scale)); }
+.metric-block strong.metric-value-text { --metric-value-size: var(--metric-text-size); line-height: 24px; font-weight: 400; text-wrap: balance; }
+/* JetBrains Mono advances by .6em. Only scale tokens that outgrow a full tile. */
+.metric-block strong.metric-value-number, .metric-word {
+  font-size: clamp(12px, calc((100cqi - var(--metric-insets)) / (var(--metric-token-chars) * .6)), var(--metric-value-size));
+}
+.metric-block strong.metric-value-number { white-space: nowrap; }
+.metric-word { display: inline-block; max-width: 100%; vertical-align: top; overflow-wrap: anywhere; }
 .metric-block small, .metric-delta { min-width: 0; overflow-wrap: anywhere; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
 .metric-warn { color: var(--fulcrum-warn); }
 .record-mark { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; margin: 5px 2px 0 0; outline: 1px solid var(--fulcrum-muted); outline-offset: -1px; vertical-align: 1px; }
@@ -64,14 +93,15 @@
 .record-form-actions p { margin: 0; color: var(--fulcrum-muted); font-size: 12px; }
 @media (max-width: 760px) { .page-content { padding: 24px 20px 40px; } .page-head { align-items: flex-start; flex-direction: column; gap: 8px; margin-bottom: 24px; } .page-layout-version { align-self: flex-start; } .page-blocks { gap: 24px; } .record-form form { grid-template-columns: 1fr; } .record-field:nth-child(n):not(.record-field-check) { grid-column: 1; } }
 @media (max-width: 760px) {
-  .metric-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .metric-block { position: relative; padding-inline: 10px; }
+  .metric-strip { --metric-track-floor: calc(100% / 3); --metric-repeat: auto-fill; }
+  .metric-strip, .metric-strip:has(> .metric-block > .record-mark) { --metric-pad: 10px; --metric-inner-pad: 0px; --metric-mark-space: 0px; }
+  .metric-block { position: relative; }
   /* Keep the status mark beside the label so the value can use the full tile width. */
   .metric-block > .record-mark { position: absolute; inset-inline-start: 10px; }
   .metric-block:has(> .record-mark) .metric-label { padding-inline-start: 14px; }
   .metric-block > div { padding-inline-end: 0; }
 }
-@media (width < 360px) { .metric-strip { grid-template-columns: repeat(auto-fit, minmax(min(100%, 128px), 1fr)); } }
+@media (width < 360px) { .metric-strip { --metric-track-floor: 128px; --metric-repeat: auto-fit; } }
 .record-count { font-weight: 400; }
 .record-reveal button { padding: 0; border: 0; color: var(--fulcrum-accent); background: none; font: inherit; cursor: pointer; }
 .record-reveal button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 3px; }
