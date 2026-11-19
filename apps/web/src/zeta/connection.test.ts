@@ -43,6 +43,8 @@ const controllerRole = { role: "controller", reason: null } as const;
 const observerRole = { role: "observer", reason: null } as const;
 const refusedRole = { ...observerRole, reason: "another tab had control. try again after it closes." };
 test.each([
+  ["connect on a read-only route", controllerRole, ["connect_read_only", "observer_busy", "retry"], observerRole],
+  ["connect on a writable route", observerRole, ["connect_writable", "retry"], controllerRole],
   ["controller granted", controllerRole, ["controller_granted"], controllerRole],
   ["controller busy probes observer", controllerRole, ["controller_busy"], observerRole],
   ["observer accepted and reconnects as observer", controllerRole, ["controller_busy", "observer_granted", "retry"], observerRole],
@@ -95,14 +97,32 @@ describe("createConnection controller capacity vs version mismatch", () => {
     } finally { connection.stop(); }
   });
 
-  test("keeps the controller success path unchanged", async () => {
-    const client = { onClose() {}, close() {} };
-    const connection = createConnection({ origin: "http://localhost", discover: async () => discovery, connect: async () => client as never });
-    await flush();
-    expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
-    expect(connection.client).toBe(client);
-    expect(connection.observerPresentation).toBe(false);
-    connection.stop();
+  test.each([
+    ["read-only", true, "observer"],
+    ["writable", false, "controller"],
+  ] as const)("connects and reconnects on a %s route", async (_route, readOnly, authority) => {
+    const roles: string[] = [];
+    let drop = () => {};
+    const client = { onClose(callback: () => void) { drop = callback; }, close() {} };
+    const route = { readOnly };
+    const connection = createConnection({
+      ...route,
+      origin: "http://localhost",
+      discover: async () => discovery,
+      connect: async (_discovery, role) => { roles.push(role); return client as never; },
+    });
+    try {
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority });
+      expect(connection.client).toBe(client);
+      expect(connection.observerPresentation).toBe(readOnly);
+      await connection.takeControl();
+      drop();
+      connection.retryNow();
+      await flush();
+      expect(roles).toEqual([authority, authority]);
+      expect(connection.state).toEqual({ phase: "connected", authority });
+    } finally { connection.stop(); }
   });
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller
   // connects (the second-tab case) and -32002 "protocol_mismatch" for a real version mismatch. @fulcrum/zeta
