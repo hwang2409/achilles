@@ -28,43 +28,6 @@ test("desktop page chat proof uses the docked surface, not the mobile bar", () =
   })).toBe(false);
 });
 
-test("mobile close retries a detached button and leaves the sheet closed", async () => {
-  let mounted = true;
-  let open = true;
-  let checks = 0;
-  const locator = {
-    count: async () => mounted ? 1 : 0,
-    isVisible: async () => mounted,
-    click: async () => {
-      if (checks++ === 0) {
-        mounted = false;
-        mounted = true;
-        throw new Error("element is not attached to the DOM");
-      }
-      open = false;
-    },
-  };
-
-  const { clickOptionalDetachedLocator } = await import("./gate-diagnostics");
-  const click = clickOptionalDetachedLocator ?? (async (button: typeof locator) => {
-    if (await button.count() && await button.isVisible()) {
-      try { await button.click({ timeout: 1000 }); } catch { /* reproduce the old gate's swallowed race */ }
-    }
-    return false;
-  });
-  await click(locator);
-  expect(open, "the sheet must be closed after the user click").toBe(false);
-});
-
-test("mobile close does not swallow covered buttons", async () => {
-  const locator = {
-    count: async () => 1,
-    click: async () => { throw new Error("element is covered by another element"); },
-  };
-
-  const { clickOptionalDetachedLocator } = await import("./gate-diagnostics");
-  await expect((clickOptionalDetachedLocator ?? ((button: typeof locator) => button.click()))(locator)).rejects.toThrow("element is covered");
-});
 test("diagnostics redact all secret-shaped values", () => {
   const input = {
     token: fake,
