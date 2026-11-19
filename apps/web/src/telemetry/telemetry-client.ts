@@ -1,5 +1,5 @@
 import type { ZetaClient } from "@fulcrum/zeta";
-import type { Page, TelemetryOverview, TelemetrySession } from "./telemetry-types";
+import type { Page, TelemetryAgent, TelemetryOverview, TelemetrySession, TelemetrySpan, TelemetryStatus, TelemetryTrace } from "./telemetry-types";
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
 /** Shown on the needs-a-newer-zeta page only: the projects views read through it. */
@@ -19,9 +19,24 @@ function params(values: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null && value !== undefined && value !== ""));
 }
 
+type AgentPage<T> = {
+  session_id: string;
+  trace_id: string | null;
+  agent_session_id: string | null;
+  items: T[];
+  next_cursor: string | null;
+};
+
+type TracePage = { trace: TelemetryTrace; spans: TelemetrySpan[]; next_cursor: string | null };
+
 /** Read-only telemetry calls over the page's one negotiated zeta connection. */
 export function telemetryClient(client: Rpc) {
   return {
+    status: () => client.request("telemetry_status", {}) as Promise<TelemetryStatus>,
+    session: (session_id: string) => client.request("telemetry_sessions", { session_id }) as Promise<Page<TelemetrySession>>,
+    trace: (trace_id: string, cursor: string | null) => client.request("telemetry_trace", params({ trace_id, cursor })) as Promise<TracePage>,
+    traceIds: (session_id: string, cursor: string | null) => client.request("telemetry_agent_tree", params({ session_id, collection: "traces", cursor })) as Promise<AgentPage<string>>,
+    agents: (session_id: string, trace_id: string, cursor: string | null) => client.request("telemetry_agent_tree", params({ session_id, collection: "agents", trace_id, cursor })) as Promise<AgentPage<TelemetryAgent>>,
     overview: (window: Window, bucket: "hour" | "day") => client.request("telemetry_overview", { ...window, bucket }) as Promise<TelemetryOverview>,
     sessions: ({ cursor, limit = 50, errorsOnly, profile, model, ...window }: SessionQuery) =>
       client.request("telemetry_sessions", params({

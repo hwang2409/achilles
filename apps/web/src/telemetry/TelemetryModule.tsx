@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { formatAgo, formatHour } from "./format";
 import { EnumListbox } from "../page/EnumListbox";
 import { Overview, OverviewSkeleton } from "./Overview";
-import { RANGES, useTelemetryReads, type Loaded, type Range, type Tab } from "./reads";
+import { browserEnv, RANGES, useTelemetryReads, type Loaded, type Range, type Tab } from "./reads";
+import { DetailLoading, DetailNotice, SESSION_LIST, SessionBackLink, SessionDetail } from "./SessionDetail";
 import { Sessions } from "./Sessions";
 import { STATE_FEATURE, TELEMETRY_FEATURE, telemetryNegotiated, telemetryProblem, type TelemetryProblem } from "./telemetry-client";
 import type { TelemetryStatus } from "./telemetry-types";
@@ -15,7 +16,7 @@ const TABS: { tab: Tab; href: string }[] = [
 ];
 const tabOf = (path: string): Tab => (path === "/telemetry/sessions" || path.startsWith("/telemetry/sessions/") ? "sessions" : "overview");
 /** The session id of `/telemetry/sessions/:id`, else null. */
-const sessionOf = (path: string) => { const match = /^\/telemetry\/sessions\/([^/]+)$/.exec(path); return match ? decodeURIComponent(match[1]) : null; };
+const sessionOf = (path: string) => /^\/telemetry\/sessions\/([^/]+)$/.exec(path)?.[1] ?? null;
 
 /** The telemetry pages: one read-only view of zeta's telemetry over the page's live connection. */
 export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
@@ -46,19 +47,34 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
   if (!client) return <Frame><Notice role="status" title="connecting to zeta…" /></Frame>;
   if (!telemetryNegotiated(client)) return <NeedsNewerZeta client={client} />;
   const detail = sessionOf(path);
-  if (detail) return <Frame tabs={tabs}><SessionComing id={detail} back={(event) => go(event, "/telemetry/sessions")} /></Frame>;
-  return <TelemetryPages client={client} tab={tab} tabs={tabs} go={go} openTelemetrySettings={openTelemetrySettings} />;
+  if (detail && !/^[a-f0-9]{32}$/.test(detail)) return <Frame tabs={tabs} detail><DetailNotice back={(event) => go(event, SESSION_LIST)} title="session not found">this link does not have a valid session id.</DetailNotice></Frame>;
+  return <TelemetryPages client={client} tab={tab} tabs={tabs} go={go} sessionId={detail} openTelemetrySettings={openTelemetrySettings} />;
 }
 
-function TelemetryPages({ client, tab, tabs, go, openTelemetrySettings }: { client: ZetaClient; tab: Tab; tabs: ReactNode; go: (event: MouseEvent<HTMLAnchorElement>, href: string) => void; openTelemetrySettings?: () => void }) {
+function TelemetryPages({ client, tab, tabs, go, sessionId, openTelemetrySettings }: { client: ZetaClient; tab: Tab; tabs: ReactNode; sessionId: string | null; go: (event: MouseEvent<HTMLAnchorElement>, href: string) => void; openTelemetrySettings?: () => void }) {
   const [chart, setChart] = useState<"calls" | "tokens">("calls");
-  const reads = useTelemetryReads(client, tab);
+  const [trace, setTrace] = useState<{ sessionId: string; id: string }>();
+  useEffect(() => setTrace(undefined), [sessionId]);
+  const traceId = trace?.sessionId === sessionId ? trace.id : null;
+  const detail = useMemo(() => sessionId ? { sessionId, traceId } : undefined, [sessionId, traceId]);
+  const reads = useTelemetryReads(client, tab, browserEnv, detail);
   const { data, shown, range } = reads;
   const seen = useSeenFilters(data);
   const status = data?.status;
   const problem = reads.error === undefined ? null : telemetryProblem(reads.error);
   if (problem?.kind === "off" || status?.enabled === false) return <TelemetryOff openSettings={openTelemetrySettings} />;
 
+  if (sessionId) {
+    const back = (event: MouseEvent<HTMLAnchorElement>) => go(event, SESSION_LIST);
+    const reply = shown?.data.tab === "detail" ? shown.data : undefined;
+    const missingTrace = problem?.code === "trace_not_found";
+    return <Frame detail tools={<Tools status={reply?.status} refreshing={reads.phase === "refreshing"} refresh={reads.refresh} />} tabs={tabs}>
+      {missingTrace ? <section className="tm-banner" role="alert"><div><h2>trace not found</h2><p>the selected trace may have expired.{reply && " showing the last available data."}</p></div><button type="button" className="tm-button" onClick={traceId ? () => setTrace(undefined) : reads.refresh}>{traceId ? "show latest trace" : "retry now"}</button></section>
+        : problem && <FailedBanner problem={problem} updatedAt={reply ? reads.updatedAt : undefined} retry={reads.refresh} />}
+      {reply ? <div className={shown?.stale ? "tm-stale" : undefined} aria-busy={shown?.stale && !problem || undefined}><SessionDetail key={sessionId} data={reply} sessionId={sessionId} back={back} chooseTrace={(id) => setTrace({ sessionId, id })} /></div>
+        : problem ? <div className="td-state"><SessionBackLink back={back} /></div> : <DetailLoading back={back} />}
+    </Frame>;
+  }
   const banner = problem && <FailedBanner problem={problem} updatedAt={shown ? reads.updatedAt : undefined} retry={reads.refresh} />;
   return (
     <Frame tools={<Tools status={status} refreshing={reads.phase === "refreshing"} range={range} chooseRange={reads.chooseRange} refresh={reads.refresh} />} tabs={tabs}>
@@ -74,6 +90,7 @@ type Reads = ReturnType<typeof useTelemetryReads>;
 
 /** Labels come from the ask the shown reply answers; while a newer ask loads, the old reply stays, dimmed. */
 function ShownView({ reads, shown, busy, chart, setChart, seen, go }: { reads: Reads; shown: NonNullable<Reads["shown"]>; busy: boolean; chart: "calls" | "tokens"; setChart: (chart: "calls" | "tokens") => void; seen: ReturnType<typeof useSeenFilters>; go: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
+  if (shown.data.tab === "detail") return null;
   const empty = <NoTelemetryYet rangeLabel={shown.label} widen={reads.range === "24h" ? () => reads.chooseRange("7d") : undefined} />;
   const view = shown.data.tab === "overview"
     ? <Overview overview={shown.data.overview} bucket={shown.bucket} chart={chart} setChart={setChart} empty={empty} />
@@ -98,23 +115,23 @@ function useSeenFilters(data: Loaded | undefined) {
 const RANGE_KEYS = Object.keys(RANGES) as Range[];
 const RANGE_LABELS = RANGE_KEYS.map((key) => RANGES[key].label);
 
-function Tools({ status, refreshing, range, chooseRange, refresh }: { status?: TelemetryStatus; refreshing: boolean; range: Range; chooseRange: (range: Range) => void; refresh: () => void }) {
+function Tools({ status, refreshing, range, chooseRange, refresh }: { status?: TelemetryStatus; refreshing: boolean; range?: Range; chooseRange?: (range: Range) => void; refresh: () => void }) {
   return (
     <div className="tm-tools">
       {status && <ReceiverMark status={status} />}
       {refreshing && <span className="tm-refreshing" role="status">refreshing…</span>}
-      <div className="tm-range">
+      {range && chooseRange && <div className="tm-range">
         <EnumListbox label="time range" value={RANGES[range].label} options={RANGE_LABELS} onChange={(label) => chooseRange(RANGE_KEYS.find((key) => RANGES[key].label === label)!)} />
-      </div>
+      </div>}
       <button type="button" className="tm-button tm-refresh" onClick={refresh}><span aria-hidden="true">↻</span>refresh</button>
     </div>
   );
 }
 
 /** Only the interior: the achilles shell draws the sidebar, top bar, and route title around it. */
-function Frame({ tools, tabs, children }: { tools?: ReactNode; tabs?: ReactNode; children: ReactNode }) {
+function Frame({ tools, tabs, children, detail }: { tools?: ReactNode; tabs?: ReactNode; children: ReactNode; detail?: boolean }) {
   return (
-    <div className="telemetry-module" data-fulcrum-theme="gruvbox-dark">
+    <div className={detail ? "telemetry-module tm-detail-frame" : "telemetry-module"} data-fulcrum-theme="gruvbox-dark">
       {tabs && <div className="tm-tabs-row">{tabs}{tools}</div>}
       <main className="tm-main">{children}</main>
     </div>
@@ -202,17 +219,6 @@ function TelemetryOff({ openSettings }: { openSettings?: () => void }) {
 }
 
 /** `/telemetry/sessions/:id` until the session detail view lands. */
-function SessionComing({ id, back }: { id: string; back: (event: MouseEvent<HTMLAnchorElement>) => void }) {
-  return (
-    <section className="tm-empty">
-      <p className="tm-eyebrow">session</p>
-      <h1 className="tm-id-heading" title={id}>{id}</h1>
-      <p>the session view, with its agent tree and trace waterfall, comes in the next update.</p>
-      <div className="tm-actions"><a className="tm-button" href="/telemetry/sessions" onClick={back}>‹ back to sessions</a></div>
-    </section>
-  );
-}
-
 function NoTelemetryYet({ rangeLabel, widen }: { rangeLabel: string; widen?: () => void }) {
   return (
     <section className="tm-empty">

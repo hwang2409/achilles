@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { readDetail, type DetailData, type DetailTarget } from "./detail-read";
 import type { SessionsQuery } from "./Sessions";
 import { telemetryClient, type Window } from "./telemetry-client";
 import type { Page, TelemetryOverview, TelemetrySession, TelemetryStatus } from "./telemetry-types";
@@ -18,9 +19,10 @@ const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (now
  * What a read asks for: a new object per user choice, so a reply answers the choice on screen only when its `ask` is
  * that object. `window` is set while paging, because zeta ties a cursor to the window and filters that issued it.
  */
-export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window | null };
+export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window | null; detail?: DetailTarget };
 
 export type Loaded =
+  | ({ ask: Ask; tab: "detail" } & DetailData)
   | { ask: Ask; tab: "overview"; status: TelemetryStatus; overview: TelemetryOverview }
   | { ask: Ask; tab: "sessions"; status: TelemetryStatus; total: number; page: Page<TelemetrySession>; window: Window };
 
@@ -46,7 +48,7 @@ export const browserEnv: ReadEnv = {
 };
 
 /** The newest reply (`data`, read at `updatedAt`, epoch ms) stays after a failed or running read. */
-type Snapshot = { data?: Loaded; updatedAt?: number; error?: unknown; reading: boolean; hidden: boolean };
+type Snapshot = { data?: Loaded; updatedAt?: number; error?: unknown; errorAsk?: Ask; reading: boolean; hidden: boolean };
 
 /**
  * The one owner of telemetry reads. It reads the current ask now, then every `POLL_MS` while the page is visible, and
@@ -71,9 +73,10 @@ function createReader(load: (ask: Ask) => Promise<Loaded>, ask: Ask, env: ReadEn
   const read = async () => {
     queued = false;
     emit({ reading: true });
+    const request = ask;
     let result: Partial<Snapshot>;
-    try { result = { data: await load(ask), updatedAt: Date.now(), error: undefined }; }
-    catch (error) { result = { error }; }
+    try { result = { data: await load(request), updatedAt: Date.now(), error: undefined, errorAsk: undefined }; }
+    catch (error) { result = { error, errorAsk: request }; }
     if (stopped) return;
     emit({ ...result, reading: false });
     if (queued) want();
@@ -97,6 +100,7 @@ function createReader(load: (ask: Ask) => Promise<Loaded>, ask: Ask, env: ReadEn
 async function loadTelemetry(client: ZetaClient, ask: Ask): Promise<Loaded> {
   const reads = telemetryClient(client);
   const { range, query } = ask;
+  if (ask.detail) return { ask, tab: "detail", ...await readDetail(reads, ask.detail) };
   if (ask.tab === "overview") {
     const overview = await reads.overview(windowOf(range), RANGES[range].bucket);
     return { ask, tab: "overview", status: overview.status, overview };
@@ -108,7 +112,7 @@ async function loadTelemetry(client: ZetaClient, ask: Ask): Promise<Loaded> {
 }
 
 const firstPage: SessionsQuery = { cursors: [null], errorsOnly: false, profile: null, model: null };
-type Choice = Omit<Ask, "tab">;
+type Choice = Omit<Ask, "tab" | "detail">;
 
 /**
  * The read state of the telemetry pages. `phase` is `loading` (a read runs and this tab has nothing to show),
@@ -118,9 +122,9 @@ type Choice = Omit<Ask, "tab">;
  * fresh window; paging is off until the reply for the current ask arrives, and a cursor goes out only with the
  * filters and window of the page that issued it.
  */
-export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = browserEnv) {
+export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = browserEnv, detail?: DetailTarget) {
   const [choice, setChoice] = useState<Choice>({ range: "24h", query: firstPage, window: null });
-  const ask = useMemo<Ask>(() => ({ ...choice, tab }), [choice, tab]);
+  const ask = useMemo<Ask>(() => ({ ...choice, tab, detail }), [choice, tab, detail]);
   const [snapshot, setSnapshot] = useState<Snapshot>({ reading: false, hidden: false });
   const reader = useRef<ReturnType<typeof createReader> | null>(null);
   const latest = useRef(ask);
@@ -132,8 +136,12 @@ export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = b
   }, [client, env]);
   useEffect(() => reader.current?.ask(ask), [ask]);
 
-  const { data, error } = snapshot;
-  const mine = data?.ask.tab === tab ? data : undefined;
+  const matchesRoute = (other?: Ask) => other?.tab === tab && other.detail?.sessionId === detail?.sessionId;
+  const data = snapshot.data;
+  const error = detail || snapshot.errorAsk?.detail
+    ? (snapshot.errorAsk === ask ? snapshot.error : undefined)
+    : snapshot.error;
+  const mine = data && matchesRoute(data.ask) ? data : undefined;
   const shown = mine && { data: mine, stale: mine.ask !== ask || error !== undefined, label: RANGES[mine.ask.range].label, bucket: RANGES[mine.ask.range].bucket };
   const phase = snapshot.reading ? (mine ? "refreshing" : "loading") : snapshot.hidden ? "hidden" : "idle";
   const answered = mine?.ask === ask ? mine : undefined;
