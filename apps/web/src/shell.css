@@ -133,3 +133,14 @@
   .main-pane [data-part="composer"] { width: calc(100% - 24px); margin-bottom: 12px; }
   .page-chat-docked .page-chat-surface [data-part="composer"] { width: calc(100% - 32px); }
 }
+
+.place-nav { flex: none; margin: 14px 14px 0; }
+.place-nav .telemetry-link { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-left: 2px solid transparent; font-size: 13px; }
+.place-nav .telemetry-link svg { flex: none; color: var(--fulcrum-muted); }
+.place-nav .telemetry-link b { font-weight: 400; }
+.place-nav .telemetry-link:hover { background: color-mix(in srgb, var(--fulcrum-accent) 6%, transparent); }
+.place-nav .telemetry-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 10%, transparent); }
+.place-nav .telemetry-link[aria-current="page"] b { font-weight: 700; }
+.place-nav .telemetry-link[aria-current="page"] svg { color: var(--fulcrum-fg); }
+.place-nav .telemetry-link:focus-visible { outline-offset: -2px; }
+.sidebar > footer > .palette-button:only-child { position: static; width: auto; min-width: 44px; height: 40px; padding-inline: 10px; justify-content: center; opacity: 1; }
