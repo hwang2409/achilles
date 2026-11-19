@@ -1,13 +1,7 @@
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { ErrorRow, ModelRow, Operation, Page, SeriesPage, TelemetryOverview, TelemetrySession, ToolRow } from "./telemetry-types";
 
-export const TELEMETRY_FEATURE = "telemetry_read_v1";
-/** Shown on the needs-a-newer-zeta page only: the projects views read through it. */
-export const STATE_FEATURE = "state_read_v1";
-
-type Rpc = Pick<ZetaClient, "request" | "features">;
-
-export const telemetryNegotiated = (client: Rpc) => client.features.includes(TELEMETRY_FEATURE);
+type Rpc = Pick<ZetaClient, "request">;
 
 /** A time window in unix nanoseconds. Paged reads keep one window, because zeta ties cursors to their filters. */
 export type Window = { start_ns: number; end_ns: number };
@@ -47,7 +41,7 @@ export type TelemetryProblem = { kind: "off" | "failed"; message: string; code?:
 
 /**
  * Sorts a rejected read into what the page shows: telemetry off, or a failure the user can retry. An old zeta is known
- * from the hello (`telemetryNegotiated`), so a `-32601` after the feature was granted is a failure too.
+ * from the granted hello features, so a `-32601` after the feature was granted is a failure too.
  */
 export function telemetryProblem(error: unknown): TelemetryProblem {
   const rpc = error as { code?: unknown; message?: unknown; data?: { code?: unknown } } | null;

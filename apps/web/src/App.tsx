@@ -5,7 +5,9 @@ import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/rea
 import { CodeFence } from "./chat/CodeFence";
 import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
-import { AppShell, titleOf } from "./AppShell";
+import type { ZetaClient } from "@fulcrum/zeta";
+import { TelemetryModule } from "./telemetry/TelemetryModule";
+import { AppShell, isTelemetryPath, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { chatQueues } from "./composer/chatQueues";
 import { MAYBE_SENT_LABEL } from "./composer/composer-machine";
@@ -146,10 +148,29 @@ function connectionFailure(state: ConnectionState): string | null {
 }
 
 export function App() {
-  const settings = useSettings();
   const connection = useMemo(() => createConnection({ origin: location.origin }), []);
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
+  useEffect(() => {
+    const unsubscribe = connection.subscribe(() => setClient(connection.client));
+    return () => { unsubscribe(); connection.stop(); };
+  }, [connection]);
+  const { pathname } = location;
+  if (isTelemetryPath(pathname)) {
+    const connecting = connectionState.phase === "connected" || (connectionState.phase === "connecting" && connectionState.attempt === 0);
+    return (
+      <AppShell agentActions={false} page={null} sessionId={null} waiting={0} hasComposer={false} refreshKey={0} pageRefreshKey={0}>
+        {client ? <TelemetryModule client={client} pathname={pathname} /> : (
+          <div className="full-state"><p role="status">{connecting ? "connecting to zeta…" : "could not connect to zeta · retrying automatically"}</p></div>
+        )}
+      </AppShell>
+    );
+  }
+  return <AgentSurface connection={connection} client={client} connectionState={connectionState} />;
+}
+
+function AgentSurface({ connection, client, connectionState }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState }) {
+  const settings = useSettings();
   const active = useActiveChat(client, connectionState.phase === "connected");
   const ready = active.state.phase === "ready" ? active.state : null;
   const empty = active.state.phase === "empty" ? active.state : null;
@@ -206,10 +227,6 @@ export function App() {
     );
   };
 
-  useEffect(() => {
-    const unsubscribe = connection.subscribe(() => setClient(connection.client));
-    return () => { unsubscribe(); connection.stop(); };
-  }, [connection]);
   useEffect(() => store?.subscribe(() => {
     for (const item of store.getState().outline) {
       if (item.kind !== "tool") continue;
