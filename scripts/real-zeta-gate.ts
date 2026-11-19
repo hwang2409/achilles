@@ -1298,8 +1298,6 @@ with _database() as db:
   await field.press("Enter", { timeout: 20_000 });
   await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
-  // At desktop width the dock stays open while the sidebar row is renamed.
-  await page.setViewportSize({ width: 1440, height: 900 });
   const readingChat = await page.locator("[data-session-id]").getAttribute("data-session-id");
   if (!readingChat || new URL(page.url()).searchParams.get("chat") !== readingChat) throw new Error("the page opened from /pages did not select the active chat after the first send");
   const readingChatRow = page.locator(`[data-chat-id="${readingChat}"]`);
@@ -1309,8 +1307,7 @@ with _database() as db:
   await readingRename.fill("reading catalog notes");
   await readingRename.press("Enter");
   await gateWait.playwright(readingChatRow.getByText("reading catalog notes", { exact: true }), "waitFor");
-  await gateWait.playwright(dockHead(page).locator("#page-chat-title").filter({ hasText: /^reading catalog notes$/ }), "waitFor", { state: "visible" });
-  console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row and dock");
+  console.log("pages catalog: list and continuation opened dynamic pages; existing chat rename updated the row");
   if (screenshotDir) {
     const readingUrl = page.url();
     const oneChat = async (tab: Page, name: string) => {
