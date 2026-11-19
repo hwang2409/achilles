@@ -39,7 +39,7 @@ export function Overview({ overview, bucket, chart, setChart, empty }: { overvie
           <Metric label="sessions" value={formatCount(totals.sessions)} className="tm-m-sessions" />
           <Metric label="model calls" mark="■" markClass="tm-accent" value={formatCount(totals.model_calls)} className="tm-m-calls" />
           <Metric label="tool calls" mark="■" markClass="tm-tool" value={formatCount(totals.tool_calls)} className="tm-m-tools" />
-          <Metric label="errors" mark="▲" markClass="tm-danger" tone="danger" value={formatCount(totals.errors)} detail={rate} detailSuffix=" of spans" className="tm-m-errors" />
+          <Metric label="errors" mark="▲" markClass="tm-danger" tone="danger" value={formatCount(totals.errors)} detail={rate} detailSuffix=" errored spans / all spans" className="tm-m-errors" />
           <Metric label="tokens" value={formatTokens(totals.total_tokens)} detail={`in ${formatTokens(totals.input_tokens)} · out ${formatTokens(totals.output_tokens)}`} className="tm-m-tokens" />
           <div className="tm-toggle" role="group" aria-label="chart shows">
             {(["calls", "tokens"] as Chart[]).map((value) => <button key={value} type="button" aria-pressed={chart === value} onClick={() => setChart(value)}>{value}</button>)}
@@ -52,7 +52,6 @@ export function Overview({ overview, bucket, chart, setChart, empty }: { overvie
   );
 }
 
-/** `detailSuffix` is dropped on narrow screens, as the T1m board shows the rate alone. */
 function Metric({ label, value, detail, detailSuffix, mark, markClass, tone, className }: { label: string; value: string; detail?: string | null; detailSuffix?: string; mark?: string; markClass?: string; tone?: "danger"; className?: string }) {
   return (
     <div className={`tm-metric${className ? ` ${className}` : ""}`}>
