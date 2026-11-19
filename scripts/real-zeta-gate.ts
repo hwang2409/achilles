@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Locator, Request, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
+import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
@@ -285,12 +285,26 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
+  const resizeWithPageChatClosed = async (tab: Page, height: number) => {
+    const composerFocused = await tab.evaluate(() => Boolean(document.activeElement?.closest(".page-chat-docked #message-composer")));
+    await tab.setViewportSize({ width: 390, height });
+    if (composerFocused) {
+      // The media change opens the sheet to preserve composer focus. Wait for that commit before closing it.
+      await gateWait.playwright(tab, "waitForFunction", () => {
+        const dialog = document.querySelector('.page-chat-surface[role="dialog"]');
+        return Boolean(dialog?.querySelector('button[aria-label="close page chat"]') && dialog.contains(document.activeElement) && document.activeElement?.closest("#message-composer"));
+      });
+      await gateWait.playwright(tab.getByRole("dialog", { name: "page chat", exact: true }).getByRole("button", { name: "close page chat", exact: true }), "click");
+    }
+    await gateWait.playwright(tab, "waitForFunction", () => {
+      const sheet = document.querySelector<HTMLElement>(".page-chat-surface");
+      return matchMedia("(width < 1280px)").matches && Boolean(sheet?.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden");
+    });
+  };
   const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
     for (const width of [390, 1280, 1440, 1920]) {
-      await page.setViewportSize({ width, height: width === 390 ? mobileHeight : desktopHeight });
       if (width === 390) {
-        const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
-        await clickOptionalDetachedLocator(pageChatClose);
+        await resizeWithPageChatClosed(page, mobileHeight);
         const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
         if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
         await waitFor(async () => {
@@ -314,6 +328,8 @@ try {
           const hit = document.elementFromPoint(x, y);
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
+      } else {
+        await page.setViewportSize({ width, height: desktopHeight });
       }
       await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
       if (assertFrame) await assertFrame(`${width}px`);
@@ -762,7 +778,7 @@ try {
       name: "drawer open",
       run: async () => {
         await reloadShell();
-        await page.setViewportSize({ width: 390, height: 760 });
+        await resizeWithPageChatClosed(page, 760);
         await page.getByRole("button", { name: "open menu" }).click();
         const first = page.locator(".sidebar").locator("button:not(:disabled), a[href], input:not(:disabled)").first();
         await waitFor(async () => await first.evaluate((element) => document.activeElement === element), "drawer first focusable focus");
@@ -892,7 +908,7 @@ try {
     await page.screenshot({ path: join(screenshotDir, "page-index-1440x900.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 760 });
     await page.screenshot({ path: join(screenshotDir, "page-index-1440x760.png"), fullPage: true });
-    await page.setViewportSize({ width: 390, height: 760 });
+    await resizeWithPageChatClosed(page, 760);
     await page.screenshot({ path: join(screenshotDir, "page-index-390x760.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
   }
@@ -961,8 +977,12 @@ try {
     // Capture the narrow fixture via its manual opener; the focused resize is tested below.
     await field.evaluate((composer) => (composer as HTMLElement).blur());
     for (const width of [1280, 1440, 1920, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-      if (width === 390) await page.locator(".page-chat-bar").click();
+      if (width === 390) {
+        await resizeWithPageChatClosed(page, 844);
+        await page.locator(".page-chat-bar").click();
+      } else {
+        await page.setViewportSize({ width, height: 900 });
+      }
       await captureInsets(width);
     }
     await page.getByRole("button", { name: "close page chat", exact: true }).click();
@@ -1053,7 +1073,7 @@ try {
   ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const accessibility = await page.context().newCDPSession(page);
-  await page.setViewportSize({ width: 390, height: 760 });
+  await resizeWithPageChatClosed(page, 760);
   const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
   const textMetricGeometry = await textMetric.evaluate((element) => ({
     blockScrollWidth: element.scrollWidth,
@@ -1426,7 +1446,7 @@ try {
       throw new Error(`${viewport} page chat has incorrect dock geometry: ${JSON.stringify(dock)}`);
     console.log(`${viewport} page chat dock: ${JSON.stringify(dock)}`);
   });
-  await page.setViewportSize({ width: 390, height: 760 });
+  await resizeWithPageChatClosed(page, 760);
   const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
   if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
@@ -2686,7 +2706,7 @@ try {
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
   if (screenshotDir) {
     const observerMarker = "prove chat";
-    await observerPage.setViewportSize({ width: 390, height: 760 });
+    await resizeWithPageChatClosed(observerPage, 760);
     const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
     if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
     for (const dialog of await observerPage.locator('[role="dialog"][aria-modal="true"]').all()) {
@@ -2699,11 +2719,6 @@ try {
       const style = getComputedStyle(element);
       return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
     }), "observer drawer settled");
-    if (await pageChatBar.getAttribute("aria-expanded") !== "false") {
-      const close = pageChatDialog.getByRole("button", { name: "close page chat" });
-      await close.click({ force: true });
-      await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
-    }
     const routeUnderneath = new URL(observerPage.url()).pathname;
     if (routeUnderneath !== "/reading") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
     await pageChatBar.click();
@@ -2796,7 +2811,7 @@ try {
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
-  await observerPage.setViewportSize({ width: 390, height: 844 });
+  await resizeWithPageChatClosed(observerPage, 844);
   const observerMenu = observerPage.getByRole("button", { name: "open menu", exact: true });
   const bannerBox = await observerBanner.boundingBox();
   const menuBox = await observerMenu.boundingBox();
