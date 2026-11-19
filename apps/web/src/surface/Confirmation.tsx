@@ -37,6 +37,7 @@ type Review = Common & Operation<Committed> & {
   title: ReviewText;
   scope: ReviewText;
   current: ReviewText;
+  after: ReviewText;
   undo: ReviewText;
   fields?: readonly { label: ReviewText; value: ReviewText | { provided: boolean } }[];
   proof: { kind: "name"; name: ReviewText } | { kind: "scope"; name?: never };
@@ -156,6 +157,8 @@ export function Confirmation(props: ConfirmationProps) {
   </section>;
 
   if (props.level !== 2 || attempt.level !== 2) return null;
+  const step = phase === "pending" ? "confirming…" : phase === "checking" ? "checking…"
+    : phase === "unknown" ? "result unknown" : failure ? "not changed" : "review";
   return <>
     <button ref={opener} className="confirmation-trigger" type="button" onClick={start}>{props.action}</button>
     {open && createPortal(<dialog ref={dialog} className="confirmation-dialog" data-proof={attempt.proof.kind}
@@ -170,13 +173,16 @@ export function Confirmation(props: ConfirmationProps) {
       <form onSubmit={event => { event.preventDefault(); event.stopPropagation(); void run(false); }}>
         <header>
           <h2 id={`${id}-title`}>{attempt.title}</h2>
-          <button type="button" className="confirmation-close" aria-label="close confirmation" disabled={locked} onClick={keep}>×</button>
+          <div className="confirmation-heading-actions">
+            <span>{step}</span>
+            <button type="button" className="confirmation-close" aria-label="close confirmation" disabled={locked} onClick={keep}>×</button>
+          </div>
         </header>
         <div className="confirmation-body">
           <dl>
             <div><dt>what</dt><dd id={`${id}-effect`}>{attempt.effect}</dd></div>
             <div><dt>where</dt><dd>{attempt.scope}</dd></div>
-            <div><dt>now</dt><dd>{attempt.current}</dd></div>
+            <div><dt>now → after</dt><dd>{attempt.current} → {attempt.after}</dd></div>
             {attempt.fields?.map(({ label, value }, index) => <div key={index}><dt>{label}</dt>
               <dd>{typeof value === "string" ? value : value.provided ? "provided" : "not provided"}</dd></div>)}
             <div><dt>undo</dt><dd id={`${id}-undo`}>{attempt.undo}</dd></div>

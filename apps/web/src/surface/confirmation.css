@@ -14,7 +14,7 @@
   box-shadow: 0 1rem 3rem rgb(0 0 0 / 35%);
 }
 .confirmation-dialog[data-proof="name"] { --confirmation-accent: var(--fulcrum-danger); }
-.confirmation-dialog::backdrop { background: rgb(0 0 0 / 58%); }
+.confirmation-dialog::backdrop { background: rgb(0 0 0 / 24%); }
 .confirmation-dialog > form { display: flex; flex-direction: column; max-height: inherit; }
 .confirmation-dialog header, .confirmation-dialog footer {
   flex: none;
@@ -24,6 +24,7 @@
   padding: 10px 16px;
 }
 .confirmation-dialog header { justify-content: space-between; border-bottom: 1px solid var(--fulcrum-border); }
+.confirmation-heading-actions { display: flex; align-items: center; gap: 8px; color: var(--fulcrum-muted); }
 .confirmation-dialog h2 { margin: 0; font-size: 1.125em; text-wrap: balance; }
 .confirmation-dialog .confirmation-close { flex: none; border-color: transparent; font-size: 1.25em; }
 .confirmation-body { min-height: 0; overflow-y: auto; padding: 16px; }
@@ -97,6 +98,7 @@ button.confirmation-trigger:hover { border-color: var(--fulcrum-accent); }
 }
 
 @media (max-width: 37.5rem) {
+  .confirmation-dialog::backdrop { background: rgb(0 0 0 / 58%); }
   .confirmation-dialog[data-proof="name"] {
     width: 100%;
     height: 100dvh;

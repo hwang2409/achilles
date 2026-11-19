@@ -17,7 +17,7 @@ function Row({ execute }: Pick<Inline, "execute">) {
 function review(execute: Extract<ConfirmationProps, { level: 2 }>["execute"], options?: Partial<Extract<ConfirmationProps, { level: 2 }>>) {
   const activity = document.body.appendChild(document.createElement("section"));
   const ui = render(<Confirmation {...common} level={2} title={text("cancel paper?")} action={text("cancel run")}
-    scope={text("child of lead")} current={text("running")} undo={text("work in progress can be lost")}
+    scope={text("child of lead")} current={text("running")} after={text("cancelled")} undo={text("work in progress can be lost")}
     fields={[{ label: text("credential"), value: { provided: true } }]}
     proof={{ kind: "name", name: text("paper") }} activity={activity} execute={execute}
     checkResult={async () => ({ status: "unknown" })} {...options} />);
@@ -80,6 +80,9 @@ test("name proof is exact, including case and whitespace; Escape before submit r
   const submit = dialog.getByRole("button", { name: "cancel run" });
   expect(document.activeElement).toBe(name);
   expect(dialog.getByText("provided")).toBeTruthy();
+  expect(dialog.getByText("now → after")).toBeTruthy();
+  expect(dialog.getByText("running → cancelled")).toBeTruthy();
+  expect(dialog.getByText("review", { selector: "header span" })).toBeTruthy();
   for (const value of ["", "Paper", "paper "]) {
     fireEvent.change(name, { target: { value } });
     expect(submit.hasAttribute("disabled")).toBe(true);
