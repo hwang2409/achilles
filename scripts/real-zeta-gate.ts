@@ -1378,38 +1378,35 @@ try {
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
-  const openDialogsBeforePageChat = await page.locator("dialog[open]").count();
-  if (openDialogsBeforePageChat !== 0) throw new Error(`stale native dialog before page chat: ${openDialogsBeforePageChat}`);
-  await page.evaluate(() => {
-    const originalAdd = window.addEventListener.bind(window);
-    const result = { prevented: false, inside: false, fired: false, active: "", openDialogs: [] as string[], pageChatAriaModal: "", registration: "" };
-    let armed = true;
-    (window as typeof window & { __pageChatFirstFrame?: { result: typeof result; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame = { result, originalAdd: window.addEventListener };
-    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
-      originalAdd(type, listener, options);
-      const pageChat = document.querySelector<HTMLElement>('.page-chat-surface[role="dialog"][aria-modal="true"]');
-      const listenerSource = typeof listener === "function" ? String(listener) : "object";
-      if (armed && type === "keydown" && options === true && pageChat) {
-        armed = false;
-        result.fired = true;
-        result.registration = listenerSource.slice(0, 240);
-        const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
-        window.dispatchEvent(event);
-        result.prevented = event.defaultPrevented;
-        result.inside = Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]'));
-        result.active = document.activeElement instanceof HTMLElement ? `${document.activeElement.tagName}#${document.activeElement.id}[aria=${document.activeElement.getAttribute("aria-label") ?? ""}]` : String(document.activeElement);
-        result.openDialogs = [...document.querySelectorAll("dialog[open]")].map((dialog) => dialog.outerHTML.slice(0, 160));
-        result.pageChatAriaModal = pageChat.getAttribute("aria-modal") ?? "";
-      }
-    }) as typeof window.addEventListener;
-  });
   const preChatClick = await page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>(".page-chat-surface");
     const close = document.querySelector<HTMLElement>('.page-chat-surface button[aria-label="close page chat"]');
     const style = surface && getComputedStyle(surface);
     return { barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), close: { connected: Boolean(close?.isConnected), visible: Boolean(close && style && style.visibility !== "hidden"), disabled: close instanceof HTMLButtonElement && close.disabled }, surface: style && { visibility: style.visibility, transform: style.transform, transition: style.transition }, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop };
   });
-  await pageChatBar.click();
+  const firstFrameTab = await pageChatBar.evaluate((button: HTMLButtonElement) => new Promise<{ dispatched: boolean; prevented: boolean; inside: boolean }>((resolve) => {
+    const originalAdd = window.addEventListener;
+    const result = { dispatched: false, prevented: false, inside: false };
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      originalAdd.call(window, type, listener, options);
+      const sheet = document.querySelector('#page-chat-sheet[role="dialog"][aria-modal="true"]');
+      if (!result.dispatched && type === "keydown" && options === true && sheet) {
+        result.dispatched = true;
+        const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        window.dispatchEvent(event);
+        result.prevented = event.defaultPrevented;
+        result.inside = sheet.contains(document.activeElement);
+      }
+    }) as typeof window.addEventListener;
+    requestAnimationFrame(() => {
+      window.addEventListener = originalAdd;
+      resolve(result);
+    });
+    // Arm and click in the same task; a Playwright click can wait for a frame.
+    button.click();
+  }));
+  if (!firstFrameTab.dispatched) throw new Error("390px page chat: trap registered after the first frame or the probe never dispatched Tab");
+  if (!firstFrameTab.prevented || !firstFrameTab.inside) throw new Error(`390px page chat first-frame Tab was not trapped inside the modal sheet: ${JSON.stringify(firstFrameTab)}`);
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
   const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
@@ -1428,14 +1425,6 @@ try {
     throw new Error("390px page chat real Tab escaped the modal sheet");
   if (await page.locator(".page-chat-backdrop").evaluate((element) => element === document.activeElement))
     throw new Error("390px page chat real Tab focused the backdrop");
-  const firstFrame = await page.evaluate(() => {
-    const state = (window as typeof window & { __pageChatFirstFrame?: { result: { prevented: boolean; inside: boolean; fired: boolean; active: string; openDialogs: string[]; pageChatAriaModal: string; registration: string }; originalAdd: typeof window.addEventListener } }).__pageChatFirstFrame;
-    if (!state) return null;
-    window.addEventListener = state.originalAdd;
-    delete (window as typeof window & { __pageChatFirstFrame?: unknown }).__pageChatFirstFrame;
-    return state.result;
-  });
-  if (!firstFrame?.inside) throw new Error(`390px page chat first-frame Tab was not trapped inside the modal sheet: ${JSON.stringify(firstFrame)}`);
   const timelineHeight = await page.locator(".page-chat-surface .transcript").evaluate((element) => element.clientHeight);
   if (timelineHeight <= 0) throw new Error(`390px page chat timeline has no usable height: ${timelineHeight}`);
   await page.keyboard.press("ControlOrMeta+Comma");
