@@ -95,7 +95,7 @@ const bucketLabel = (point: SeriesPoint, bucket: "hour" | "day") =>
  * Bars per bucket: model calls with errors as a red cap, or total tokens. The bucket that holds now is dashed: it is
  * still filling. One tab stop; arrow keys and the pointer pick a bucket, and its exact numbers show in a live tooltip.
  */
-function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: Chart; bucket: "hour" | "day" }) {
+export function TrendChart({ series, chart, bucket }: { series: SeriesPoint[]; chart: Chart; bucket: "hour" | "day" }) {
   const [active, setActive] = useState<number | null>(null);
   const value = (point: SeriesPoint) => (chart === "calls" ? point.model_calls : point.total_tokens);
   const max = Math.max(1, ...series.map(value));

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { errorKey, mergePage, modelKey, modelTrends, toolKey, type AggregateTab } from "./aggregates";
 import type { SessionsQuery } from "./Sessions";
 import { telemetryClient, type Window } from "./telemetry-client";
-import type { Page, TelemetryOverview, TelemetrySession, TelemetryStatus } from "./telemetry-types";
+import type { ErrorRow, ModelRow, Operation, Page, SeriesPoint, SeriesRow, TelemetryOverview, TelemetrySession, TelemetryStatus, ToolRow } from "./telemetry-types";
 
 export const POLL_MS = 5_000;
 
-export type Tab = "overview" | "sessions";
+export type Tab = "overview" | "sessions" | AggregateTab;
 export type Range = "24h" | "7d";
 export const RANGES: Record<Range, { label: string; ms: number; bucket: "hour" | "day" }> = {
   "24h": { label: "last 24 hours", ms: 24 * 3600_000, bucket: "hour" },
@@ -18,9 +19,17 @@ const windowOf = (range: Range, nowMs = Date.now()): Window => ({ start_ns: (now
  * What a read asks for: a new object per user choice, so a reply answers the choice on screen only when its `ask` is
  * that object. `window` is set while paging, because zeta ties a cursor to the window and filters that issued it.
  */
-export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window | null };
+export type Ask = { tab: Tab; range: Range; query: SessionsQuery; window: Window | null; aggregate?: AggregateChoice };
+
+type AggregatePage =
+  | { tab: "models"; page: Page<ModelRow>; trends: ReturnType<typeof modelTrends> }
+  | { tab: "tools"; page: Page<ToolRow> }
+  | { tab: "errors"; page: Page<ErrorRow> };
+export type AggregateLoaded = AggregatePage & { ask: Ask; status: TelemetryStatus; window: Window; total: number; totals: SeriesPoint };
+type AggregateChoice = { tab: Tab; operation: Operation | null; prefix?: AggregateLoaded };
 
 export type Loaded =
+  | AggregateLoaded
   | { ask: Ask; tab: "overview"; status: TelemetryStatus; overview: TelemetryOverview }
   | { ask: Ask; tab: "sessions"; status: TelemetryStatus; total: number; page: Page<TelemetrySession>; window: Window };
 
@@ -101,10 +110,42 @@ async function loadTelemetry(client: ZetaClient, ask: Ask): Promise<Loaded> {
     const overview = await reads.overview(windowOf(range), RANGES[range].bucket);
     return { ask, tab: "overview", status: overview.status, overview };
   }
+  if (ask.tab !== "sessions") return loadAggregate(reads, ask, ask.tab);
   // The count comes from overview totals for the same window, so overview and sessions show one number.
   const window = ask.window ?? windowOf(range);
   const [overview, page] = await Promise.all([reads.overview(window, RANGES[range].bucket), reads.sessions({ ...window, cursor: query.cursors.at(-1), errorsOnly: query.errorsOnly, profile: query.profile, model: query.model })]);
   return { ask, tab: "sessions", status: overview.status, total: overview.totals.sessions, page, window };
+}
+
+async function loadAggregate(reads: ReturnType<typeof telemetryClient>, ask: Ask, tab: AggregateTab): Promise<AggregateLoaded> {
+  const prefix = ask.aggregate?.prefix;
+  const window = prefix?.window ?? windowOf(ask.range);
+  const bucket = RANGES[ask.range].bucket;
+  const overviewRead = reads.overview(window, bucket);
+  const query = { ...window, cursor: prefix?.page.next_cursor, limit: tab === "errors" ? 7 : 10 };
+  if (tab === "models") {
+    const [overview, page, trends] = await Promise.all([
+      overviewRead, reads.models(query), loadModelTrends(reads, window, bucket),
+    ]);
+    return { ask, window, tab, status: overview.status, total: overview.active_models, totals: overview.totals, trends, page: mergePage(prefix?.tab === tab ? prefix.page.items : [], page, modelKey) };
+  }
+  if (tab === "tools") {
+    const [overview, page] = await Promise.all([overviewRead, reads.tools(query)]);
+    return { ask, window, tab, status: overview.status, total: overview.active_tools, totals: overview.totals, page: mergePage(prefix?.tab === tab ? prefix.page.items : [], page, toolKey) };
+  }
+  const [overview, page] = await Promise.all([overviewRead, reads.errors({ ...query, operation: ask.aggregate?.operation ?? null })]);
+  return { ask, window, tab, status: overview.status, total: overview.totals.errors, totals: overview.totals, page: mergePage(prefix?.tab === tab ? prefix.page.items : [], page, errorKey) };
+}
+
+async function loadModelTrends(reads: ReturnType<typeof telemetryClient>, window: Window, bucket: "hour" | "day") {
+  const points: SeriesRow[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await reads.modelSeries({ ...window, bucket, cursor });
+    points.push(...page.points);
+    cursor = page.next_cursor;
+  } while (cursor !== null);
+  return modelTrends(points, window, bucket);
 }
 
 const firstPage: SessionsQuery = { cursors: [null], errorsOnly: false, profile: null, model: null };
@@ -120,7 +161,8 @@ type Choice = Omit<Ask, "tab">;
  */
 export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = browserEnv) {
   const [choice, setChoice] = useState<Choice>({ range: "24h", query: firstPage, window: null });
-  const ask = useMemo<Ask>(() => ({ ...choice, tab }), [choice, tab]);
+  const [aggregate, setAggregate] = useState<AggregateChoice>({ tab, operation: null });
+  const ask = useMemo<Ask>(() => ({ ...choice, tab, aggregate: aggregate.tab === tab ? aggregate : undefined }), [choice, tab, aggregate]);
   const [snapshot, setSnapshot] = useState<Snapshot>({ reading: false, hidden: false });
   const reader = useRef<ReturnType<typeof createReader> | null>(null);
   const latest = useRef(ask);
@@ -149,7 +191,17 @@ export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = b
     range: choice.range,
     query: choice.query,
     refresh: () => reader.current?.want(),
-    chooseRange: (range: Range) => restart({ range }),
+    chooseRange: (range: Range) => { setAggregate({ tab, operation: aggregate.tab === tab ? aggregate.operation : null }); restart({ range }); },
+    operation: ask.aggregate?.operation ?? null,
+    chooseOperation: (operation: Operation | null) => setAggregate({ tab, operation }),
+    aggregateNext: answered && answered.tab !== "overview" && answered.tab !== "sessions" && answered.page.next_cursor
+      ? () => {
+        // The original cursor owns both the already displayed prefix and its fixed window.
+        const prefix = { ...answered, ask: { ...answered.ask, aggregate: undefined } };
+        setAggregate({ tab, operation: ask.aggregate?.operation ?? null, prefix });
+      }
+      : undefined,
+    aggregateLatest: ask.aggregate?.prefix ? () => setAggregate({ tab, operation: ask.aggregate!.operation }) : undefined,
     setFilters: (filters: Partial<SessionsQuery>) => restart({}, filters),
     next: page?.page.next_cursor
       ? () => setChoice({ ...choice, query: { ...choice.query, cursors: [...choice.query.cursors, page.page.next_cursor] }, window: page.window })

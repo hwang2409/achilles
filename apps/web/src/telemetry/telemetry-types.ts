@@ -57,3 +57,45 @@ export type TelemetryOverview = {
   /** More series points; null for the 24-hour and 7-day views, which fit in one page. */
   next_cursor: string | null;
 };
+
+export type AggregateCall = {
+  calls: number;
+  errors: number;
+  duration_ns: number;
+  p50_ns: number;
+  p95_ns: number;
+  last_ns: number;
+};
+
+export type ModelRow = AggregateCall & Pick<SeriesPoint, "input_tokens" | "output_tokens" | "total_tokens"> & {
+  provider: string | null;
+  model: string;
+};
+
+export type ToolRow = AggregateCall & {
+  tool_name: string;
+  tool_type: string | null;
+  argument_bytes: number;
+  result_bytes: number;
+};
+
+export const OPERATIONS = ["chat", "execute_tool", "invoke_agent", "mcp", "turn", "context_compact", "serve"] as const;
+export type Operation = typeof OPERATIONS[number];
+export type ErrorRow = {
+  trace_id: string;
+  span_id: string;
+  session_id: string | null;
+  time_ns: number;
+  operation: Operation;
+  error_type: string | null;
+  duration_ns: number;
+  model: string | null;
+  tool_name: string | null;
+  agent_name: string | null;
+  mcp_server: string | null;
+  mcp_method: string | null;
+  mcp_tool: string | null;
+};
+
+export type SeriesRow = { key: string | null; point: SeriesPoint };
+export type SeriesPage = { points: SeriesRow[]; next_cursor: string | null };

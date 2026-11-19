@@ -18,6 +18,14 @@ export function formatDuration(ns: number) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
+/** Percentile cells keep seconds through the sub-two-minute range and seconds in minute-scale values. */
+export function formatLatency(ns: number) {
+  const seconds = ns / NS_PER_S;
+  if (seconds < 0.1 || seconds >= 3600) return formatDuration(ns);
+  if (seconds <= 120) return `${seconds.toFixed(1)} s`;
+  return `${Math.floor(seconds / 60)}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
+}
+
 /** Today's times show the clock only; older ones add the date. */
 export function formatTime(ns: number, now = new Date()) {
   const date = new Date(ns / NS_PER_MS);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { AggregateSkeleton, AggregateView } from "./AggregateViews";
 import { formatAgo, formatHour } from "./format";
 import { EnumListbox } from "../page/EnumListbox";
 import { Overview, OverviewSkeleton } from "./Overview";
@@ -12,8 +13,11 @@ import "./telemetry.css";
 const TABS: { tab: Tab; href: string }[] = [
   { tab: "overview", href: "/telemetry" },
   { tab: "sessions", href: "/telemetry/sessions" },
+  { tab: "models", href: "/telemetry/models" },
+  { tab: "tools", href: "/telemetry/tools" },
+  { tab: "errors", href: "/telemetry/errors" },
 ];
-const tabOf = (path: string): Tab => (path === "/telemetry/sessions" || path.startsWith("/telemetry/sessions/") ? "sessions" : "overview");
+const tabOf = (path: string): Tab => (path.startsWith("/telemetry/sessions/") ? "sessions" : TABS.find((item) => item.href === path)?.tab ?? "overview");
 /** The session id of `/telemetry/sessions/:id`, else null. */
 const sessionOf = (path: string) => { const match = /^\/telemetry\/sessions\/([^/]+)$/.exec(path); return match ? decodeURIComponent(match[1]) : null; };
 
@@ -77,12 +81,13 @@ function ShownView({ reads, shown, busy, chart, setChart, seen, go }: { reads: R
   const empty = <NoTelemetryYet rangeLabel={shown.label} widen={reads.range === "24h" ? () => reads.chooseRange("7d") : undefined} />;
   const view = shown.data.tab === "overview"
     ? <Overview overview={shown.data.overview} bucket={shown.bucket} chart={chart} setChart={setChart} empty={empty} />
-    : <Sessions page={shown.data.page} total={shown.data.total} open={go} query={reads.query} shown={shown.data.ask.query} rangeLabel={shown.label} profiles={seen.profiles} models={seen.models} setFilters={reads.setFilters} next={reads.next} previous={reads.previous} empty={empty} />;
+    : shown.data.tab === "sessions" ? <Sessions page={shown.data.page} total={shown.data.total} open={go} query={reads.query} shown={shown.data.ask.query} rangeLabel={shown.label} profiles={seen.profiles} models={seen.models} setFilters={reads.setFilters} next={reads.next} previous={reads.previous} empty={empty} />
+    : <AggregateView key={shown.data.tab} data={shown.data} reads={reads} bucket={shown.bucket} label={shown.label} open={go} empty={empty} />;
   return <div className={shown.stale ? "tm-stale" : undefined} aria-busy={shown.stale && busy ? true : undefined}>{view}</div>;
 }
 
 function Loading({ tab, range, quiet }: { tab: Tab; range: Range; quiet: boolean }) {
-  return <>{!quiet && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {RANGES[range].label}…</p>}{tab === "overview" && <OverviewSkeleton />}</>;
+  return <>{!quiet && <p className="tm-loading" role="status"><span aria-hidden="true" className="tm-mark">□ </span>loading the {RANGES[range].label}…</p>}{tab === "overview" ? <OverviewSkeleton /> : tab !== "sessions" && <AggregateSkeleton tab={tab} /> }</>;
 }
 
 /** Filter choices come from the sessions seen so far; zeta has no list of profiles or models yet. */
