@@ -51,12 +51,12 @@ const LazyVimComposer = lazy(() => import("./composer/VimComposer").then(({ VimC
 
 type ComposerActivity = { sending: boolean; queued: number; failed: boolean; held: boolean };
 
-const MOBILE_PAGE_CHAT_QUERY = "(max-width: 1099px) and (min-height: 501px)";
+const PAGE_CHAT_SHEET_QUERY = "(width < 1280px)";
 
 function useMobilePageChat() {
-  const [matches, setMatches] = useState(() => matchMedia(MOBILE_PAGE_CHAT_QUERY).matches);
+  const [matches, setMatches] = useState(() => matchMedia(PAGE_CHAT_SHEET_QUERY).matches);
   useEffect(() => {
-    const media = matchMedia(MOBILE_PAGE_CHAT_QUERY);
+    const media = matchMedia(PAGE_CHAT_SHEET_QUERY);
     const update = () => setMatches(media.matches);
     update();
     media.addEventListener("change", update);
@@ -262,7 +262,7 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
   useEffect(() => {
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     setMobileChatOpen(false);
     setPageChatFocusRequest(0);
   }, [ready?.sessionId, activePage?.id]);
@@ -340,6 +340,8 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
   const unsentNew = ready ? chatQueues.unsent(`new:${ready.page.id}`).length : 0;
   // a failed create keeps the message typed for it in the page's new-chat box: show it, so the user sees it is safe
   const keptNew = active.creationError && active.creationPageId ? chatQueues.unsent(`new:${active.creationPageId}`) : [];
+  const state = headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent));
+  const title = ready?.title ?? "new chat";
   const content = <>
     {activePage && historyOpen && <HistoryDialog key={activePage.id} pageId={activePage.id} credential={(ready ?? empty)!.credential} createMode={activePage.create_mode} opener={historyOpener} onClose={() => setHistoryOpen(false)} onChanged={() => setRestores((value) => value + 1)} canWrite={canWrite} disabledReason={readOnlyReason} />}
     {activePage && active.toggleError && <div className="create-mode-alert" role="alert"><span>{active.toggleError}</span>{active.toggleRetryable && <button type="button" disabled={active.toggling} onClick={active.toggle}>{active.toggling ? "retrying…" : "retry"}</button>}</div>}
@@ -357,10 +359,10 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
         <div className={hasBlocks ? "page-view docked" : "page-view"}>
         {hasBlocks && <PageView page={activePage} pageId={activePage.id} credential={(ready ?? empty)!.credential} refreshKey={`${refreshKey}:${pageRefreshNonce}`} onAskChat={canWrite ? askPageChat : undefined} canWrite={canWrite} disabledReason={readOnlyReason} />}
         <div className={`page-chat${hasBlocks ? " page-chat-docked" : ""}${pageChatSheetOpen ? " mobile-chat-open" : ""}`}>
-        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))}{composerActivity.queued ? ` · ${composerActivity.queued}` : ""}</span><span aria-hidden="true">{pageChatSheetOpen ? "⌃" : "⌃"}</span></button>}
+        {hasBlocks && <button ref={pageChatButton} className="page-chat-bar" type="button" aria-expanded={pageChatSheetOpen} aria-controls="page-chat-sheet" onClick={() => setMobileChatOpen(true)}><span>page chat</span><span className="page-chat-bar-state">{runStateLabel(state, composerActivity.queued)}</span><span aria-hidden="true">⌃</span></button>}
         {hasBlocks && pageChatSheetOpen && <div className="page-chat-backdrop" onClick={() => setMobileChatOpen(false)} />}
-        <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={hasBlocks && pageChatSheetOpen ? "dialog" : undefined} aria-modal={hasBlocks && pageChatSheetOpen ? "true" : undefined} aria-labelledby={hasBlocks && pageChatSheetOpen ? "page-chat-title" : undefined} aria-hidden={mobilePageChat && hasBlocks && !pageChatSheetOpen ? "true" : undefined}>
-        {hasBlocks && <div className="page-chat-sheet-head"><strong id="page-chat-title">page chat</strong><button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button></div>}
+        <div ref={pageChatSurface} id="page-chat-sheet" className="page-chat-surface" role={hasBlocks && pageChatSheetOpen ? "dialog" : undefined} aria-modal={hasBlocks && pageChatSheetOpen ? "true" : undefined} aria-labelledby={hasBlocks && pageChatSheetOpen ? "page-chat-title" : undefined} inert={mobilePageChat && hasBlocks && !pageChatSheetOpen}>
+        {hasBlocks && <div className="page-chat-head"><strong id="page-chat-title" title={mobilePageChat ? undefined : title}>{mobilePageChat ? "page chat" : title}</strong><span className={`page-chat-status state-${state}`}>{runStateLabel(state, composerActivity.queued)}</span>{pageChatSheetOpen && <button ref={pageChatClose} type="button" aria-label="close page chat" onClick={() => setMobileChatOpen(false)}>×</button>}</div>}
         <section ref={ready ? setTranscript : undefined} className="transcript" data-follow-request={followRequest}>{active.creatingChat ? <div className="full-state"><p role="status">creating chat…</p></div> : (!ready || Number(outlineLength) === 0) && <EmptyChat key={activePage.id} page={activePage} sessionId={ready?.sessionId ?? null} send={send} continueWaiting={active.continueWaitingChat} toggleCreateMode={active.toggle} credential={(ready ?? empty)!.credential} refreshKey={refreshKey} canWrite={canWrite} />}{ready && <Timeline renderers={appRenderers} virtual followRequest={followRequest} />}{ready && showJumpToLatest && <div data-part="jump-to-latest-lane" data-jump-owned="true"><button type="button" data-part="jump-to-latest" onMouseDown={(event) => event.preventDefault()} onClick={(event) => {
           // the button unmounts once the reader is at the bottom; a mouse click must not take focus from where it was (the composer)
           keyboardFocusToComposer(event);
@@ -375,7 +377,7 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
         </div>
       </RunProvider>}
   </>;
-  return <AppShell banner={observer && <ObserverBanner connection={connection} />} header={activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={ready?.title ?? "new chat"} state={headerState(lost, lastState, outcome, composerActivity, Boolean(active.busy), Boolean(ready?.sent))} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell banner={observer && <ObserverBanner connection={connection} />} header={activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {
@@ -392,6 +394,10 @@ function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: 
 
 function NotFoundState({ onNewChat }: { onNewChat: () => Promise<void> }) {
   return <div className="full-state not-found-state"><p role="alert">page not found</p><div><a className="primary" href="/">go home</a><button className="primary" onClick={() => void onNewChat()}>new chat</button></div></div>;
+}
+
+function runStateLabel(state: string, queued: number) {
+  return state === "approval" ? "needs you" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state;
 }
 
 function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled, toggle, onRename, onHistory }: { page: Page; sessionId: string | null; title: string; state: string; queued: number; toggling: boolean; disabled: boolean; toggle: () => void; onRename?: (sessionId: string, title: string) => void; onHistory: (opener: HTMLElement | null) => void }) {
@@ -453,7 +459,7 @@ function ChatHeader({ page, sessionId, title, state, queued, toggling, disabled,
   const autoApprove = page.approval_mode === "allow";
   const foldMarkers = (autoApprove || page.create_mode) && <span className="fold-indicator">{autoApprove && <span className="fold-mark fold-mark-approve" role="img" aria-label="auto-approve is on" title="auto-approve is on">auto<span className="fold-long">-approve</span></span>}{page.create_mode && <span className="fold-mark fold-mark-create" role="img" aria-label="create mode is on" title="create mode is on"><span className="fold-long">create mode</span></span>}</span>;
   const routeLabel = page.route === "/" ? "home" : page.route.replace(/^\//, "");
-  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status">{state === "approval" ? "needs you" : state === "unsent" ? "not sent" : state === "maybe-unsent" ? MAYBE_SENT_LABEL : state === "queued" && queued > 1 ? `${queued} queued` : state}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
+  return <header className="chat-header"><div className="chat-heading"><span title={routeLabel} aria-label={routeLabel}>{routeLabel} /</span>{titleNode}</div><div className="chat-actions" ref={actions}>{controls(false, false)}<div className="header-status"><span className={`run-state state-${state}`} role="status">{runStateLabel(state, queued)}</span>{foldMarkers}</div><button type="button" onClick={(event) => onHistory(event.currentTarget)}>history</button><button ref={overflowButton} className="header-overflow" aria-label="chat options" aria-expanded={overflow} onClick={() => setOverflow((value) => !value)}>•••</button>{overflow && <div className="header-menu">{controls(true)}</div>}</div></header>;
 }
 
 const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
