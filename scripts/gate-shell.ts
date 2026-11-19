@@ -218,18 +218,55 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   const readHome = async () => {
     const response = await tab.request.get(`${origin}/api/pages/home`);
     if (!response.ok()) throw new Error(`home lookup failed: ${response.status()}`);
-    return await response.json() as { id: string; create_mode: boolean };
+    return await response.json() as { id: string; create_mode: boolean; approval_mode?: string };
   };
   await tab.goto(landingUrl);
   const connected = tab.locator('.surface-connection[data-connected="true"]');
   await gateWait.playwright(connected, "waitFor", { state: "attached" });
   if (await tab.locator('.create-split a[aria-current="page"]').getAttribute("href") !== `/create${theme}` || await tab.locator(".create-split button").count()) throw new Error("create is not selected as a place without a switch");
   await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor", { state: "attached" });
+  const newChat = tab.locator(".surface-actions").getByRole("button", { name: "new chat", exact: true });
+  const assertNewChat = async () => {
+    await gateWait.playwright(tab.locator('.surface-actions > .new-chat:enabled + .create-split'), "waitFor");
+    if (!await newChat.isEnabled()) throw new Error(`new chat not available at ${new URL(tab.url()).pathname}`);
+  };
+  await assertNewChat();
+  const home = await readHome();
+  const registrations: Array<{ pageId: string; sessionId: string }> = [];
+  tab.on("request", (request) => {
+    const path = new URL(request.url()).pathname.match(/^\/api\/pages\/([^/]+)\/chats$/);
+    if (path && request.method() === "POST") registrations.push({ pageId: path[1], sessionId: request.postDataJSON().session_id });
+  });
+  await tab.setViewportSize({ width: 1440, height: 900 });
+  await tab.goto(`${origin}/settings${theme}`);
+  await assertNewChat();
+  await capture("new-chat-settings", 1440);
+  for (const place of ["create", "pages"]) {
+    await tab.goto(`${origin}/${place}${theme}`);
+    await assertNewChat();
+    if (place === "pages") await capture("new-chat-pages", 1440);
+    const requestCount = requests.filter(({ method }) => method === "new_session").length;
+    const registrationCount = registrations.length;
+    await newChat.click();
+    await gateWait.playwright(tab, "waitForURL", (url) => url.pathname === "/" && Boolean(url.searchParams.get("chat")) && !url.hash, { waitUntil: "commit" });
+    const latest = new URL(tab.url()).searchParams.get("chat");
+    if (registrations.length !== registrationCount + 1 || registrations.at(-1)?.sessionId !== latest || registrations.at(-1)?.pageId !== home.id || requests.filter(({ method }) => method === "new_session").length !== requestCount + 1) throw new Error(`new chat from /${place} did not register one home chat`);
+  }
+  await tab.goto(landingUrl);
+  await assertNewChat();
+  const sessionBaseline = requests.filter(({ method }) => method === "new_session").length;
+  registrations.length = 0;
+
+  const facts = tab.getByTestId("build-facts");
+  const savedApproval = await tab.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "{}").autoApproveDefault);
+  const expectedApproval = (await readHome()).approval_mode === "ask" || savedApproval === false ? "ask before running tools" : "auto-approve tools";
+  const expectedFacts = `create on · runs in a new chat · ${expectedApproval}`;
+  await gateWait.playwright(facts.filter({ hasText: expectedFacts }), "waitFor");
   const build = tab.getByRole("button", { name: "build page", exact: true });
   const prompt = tab.getByRole("textbox", { name: "describe your page" });
   await tab.setViewportSize({ width: 390, height: 844 });
   await tab.getByRole("button", { name: "a reading list with statuses" }).click();
-  if (await prompt.inputValue() !== "a reading list with statuses" || !await prompt.evaluate((element) => element === document.activeElement) || requests.some(({ method }) => method === "send" || method === "new_session")) throw new Error("starter did more than fill and focus the prompt");
+  if (await prompt.inputValue() !== "a reading list with statuses" || !await prompt.evaluate((element) => element === document.activeElement) || requests.some(({ method }) => method === "send") || requests.filter(({ method }) => method === "new_session").length !== sessionBaseline) throw new Error("starter did more than fill and focus the prompt");
   const measure: number[] = [];
   for (const width of [390, 1280, 1440, 1920]) {
     const height = width === 390 ? 844 : 900;
@@ -252,28 +289,23 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await tab.setViewportSize({ width: 1440, height: 900 });
   const draft = "  a synthetic reading list\nwith tags  ";
   await prompt.fill(draft);
-  const home = await readHome();
   const modePath = `${origin}/api/pages/${home.id}/create-mode`;
   if (home.create_mode) {
     const disabled = await tab.request.post(modePath, { data: { enabled: false } });
     if (!disabled.ok()) throw new Error("could not set up create-off home fixture");
   }
   const mode: unknown[] = [];
-  const registrations: Array<{ pageId: string; sessionId: string }> = [];
-  tab.on("request", (request) => {
-    const path = new URL(request.url()).pathname.match(/^\/api\/pages\/([^/]+)\/chats$/);
-    if (path && request.method() === "POST") registrations.push({ pageId: path[1], sessionId: request.postDataJSON().session_id });
-  });
   await tab.route(modePath, async (route) => {
     mode.push(route.request().postDataJSON());
     if (mode.length === 1) {
+      if (await facts.innerText() !== expectedFacts) throw new Error("pending build omitted or changed its execution facts");
       await capture("pending", 1440);
       await route.fulfill({ status: 503, json: { error: "synthetic refusal" } });
     } else await route.continue();
   });
   await build.evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });
   await gateWait.playwright(tab.getByRole("alert").filter({ hasText: "could not update create mode (503)" }), "waitFor");
-  if (tab.url() !== landingUrl || await prompt.inputValue() !== draft || registrations.length !== 1 || requests.filter(({ method }) => method === "new_session").length !== 1 || requests.some(({ method }) => method === "send") || mode.length !== 1) throw new Error("refused build changed route/draft or duplicated a write");
+  if (tab.url() !== landingUrl || await prompt.inputValue() !== draft || registrations.length !== 1 || requests.filter(({ method }) => method === "new_session").length !== sessionBaseline + 1 || requests.some(({ method }) => method === "send") || mode.length !== 1) throw new Error("refused build changed route/draft or duplicated a write");
   await gateWait.playwright(tab, "waitForFunction", () => document.activeElement?.getAttribute("aria-label") === "describe your page");
   await capture("refused", 1440);
   await tab.getByRole("button", { name: "retry build" }).click();
@@ -282,7 +314,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab, "waitForURL", target);
   await gateWait.playwright(tab.locator(`[data-session-id="${sessionId}"]`).first(), "waitFor", { state: "visible" });
   const sends = requests.filter(({ method }) => method === "send" || method === "steer");
-  if (registrations.length !== 1 || registrations[0].pageId !== home.id || requests.filter(({ method }) => method === "new_session").length !== 1 || JSON.stringify(mode) !== '[{"enabled":true},{"enabled":true}]' || !(await readHome()).create_mode || sends.length !== 1 || sends[0].params?.session_id !== sessionId || sends[0].params?.text !== draft || !/^[0-9a-f-]{36}$/.test(sends[0].params?.delivery_id ?? "")) throw new Error("build did not deliver exactly once to its registered home chat in create mode");
+  if (registrations.length !== 1 || registrations[0].pageId !== home.id || requests.filter(({ method }) => method === "new_session").length !== sessionBaseline + 1 || JSON.stringify(mode) !== '[{"enabled":true},{"enabled":true}]' || !(await readHome()).create_mode || sends.length !== 1 || sends[0].params?.session_id !== sessionId || sends[0].params?.text !== draft || !/^[0-9a-f-]{36}$/.test(sends[0].params?.delivery_id ?? "")) throw new Error("build did not deliver exactly once to its registered home chat in create mode");
   const toggle = tab.getByRole("button", { name: "toggle create mode for this page" });
   if (await toggle.getAttribute("aria-pressed") !== "true") throw new Error("contextual switch did not reflect build mode");
   await capture("chat-on", 1440);
@@ -294,4 +326,5 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator('.create-split button[aria-pressed="false"]'), "waitFor");
   await tab.getByRole("button", { name: "collapse sidebar" }).click();
   await capture("chat-off-rail", 1280);
+
 }

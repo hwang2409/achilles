@@ -30,7 +30,7 @@ export function CreateLanding({ build, nav }: { build: ReturnType<typeof useActi
           <textarea ref={prompt} aria-label="describe your page" aria-describedby="create-build-status" value={build.draft}
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />
           <div className="create-form-actions">
-            <span>opens in a new chat</span>
+            <span data-testid="build-facts">create on · runs in a new chat · {build.approvalMode === "ask" ? "ask before running tools" : build.approvalMode === "allow" ? "auto-approve tools" : "checking approval mode…"}</span>
             <button ref={submit} type="submit" aria-disabled={build.pending || !build.draft.trim()}>{build.pending ? "starting…" : build.error ? "retry build" : "build page"}</button>
           </div>
           <div id="create-build-status" className="create-build-status" role={build.error ? "alert" : "status"}>

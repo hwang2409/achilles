@@ -430,7 +430,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
   });
   return <AppShell current={landing ? createRoute : current === createRoute ? chatsRoute : current} nav={nav} connectionStatus={connectionStatus} banner={observerBanner} hasComposer={!landing && hasComposer}
-    workspace={landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", onNewChat: active.newChat, createMode }}
+    newChat={{ available: canWrite && (!landing || active.state.phase === "empty") && !active.build.pending, run: () => void active.newChat() }}
+    workspace={landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createMode }}
     header={!landing && activePage && createMode && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} createMode={createMode} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}>
     {landing ? <CreateLanding build={active.build} nav={nav} /> : content}
   </AppShell>;

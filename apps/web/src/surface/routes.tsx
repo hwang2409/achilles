@@ -39,3 +39,5 @@ export const surfaceHref = (path: string) => {
   url.searchParams.delete("chat");
   return `${url.pathname}${url.search}`;
 };
+
+export const newChatIntent = "#new-chat";

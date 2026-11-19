@@ -5,7 +5,7 @@ import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, type Connection } from "../zeta";
 import { useAgentNavAdapter } from "./AgentNavAdapter";
 import { ModuleFrame, ModuleState } from "./ModuleState";
-import { chatsRoute, createRoute, matchSurfaceRoute, type SurfaceRoute } from "./routes";
+import { chatsRoute, createRoute, matchSurfaceRoute, newChatIntent, surfaceHref, type SurfaceRoute } from "./routes";
 
 const connectionLabels: Partial<Record<Connection["state"]["phase"], string>> = { connected: "zeta connected", connecting: "connecting to zeta", not_running: "zeta is not running" };
 
@@ -43,7 +43,8 @@ export function SurfaceRouter() {
 
 function CatalogShell({ route, connectionStatus, banner, children }: { route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
-  return <AppShell current={route} nav={nav} banner={banner} connectionStatus={connectionStatus}>
+  return <AppShell current={route} nav={nav} banner={banner} connectionStatus={connectionStatus}
+    newChat={{ available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) }}>
     {route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages()}</ModuleFrame> : children}
   </AppShell>;
 }

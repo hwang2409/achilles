@@ -1,8 +1,9 @@
+import { newChatIntent } from "./surface/routes";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import type { Chat } from "./surface/AgentNavAdapter";
 import { supportsFeature } from "./zeta";
-import { getSettings } from "./settings";
+import { getSettings, useSettings } from "./settings";
 import { draftStore } from "./draftStore";
 import type { SendIntent } from "./composer/useComposerDelivery";
 import { MAYBE_SENT, SendRefused } from "./composer/composer-machine";
@@ -511,7 +512,8 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const status = useSyncExternalStore(creation.current.subscribe, () => creationPageId ? creation.current.status(creationPageId) : NO_CREATION);
   const creationError = status.error ? attachmentError(status.error, "creation") : null;
   const missingCreation = useRef<{ input: ChatCreationInput; route: string } | null>(null);
-  const createAfterLoad = useRef(false);
+  const createAfterLoad = useRef(location.hash === newChatIntent);
+  const { autoApproveDefault } = useSettings();
   const pendingSelection = useRef<{ sessionId: string; sawRunning: boolean } | null>(null);
   const [busy, setBusy] = useState<BusyChat | null>(null);
   const titleClock = useRef(0);
@@ -578,6 +580,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const retrying = retryingCreation.current; retryingCreation.current = false;
     if (!client || !connected) return;
     const landing = location.pathname === createPath;
+    const startFresh = !landing && createAfterLoad.current && location.hash === newChatIntent;
     const key = landing ? "home" : keyFromPath(homeAlias);
     const token = owner.current.begin(`${key}:${landing ? "build" : selectedId ?? "default"}`, true);
     const readAt = titleClock.current;
@@ -591,11 +594,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     setAttachSlow(false);
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" || (retrying && current.phase === "empty") ? current : { phase: "loading" } });
     const slowTimer = clock.setTimeout(() => { if (owner.current.current(token)) setAttachSlow(true); }, ATTACH_SLOW_MS);
-    void attachPage(client, key, landing ? null : selectedId, owner.current, creation.current, token, false, !landing && canWrite ? applyPendingCreateMode : undefined, async (next) => {
+    void attachPage(client, key, landing || startFresh ? null : selectedId, owner.current, creation.current, token, false, !landing && canWrite ? applyPendingCreateMode : undefined, async (next) => {
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token, readAt);
       else applyActive(token, { kind: "snapshot", state: next, readAt });
-    }, landing, !landing && canWrite).then((next) => {
+    }, landing || startFresh, !landing && !startFresh && canWrite).then((next) => {
       if (!owner.current.current(token)) return;
       setCreationPageId(next.page.id);
       if (next.phase === "busy") void showBusy(token, next.busySessionId, "attach");
@@ -685,7 +688,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       focusClaim.release();
       if (newChatRun.current === run) setCreatingChat(false);
     }
-  }, [applyActive, applyPendingCreateMode, client, publishReady, showBusy, state]);
+  }, [applyActive, applyPendingCreateMode, canWrite, client, publishReady, showBusy, state]);
 
   // the unsent-rows notice: show the page's new-chat box with its rows; the chat is made only when one of them is sent
   const openNewChat = useCallback(() => {
@@ -714,10 +717,11 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
   const openBusyChat = useCallback(() => { if (busy?.chat) selectChat(busy.chat); }, [busy, selectChat]);
 
   useEffect(() => {
-    if (!createAfterLoad.current || (state.phase !== "ready" && state.phase !== "empty")) return;
+    if (!canWrite || !createAfterLoad.current || (state.phase !== "ready" && state.phase !== "empty")) return;
     createAfterLoad.current = false;
+    if (location.hash === newChatIntent) history.replaceState({}, "", location.pathname + location.search);
     void newChat();
-  }, [newChat, state]);
+  }, [canWrite, newChat, state]);
 
   const updateReady = useCallback((token: number, update: (current: ReadyState) => ReadyState) => {
     applyActive(token, { kind: "state", update: (current) => current.phase === "ready" ? update(current) : current });
@@ -966,5 +970,6 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       .then((saved) => { if (saved && owner.current.current(token)) setListRefresh((value) => value + 1); });
   }, [canWrite, state]);
 
-  return { build: { draft: buildDraft, setDraft: setBuildDraft, pending: buildPending, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
+  const approvalMode = "page" in state ? creationApprovalMode(state.page.approval_mode, autoApproveDefault) : null;
+  return { build: { approvalMode, draft: buildDraft, setDraft: setBuildDraft, pending: buildPending, error: buildError, locked: Boolean(buildTarget.current?.deliveryId), start: buildPage }, state, approvalChange, toggleApprovalMode, attachSlow, selectedId, listRefresh, toggleError, toggling, toggleBlocked, toggleRetryable, creationError, creationPageId, creatingChat, focusSessionId, retrySaving, discardCreation, retryAttachment, selectChat, continueWaitingChat, newChat, openNewChat, send, toggle, refreshPage, recordLastState, rename, busy, retryBusy, openBusyChat };
 }
