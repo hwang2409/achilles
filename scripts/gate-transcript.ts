@@ -346,10 +346,12 @@ export async function gateTranscript(
     }) as typeof element.scrollTo;
   });
   await waitForJump(async () => (JSON.parse(await Bun.file(controlPath).text()).jump_stream_barrier ?? null) === "held", "held jump stream chunks");
-  await textOnlyJump.evaluate((element) => { (element as HTMLElement).dataset.gateFocused = "text-jump"; });
-  await textOnlyJump.focus();
-  if (!(await focusKept("text-jump"))) throw new Error("text-only jump to latest control is not keyboard focusable");
-  await textOnlyJump.click();
+  // Desktop CSS can show the jump before the closed mobile sheet drops inert.
+  const desktopJump = page.locator(".page-chat-docked #page-chat-sheet:not([inert], [role], [aria-modal])").locator(textOnlyJump);
+  await gateWait.playwright(desktopJump, "waitFor", { state: "visible" });
+  await desktopJump.focus();
+  if (!(await desktopJump.evaluate((element) => document.activeElement === element))) throw new Error("text-only jump to latest control is not keyboard focusable");
+  await desktopJump.click();
   await waitForJump(async () => await scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop <= 4 && !document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length), "jump to latest lands before releasing held chunks");
   const jumpedBeforeRelease = await scroll.evaluate((element) => ({ gap: element.scrollHeight - element.clientHeight - element.scrollTop, jumpVisible: Boolean(document.querySelector<HTMLElement>('[data-part="jump-to-latest-lane"][data-jump-owned="true"] [data-part="jump-to-latest"]')?.getClientRects().length) }));
   if (jumpedBeforeRelease.gap > 4 || jumpedBeforeRelease.jumpVisible)
