@@ -1,0 +1,144 @@
+// @ts-expect-error Bun supplies this module at test time; the web project does not install Bun types.
+import { afterEach, expect, mock, test } from "bun:test";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
+import { useState } from "react";
+import { Confirmation, reviewText as text, type ConfirmationProps } from "./Confirmation";
+
+afterEach(() => { cleanup(); document.body.replaceChildren(); });
+
+const common = { action: text("turn off"), keep: text("keep current"), effect: text("new sessions will not get github tools") };
+type Inline = Extract<ConfirmationProps, { level: 1 }>;
+function Row({ execute }: Pick<Inline, "execute">) {
+  const [value, setValue] = useState(text("on"));
+  return <Confirmation {...common} level={1} label={text("github")} value={value} onCommitted={setValue}
+    execute={execute} checkResult={async () => ({ status: "unknown" })} />;
+}
+
+function review(execute: Extract<ConfirmationProps, { level: 2 }>["execute"], options?: Partial<Extract<ConfirmationProps, { level: 2 }>>) {
+  const activity = document.body.appendChild(document.createElement("section"));
+  const ui = render(<Confirmation {...common} level={2} title={text("cancel paper?")} action={text("cancel run")}
+    scope={text("child of lead")} current={text("running")} after={text("cancelled")} undo={text("work in progress can be lost")}
+    fields={[{ label: text("credential"), value: { provided: true } }]}
+    proof={{ kind: "name", name: text("paper") }} activity={activity} execute={execute}
+    checkResult={async () => ({ status: "unknown" })} {...options} />);
+  const opener = ui.getByRole("button", { name: "cancel run" });
+  fireEvent.click(opener);
+  const modal = ui.getByRole("dialog", { name: "cancel paper?" });
+  return { opener, modal, dialog: within(modal), activity: within(activity) };
+}
+const cancel = (dialog: HTMLElement) => fireEvent(dialog, new Event("cancel", { cancelable: true }));
+const click = (button: HTMLElement) => act(async () => { fireEvent.click(button); });
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+test("inline confirm takes focus; Escape keeps the authoritative state without writing", () => {
+  const execute = mock(async () => ({ status: "unknown" as const }));
+  const ui = render(<Row execute={execute} />);
+  const opener = ui.getByRole("button", { name: "turn off" });
+  fireEvent.click(opener);
+  const confirm = within(ui.getByRole("group")).getByRole("button", { name: "turn off" });
+  expect(document.activeElement).toBe(confirm);
+  fireEvent.keyDown(confirm, { key: "Escape" });
+  expect(document.activeElement).toBe(opener);
+  expect(ui.getByText("on")).toBeTruthy();
+  expect(execute).not.toHaveBeenCalled();
+});
+
+test("inline pending locks only its row; success uses the returned value and timestamps the receipt", async () => {
+  const pending = deferred<Awaited<ReturnType<Inline["execute"]>>>();
+  const ui = render(<><Row execute={() => pending.promise} /><button>other row</button></>);
+  const opener = ui.getByRole("button", { name: "turn off" });
+  fireEvent.click(opener);
+  await click(within(ui.getByRole("group")).getByRole("button", { name: "turn off" }));
+  expect(opener.hasAttribute("disabled")).toBe(true);
+  expect(ui.getByRole("button", { name: "other row" }).hasAttribute("disabled")).toBe(false);
+  expect(ui.getByText("saving…")).toBeTruthy();
+  expect(ui.getByText("on")).toBeTruthy();
+  await act(async () => { pending.resolve({ status: "committed", value: text("off for new sessions"), receipt: text("github turned off") }); });
+  expect(document.activeElement).toBe(opener);
+  expect(ui.getByText("off for new sessions")).toBeTruthy();
+  expect(ui.getByText(/github turned off at/).querySelector("time")?.dateTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("inline known failure keeps the old value and announces a safe failure", async () => {
+  const ui = render(<Row execute={async () => ({ status: "failed", reason: "changed" })} />);
+  fireEvent.click(ui.getByRole("button", { name: "turn off" }));
+  await click(within(ui.getByRole("group")).getByRole("button", { name: "turn off" }));
+  expect(ui.getByText("on")).toBeTruthy();
+  expect(ui.getByRole("alert").textContent).toContain("refresh before trying again");
+  expect(ui.container.querySelector("time")).toBeNull();
+});
+
+test("name proof is exact, including case and whitespace; Escape before submit returns focus", () => {
+  const execute = mock(async () => ({ status: "unknown" as const }));
+  const { opener, modal, dialog } = review(execute);
+  const name = dialog.getByRole("textbox", { name: "type paper to confirm" });
+  const submit = dialog.getByRole("button", { name: "cancel run" });
+  expect(document.activeElement).toBe(name);
+  expect(dialog.getByText("provided")).toBeTruthy();
+  expect(dialog.getByText("now → after")).toBeTruthy();
+  expect(dialog.getByText("running → cancelled")).toBeTruthy();
+  expect(dialog.getByText("review", { selector: "header span" })).toBeTruthy();
+  for (const value of ["", "Paper", "paper "]) {
+    fireEvent.change(name, { target: { value } });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.submit(submit.closest("form")!);
+  }
+  expect(execute).not.toHaveBeenCalled();
+  cancel(modal);
+  expect(modal.isConnected).toBe(false);
+  expect(document.activeElement).toBe(opener);
+});
+
+test("pending and unknown lock dismissal and duplicate submit; only a read confirms success", async () => {
+  const pending = deferred<Awaited<ReturnType<Inline["execute"]>>>();
+  const execute = mock(() => pending.promise);
+  const checkResult = mock(async () => ({ status: "committed" as const, receipt: text("paper cancelled") }));
+  const { opener, modal, dialog, activity } = review(execute, { checkResult });
+  fireEvent.change(dialog.getByRole("textbox"), { target: { value: "paper" } });
+  const submit = dialog.getByRole("button", { name: "cancel run" });
+  const form = submit.closest("form")!;
+  await act(async () => { fireEvent.submit(form); fireEvent.submit(form); });
+  expect(execute).toHaveBeenCalledTimes(1);
+  cancel(modal);
+  expect(dialog.getByText("finishing…")).toBeTruthy();
+  expect(activity.queryByText(/paper cancelled/)).toBeNull();
+  await act(async () => { pending.reject(new Error("private transport body")); });
+  const check = dialog.getByRole("button", { name: "check now" });
+  cancel(modal);
+  fireEvent.submit(form);
+  expect(modal.isConnected).toBe(true);
+  expect(document.activeElement).toBe(check);
+  expect(dialog.queryByText(/private transport body/)).toBeNull();
+  expect(execute).toHaveBeenCalledTimes(1);
+  await click(check);
+  expect(checkResult).toHaveBeenCalledTimes(1);
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(modal.isConnected).toBe(false);
+  expect(document.activeElement).toBe(opener);
+  expect(activity.getByText(/paper cancelled at/).querySelector("time")).toBeTruthy();
+  fireEvent.click(activity.getByRole("button", { name: "dismiss receipt" }));
+  expect(activity.queryByText(/paper cancelled/)).toBeNull();
+});
+
+test("scope proof gates submit; a known failure leaves a recoverable dialog open", async () => {
+  const execute = mock(async () => ({ status: "failed" as const, reason: "not-applied" as const }));
+  const { modal, dialog, activity } = review(execute, { proof: { kind: "scope" } });
+  const scope = dialog.getByRole("checkbox", { name: "i reviewed the scope" });
+  const submit = dialog.getByRole("button", { name: "cancel run" });
+  expect(document.activeElement).toBe(scope);
+  expect(dialog.queryByRole("textbox")).toBeNull();
+  expect(submit.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(scope);
+  await click(submit);
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(modal.isConnected).toBe(true);
+  expect(document.activeElement).toBe(dialog.getByRole("alert"));
+  expect(dialog.getByRole("alert").textContent).toContain("you can try again");
+  expect(submit.hasAttribute("disabled")).toBe(false);
+  expect(activity.queryByRole("button")).toBeNull();
+});
