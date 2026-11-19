@@ -31,9 +31,8 @@ export async function readDetail(reads: Client, { sessionId, traceId }: DetailTa
   const status = await reads.status();
   const empty = { status, session: undefined, traceIds: [], trace: undefined, agents: [], spans: [] };
   if (!status.enabled) return empty;
-  const [summary, traceIds] = await Promise.all([reads.session(sessionId), collect((cursor) => reads.traceIds(sessionId, cursor))]);
+  const [session, traceIds] = await Promise.all([reads.session(sessionId), collect((cursor) => reads.traceIds(sessionId, cursor))]);
   // No range filter on a permalink. Prefer the session's last trace unless the user picked one.
-  const session = summary.items[0];
   const latest = session?.last_trace_id;
   const selected = traceId ?? (latest && traceIds.includes(latest) ? latest : traceIds.at(-1));
   if (!selected) return { ...empty, traceIds, session };

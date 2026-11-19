@@ -97,8 +97,7 @@ function createReader(load: (ask: Ask) => Promise<Loaded>, ask: Ask, env: ReadEn
   };
 }
 
-async function loadTelemetry(client: ZetaClient, ask: Ask): Promise<Loaded> {
-  const reads = telemetryClient(client);
+async function loadTelemetry(reads: ReturnType<typeof telemetryClient>, ask: Ask): Promise<Loaded> {
   const { range, query } = ask;
   if (ask.detail) return { ask, tab: "detail", ...await readDetail(reads, ask.detail) };
   if (ask.tab === "overview") {
@@ -130,7 +129,8 @@ export function useTelemetryReads(client: ZetaClient, tab: Tab, env: ReadEnv = b
   const latest = useRef(ask);
   latest.current = ask;
   useEffect(() => {
-    const current = createReader((next) => loadTelemetry(client, next), latest.current, env, setSnapshot);
+    const reads = telemetryClient(client);
+    const current = createReader((next) => loadTelemetry(reads, next), latest.current, env, setSnapshot);
     reader.current = current;
     return () => { current.stop(); reader.current = null; };
   }, [client, env]);

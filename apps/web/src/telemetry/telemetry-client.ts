@@ -25,9 +25,21 @@ type TracePage = { trace: TelemetryTrace; spans: TelemetrySpan[]; next_cursor: s
 
 /** Read-only telemetry calls over the page's one negotiated zeta connection. */
 export function telemetryClient(client: Rpc) {
+  let supportsSessionSummary = true;
   return {
     status: () => client.request("telemetry_status", {}) as Promise<TelemetryStatus>,
-    session: (session_id: string) => client.request("telemetry_sessions", { session_id }) as Promise<Page<TelemetrySession>>,
+    async session(session_id: string) {
+      if (!supportsSessionSummary) return undefined;
+      try {
+        const page = await client.request("telemetry_sessions", { session_id }) as Page<TelemetrySession>;
+        return page.items[0];
+      } catch (error) {
+        // Older zeta rejects the session_id parameter, but still serves trace detail.
+        if ((error as { code?: unknown } | null)?.code !== -32602) throw error;
+        supportsSessionSummary = false;
+        return undefined;
+      }
+    },
     trace: (trace_id: string, cursor: string | null) => client.request("telemetry_trace", params({ trace_id, cursor })) as Promise<TracePage>,
     traceIds: (session_id: string, cursor: string | null) => client.request("telemetry_agent_tree", params({ session_id, collection: "traces", cursor })) as Promise<AgentPage<string>>,
     agents: (session_id: string, trace_id: string, cursor: string | null) => client.request("telemetry_agent_tree", params({ session_id, collection: "agents", trace_id, cursor })) as Promise<AgentPage<TelemetryAgent>>,

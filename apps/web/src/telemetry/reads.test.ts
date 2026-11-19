@@ -103,3 +103,52 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
     zeta.finish(true);
   }
 });
+
+test.each([
+  ["invalid params disables only the summary lookup", -32602, 1],
+  ["another summary error stays retryable", -32000, 2],
+] as const)("%s", async (_name, code, expectedLookups) => {
+  const page = fakeEnv();
+  const detail = { sessionId: "session", traceId: null };
+  const error = { code, message: "summary lookup failed" };
+  const trace = { trace_id: "trace" };
+  const agents = [{ agent_session_id: "session" }];
+  let lookups = 0;
+  let traceReads = 0;
+  const client = {
+    request: async (method: string, params: Record<string, unknown>) => {
+      if (method === "telemetry_status") return status;
+      if (method === "telemetry_sessions" && params.session_id === detail.sessionId) {
+        lookups++;
+        throw error;
+      }
+      if (method === "telemetry_agent_tree") return { items: params.collection === "traces" ? [trace.trace_id] : agents, next_cursor: null };
+      if (method === "telemetry_trace") {
+        traceReads++;
+        return { trace, spans: [], next_cursor: null };
+      }
+      throw new Error(`unexpected request: ${method}`);
+    },
+  } as unknown as ZetaClient;
+  const hook = renderHook(() => useTelemetryReads(client, "sessions", page.env, detail));
+  try {
+    await act(flush);
+    const checkResult = () => {
+      const { error: readError, shown } = hook.result.current;
+      if (code === -32602) {
+        expect(readError).toBeUndefined();
+        expect(shown?.data).toMatchObject({ tab: "detail", session: undefined, trace, agents });
+      } else {
+        expect(readError).toBe(error);
+        expect(shown).toBeUndefined();
+      }
+    };
+    checkResult();
+    await act(async () => { page.tick(); await flush(); });
+    checkResult();
+    expect(lookups).toBe(expectedLookups);
+    expect(traceReads).toBe(code === -32602 ? 2 : 0);
+  } finally {
+    hook.unmount();
+  }
+});
