@@ -6,7 +6,7 @@ import { CodeFence } from "./chat/CodeFence";
 import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { TelemetryPlaceholder } from "./TelemetryPlaceholder";
+import { TelemetryModule } from "./telemetry/TelemetryModule";
 import { AppShell, isTelemetryPath, titleOf } from "./AppShell";
 import { PlainComposer } from "./composer/PlainComposer";
 import { chatQueues } from "./composer/chatQueues";
@@ -155,11 +155,17 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
-  if (isTelemetryPath(location.pathname)) return (
-    <AppShell agentActions={false} page={null} sessionId={null} waiting={0} hasComposer={false} refreshKey={0} pageRefreshKey={0}>
-      <TelemetryPlaceholder client={client} state={connectionState} />
-    </AppShell>
-  );
+  const { pathname } = location;
+  if (isTelemetryPath(pathname)) {
+    const connecting = connectionState.phase === "connected" || (connectionState.phase === "connecting" && connectionState.attempt === 0);
+    return (
+      <AppShell agentActions={false} page={null} sessionId={null} waiting={0} hasComposer={false} refreshKey={0} pageRefreshKey={0}>
+        {client ? <TelemetryModule client={client} pathname={pathname} /> : (
+          <div className="full-state"><p role="status">{connecting ? "connecting to zeta…" : "could not connect to zeta · retrying automatically"}</p></div>
+        )}
+      </AppShell>
+    );
+  }
   return <AgentSurface connection={connection} client={client} connectionState={connectionState} />;
 }
 
