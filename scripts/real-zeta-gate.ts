@@ -1219,7 +1219,10 @@ with _database() as db:
   await waitCreateMode(true);
   if (screenshotDir) {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole("link", { name: "create (on · this page)" }).waitFor();
+    const contextual = page.getByRole("button", { name: "toggle create mode for this page", exact: true });
+    await contextual.and(page.locator('[aria-pressed="true"]')).waitFor();
+    const createPlace = page.getByRole("link", { name: "create", exact: true });
+    if (new URL((await createPlace.getAttribute("href")) ?? "", origin).pathname !== "/create") throw new Error("contextual mode hid the separate create place link");
     await page.screenshot({ path: join(screenshotDir, "v5-chat-create-on-1440x900.png"), animations: "disabled" });
   }
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
