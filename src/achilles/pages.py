@@ -203,13 +203,30 @@ LAYOUT_HISTORY_LIMIT = 20
 INSPECT_MAX_BYTES = 8 * 1024
 DETAIL_SUGGESTION_RECORD_LIMIT = 200
 
+_RESERVED_PAGE_ROUTE_SEGMENTS = (
+    "chats",
+    "pages",
+    "agents",
+    "sessions",
+    "projects",
+    "telemetry",
+    "skills",
+    "agent-profiles",
+    "settings",
+    "accounts",
+    "mcp",
+    "create",
+    "api",
+    "assets",
+)
+
 CREATE_PAGE_SCHEMA = {
     "type": "object",
     "properties": {
         "route": {
             "type": "string",
             "pattern": (
-                r"^/(?!api(?:/|$)|assets(?:/|$)|mcp(?:/|$))"
+                rf"^/(?!(?:{'|'.join(_RESERVED_PAGE_ROUTE_SEGMENTS)})(?:/|$))"
                 r"(?:[a-z0-9][a-z0-9-]{0,62})"
                 r"(?:/(?:[a-z0-9][a-z0-9-]{0,62})){0,7}$"
             ),
