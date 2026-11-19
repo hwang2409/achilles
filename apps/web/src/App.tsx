@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
@@ -157,7 +157,11 @@ function connectionFailure(state: ConnectionState): string | null {
 }
 
 export function App() {
-  const connection = useMemo(() => createConnection({ origin: location.origin }), []);
+  const [{ connection, readOnly }] = useState(() => {
+    // Navigation between telemetry and chat loads a new document.
+    const readOnly = isTelemetryPath(location.pathname);
+    return { connection: createConnection({ origin: location.origin, readOnly }), readOnly };
+  });
   const [client, setClient] = useState(connection.client);
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   useEffect(() => {
@@ -165,21 +169,22 @@ export function App() {
     const unsubscribe = connection.subscribe(() => setClient(connection.client));
     return () => { unsubscribe(); connection.stop(); };
   }, [connection]);
-  const { pathname } = location;
-  if (isTelemetryPath(pathname)) {
+  const observer = isObserverPresentation(connectionState, connection.observerPresentation);
+  const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
+  if (readOnly) {
     const connecting = connectionState.phase === "connected" || (connectionState.phase === "connecting" && connectionState.attempt === 0);
     return (
-      <AppShell agentActions={false} page={null} sessionId={null} waiting={0} hasComposer={false} refreshKey={0} pageRefreshKey={0}>
-        {client ? <TelemetryModule client={client} pathname={pathname} /> : (
+      <AppShell agentActions={false} banner={observerBanner} page={null} sessionId={null} waiting={0} hasComposer={false} refreshKey={0} pageRefreshKey={0}>
+        {client ? <TelemetryModule client={client} pathname={location.pathname} /> : (
           <div className="full-state"><p role="status">{connecting ? "connecting to zeta…" : "could not connect to zeta · retrying automatically"}</p></div>
         )}
       </AppShell>
     );
   }
-  return <AgentSurface connection={connection} client={client} connectionState={connectionState} />;
+  return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} />;
 }
 
-function AgentSurface({ connection, client, connectionState }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState }) {
+function AgentSurface({ connection, client, connectionState, observerBanner }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode }) {
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
   const readOnlyReason = READ_ONLY_REASON;
@@ -316,7 +321,6 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
   useEffect(() => { active.recordLastState(lastState); }, [active.recordLastState, lastState]);
 
   const connected = connectionState.phase === "connected";
-  const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const shownToggleError = useRef(active.toggleError);
   useEffect(() => {
     // a successful retry removes the notice and its focused button; give focus back to the visible header control
@@ -343,7 +347,7 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
     : active.creatingChat ? { state: "read-only", reason: "send waits until the new chat is ready", onSubmit: send, placeholder }
     : activeComposerProps(connected && Boolean(client), active.toggleBlocked, turn, send, () => { if (ready) void client?.request("abort", { session_id: ready.sessionId }); }, placeholder);
   // mirrors the final branch of `content` below: whichever states skip the composer must also relabel the skip link.
-  const hasComposer = observer ? Boolean(activePage) : !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
+  const hasComposer = observerBanner ? Boolean(activePage) : !active.creationError && active.state.phase !== "missing" && active.state.phase !== "error" && !(failure && !lost) && Boolean(activePage) && Boolean(activeStore);
   // rows typed in the new-chat box that no chat took (a refused create): the page opens another chat, so say they wait
   const unsentNew = ready ? chatQueues.unsent(`new:${ready.page.id}`).length : 0;
   // a failed create keeps the message typed for it in the page's new-chat box: show it, so the user sees it is safe
@@ -385,7 +389,7 @@ function AgentSurface({ connection, client, connectionState }: { connection: Con
         </div>
       </RunProvider>}
   </>;
-  return <AppShell banner={observer && <ObserverBanner connection={connection} />} header={activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
+  return <AppShell banner={observerBanner} header={activePage && <ChatHeader page={activePage} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} toggling={active.toggling} disabled={active.toggling || !connected || active.creatingChat || !canWrite} toggle={active.toggle} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />} page={activePage} sessionId={ready?.sessionId ?? null} waiting={waiting} canWrite={canWrite} serverForcesAsk={(ready ?? empty)?.serverApprovalMode === "ask"} hasComposer={hasComposer} onNewChat={active.newChat} onToggleCreateMode={active.toggle} onSelectChat={active.selectChat} onRenameChat={(chat, text) => { if (canWrite) void active.rename(chat.session_id, text); }} refreshKey={active.listRefresh} pageRefreshKey={pageRefreshNonce}>{content}</AppShell>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {
@@ -477,7 +481,7 @@ const connectionHeadings: Partial<Record<ConnectionState["phase"], string>> = {
   incompatible: "zeta version mismatch",
 };
 
-function ObserverBanner({ connection }: { connection: Connection }) {
+function ObserverBanner({ connection, readOnly }: { connection: Connection; readOnly: boolean }) {
   const [working, setWorking] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const takeControl = async () => {
@@ -486,7 +490,13 @@ function ObserverBanner({ connection }: { connection: Connection }) {
     setWorking(false);
     setFeedback(reason);
   };
-  return <aside className="observer-banner" aria-label="observer mode"><div><strong>another tab controls zeta</strong><span>this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled.</span></div><div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => void takeControl()} disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div></aside>;
+  return <aside className="observer-banner" aria-label="observer mode">
+    <div>
+      <strong>{readOnly ? "this page is read-only" : "another tab controls zeta"}</strong>
+      <span>{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
+    </div>
+    {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => void takeControl()} disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div>}
+  </aside>;
 }
 
 function ConnectionBanner({ state, connection, compact = false }: { state: ConnectionState; connection: Connection; compact?: boolean }) {

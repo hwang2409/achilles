@@ -56,14 +56,16 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
 }
 
 type RoleState = { role: ZetaRole; reason: string | null };
-type RoleEvent = "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "retry";
+type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "retry";
 
 export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
   switch (event) {
+    case "connect_writable":
     case "controller_granted":
     case "controller_closed":
     case "both_busy":
       return { role: "controller", reason: null };
+    case "connect_read_only":
     case "observer_granted":
     case "controller_busy":
     case "observer_busy":
@@ -80,6 +82,8 @@ export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
 export type ConnectionDeps = {
   /** The page origin the server's `--ws-origin` allowlist must contain. */
   origin: string;
+  /** This document can only connect as an observer. */
+  readOnly?: boolean;
   /** `{ start }` when zeta is not running and the server names the command that starts it. */
   discover?: () => Promise<ZetaDiscovery | { start: string } | null>;
   connect?: (discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) => Promise<ZetaClient>;
@@ -140,6 +144,7 @@ async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (c
  */
 export function createConnection({
   origin,
+  readOnly = false,
   discover = async () => {
     const response = await fetch("/api/zeta/discovery", { cache: "no-store" });
     if (response.ok) return await response.json();
@@ -160,7 +165,7 @@ export function createConnection({
   let timer: unknown = null;
   let generation = 0;
   let stopped = false;
-  let roleState: RoleState = { role: "controller", reason: null };
+  let roleState = transitionRole({ role: "controller", reason: null }, readOnly ? "connect_read_only" : "connect_writable");
   let retainedObserver = false;
   let liveDiscovery: ZetaDiscovery | null = null;
   let takingControl = false;
@@ -266,7 +271,7 @@ export function createConnection({
       void attempt();
     },
     async takeControl() {
-      if (stopped || takingControl || state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return null;
+      if (readOnly || stopped || takingControl || state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return null;
       const observer = client;
       const discovery = liveDiscovery;
       takingControl = true;

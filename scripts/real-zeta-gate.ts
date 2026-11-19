@@ -42,7 +42,7 @@ const sharedDiscovery = join(zetaHome, "run/serve.ws.json");
 const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
 // Stay below port 6000, which Chromium blocks (X11).
-const port = 5200 + Math.floor(Math.random() * 800);
+const port = Number(process.env.GATE_PORT ?? (5200 + Math.floor(Math.random() * 800)));
 const origin = `http://127.0.0.1:${port}`;
 const screenshotDir = process.env.SCREENSHOT_DIR;
 if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
@@ -217,6 +217,9 @@ try {
   );
   browser = await chromium.launch({ headless: true });
   const telemetryPage = await browser.newPage();
+  const telemetryChatPage = await browser.newPage();
+  const telemetryFailures: string[] = [];
+  const telemetryArtifacts = ["telemetry-observer-390x760.png", "telemetry-observer-1440x900.png"];
   const telemetryHttp: string[] = [];
   const recordTelemetryRequest = (request: Request) => telemetryHttp.push(`${request.method()} ${new URL(request.url()).pathname}`);
   const telemetryMethods: string[] = [];
@@ -253,6 +256,11 @@ try {
     if (agentMethods.length) throw new Error(`telemetry route used agent RPCs: ${agentMethods.join(", ")}`);
     if (!await newerZeta.isVisible()) throw new Error("telemetry route did not show the newer-zeta state");
     console.log("telemetry route: hello succeeded, newer-zeta state visible, no page attachment or agent RPCs");
+    await telemetryChatPage.goto(origin);
+    const newChat = telemetryChatPage.getByRole("button", { name: "new chat" });
+    const takeControl = telemetryChatPage.getByRole("button", { name: "take control", exact: true });
+    await waitFor(async () => await newChat.isEnabled() || await takeControl.isVisible(), "chat role after telemetry opened first");
+    if (!await newChat.isEnabled()) telemetryFailures.push("chat opened after telemetry did not get controller");
   } finally {
     telemetryPage.off("request", recordTelemetryRequest);
     await telemetryPage.close();
@@ -309,7 +317,10 @@ try {
       if (wasFocused || await closeButton.count()) await gateWait.playwright(closeButton, "click");
       await gateWait.playwright(tab, "waitForFunction", () => {
         const sheet = document.querySelector<HTMLElement>("#page-chat-sheet");
-        return matchMedia("(width < 1280px)").matches && Boolean(sheet?.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden" && !sheet.getAnimations().length);
+        if (!matchMedia("(width < 1280px)").matches) return false;
+        // The pinned zeta's telemetry notice has no page chat sheet.
+        if (!sheet) return Boolean(document.querySelector(".telemetry-placeholder"));
+        return sheet.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden" && !sheet.getAnimations().length;
       });
     };
     const checkOpen = async (via: NonNullable<typeof opener>) => {
@@ -370,6 +381,29 @@ try {
     }
     if (opener) await checkOpen(opener);
   };
+  try {
+    // On the old build the first assertion fails. Free the slot so the banner is still tested with a controller present.
+    const takeControl = telemetryChatPage.getByRole("button", { name: "take control", exact: true });
+    if (telemetryFailures.length) await takeControl.click({ timeout: 10_000 });
+    await waitFor(async () => await telemetryChatPage.getByRole("button", { name: "new chat" }).isEnabled(), "chat controller for telemetry banner check");
+    const observerTelemetry = await browser.newPage({ viewport: { width: 390, height: 760 } });
+    try {
+      await observerTelemetry.goto(`${origin}/telemetry`);
+      await waitFor(async () => await observerTelemetry.getByText("telemetry · needs a newer zeta", { exact: true }).isVisible(), "observer telemetry connected");
+      const banner = observerTelemetry.getByRole("complementary", { name: "observer mode" });
+      if (!await banner.getByText("this page is read-only", { exact: true }).isVisible()) telemetryFailures.push("telemetry opened with a chat controller did not show the read-only banner");
+      if (await observerTelemetry.getByRole("button", { name: "take control", exact: true }).count()) telemetryFailures.push("telemetry offered take control");
+      if (telemetryFailures.length) throw new Error(telemetryFailures.join("\n"));
+      if (screenshotDir) {
+        for (const [index, viewport] of [{ width: 390, height: 760 }, { width: 1440, height: 900 }].entries()) {
+          if (viewport.width === 390) await setupMobileSheet(observerTelemetry, viewport.height);
+          else await observerTelemetry.setViewportSize(viewport);
+          await observerTelemetry.screenshot({ path: join(screenshotDir, telemetryArtifacts[index]!), animations: "disabled" });
+        }
+      }
+      console.log("telemetry observer: chat can control zeta, read-only banner visible, no take-control button");
+    } finally { await observerTelemetry.close(); }
+  } finally { await telemetryChatPage.close(); }
   const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
     for (const width of [390, 1280, 1440, 1920]) {
       if (width === 390) {
@@ -2891,9 +2925,9 @@ try {
       zeta: zetaRef,
       timestamps: { started: new Date().toISOString(), completed: new Date().toISOString() },
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
-      routes: [new URL(observerPage.url()).pathname],
-      states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png"],
+      routes: [new URL(observerPage.url()).pathname, "/telemetry"],
+      states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
