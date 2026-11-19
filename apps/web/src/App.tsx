@@ -43,7 +43,9 @@ const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={h
 const AuthRecoveryContext = createContext<{ id: string; sessionId: string; client: ZetaClient; canWrite: boolean; onNewChat: () => void } | null>(null);
 function ErrorRow({ id }: { id: string }) {
   const recovery = useContext(AuthRecoveryContext);
-  return recovery?.id === id ? <AuthErrorRecovery key={`${recovery.sessionId}:${id}:${recovery.canWrite}`} {...recovery} /> : <Fallback id={id} />;
+  const item = useItem(id);
+  const code = item?.type === "error" && item.event.type === "error" ? item.event.error.code : undefined;
+  return recovery?.id === id ? <AuthErrorRecovery key={`${recovery.sessionId}:${id}:${recovery.canWrite}`} {...recovery} code={code} /> : <Fallback id={id} />;
 }
 const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble

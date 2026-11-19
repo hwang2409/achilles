@@ -4,8 +4,8 @@ export type ParsedComposerInput =
   | { kind: "command"; name: string; arg: string };
 
 // a single leading "/word" is a command; "//" escapes to a literal message with one slash dropped; a slash
-// anywhere else (or a "/ " with no word) is plain text.
-const COMMAND = /^\/([a-zA-Z][\w-]*)[ \t]*([\s\S]*)$/;
+// anywhere else (or a leading path such as "/usr/bin") is plain text.
+const COMMAND = /^\/([a-zA-Z][\w-]*)(?=\s|$)\s*([\s\S]*)$/;
 
 export function parseComposerInput(draft: string): ParsedComposerInput {
   if (draft.startsWith("//")) return { kind: "send", text: draft.slice(1) };

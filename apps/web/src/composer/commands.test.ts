@@ -4,6 +4,9 @@ import { parseComposerInput } from "./commands";
 test.each([
   ["/accounts", { kind: "command", name: "accounts", arg: "" }],
   ["/accounts anthropic:personal", { kind: "command", name: "accounts", arg: "anthropic:personal" }],
+  ["/usr/bin", { kind: "send", text: "/usr/bin" }],
+  ["/usr/bin is missing", { kind: "send", text: "/usr/bin is missing" }],
+  ["/nope", { kind: "command", name: "nope", arg: "" }],
   ["/Accounts", { kind: "command", name: "accounts", arg: "" }],
   ["/unknown do a thing", { kind: "command", name: "unknown", arg: "do a thing" }],
   // "//" escapes to a literal message with one slash dropped

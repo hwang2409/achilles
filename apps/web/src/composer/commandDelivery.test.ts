@@ -46,3 +46,11 @@ test('a leading "//" sends the literal "/" text to the model', async () => {
   expect(h.sent).toEqual(["/accounts"]);
   expect(h.commands).toEqual([]);
 });
+
+test.each(["/usr/bin", "/usr/bin is missing"])("an absolute path draft is delivered unchanged: %s", async (text) => {
+  const h = harness(() => false);
+  h.owner.edit(text);
+  await h.owner.submit();
+  expect(h.sent).toEqual([text]);
+  expect(h.commands).toEqual([]);
+});

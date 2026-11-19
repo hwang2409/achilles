@@ -6,7 +6,7 @@ import "./auth-error-recovery.css";
 
 type Login = { state: "pending"; authorization_url?: string } | { state: "succeeded" } | { state: "failed" | "idle" | "cancelled"; error?: { message?: string } };
 
-export function AuthErrorRecovery({ client, sessionId, canWrite, onNewChat }: { client: ZetaClient; sessionId: string; canWrite: boolean; onNewChat: () => void }) {
+export function AuthErrorRecovery({ client, sessionId, canWrite, onNewChat, code }: { client: ZetaClient; sessionId: string; canWrite: boolean; onNewChat: () => void; code?: string }) {
   const reason = useId();
   const [recovery, setRecovery] = useState<ReturnType<typeof accountRecovery>>(null);
   const [notice, setNotice] = useState("");
@@ -86,8 +86,8 @@ export function AuthErrorRecovery({ client, sessionId, canWrite, onNewChat }: { 
   }
 
   return <div className="chat-auth-error" aria-describedby={!canWrite ? reason : undefined}>
-    <strong role="status">{failed ? <>account <code>{failed.account}</code> failed</> : "this chat's account failed to sign in"}</strong>
-    <p>this chat stays pinned to its account until you switch it.</p>
+    <strong role="status">this chat can't reach its account</strong>
+    <p>this chat is pinned to {failed ? <code>{failed.account}</code> : "its account"}, which failed to sign in{failed && code ? <> (<code>{code}</code>)</> : null}. the chat stays pinned so it never switches accounts on you by surprise.</p>
     <div className="chat-auth-error-actions">
       <button type="button" data-write-surface={WRITE_SURFACE.authLogin} disabled={!failed || busy || recovered} onClick={() => void logIn()}>{failed ? `log in to ${failed.account}` : "log in to this account"}</button>
       {(target || !failed) && <button type="button" data-write-surface={WRITE_SURFACE.authSwitch} disabled={!target || busy || recovered || !supportsRequest(client, "account_switch")} onClick={() => void switchToTarget()}>{target ? `switch this chat to ${target.account}` : "switch this chat to another account"}</button>}

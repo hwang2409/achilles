@@ -36,7 +36,7 @@ export function useComposerCommands(client: ZetaClient | null, sessionId: string
       revision.current++;
       if (!canWrite) return false;
       if (command.name !== "accounts") {
-        setOutput({ text: `commands are not available here: /${command.name}`, error: true });
+        setOutput({ text: `commands are not available here: /${command.name}. use // to send a literal slash.`, error: true });
         return false;
       }
       if (!canList || (command.arg && !canSwitch)) {

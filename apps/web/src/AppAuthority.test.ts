@@ -236,7 +236,7 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "vi
   expect(disabled(control)).toBe(authority === "observer");
   await click(control);
   if (authority === "observer") {
-    expect(card.textContent).toContain("this chat's account failed to sign in");
+    expect(card.textContent).toContain("this chat is pinned to its account, which failed to sign in.");
     expect(card.textContent).toContain("read-only");
     expect(card.textContent).not.toContain("anthropic:");
     expect(requests).not.toContain("account_list");
