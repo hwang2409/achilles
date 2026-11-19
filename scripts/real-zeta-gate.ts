@@ -1413,15 +1413,21 @@ try {
         // Serialized track sizes are rounded. Use layout edges for the overlap check.
         const left = finalCell.right;
         const right = stripBox.right - parseFloat(stripStyle.borderRightWidth) - parseFloat(stripStyle.paddingRight);
-        if (right <= left) return true;
-        const occupied = cellElements.some((cell) => {
-          const box = cell.getBoundingClientRect();
-          return box.left < right && box.right > left && box.top < finalCell.bottom && box.bottom > finalCell.top;
-        });
+        const liveCells = cellElements.map((cell) => cell.getBoundingClientRect());
+        if (![left, right].every(Number.isFinite) || liveCells.some((box) => ![box.left, box.top, box.width, box.height].every(Number.isFinite) || box.width <= 0 || box.height <= 0)) return false;
+        const usedTrackCount = finalRow.length;
+        const trackCount = trackSizes.length;
+        if (usedTrackCount === trackCount) {
+          const liveFinalCell = liveCells.at(-1)!;
+          return Math.abs(right - left) <= 0.5 && Math.abs(right - liveFinalCell.right) <= 0.5;
+        }
+        if (usedTrackCount > trackCount || left >= right || liveCells.some((box) => box.right > right)) return false;
+        const occupied = liveCells.some((box) => box.left < right && box.right > left && box.top < finalCell.bottom && box.bottom > finalCell.top);
         let trackLeft = left;
-        const unusedTrackWidths = trackSizes.slice(finalRow.length).filter((width) => width > 0);
-        return !occupied && unusedTrackWidths.length > 0 && unusedTrackWidths.every((width) => {
+        return !occupied && trackSizes.slice(usedTrackCount).every((width) => {
+          if (!Number.isFinite(width) || width <= 0) return false;
           const trackRight = Math.min(trackLeft + width, right);
+          if (trackRight <= trackLeft) return false;
           const hit = document.elementFromPoint((trackLeft + trackRight) / 2, (finalCell.top + finalCell.bottom) / 2);
           trackLeft = trackRight;
           return hit === strip;
@@ -1476,6 +1482,8 @@ try {
             strip.style.cssText = originalStrip!.cssText;
             lastCell.style.transform = "translateX(4px)";
             expectRejected("a cell intruding into the unused track", hasUnusedTrackPaint(grid));
+            lastCell.style.transform = `translateX(${strip.getBoundingClientRect().width}px)`;
+            expectRejected("a cell crossing the unused track and leaving the strip", hasUnusedTrackPaint(grid));
             lastCell.style.transform = originalLastCellTransform;
           }
           mutationStyle.textContent = ".metric-strip::before { content: \"\"; background: red; }";
