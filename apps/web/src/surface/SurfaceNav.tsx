@@ -49,8 +49,8 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
           {surfaceRoutes.filter((route) => route.group === group).map((route) => <PlaceLink key={route.id} route={route} current={current} />)}
         </section>)}
       </nav>
-      {catalog}
       {recent}
+      {catalog}
     </div>
     <footer>
       {!narrow && <button className="collapse-button" aria-label={collapsed ? "expand sidebar" : "collapse sidebar"} aria-keyshortcuts={isMac ? "Meta+B" : "Control+B"} aria-expanded={!collapsed} onClick={onCollapse}><span aria-hidden="true">{collapsed ? "»" : "«"}</span><span className="collapse-label">collapse</span><kbd>{modKey("B")}</kbd></button>}

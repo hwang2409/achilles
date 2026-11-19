@@ -71,7 +71,7 @@ export async function gateShell(
 
   await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=foreign-session`);
   await gateWait.playwright(page.getByRole("alert").filter({ hasText: "this chat no longer exists" }), "waitFor", { timeout: 20_000 });
-  await gateWait.playwright(page.getByRole("button", { name: "new chat", exact: true }), "waitFor", { timeout: 20_000 });
+  await gateWait.playwright(page.getByRole("main").getByRole("button", { name: "new chat", exact: true }), "waitFor", { timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== "foreign-session")
     throw new Error("missing chat state discarded the selected chat query");
   await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=${firstSessionId}`);
@@ -135,7 +135,7 @@ export async function gateShell(
   await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
   try {
     await page.keyboard.press("Enter");
-    if (await menu.getAttribute("aria-expanded") !== "true") throw new Error("keyboard did not open the drawer at 200% zoom");
+    if (await page.locator(".menu-button").getAttribute("aria-expanded") !== "true") throw new Error("keyboard did not open the drawer at 200% zoom");
     if (await sidebar.evaluate((element) => element.getAnimations().length)) throw new Error("drawer animated with reduced motion enabled");
     if (await sidebar.evaluate((element) => element.scrollWidth > element.clientWidth)) throw new Error("drawer overflowed horizontally at 200% zoom");
     await page.keyboard.press("Tab");

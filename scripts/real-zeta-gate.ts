@@ -791,7 +791,7 @@ with _database() as db:
   await expectBrowserErrors(page, [{ method: "GET", url: expectedNotFoundUrl, status: 404 }], async () => {
     await page.goto(`${origin}/not-a-real-page`);
   await gateWait.playwright(page.getByRole("alert").filter({ hasText: "page not found" }), "waitFor", { timeout: 20_000 });
-  await page.getByRole("button", { name: "new chat", exact: true }).click();
+  await page.getByRole("main").getByRole("button", { name: "new chat", exact: true }).click();
   await gateWait.playwright(page.getByRole("textbox", { name: "message", exact: true }), "waitFor", { timeout: 20_000 });
   });
   const unknownRouteSession = await homeSessionId();
@@ -1246,6 +1246,11 @@ with _database() as db:
   const toggleResult = await toggleResponse;
   if (!toggleResult.ok()) throw new Error(`create mode toggle failed: ${toggleResult.status()}`);
   await waitCreateMode(true);
+  if (screenshotDir) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("link", { name: "create (on · this page)" }).waitFor();
+    await page.screenshot({ path: join(screenshotDir, "v5-chat-create-on-1440x900.png"), animations: "disabled" });
+  }
   await waitFor(async () => (await catalogReady.count()) > catalogReadyBefore && ((JSON.parse(await Bun.file(control).text()).request_count ?? 0) > catalogRequestBefore), "catalog ready");
   if (pageIndexRequests.length !== pageRequestsBeforeStreamingTurn)
     throw new Error(`streaming turn made ${pageIndexRequests.length - pageRequestsBeforeStreamingTurn} extra /api/pages requests`);
