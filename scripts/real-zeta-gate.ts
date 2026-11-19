@@ -298,10 +298,19 @@ try {
     const bar = tab.locator(".page-chat-bar");
     const dialog = tab.getByRole("dialog", { name: "page chat", exact: true });
     const closeButton = dialog.getByRole("button", { name: "close page chat", exact: true });
-    const waitClosed = () => gateWait.playwright(tab, "waitForFunction", () => {
-      const sheet = document.querySelector<HTMLElement>("#page-chat-sheet");
-      return matchMedia("(width < 1280px)").matches && Boolean(sheet?.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden");
-    });
+    const settleClosed = async () => {
+      const wasFocused = await tab.evaluate(() => Boolean(document.activeElement?.closest(".page-chat-docked #message-composer") && !matchMedia("(width < 1280px)").matches));
+      await tab.setViewportSize({ width: 390, height });
+      if (wasFocused) {
+        // A focused resize opens the sheet. Do not close until that commit happened.
+        await gateWait.playwright(tab, "waitForFunction", () => Boolean(document.activeElement?.closest('#page-chat-sheet[aria-modal="true"] #message-composer')));
+      }
+      if (wasFocused || await closeButton.count()) await gateWait.playwright(closeButton, "click");
+      await gateWait.playwright(tab, "waitForFunction", () => {
+        const sheet = document.querySelector<HTMLElement>("#page-chat-sheet");
+        return matchMedia("(width < 1280px)").matches && Boolean(sheet?.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden" && !sheet.getAnimations().length);
+      });
+    };
     const checkOpen = async (via: NonNullable<typeof opener>) => {
       await gateWait.playwright(tab.locator("#page-chat-sheet"), "waitFor", { state: "attached" });
       // Mutation delivery runs after the open commit's layout effects, before paint or any timer.
@@ -309,27 +318,30 @@ try {
         const sheet = document.querySelector<HTMLElement>("#page-chat-sheet")!;
         const start = document.activeElement;
         const isVisible = (element: HTMLElement | null | undefined) => Boolean(element?.checkVisibility({ visibilityProperty: true }));
-        let result: Record<string, unknown> | undefined;
-        const observer = new MutationObserver(() => {
-          if (!sheet.matches('[role="dialog"][aria-modal="true"]')) return;
-          observer.disconnect();
+        function probeEdge(edge: HTMLElement | undefined, next: HTMLElement | undefined, shiftKey: boolean) {
+          if (!edge || !next) return false;
+          edge.focus();
+          if (document.activeElement !== edge) return false;
+          const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
+          edge.dispatchEvent(event);
+          return event.defaultPrevented && document.activeElement === next;
+        }
+        function readOpening() {
           const active = document.activeElement as HTMLElement | null;
           const close = sheet.querySelector<HTMLElement>('button[aria-label="close page chat"]');
           const initial = via === "resize" ? active === start && Boolean(active?.closest("#message-composer")) : active === close;
-          const controls = [...sheet.querySelectorAll<HTMLElement>(selector)].filter(element => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && isVisible(element));
-          const wrap = (edge: HTMLElement | undefined, next: HTMLElement | undefined, shiftKey: boolean) => {
-            if (!edge || !next) return false;
-            edge.focus();
-            if (document.activeElement !== edge) return false;
-            const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
-            edge.dispatchEvent(event);
-            return event.defaultPrevented && sheet.contains(document.activeElement) && document.activeElement === next;
-          };
           const focus = initial && isVisible(active) && isVisible(close);
-          const backward = focus && wrap(controls[0], controls.at(-1), true);
-          const forward = via !== "resize" || (focus && wrap(controls.at(-1), controls[0], false));
+          const controls = [...sheet.querySelectorAll<HTMLElement>(selector)].filter(element => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && isVisible(element));
+          const backward = focus && probeEdge(controls[0], controls.at(-1), true);
+          const forward = focus && probeEdge(controls.at(-1), controls[0], false);
           if (focus && active !== document.activeElement) active?.focus();
-          result = { focus, backward, forward, active: active?.getAttribute("aria-label") ?? active?.tagName, visibility: getComputedStyle(sheet).visibility, tabbables: controls.length };
+          return { focus, backward, forward, active: active?.getAttribute("aria-label") ?? active?.tagName, visibility: getComputedStyle(sheet).visibility, tabbables: controls.length };
+        }
+        let result: ReturnType<typeof readOpening> | undefined;
+        const observer = new MutationObserver(() => {
+          if (!sheet.matches('[role="dialog"][aria-modal="true"]')) return;
+          observer.disconnect();
+          result = readOpening();
         });
         observer.observe(sheet, { attributes: true, attributeFilter: ["aria-modal"] });
         return { read: () => result, stop: () => observer.disconnect() };
@@ -348,22 +360,13 @@ try {
         await probe.dispose();
       }
     };
+    await settleClosed();
     if (opener === "resize") {
       await tab.setViewportSize({ width: 1440, height });
-      const composer = tab.locator('.page-chat-docked #message-composer').getByRole("textbox", { name: "message" });
+      const composer = tab.locator('.page-chat-docked #page-chat-sheet:not([inert]) #message-composer').getByRole("textbox", { name: "message" });
       await composer.focus();
       if (!await composer.evaluate(element => element === document.activeElement && !matchMedia("(width < 1280px)").matches)) throw new Error("390px page chat resize: expected a focused desktop composer");
-      await checkOpen("resize");
-      return;
     }
-    const wasFocused = await tab.evaluate(() => Boolean(document.activeElement?.closest(".page-chat-docked #message-composer") && !matchMedia("(width < 1280px)").matches));
-    await tab.setViewportSize({ width: 390, height });
-    if (wasFocused) {
-      // A focused resize opens the sheet. Do not close until that commit happened.
-      await gateWait.playwright(tab, "waitForFunction", () => Boolean(document.activeElement?.closest('#page-chat-sheet[aria-modal="true"] #message-composer')));
-    }
-    if (wasFocused || await closeButton.count()) await gateWait.playwright(closeButton, "click");
-    await waitClosed();
     if (opener) await checkOpen(opener);
   };
   const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
