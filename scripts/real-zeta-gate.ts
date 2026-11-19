@@ -943,6 +943,46 @@ try {
   await field.press("Enter", { timeout: 20_000 });
   await gateWait.playwright(page.getByText("new page ready", { exact: true }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.locator(".run-state").getByText("idle", { exact: true }), "waitFor", { timeout: 20_000 });
+  if (screenshotDir) {
+    const captureInsets = async (width: number) => {
+      const surface = page.locator(".page-chat-docked .page-chat-surface");
+      const user = surface.locator('[data-part="message-content"]').filter({ hasText: /^open created page$/ });
+      await gateWait.playwright(user, "waitFor", { state: "visible" });
+      const insets = await surface.evaluate((node) => {
+        const user = [...node.querySelectorAll('[data-part="message-content"]')].find((row) => row.textContent === "open created page")!.closest('[data-virtual-id]')!;
+        const reply = [...node.querySelectorAll('[data-part="message"][data-role="assistant"]')].find((row) => row.textContent === "new page ready")!;
+        const transcript = node.querySelector(".transcript")!;
+        const left = node.getBoundingClientRect().left;
+        return { user: user.getBoundingClientRect().left - left, reply: reply.getBoundingClientRect().left - left, transcript: transcript.getBoundingClientRect().left - left };
+      });
+      console.log(`page chat message insets at ${width}px: ${JSON.stringify(insets)}`);
+      if (screenshotDir) await page.screenshot({ path: join(screenshotDir, `page-chat-transcript-${width}.png`), animations: "disabled" });
+    };
+    // Capture the narrow fixture via its manual opener; the focused resize is tested below.
+    await field.evaluate((composer) => (composer as HTMLElement).blur());
+    for (const width of [1280, 1440, 1920, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      if (width === 390) await page.locator(".page-chat-bar").click();
+      await captureInsets(width);
+    }
+    await page.getByRole("button", { name: "close page chat", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+  const resizeComposer = await field.elementHandle();
+  if (!resizeComposer) throw new Error("page chat resize: no composer before resize");
+  const resizeDraft = "draft survives resize";
+  await field.fill(resizeDraft);
+  await field.focus();
+  for (const width of [1000, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const state = await resizeComposer.evaluate((composer) => ({ focused: document.activeElement === composer, active: document.activeElement?.tagName, draft: (composer as HTMLTextAreaElement).value }));
+    if (!state.focused || state.draft !== resizeDraft)
+      throw new Error(`page chat resize to ${width}px did not keep the same composer focused with its draft: ${JSON.stringify(state)}`);
+  }
+  await resizeComposer.dispose();
+  await field.fill("");
+  console.log("page chat resize kept the same composer focused and retained its draft in both directions");
   if (await chatCount() !== chatsBeforeReading + 1) throw new Error("first created-page send did not create exactly one chat");
   if (zetaSessionCount() !== sessionsBeforeReading + 1) throw new Error("first created-page send did not create exactly one zeta session");
   await page.goto(origin);
