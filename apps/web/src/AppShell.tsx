@@ -255,7 +255,7 @@ export function AppShell({ page, sessionId, waiting, serverForcesAsk = false, ca
     ...loading || !canWrite ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: () => { setDrawer(false); void onNewChat(); } }],
     ...loading || !page || !canWrite ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), run: () => void onToggleCreateMode() }],
     { id: "settings", label: "settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) },
-    { id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => { if (canWrite) updateSettings({ vim: !settings.vim }); } },
+    ...!canWrite ? [] : [{ id: "vim", label: "toggle vim mode", detail: settings.vim ? "on" : "off", run: () => updateSettings({ vim: !settings.vim }) }],
     { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
   ];
   // shortcut: pages filter only the loaded pages (the first 20 and any the sidebar paged in); add server search to /api/pages when lists grow.

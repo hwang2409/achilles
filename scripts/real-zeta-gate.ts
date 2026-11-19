@@ -2556,11 +2556,10 @@ try {
     if (await closeSettings.count()) await closeSettings.click();
   }
   await observerPage.keyboard.press(appShortcut("k"));
-  const palette = observerPage.getByRole("dialog").filter({ hasText: "toggle vim mode" });
-  if (await palette.count()) {
-    const vim = palette.getByText("toggle vim mode", { exact: true });
-    if (await vim.count()) await vim.click();
-  }
+  const palette = observerPage.getByRole("dialog", { name: "command palette" });
+  await gateWait.playwright(palette, "waitFor", { state: "visible" });
+  if (await palette.getByText("toggle vim mode", { exact: true }).count()) throw new Error("observer palette exposed the vim mode toggle");
+  await observerPage.keyboard.press("Escape");
   const observerWritableControls = observerPage.locator(".record-form button:not(:disabled), [data-part='approval'] button:not(:disabled)");
   if (await observerWritableControls.count()) throw new Error("observer exposed an enabled form or approval action");
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageAtActions) throw new Error("observer action matrix changed settings storage");
@@ -2729,9 +2728,11 @@ try {
   const captured = [...logs.values()].join("\n");
   if (secrets.some((secret) => captured.includes(secret) || errors.some((error) => error.includes(secret)))) throw new Error("captured output contains a zeta token");
   await recordRenderedWriteSurfaces(observerPage);
+  const observed = [...renderedWriteSurfaceIds].sort();
+  const registry = [...registryWriteSurfaceIds].sort();
+  const unknown = observed.filter((id) => !registry.includes(id));
+  if (!observed.length || unknown.length) throw new Error(`invalid browser write-surface sample: ${JSON.stringify({ observed, unknown })}`);
   if (screenshotDir) {
-    const observed = [...renderedWriteSurfaceIds].sort();
-    const registry = [...registryWriteSurfaceIds].sort();
     await writeFile(join(screenshotDir, "manifest.json"), JSON.stringify({
       head: (await Bun.$`git rev-parse HEAD`.text()).trim(),
       base: (await Bun.$`git rev-parse origin/main`.text()).trim(),
@@ -2746,8 +2747,7 @@ try {
       artifacts: ["observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
-      setEquality: { registryEqualsRendered: registry.length === observed.length && registry.every((id, index) => id === observed[index]) },
-      all37ActionIds: registryWriteSurfaceIds,
+      unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
       errors,
       failedRequests: [],
       websocket: { connectionRows, observerSockets },

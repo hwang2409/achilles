@@ -182,9 +182,9 @@ export async function attachPage(
     };
     const busy = (busySessionId: string | null): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId });
 
-    const creationStatus = creation.status(page.id);
-    const pending = creationStatus.pending;
-    if (creationStatus.createMode !== undefined) page.create_mode = creationStatus.createMode;
+    const creationStatus = canWrite ? creation.status(page.id) : undefined;
+    const pending = creationStatus?.pending;
+    if (creationStatus?.createMode !== undefined) page.create_mode = creationStatus.createMode;
     // with no chat named, a page opens on its most recent chat (the sidebar's order), then on its home chat (page.zeta_session_id)
     // shortcut: scans the whole chat list for a page with no listed chat; add a page filter to /api/chats if that gets slow
     const newest = forceNew || create || selectedId || pending ? null : await findNewestChat((chat) => chat.page_id === page.id); requireCurrent(owner, token);
@@ -199,7 +199,7 @@ export async function attachPage(
         if (sessionId === page.zeta_session_id) create = true;
       }
     }
-    if (!pending && !create) return { phase: "empty", page, serverApprovalMode, credential };
+    if (!canWrite || (!pending && !create)) return { phase: "empty", page, serverApprovalMode, credential };
 
     const mappingInput = forceNew ? creationInput : { ...creationInput, mapExpectedSessionId: page.zeta_session_id };
     try {

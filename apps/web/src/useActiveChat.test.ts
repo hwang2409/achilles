@@ -591,7 +591,7 @@ describe("attachment while a turn runs", () => {
     const owner = createAttachmentOwner();
     const creation = createChatCreationOwner(new MemoryStorage());
     try {
-      const result = await withFetch(pageFetch([]), () => attachPage(client as never, "home", null, owner, creation, owner.begin("new", true), true, undefined, undefined, true))
+      const result = await withFetch(pageFetch([]), () => attachPage(client as never, "home", null, owner, creation, owner.begin("new", true), true, undefined, undefined, true, true))
         .catch((caught: Error) => ({ phase: "error", error: caught.message }));
       expect(result).toMatchObject({ phase: "busy", busySessionId: "waiting" });
       expect(creation.status("home").pending).toBeFalsy();
