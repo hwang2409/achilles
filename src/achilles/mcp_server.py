@@ -206,6 +206,8 @@ def _validate_create(name: str, args: Any) -> None:
     try:
         validate_schema(args, schema)
     except ValidationError as exc:
+        if name == "create_page" and exc.path == "/route" and exc.expected.startswith("pattern "):
+            exc.hint = "Use a valid page route whose first segment is not reserved."
         bundle = args.get("bundle") if isinstance(args, dict) else None
         if (
             name == "create_tool"
