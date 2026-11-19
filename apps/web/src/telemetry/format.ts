@@ -69,8 +69,8 @@ export function formatAgo(ns: number, nowMs = Date.now()) {
 }
 
 /** One decimal under 10%, so 1.3% and 0% stay apart; no rate without a denominator. */
-export function formatPercent(part: number, whole: number) {
-  if (whole <= 0) return null;
+export function formatPercent(part: number | null, whole: number) {
+  if (part === null || whole <= 0) return null;
   const value = (part / whole) * 100;
   return `${value < 10 ? value.toFixed(1) : Math.round(value)}%`;
 }

@@ -46,6 +46,8 @@ export type SeriesPoint = {
   duration_ns: number;
 };
 
+export type ModelSeriesPoint = Omit<SeriesPoint, "errors"> & { errored_model_calls: number };
+
 export type Page<T> = { items: T[]; next_cursor: string | null; as_of_ns: number };
 
 export type TelemetryOverview = {

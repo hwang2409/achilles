@@ -1,9 +1,10 @@
 import { useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { errorShare } from "./errorShare";
 import { errorKey, modelKey, toolKey } from "./aggregates";
 import { formatBytes, formatCount, formatDuration, formatFullTime, formatHour, formatLatency, formatPercent, formatTime, formatTokens, shortId } from "./format";
 import { TrendChart } from "./Overview";
 import type { AggregateLoaded, useTelemetryReads } from "./reads";
-import { OPERATIONS, type ErrorRow, type Operation, type SeriesPoint } from "./telemetry-types";
+import { OPERATIONS, type ErrorRow, type Operation, type ModelSeriesPoint } from "./telemetry-types";
 import "./aggregates.css";
 
 type Reads = ReturnType<typeof useTelemetryReads>;
@@ -66,7 +67,7 @@ function useFullName(kind: string) {
   };
 }
 
-function Spark({ points }: { points: SeriesPoint[] | undefined }) {
+function Spark({ points }: { points: ModelSeriesPoint[] | undefined }) {
   if (!points) return <span className="tm-dim" title="not in the top 20 models by calls">—</span>;
   const max = Math.max(1, ...points.map((point) => point.model_calls));
   return <span className="tm-ag-spark" aria-hidden="true">{points.map((point) => <i key={point.start_ns} style={{ height: `${100 * point.model_calls / max}%` }} />)}</span>;
@@ -93,7 +94,7 @@ function Models({ data, bucket, label }: { data: Extract<AggregateLoaded, { tab:
           </Cell>
           <Cell className="tm-ag-mini"><Spark points={trends.get(id)} /></Cell>
           <Cell label="calls">{formatCount(row.calls)}</Cell>
-          <Cell label="errors"><span className={row.errors ? "tm-danger" : "tm-dim"}>{formatCount(row.errors)}</span><span className="tm-dim"> · {formatPercent(row.errors, row.calls) ?? "—"}</span></Cell>
+          <Cell label="errors"><span className={row.errors ? "tm-danger" : "tm-dim"}>{formatCount(row.errors)}</span><span className="tm-dim"> · {formatPercent(errorShare({ model: row }), 1) ?? "—"}</span></Cell>
           <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
           <Cell label="p95"><span title={latencyTitle}>{formatLatency(row.p95_ns)}</span></Cell>
           <Cell label="TTFT p50"><span title={`time to first token · ${latencyTitle}`}>{formatLatency(row.ttft_p50_ns)}</span></Cell>
@@ -127,17 +128,18 @@ function Meter({ part, scale }: { part: number; scale: number }) {
 function ToolTable({ data }: { data: Extract<AggregateLoaded, { tab: "tools" }> }) {
   const { page: { items }, totals } = data;
   const full = useFullName("tool");
-  const highest = Math.max(...items.map((row) => row.errors / Math.max(1, row.calls)));
+  const rates = items.map((row) => ({ row, share: errorShare({ tool: row }) }));
+  const highest = Math.max(0, ...rates.map(({ share }) => share ?? 0));
   const failures = items.reduce((sum, row) => sum + row.errors, 0);
   return <>
     <Heading title="tools">{formatCount(totals.tool_calls)} calls · <span className="tm-danger">{formatCount(failures)}</span> failed{data.page.next_cursor !== null && " in rows shown"} · sizes only</Heading>
     <Table kind="tools" columns={["tool", "type", "calls ↓", "failed", "failure rate", "p50", "p95", "args in", "results out", "last"]}>
-      {items.map((row) => <div role="row" key={toolKey(row)}>
+      {rates.map(({ row, share }) => <div role="row" key={toolKey(row)}>
         <Cell className="tm-ag-identity tm-tool"><Name name={row.tool_name} kind="tool" reveal={full.reveal} /></Cell>
         <Cell className="tm-ag-ellipsis tm-dim"><span title={row.tool_type ?? undefined}>{row.tool_type ?? "—"}</span></Cell>
         <Cell label="calls" className="tm-ag-tool-calls">{formatCount(row.calls)}</Cell>
         <Cell label="failed" className={row.errors ? "tm-danger" : "tm-dim"}>{formatCount(row.errors)}</Cell>
-        <Cell className="tm-ag-failure-rate tm-dim"><Meter part={row.errors / Math.max(1, row.calls)} scale={highest} />{formatPercent(row.errors, row.calls) ?? "—"}</Cell>
+        <Cell className="tm-ag-failure-rate tm-dim"><Meter part={share ?? 0} scale={highest} />{formatPercent(share, 1) ?? "—"}</Cell>
         <Cell label="p50"><span title={latencyTitle}>{formatLatency(row.p50_ns)}</span></Cell>
         <Cell label="p95"><span title={latencyTitle}>{formatLatency(row.p95_ns)}</span></Cell>
         <Cell label="args" className="tm-ag-size">{formatBytes(row.argument_bytes)}</Cell>

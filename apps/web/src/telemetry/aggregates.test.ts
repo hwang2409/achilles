@@ -24,7 +24,8 @@ test("the model trend retains UTC spacing and distinguishes an omitted model fro
   const trends = modelTrends([{ key: '[null,"\\u00e9"]', point }], { start_ns: 1, end_ns: hour * 2 + 1 }, "hour");
   const shown = trends.get(modelKey(model(null, "é", 4)));
   expect(shown?.map(({ start_ns, model_calls }) => [start_ns, model_calls])).toEqual([[0, 0], [hour, 4], [hour * 2, 0]]);
-  expect(shown?.[1]).toEqual(point);
+  const { errors, ...modelPoint } = point;
+  expect(shown?.[1]).toEqual({ ...modelPoint, errored_model_calls: errors });
   expect(trends.has(modelKey(model("example", "é", 0)))).toBe(false);
 });
 
