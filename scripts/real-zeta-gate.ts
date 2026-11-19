@@ -262,7 +262,7 @@ try {
   const expectedNotFoundUrl = `${origin}/api/pages/not-a-real-page`;
   const discoveryUrl = `${origin}/api/zeta/discovery`;
   const frames: string[] = [];
-  const connectionRows: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; params?: unknown; payload?: string }> = [];
+  const connectionRows: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string }> = [];
   let nextSocket = 0;
   page.on("websocket", (socket) => {
     const socketId = nextSocket++;
@@ -271,11 +271,11 @@ try {
     connectionRows.push(row);
     socket.on("framesent", (event) => {
       const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "sent", payload]); frameRing.record(socketId, "sent", payload);
-      try { const frame = JSON.parse(payload) as { method?: unknown; params?: { role?: unknown } }; if (typeof frame.params?.role === "string") row.role = frame.params.role; connectionRows.push({ ...row, lifecycle: "open", direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* raw protocol payload remains in frameLog */ }
+      try { const frame = JSON.parse(payload) as { method?: unknown; params?: { role?: unknown } }; if (frame.method === "hello" && (frame.params?.role === "controller" || frame.params?.role === "observer")) row.role = frame.params.role; connectionRows.push({ ...row, lifecycle: "open", direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined }); } catch { /* raw protocol payload remains in frameLog */ }
     });
     socket.on("framereceived", (event) => {
       const payload = String(event.payload); frames.push(payload); frameLog.push([new Date().toISOString(), socketId, "received", payload]); frameRing.record(socketId, "received", payload);
-      try { const frame = JSON.parse(payload) as { method?: unknown; params?: unknown }; connectionRows.push({ ...row, lifecycle: "open", direction: "received", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* raw protocol payload remains in frameLog */ }
+      try { const frame = JSON.parse(payload) as { method?: unknown }; connectionRows.push({ ...row, lifecycle: "open", direction: "received", method: typeof frame.method === "string" ? frame.method : undefined }); } catch { /* raw protocol payload remains in frameLog */ }
     });
     socket.on("close", () => connectionRows.push({ ...row, lifecycle: "closed" }));
   });
@@ -2537,20 +2537,31 @@ try {
   };
   await recordRenderedWriteSurfaces(page);
   const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
-  const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; params?: unknown; payload?: string }> = [];
+  const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; helloAccepted?: boolean }> = [];
   const observerHttp: { method: string; path: string; body: string | null }[] = [];
   let observerSocketId = 0;
   observerPage.on("websocket", (socket) => {
     const socketId = observerSocketId++;
     const row = { socketId, attempt: socketId + 1, role: null as string | null, lifecycle: "open" as const };
     observerSockets.push(row);
+    let helloId: string | number | undefined;
     socket.on("framesent", (event) => {
       const payload = String(event.payload); observerFrames.push({ direction: "sent", payload });
-      try { const frame = JSON.parse(payload) as { method?: unknown; params?: { role?: unknown } }; if (typeof frame.params?.role === "string") row.role = frame.params.role; observerSockets.push({ ...row, direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* retain raw frame */ }
+      try {
+        const frame = JSON.parse(payload) as { id?: string | number; method?: unknown; params?: { role?: unknown } };
+        if (frame.method === "hello" && (frame.params?.role === "controller" || frame.params?.role === "observer")) {
+          row.role = frame.params.role;
+          helloId = frame.id;
+        }
+        observerSockets.push({ ...row, direction: "sent", method: typeof frame.method === "string" ? frame.method : undefined });
+      } catch { /* raw frame remains in observerFrames */ }
     });
     socket.on("framereceived", (event) => {
       const payload = String(event.payload); observerFrames.push({ direction: "received", payload });
-      try { const frame = JSON.parse(payload) as { method?: unknown; params?: unknown }; observerSockets.push({ ...row, direction: "received", method: typeof frame.method === "string" ? frame.method : undefined, params: frame.params, payload }); } catch { /* retain raw frame */ }
+      const frame = decodeFrame(payload);
+      if (!frame) return;
+      const helloReply = helloId !== undefined && frame.id === helloId;
+      observerSockets.push({ ...row, direction: "received", method: helloReply ? "hello" : frame.method, ...(helloReply ? { helloAccepted: Object.hasOwn(frame, "result") } : {}) });
     });
     socket.on("close", () => observerSockets.push({ ...row, lifecycle: "closed" }));
   });
@@ -2721,7 +2732,8 @@ try {
   const takeControl = observerBanner.getByRole("button", { name: "take control", exact: true });
   const helloRoles = () => observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(",");
   await takeControl.click();
-  await gateWait.playwright(observerBanner.getByText("close the other tab, then take control.", { exact: true }), "waitFor", { state: "visible", timeout: 20_000 });
+  const takeoverReason = observerPage.getByText("close the other tab, then take control.", { exact: true });
+  await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
   await observerPage.setViewportSize({ width: 390, height: 844 });
@@ -2733,8 +2745,12 @@ try {
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-390x844.png") });
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await page.close();
+  const takeoverStart = observerSockets.length;
   await takeControl.click();
-  await gateWait.playwright(observerBanner, "waitFor", { state: "hidden", timeout: 20_000 });
+  await waitFor(async () => await observerComposer.isVisible() && await observerComposer.isEditable({ timeout: 1_000 }), "editable composer after take control without reload");
+  if (!observerSockets.slice(takeoverStart).some((row) => row.role === "controller" && row.helloAccepted)) throw new Error("controller hello was not accepted after closing the controller tab");
+  if (await observerBanner.isVisible() || await takeoverReason.isVisible()) throw new Error("observer banner or refusal reason remained after take control");
+  if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-takeover-no-reload-1440x900.png") });
   await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
   if (helloRoles() !== "controller,observer,controller,controller") throw new Error(`takeover role sequence mismatch: ${helloRoles()}`);
   await observerPage.reload({ waitUntil: "domcontentloaded" });
@@ -2789,7 +2805,7 @@ try {
       viewports: ["390x760", "1440x900"],
       routes: [new URL(observerPage.url()).pathname],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored"],
-      artifacts: ["observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png"],
+      artifacts: ["observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png"],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
@@ -2801,7 +2817,7 @@ try {
       privacy: { secretsRedacted: true, tokensPresent: false },
       cleanup: "browser, servers, and temporary homes are removed in finally",
     }, null, 2) + "\n");
-    await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png, observer-refused-390x844.png, observer-refused-1440x900.png, observer-settings-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
+    await writeFile(join(screenshotDir, "run-proof.md"), `# observer fallback evidence\n\n- exact head: ${(await Bun.$`git rev-parse HEAD`.text()).trim()}\n- zeta pin: ${zetaRef}\n- final captures: observer-active-chat-390x760.png, observer-active-chat-1440x900.png, observer-controller-restored-1440x900.png, observer-refused-390x844.png, observer-refused-1440x900.png, observer-settings-1440x900.png, observer-takeover-no-reload-1440x900.png\n- registry: ${registryWriteSurfaceIds.length} ids\n- rendered ids observed: ${renderedWriteSurfaceIds.size}\n- websocket roles: ${observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(" → ")}\n- observer and rejected-controller mutation checks: passed\n- controller restoration send and reversible settings mutation: passed\n`);
   }
   if (process.env.SCREENSHOT_PATH) await observerPage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
   passed = true;
