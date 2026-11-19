@@ -267,7 +267,7 @@ try {
     const takeControl = telemetryChatPage.getByRole("button", { name: "take control", exact: true });
     if (telemetryFailures.length) await takeControl.click({ timeout: 10_000 });
     await waitFor(async () => await telemetryChatPage.getByRole("button", { name: "new chat" }).isEnabled(), "chat controller for telemetry banner check");
-    const observerTelemetry = await browser.newPage();
+    const observerTelemetry = await browser.newPage({ viewport: { width: 390, height: 760 } });
     try {
       await observerTelemetry.goto(`${origin}/telemetry`);
       await waitFor(async () => await observerTelemetry.getByText("telemetry · needs a newer zeta", { exact: true }).isVisible(), "observer telemetry connected");
@@ -278,7 +278,7 @@ try {
       if (screenshotDir) {
         for (const [index, viewport] of [{ width: 390, height: 760 }, { width: 1440, height: 900 }].entries()) {
           await observerTelemetry.setViewportSize(viewport);
-          await observerTelemetry.screenshot({ path: join(screenshotDir, telemetryArtifacts[index]!) });
+          await observerTelemetry.screenshot({ path: join(screenshotDir, telemetryArtifacts[index]!), animations: "disabled" });
         }
       }
       console.log("telemetry observer: chat can control zeta, read-only banner visible, no take-control button");
