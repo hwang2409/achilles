@@ -270,7 +270,7 @@ test("numeric metric displays stay within the declared matrix boundary", () => {
   }
 });
 
-test("metric values keep words intact and expose long values once", () => {
+test("text metrics expose the full value", () => {
   const page = { title: "page", route: "/page", layout: { blocks: [
     { type: "metric", label: "description", value: "intentionally editorial text" },
     { type: "metric", label: "single token", value: "supercalifragilisticexpialidocious" },
@@ -279,7 +279,7 @@ test("metric values keep words intact and expose long values once", () => {
   const values = [...result.container.querySelectorAll(".metric-value")];
   expect(values[0]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[0]?.getAttribute("aria-label")).toBe("intentionally editorial text");
-  expect(values[1]?.classList.contains("metric-value-text-single")).toBe(true);
+  expect(values[1]?.classList.contains("metric-value-text")).toBe(true);
   expect(values[1]?.getAttribute("title")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.getAttribute("aria-label")).toBe("supercalifragilisticexpialidocious");
   expect(values[1]?.textContent).toBe("supercalifragilisticexpialidocious");

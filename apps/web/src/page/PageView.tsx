@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { DetailRecord, type DetailFilter } from "../DetailRecord";
 import { FormBlock, refreshSelection, selectRow, useRecordWrites, useSelectedRow } from "./RecordForm";
@@ -6,6 +6,7 @@ import { extendWithRecordKeys, recordColumns, schemaColumns } from "./listColumn
 import { usePageTools, type PageTool } from "./usePageTools";
 import "./page.css";
 import { RecordMark } from "./RecordMark";
+import { observeMetricFit } from "./metricFit";
 import { formatMetricValue } from "./metricValue";
 import { WRITE_SURFACE } from "../writeSurfaces";
 
@@ -92,7 +93,10 @@ export function PageView({ page, pageId, credential, refreshKey, onAskChat, canW
       <span className="page-layout-version">layout v{page.active_layout_version ?? 1}</span>
     </header>
     <div className="page-blocks">{groupBlocks(content).map((group, index) => {
-      if (group[0].type === "metric") return <div className="metric-strip" key={`metric-strip:${index}`}>{group.map((block) => <MetricBlock key={blockIdentity(block, content)} block={block} value={counts.get(metricQueryKey(block, pageId, credential) ?? "")} />)}</div>;
+      if (group[0].type === "metric") {
+        const metrics = group.map(block => metricPresentation(block, counts.get(metricQueryKey(block, pageId, credential) ?? "")));
+        return <MetricStrip key={`metric-strip:${index}`} metrics={metrics} blocks={content} />;
+      }
       return <LayoutBlock key={blockIdentity(group[0], content)} block={group[0]} pageId={pageId} credential={credential} refreshKey={refreshKey} onAskChat={onAskChat} insertCapability={addFor(String(group[0].collection ?? ""))} onRegisterInsert={registerInsert} canWrite={canWrite} disabledReason={disabledReason} />;
     })}</div>
   </main>;
@@ -109,7 +113,6 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   const selected = useSelectedRow(pageId);
   const refreshKey = `${chatRefreshKey}:${useRecordWrites(pageId)}`;
   if (block.type === "text") return <p className="page-text">{String(block.text)}</p>;
-  if (block.type === "metric") return <MetricBlock block={block} value={block.count ? "…" : undefined} />;
   if (block.type === "list") return <ListBlock block={block} pageId={pageId} credential={credential} refreshKey={refreshKey} toolsKey={chatRefreshKey} onAskChat={onAskChat} insertCapability={insertCapability} />;
   if (block.type === "detail") {
     const fields = Array.isArray(block.fields) ? block.fields.map(String) : [];
@@ -121,19 +124,29 @@ export function LayoutBlock({ block, pageId, credential, refreshKey: chatRefresh
   return null;
 }
 
-function MetricBlock({ block, value }: { block: Record<string, unknown>; value?: string }) {
-  const fullValue = block.count ? value ?? "…" : block.value == null ? "0" : String(block.value);
+function metricPresentation(block: Record<string, unknown>, count?: string) {
+  const fullValue = block.count ? count ?? "…" : block.value == null ? "0" : String(block.value);
+  const formatted = formatMetricValue(fullValue);
+  const number = formatted.numeric || formatted.currency;
+  const words = number ? [] : formatted.display.split(/(\s+)/);
+  return { block, fullValue, formatted, number, words };
+}
+
+type Metric = ReturnType<typeof metricPresentation>;
+function MetricStrip({ metrics, blocks }: { metrics: Metric[]; blocks: Metric["block"][] }) {
+  const strip = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => observeMetricFit(strip.current!), [metrics]);
+  return <div className="metric-strip" ref={strip}>{metrics.map(metric => <MetricBlock key={blockIdentity(metric.block, blocks)} {...metric} />)}</div>;
+}
+
+function MetricBlock({ block, fullValue, formatted, number, words }: Metric) {
   const label = String(block.label);
   const status = String(block.status ?? (["queued", "reading", "done", "in-progress", "to-claim", "paid", "sent"].includes(label.toLowerCase()) ? label : "")).toLowerCase();
-  const formatted = formatMetricValue(fullValue);
   const displayValue = formatted.display;
   const isCompacted = displayValue !== fullValue;
-  const isScientific = formatted.scientific;
-  const isNumeric = formatted.numeric;
-  const textClass = !isNumeric ? ` metric-value-text${/\s/.test(fullValue.trim()) ? "" : " metric-value-text-single"}` : "";
-  const numericClass = isScientific ? " metric-value-scientific" : "";
-  const textValue = !isNumeric ? fullValue.split(/(\s+)/).map((part, index) => /\s+/.test(part) ? part : <span className="metric-value-text-token" key={index}>{part}</span>) : displayValue;
-  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${textClass}${numericClass}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{displayValue}</span> : textValue}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
+  const valueClass = formatted.scientific ? " metric-value-scientific" : formatted.numeric ? "" : " metric-value-text";
+  const value = number ? displayValue : words.map((word, index) => word.trim() ? <span key={index} className="metric-word">{word}</span> : word);
+  return <section className="metric-block">{status && <RecordMark status={status} />}<div><span className="metric-label">{label}</span><span className="metric-value-line"><strong className={`metric-value${valueClass}${number ? " metric-value-number" : ""}`} title={fullValue} aria-label={fullValue}>{isCompacted ? <span aria-hidden="true">{value}</span> : value}</strong>{block.delta != null && <span className={`metric-delta${block.warn ? " metric-warn" : ""}`}>{String(block.delta)}</span>}</span>{block.detail != null && <small>{String(block.detail)}</small>}</div></section>;
 }
 
 function ListBlock({ block, pageId, credential, refreshKey, toolsKey, onAskChat, insertCapability }: { block: Record<string, unknown>; pageId: string; credential: string; refreshKey: string; toolsKey: string; onAskChat?: (draft: string) => void; insertCapability?: InsertCapability }) {
