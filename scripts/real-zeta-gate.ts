@@ -3,14 +3,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Locator, Request, Route } from "../apps/web/node_modules/playwright";
-import { appShortcut, clickOptionalDetachedLocator, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
+import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
+import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateShell } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 
+import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -19,6 +20,7 @@ const writeSurfaceObject = writeSurfaceSource.split("} as const")[0]!;
 const registryWriteSurfaceIds = [...writeSurfaceObject.matchAll(/\s+\w+:\s+"([^"]+)"/g)].map((match) => match[1]!);
 if (registryWriteSurfaceIds.length !== 37 || new Set(registryWriteSurfaceIds).size !== 37) throw new Error(`write-surface registry must contain 37 unique ids, got ${registryWriteSurfaceIds.length}`);
 const metricBoundaryMatrix = JSON.parse(await readFile(join(root, "apps/web/src/metric-boundary-matrix.json"), "utf8")) as Array<{ label: string; value: string; expectedText: string; classification: string; status?: string }>;
+
 const { chromium } = await import(pathToFileURL(join(root, "apps/web/node_modules/playwright/index.mjs")).href);
 const zeta = process.env.ZETA_CHECKOUT ?? join(root, ".cache/zeta");
 const zetaRef = (await readFile(join(root, "zeta.rev"), "utf8")).trim();
@@ -285,12 +287,92 @@ try {
     if (message.type() === "error") consoleErrors.push(`${requestPath(message.location().url)}: ${message.text()}`);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
+  const mobileSheet = {
+    closed: null,
+    button: "pointer",
+    keyboard: "keyboard",
+    resize: "resize",
+  } as const;
+  const setupMobileSheet = async (tab: Page, height: number, state: keyof typeof mobileSheet = "closed") => {
+    const opener = mobileSheet[state];
+    const bar = tab.locator(".page-chat-bar");
+    const dialog = tab.getByRole("dialog", { name: "page chat", exact: true });
+    const closeButton = dialog.getByRole("button", { name: "close page chat", exact: true });
+    const settleClosed = async () => {
+      const wasFocused = await tab.evaluate(() => Boolean(document.activeElement?.closest(".page-chat-docked #message-composer") && !matchMedia("(width < 1280px)").matches));
+      await tab.setViewportSize({ width: 390, height });
+      if (wasFocused) {
+        // A focused resize opens the sheet. Do not close until that commit happened.
+        await gateWait.playwright(tab, "waitForFunction", () => Boolean(document.activeElement?.closest('#page-chat-sheet[aria-modal="true"] #message-composer')));
+      }
+      if (wasFocused || await closeButton.count()) await gateWait.playwright(closeButton, "click");
+      await gateWait.playwright(tab, "waitForFunction", () => {
+        const sheet = document.querySelector<HTMLElement>("#page-chat-sheet");
+        return matchMedia("(width < 1280px)").matches && Boolean(sheet?.inert && !sheet.hasAttribute("role") && getComputedStyle(sheet).visibility === "hidden" && !sheet.getAnimations().length);
+      });
+    };
+    const checkOpen = async (via: NonNullable<typeof opener>) => {
+      await gateWait.playwright(tab.locator("#page-chat-sheet"), "waitFor", { state: "attached" });
+      // Mutation delivery runs after the open commit's layout effects, before paint or any timer.
+      const probe = await tab.evaluateHandle(({ via, selector }) => {
+        const sheet = document.querySelector<HTMLElement>("#page-chat-sheet")!;
+        const start = document.activeElement;
+        const isVisible = (element: HTMLElement | null | undefined) => Boolean(element?.checkVisibility({ visibilityProperty: true }));
+        function probeEdge(edge: HTMLElement | undefined, next: HTMLElement | undefined, shiftKey: boolean) {
+          if (!edge || !next) return false;
+          edge.focus();
+          if (document.activeElement !== edge) return false;
+          const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
+          edge.dispatchEvent(event);
+          return event.defaultPrevented && document.activeElement === next;
+        }
+        function readOpening() {
+          const active = document.activeElement as HTMLElement | null;
+          const close = sheet.querySelector<HTMLElement>('button[aria-label="close page chat"]');
+          const initial = via === "resize" ? active === start && Boolean(active?.closest("#message-composer")) : active === close;
+          const focus = initial && isVisible(active) && isVisible(close);
+          const controls = [...sheet.querySelectorAll<HTMLElement>(selector)].filter(element => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && isVisible(element));
+          const backward = focus && probeEdge(controls[0], controls.at(-1), true);
+          const forward = focus && probeEdge(controls.at(-1), controls[0], false);
+          if (focus && active !== document.activeElement) active?.focus();
+          return { focus, backward, forward, active: active?.getAttribute("aria-label") ?? active?.tagName, visibility: getComputedStyle(sheet).visibility, tabbables: controls.length };
+        }
+        let result: ReturnType<typeof readOpening> | undefined;
+        const observer = new MutationObserver(() => {
+          if (!sheet.matches('[role="dialog"][aria-modal="true"]')) return;
+          observer.disconnect();
+          result = readOpening();
+        });
+        observer.observe(sheet, { attributes: true, attributeFilter: ["aria-modal"] });
+        return { read: () => result, stop: () => observer.disconnect() };
+      }, { via, selector: focusable });
+      try {
+        if (via === "resize") await tab.setViewportSize({ width: 390, height });
+        else if (via === "keyboard") await bar.press("Enter");
+        else await bar.click();
+        const proof = await gateWait.playwright(tab, "waitForFunction", (probe) => probe.read(), probe);
+        const result = await proof.jsonValue();
+        await proof.dispose();
+        if (!result.focus) throw new Error(`390px page chat ${via}: opening did not immediately focus a visible ${via === "resize" ? "composer" : "close page chat button"}: ${JSON.stringify(result)}`);
+        if (!result.backward || !result.forward) throw new Error(`390px page chat ${via}: first-frame Tab escaped the modal sheet: ${JSON.stringify(result)}`);
+      } finally {
+        await probe.evaluate(probe => probe.stop());
+        await probe.dispose();
+      }
+    };
+    await settleClosed();
+    if (opener === "resize") {
+      await tab.setViewportSize({ width: 1440, height });
+      const composer = tab.locator('.page-chat-docked #page-chat-sheet:not([inert]) #message-composer').getByRole("textbox", { name: "message" });
+      await composer.focus();
+      if (!await composer.evaluate(element => element === document.activeElement && !matchMedia("(width < 1280px)").matches)) throw new Error("390px page chat resize: expected a focused desktop composer");
+    }
+    if (opener) await checkOpen(opener);
+  };
   const captureBlockState = async (state: string, target: Locator, mobileHeight = 760, desktopHeight = 900, assertFrame?: (viewport: string) => Promise<void>) => {
     for (const width of [390, 1280, 1440, 1920]) {
-      await page.setViewportSize({ width, height: width === 390 ? mobileHeight : desktopHeight });
       if (width === 390) {
-        const pageChatClose = page.getByRole("button", { name: "close page chat", exact: true });
-        await clickOptionalDetachedLocator(pageChatClose);
+        await setupMobileSheet(page, mobileHeight);
         const drawerClose = page.getByRole("button", { name: "close menu", exact: true });
         if (await drawerClose.count() && await drawerClose.isVisible()) await drawerClose.click({ force: true });
         await waitFor(async () => {
@@ -314,6 +396,8 @@ try {
           const hit = document.elementFromPoint(x, y);
           return Boolean(hit && (hit === element || element.contains(hit)));
         }), `state ${state} target visible and unobscured`);
+      } else {
+        await page.setViewportSize({ width, height: desktopHeight });
       }
       await page.evaluate(() => { scrollTo(0, 0); document.querySelector<HTMLElement>(".page-content")?.scrollTo(0, 0); });
       if (assertFrame) await assertFrame(`${width}px`);
@@ -762,7 +846,7 @@ try {
       name: "drawer open",
       run: async () => {
         await reloadShell();
-        await page.setViewportSize({ width: 390, height: 760 });
+        await setupMobileSheet(page, 760);
         await page.getByRole("button", { name: "open menu" }).click();
         const first = page.locator(".sidebar").locator("button:not(:disabled), a[href], input:not(:disabled)").first();
         await waitFor(async () => await first.evaluate((element) => document.activeElement === element), "drawer first focusable focus");
@@ -892,7 +976,7 @@ try {
     await page.screenshot({ path: join(screenshotDir, "page-index-1440x900.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 760 });
     await page.screenshot({ path: join(screenshotDir, "page-index-1440x760.png"), fullPage: true });
-    await page.setViewportSize({ width: 390, height: 760 });
+    await setupMobileSheet(page, 760);
     await page.screenshot({ path: join(screenshotDir, "page-index-390x760.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
   }
@@ -961,11 +1045,14 @@ try {
     // Capture the narrow fixture via its manual opener; the focused resize is tested below.
     await field.evaluate((composer) => (composer as HTMLElement).blur());
     for (const width of [1280, 1440, 1920, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-      if (width === 390) await page.locator(".page-chat-bar").click();
+      if (width === 390) {
+        await setupMobileSheet(page, 844, "button");
+      } else {
+        await page.setViewportSize({ width, height: 900 });
+      }
       await captureInsets(width);
     }
-    await page.getByRole("button", { name: "close page chat", exact: true }).click();
+    await setupMobileSheet(page, 844);
     await page.setViewportSize({ width: 1440, height: 900 });
   }
   const resizeComposer = await field.elementHandle();
@@ -1053,7 +1140,7 @@ try {
   ].join("\n") + "\n");
   await gateWait.playwright(field, "waitFor", { timeout: 20000 });
   const accessibility = await page.context().newCDPSession(page);
-  await page.setViewportSize({ width: 390, height: 760 });
+  await setupMobileSheet(page, 760);
   const textMetric = page.locator(".metric-block").filter({ has: page.locator(".metric-label", { hasText: "review status" }) });
   const textMetricGeometry = await textMetric.evaluate((element) => ({
     blockScrollWidth: element.scrollWidth,
@@ -1426,7 +1513,7 @@ try {
       throw new Error(`${viewport} page chat has incorrect dock geometry: ${JSON.stringify(dock)}`);
     console.log(`${viewport} page chat dock: ${JSON.stringify(dock)}`);
   });
-  await page.setViewportSize({ width: 390, height: 760 });
+  await setupMobileSheet(page, 760);
   const pageChatBar = page.locator(".page-chat-bar");
   await gateWait.playwright(pageChatBar, "waitFor", { state: "visible" });
   if (await pageChatBar.getAttribute("aria-expanded") !== "false") throw new Error(`page chat was not closed after matrix: ${JSON.stringify(await pageChatLayout())}`);
@@ -1437,46 +1524,11 @@ try {
   });
   if (closedGeometry.actionBottom > closedGeometry.viewport - closedGeometry.barHeight + 1)
     throw new Error(`390px page form action is under the closed page chat bar: ${JSON.stringify(closedGeometry)}`);
-  const preChatClick = await page.evaluate(() => {
-    const surface = document.querySelector<HTMLElement>(".page-chat-surface");
-    const close = document.querySelector<HTMLElement>('.page-chat-surface button[aria-label="close page chat"]');
-    const style = surface && getComputedStyle(surface);
-    return { barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), close: { connected: Boolean(close?.isConnected), visible: Boolean(close && style && style.visibility !== "hidden"), disabled: close instanceof HTMLButtonElement && close.disabled }, surface: style && { visibility: style.visibility, transform: style.transform, transition: style.transition }, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop };
-  });
-  const firstFrameTab = await pageChatBar.evaluate((button: HTMLButtonElement) => new Promise<{ dispatched: boolean; prevented: boolean; inside: boolean }>((resolve) => {
-    const originalAdd = window.addEventListener;
-    const result = { dispatched: false, prevented: false, inside: false };
-    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
-      originalAdd.call(window, type, listener, options);
-      const sheet = document.querySelector('#page-chat-sheet[role="dialog"][aria-modal="true"]');
-      if (!result.dispatched && type === "keydown" && options === true && sheet) {
-        result.dispatched = true;
-        const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
-        window.dispatchEvent(event);
-        result.prevented = event.defaultPrevented;
-        result.inside = sheet.contains(document.activeElement);
-      }
-    }) as typeof window.addEventListener;
-    requestAnimationFrame(() => {
-      window.addEventListener = originalAdd;
-      resolve(result);
-    });
-    // Arm and click in the same task; a Playwright click can wait for a frame.
-    button.click();
-  }));
-  if (!firstFrameTab.dispatched) throw new Error("390px page chat: trap registered after the first frame or the probe never dispatched Tab");
-  if (!firstFrameTab.prevented || !firstFrameTab.inside) throw new Error(`390px page chat first-frame Tab was not trapped inside the modal sheet: ${JSON.stringify(firstFrameTab)}`);
+  await page.reload();
+  await setupMobileSheet(page, 760, "button");
+  await setupMobileSheet(page, 760, "resize");
+  await setupMobileSheet(page, 760, "keyboard");
   const pageChatDialog = page.getByRole("dialog", { name: "page chat" });
-  await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
-  const pageChatClose = pageChatDialog.getByRole("button", { name: "close page chat" });
-  const focusAfterChatClick = await page.evaluate(() => ({ active: { tag: document.activeElement?.tagName, id: (document.activeElement as HTMLElement | null)?.id, className: (document.activeElement as HTMLElement | null)?.className, aria: document.activeElement?.getAttribute("aria-label"), insideModal: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')) }, barExpanded: document.querySelector(".page-chat-bar")?.getAttribute("aria-expanded"), layout: { mobileQuery: matchMedia("(width < 1280px)").matches, windowScroll: scrollY, contentScroll: document.querySelector<HTMLElement>(".page-content")?.scrollTop, surface: (() => { const node = document.querySelector<HTMLElement>(".page-chat-surface"); const style = node && getComputedStyle(node); return node && style ? { connected: node.isConnected, visibility: style.visibility, transform: style.transform, transition: style.transition } : null; })() } }));
-  if (!focusAfterChatClick.active.insideModal || focusAfterChatClick.active.aria !== "close page chat") throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify({ preChatClick, focusAfterChatClick, chat: await pageChatLayout() })}`);
-  const preTabFocus = await page.evaluate(() => ({
-    inside: Boolean(document.activeElement?.closest('[role="dialog"][aria-modal="true"]')),
-    close: document.activeElement?.getAttribute("aria-label") === "close page chat",
-  }));
-  if (!preTabFocus.inside || !preTabFocus.close)
-    throw new Error(`390px page chat click did not focus its close control before Tab: ${JSON.stringify(preTabFocus)}`);
   const backdropTabIndex = await page.locator(".page-chat-backdrop").evaluate((element) => (element as HTMLElement).tabIndex);
   if (backdropTabIndex >= 0) throw new Error(`page chat backdrop is in sequential focus order: tabIndex=${backdropTabIndex}`);
   await page.keyboard.press("Tab");
@@ -1563,8 +1615,7 @@ try {
   await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
   if (new URL(page.url()).pathname !== pathBeforeOutsideClick)
     throw new Error("background chat control activated through open page chat sheet");
-  await pageChatBar.click();
-  await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
+  await setupMobileSheet(page, 760, "button");
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-open-390x760.png"), fullPage: true });
   await field.fill("sb7 page stream");
   await field.press("Enter");
@@ -1593,8 +1644,7 @@ try {
   if (streamProof.lines !== 120 || !streamProof.orderedUnique || !streamProof.first || !streamProof.last || !streamProof.lastVisible || streamProof.gap > 1)
     throw new Error(`390px page chat did not retain and follow all 120 chunks: ${JSON.stringify(streamProof)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-last-chunk-open-390x760.png"), fullPage: true });
-  await pageChatDialog.getByRole("button", { name: "close page chat" }).click();
-  await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "false", "page chat close");
+  await setupMobileSheet(page, 760);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "page-chat-closed-after-stream-390x760.png"), fullPage: true });
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   const readingSessionId = await homeSessionId();
@@ -1691,13 +1741,10 @@ try {
   await gateWait.playwright(summaryBody.getByText("+ 2 more", { exact: true }), "waitFor", { timeout: 20000 });
   if (screenshotDir) {
     for (const width of [390, 1280, 1440, 1920]) {
-      await page.setViewportSize({ width, height: 900 });
       if (width === 390) {
         await page.reload();
-        await gateWait.playwright(page.locator(".page-chat-bar"), "waitFor", { timeout: 20000 });
-        await page.locator(".page-chat-bar").click();
-        await gateWait.playwright(page.getByRole("dialog", { name: "page chat" }), "waitFor", { timeout: 20000 });
-      }
+        await setupMobileSheet(page, 900, "button");
+      } else await page.setViewportSize({ width, height: 900 });
       await page.screenshot({ path: join(screenshotDir, `tool-summary-${width}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -1705,11 +1752,8 @@ try {
   if ((await toolRow.locator('[data-part="tool-raw"] pre').count()) !== 0 && (await toolRow.locator('[data-part="tool-raw"] pre').innerText()).includes('"Summary Book 1"'))
     throw new Error("raw list result was visible before opening raw");
   if (process.env.ONLY_TOOL_SUMMARY) {
-    await page.setViewportSize({ width: 390, height: 900 });
     await page.reload();
-    await gateWait.playwright(page.locator(".page-chat-bar"), "waitFor", { timeout: 20000 });
-    await page.locator(".page-chat-bar").click();
-    await gateWait.playwright(page.getByRole("dialog", { name: "page chat" }), "waitFor", { timeout: 20000 });
+    await setupMobileSheet(page, 900, "button");
     await page.setViewportSize({ width: 1440, height: 900 });
     await gateWait.playwright(page.locator('[data-part="tool"]', { hasText: "list_books" }).last().locator('[data-part="tool-summary-preview"]').getByText("5 rows · 4 done, 1 reading", { exact: true }), "waitFor", { timeout: 20000 });
   }
@@ -2686,39 +2730,22 @@ try {
   if (await observerPage.evaluate(() => JSON.stringify({ ...localStorage })) !== observerStorageBefore) throw new Error("observer changed settings storage");
   if (screenshotDir) {
     const observerMarker = "prove chat";
-    await observerPage.setViewportSize({ width: 390, height: 760 });
+    await setupMobileSheet(observerPage, 760);
     const drawerClose = observerPage.getByRole("button", { name: "close menu", exact: true });
     if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click({ force: true });
     for (const dialog of await observerPage.locator('[role="dialog"][aria-modal="true"]').all()) {
       const close = dialog.getByRole("button", { name: /close/i }).first();
       if (await close.isVisible().catch(() => false)) await close.click({ force: true });
     }
-    const pageChatBar = observerPage.locator(".page-chat-bar");
     const pageChatDialog = observerPage.getByRole("dialog", { name: "page chat" });
     await waitFor(async () => await observerPage.locator(".sidebar").evaluate((element) => {
       const style = getComputedStyle(element);
       return element.getBoundingClientRect().right <= 0 && style.transform !== "matrix(1, 0, 0, 1, 0, 0)";
     }), "observer drawer settled");
-    if (await pageChatBar.getAttribute("aria-expanded") !== "false") {
-      const close = pageChatDialog.getByRole("button", { name: "close page chat" });
-      await close.click({ force: true });
-      await gateWait.playwright(pageChatDialog, "waitFor", { state: "hidden" });
-    }
     const routeUnderneath = new URL(observerPage.url()).pathname;
     if (routeUnderneath !== "/reading") throw new Error(`observer page route changed before active chat capture: ${routeUnderneath}`);
-    await pageChatBar.click();
-    await gateWait.playwright(pageChatDialog, "waitFor", { state: "visible" });
-    await waitFor(async () => await pageChatBar.getAttribute("aria-expanded") === "true", "observer page chat expanded");
+    await setupMobileSheet(observerPage, 760, "button");
     await pageChatDialog.evaluate((dialog) => Promise.all(dialog.getAnimations({ subtree: true }).map((animation) => animation.finished)));
-    await waitFor(async () => await pageChatDialog.evaluate((dialog) => {
-      const surface = dialog.querySelector<HTMLElement>(".page-chat-surface") ?? dialog;
-      const style = getComputedStyle(surface);
-      return style.visibility === "visible" && style.display !== "none";
-    }), "observer page chat settled");
-    await pageChatDialog.getByRole("button", { name: "close page chat" }).evaluate((element) => {
-      if (document.activeElement !== element) (element as HTMLElement).focus();
-    });
-    if (!await pageChatDialog.evaluate((dialog) => dialog.contains(document.activeElement))) throw new Error("observer page chat did not focus inside the open sheet");
     const surface = observerPage.locator(".page-chat-surface");
     const transcript = surface.locator('[data-part="timeline-scroll"]');
     const marker = surface.locator('[data-part="message"]').filter({ hasText: observerMarker }).first();
@@ -2796,7 +2823,7 @@ try {
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });
-  await observerPage.setViewportSize({ width: 390, height: 844 });
+  await setupMobileSheet(observerPage, 844);
   const observerMenu = observerPage.getByRole("button", { name: "open menu", exact: true });
   const bannerBox = await observerBanner.boundingBox();
   const menuBox = await observerMenu.boundingBox();

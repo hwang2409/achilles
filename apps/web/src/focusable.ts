@@ -1,0 +1,1 @@
+export const focusable = "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";

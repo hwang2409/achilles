@@ -115,13 +115,18 @@
     position: fixed; inset: auto 0 0; z-index: 3; display: flex; flex-direction: column;
     height: clamp(min(320px, 100dvh), 66.666dvh, 640px); color: var(--fulcrum-fg); background: var(--fulcrum-bg);
     pointer-events: auto;
-    transform: translateY(0); transition: transform 160ms ease, visibility 160ms ease;
+    transform: translateY(0); transition: transform 160ms ease;
   }
   .page-chat-docked .page-chat-backdrop { position: fixed; inset: 0; z-index: 1; border: 0; background: color-mix(in srgb, var(--fulcrum-bg) 62%, transparent); pointer-events: auto; }
-  .page-chat-sheet-closed .page-chat-surface { transform: translateY(100%); visibility: hidden; }
+  /* The opening commit must be able to focus the sheet before the slide starts. */
+  .page-chat-docked.page-chat-sheet-closed .page-chat-surface { transform: translateY(100%); visibility: hidden; transition: transform 160ms ease, visibility 0s linear 160ms; }
   .page-chat-docked .page-chat-surface .transcript { flex: 1 1 0; min-height: 0; padding: 0 16px; }
   .page-chat-docked .page-chat-surface .transcript > [data-part="timeline-frame"] { height: 100%; }
 
+}
+
+@media (width < 1280px) and (prefers-reduced-motion: reduce) {
+  .page-chat-docked .page-chat-surface, .page-chat-docked.page-chat-sheet-closed .page-chat-surface { transition: none; }
 }
 
 @media (max-width: 760px) and (min-height: 501px) {

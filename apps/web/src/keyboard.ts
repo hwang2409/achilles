@@ -1,4 +1,5 @@
 import { useLayoutEffect, type RefObject } from "react";
+import { focusable } from "./focusable";
 
 export function isEditableTarget(event: KeyboardEvent) {
   const target = event.target;
@@ -12,7 +13,6 @@ export const hasAppModifier = (event: Pick<KeyboardEvent, "metaKey" | "ctrlKey">
 };
 export const modKey = (key: string) => isMac ? `⌘${key}` : `ctrl+${key}`;
 
-export const focusable = "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false']), [tabindex]:not([tabindex='-1'])";
 const nativelyFocusable = "button, a[href], input, textarea, summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable='false'])";
 // in Tab order now, wherever it is drawn: the drawer slides in, so on-screen checks drop every control mid-slide.
 const tabbable = (element: HTMLElement) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true });
@@ -58,8 +58,15 @@ export function useModalFocus(open: boolean, container: RefObject<HTMLElement | 
       wrapTab(event, node);
     };
     window.addEventListener("keydown", key, true);
-    if (!preserveFocus || !node.contains(document.activeElement)) (initial?.current ?? firstFocusable(node))?.focus();
-    return () => window.removeEventListener("keydown", key, true);
+    let frame = 0;
+    if (!preserveFocus || !node.contains(document.activeElement)) {
+      const target = initial?.current ?? firstFocusable(node);
+      if (target && tabbable(target)) target.focus();
+      else if (target) frame = requestAnimationFrame(() => {
+        if (!node.contains(document.activeElement) && target.isConnected && tabbable(target)) target.focus();
+      });
+    }
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", key, true); };
   }, [open, container, initial, preserveFocus]);
 }
 
