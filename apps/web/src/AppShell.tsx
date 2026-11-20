@@ -186,7 +186,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   const dock = (status || receipt) ? <div className="build-dock">
     {status}
     {receipt && <aside className="build-receipt" aria-label="build receipt">
-      <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.route} is ready</span>
+      <span><strong title={titleOf(receipt.chat)}>{titleOf(receipt.chat)}</strong> finished{" ·\u00a0"}{receipt.route} is ready</span>
       <a className="build-open" href={receiptHref} onClick={(event) => {
         // a new-tab or new-window click is the browser's: no acknowledgement
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
