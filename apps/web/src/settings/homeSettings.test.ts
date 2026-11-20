@@ -36,7 +36,7 @@ describe("parse", () => {
     expect(parseGet(get(true))).toEqual({ revision: rev("a"), telemetry: "on", editable: true, malformed: false });
     expect(parseGet({ revision: rev("a"), settings: { telemetry: { source: "unknown", editable: false } }, settings_malformed: true }))
       .toEqual({ revision: rev("a"), telemetry: "unknown", editable: false, malformed: true });
-    expect(parseGet({ ...get(true), settings: { telemetry: { enabled: true, source: "custom", editable: false } } })?.telemetry).toBe("custom");
+    expect(parseGet({ ...get(true), settings: { telemetry: { enabled: true, source: "custom", editable: false } } })?.telemetry).toBe("custom-on");
     expect(parseUpdate(updated(true))).toEqual({ settings: { revision: rev("b"), telemetry: "on", editable: true, malformed: false }, restart: { sessions: ["s1"], complete: true } });
   });
   test.each([
@@ -60,13 +60,13 @@ describe("write", () => {
   test("update params are exactly the revision and one change, sent once inside the borrow", async () => {
     const zeta = fakeZeta({ home_settings_update: [updated(true)] });
     const { op, seen } = change(zeta);
-    expect(await op.execute()).toMatchObject({ status: "committed", receipt: "telemetry is on. restart zeta to start recording." });
+    expect(await op.execute()).toMatchObject({ status: "committed", receipt: "telemetry is on. if zeta[otel] is not installed, turn it off here before you restart zeta." });
     expect(zeta.calls).toEqual([["home_settings_update", { expected_revision: rev("a"), changes: [{ key: "telemetry.enabled", value: true }] }]]);
     expect(seen.committed).toEqual([[{ revision: rev("b"), telemetry: "on", editable: true, malformed: false }, { sessions: ["s1"], complete: true }]]);
   });
 
   test.each([
-    ["stale_revision", error(-32009, "settings.toml changed since the given revision", { code: "stale_revision", current_revision: rev("c") }), { reason: "changed" }, 1],
+    ["stale_revision", error(-32009, "settings.toml changed since the given revision", { code: "stale_revision", current_revision: rev("c") }), { reason: "changed", message: "not changed. the state changed elsewhere; the row now shows the current state." }, 1],
     ["settings_busy", error(-32009, "another zeta process is writing settings.toml", { code: "settings_busy", retryable: true }), { reason: "not-applied" }, 0],
     ["custom_home_setting", error(-32602, "the setting has a custom value", { code: "custom_home_setting" }), { reason: "not-applied", message: "not changed. telemetry uses a custom endpoint from settings.toml. change it there." }, 1],
     ["observer_read_only", error(-32008, "observer", { code: "observer_read_only" }), { reason: "refused" }, 0],
@@ -117,7 +117,7 @@ describe("unknown result", () => {
     });
   }
   test("the same revision means not applied; a moved revision with the old value means changed", async () => {
-    for (const [reply, result] of [[get(false), { status: "failed", reason: "not-applied" }], [get(false, rev("c")), { status: "failed", reason: "changed" }]] as const) {
+    for (const [reply, result] of [[get(false), { status: "failed", reason: "not-applied" }], [get(false, rev("c")), { status: "failed", reason: "changed", message: "not changed. the state changed elsewhere; the row now shows the current state." }]] as const) {
       const zeta = fakeZeta({ home_settings_update: [new Error("drop")], home_settings_get: [reply] });
       const { op, seen } = change(zeta);
       await op.execute();

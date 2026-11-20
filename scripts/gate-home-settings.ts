@@ -24,7 +24,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
       return dialog;
     };
     const dialog = await confirmOn();
-    const receipt = row.getByText(/^telemetry is on\. restart zeta to start recording\. at /);
+    const receipt = row.getByText(/^telemetry is on\. if zeta\[otel\] is not installed, turn it off here before you restart zeta\. at /);
     const refusal = dialog.getByRole("alert");
     await waitFor(async () => await receipt.isVisible() || /^not changed\./.test(await refusal.textContent().catch(() => "") ?? ""), "telemetry on outcome");
     if (await receipt.isVisible()) {
@@ -50,11 +50,12 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const edited = `${(await bytes()) ?? ""}# synthetic gate edit\n`;
     await writeFile(file, edited, { mode: 0o600 });
     const stale = await confirmOn();
-    const changed = "not changed. the state changed elsewhere; keep the current state and refresh before trying again.";
-    await waitFor(async () => (await stale.getByRole("alert").textContent().catch(() => null)) === changed, "stale telemetry change copy");
+    const changed = row.getByText("not changed. the state changed elsewhere; the row now shows the current state.", { exact: true });
+    await waitFor(() => changed.isVisible(), "stale telemetry change copy in the row");
     if ((await bytes()) !== edited) throw new Error("a stale telemetry change wrote settings.toml");
-    await stale.getByRole("button", { name: "keep it off", exact: true }).click();
-    console.log("settings telemetry: an outside edit made the change stale; nothing was written");
+    if (await stale.isVisible()) throw new Error("a stale telemetry change left the old review open");
+    await waitFor(async () => await tab.evaluate(() => document.activeElement?.textContent) === "turn on telemetry", "focus on the row control after a stale change");
+    console.log("settings telemetry: an outside edit made the change stale; nothing was written; the row kept the reason and the focus");
   } finally {
     await tab.close();
     if (original === null) await rm(file, { force: true });

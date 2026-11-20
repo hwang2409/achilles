@@ -7,9 +7,9 @@ import { supportsRequest, TAKEOVER_FAILED } from "../zeta";
 
 export const HOME_SETTINGS_FEATURE = "home_settings_v1";
 
-/** `on`/`off`: the built-in endpoint or none. `custom`/`unknown`: zeta does not change it (or sent a value this page
+/** `on`/`off`: the built-in endpoint or none. `custom-*`/`unknown`: zeta does not change it (or sent a value this page
  * does not know). Only `on` and `off` can be `editable`. */
-export type TelemetryState = "on" | "off" | "custom" | "unknown";
+export type TelemetryState = "on" | "off" | "custom-on" | "custom-off" | "unknown";
 export type HomeSettings = { revision: string; telemetry: TelemetryState; editable: boolean; malformed: boolean };
 /** What must restart to use a change. `null`: zeta did not report it (the result was settled by a reread). */
 export type Restart = { sessions: string[]; complete: boolean } | null;
@@ -25,7 +25,7 @@ function telemetry(value: unknown): { state: TelemetryState; editable: boolean }
   if (value.source === "unknown") return exactly(value, ["source", "editable"]) ? { state: "unknown", editable: false } : null;
   if (!exactly(value, ["enabled", "source", "editable"]) || typeof value.enabled !== "boolean") return null;
   const state = value.source === "builtin" && value.enabled ? "on" : value.source === "off" && !value.enabled ? "off"
-    : value.source === "custom" ? "custom" : "unknown";
+    : value.source === "custom" ? value.enabled ? "custom-on" : "custom-off" : "unknown";
   return { state, editable: value.editable && (state === "on" || state === "off") };
 }
 
@@ -68,6 +68,7 @@ export const NOT_ALLOWED = reviewText("not changed. this zeta does not allow cha
 export const CUSTOM = reviewText("not changed. telemetry uses a custom endpoint from settings.toml. change it there.");
 export const MALFORMED = reviewText("not changed. settings.toml has an error. zeta will not start until it is fixed.");
 export const UNSAFE = reviewText("not changed. settings.toml is a link or a shared file. zeta does not change it.");
+export const STALE = reviewText("not changed. the state changed elsewhere; the row now shows the current state.");
 
 /** The update's error, mapped. `reread`: the row must read the file again. null: unknown, a read must settle it. */
 export function mapUpdateError(error: unknown): { result: Failed; reread: boolean } | null {
@@ -85,7 +86,7 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
       return { result: failed("not-applied", plain(`not changed. zeta refused this change: ${message}`)), reread: false };
     }
     case -32009:
-      if (data.code === "stale_revision") return { result: failed("changed"), reread: true };
+      if (data.code === "stale_revision") return { result: failed("changed", STALE), reread: true };
       if (data.code === "settings_busy") return { result: failed("not-applied"), reread: false };
       return null;
     case -32000:
@@ -99,7 +100,7 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
 }
 
 export const receipt = (enabled: boolean) => enabled
-  ? reviewText("telemetry is on. restart zeta to start recording.")
+  ? reviewText("telemetry is on. if zeta[otel] is not installed, turn it off here before you restart zeta.")
   : reviewText("telemetry is off. restart zeta to stop recording.");
 type Committed = { status: "committed"; receipt: ReviewText; value: ReviewText };
 type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
@@ -151,7 +152,7 @@ export function telemetryChange({ before, enabled, withControl, live, committed,
         return done();
       }
       reread();
-      return failed("changed");
+      return failed("changed", STALE);
     },
   };
 }

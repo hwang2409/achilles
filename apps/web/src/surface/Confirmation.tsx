@@ -81,7 +81,8 @@ export function Confirmation(props: ConfirmationProps) {
     }
     const node = dialog.current;
     node?.showModal();
-    initial.current?.focus();
+    // a review keeps its body at the top, so the warning shows before the proof field
+    initial.current?.focus({ preventScroll: attempt.level === 2 });
     return () => { node?.close(); };
   }, [open]);
 
