@@ -133,6 +133,14 @@ async function lockTargetWeb(owner: ProcessOwner, achillesDir: string) {
   if (!await Promise.race([new Promise<boolean>(resolveLock => holder.stdout!.once("data", () => resolveLock(true))), exited.then(() => false)])) throw new Error(`could not lock ${path}`);
   return async () => { holder.stdin!.end(); await exited; };
 }
+// inexact, so a developer checkout keeps its test group (pytest, ruff) in .venv
+async function syncTarget(owner: ProcessOwner, achillesDir: string) {
+  const release = await lockTargetWeb(owner, achillesDir);
+  try {
+    const sync = await owner.run("uv", ["sync", "--inexact", "--project", achillesDir], undefined, 120_000);
+    if (sync.exitCode) throw new Error(`could not sync achilles: ${sync.stderr.trim()}`);
+  } finally { await release(); }
+}
 async function ensureTargetWeb(owner: ProcessOwner, achillesDir: string, origin: string) {
   const release = await lockTargetWeb(owner, achillesDir);
   try {
@@ -187,7 +195,7 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
   })();
   try {
     config.signal?.throwIfAborted();
-    { const release = await lockTargetWeb(owner, achillesDir); try { const sync = await owner.run("uv", ["sync", "--project", achillesDir], undefined, 120_000); if (sync.exitCode) throw new Error(`could not sync achilles: ${sync.stderr.trim()}`); } finally { await release(); } }
+    await syncTarget(owner, achillesDir);
     const achillesLog = openSync(join(root, "achilles-home/serve.log"), "w"); const achillesProcess = owner.spawn("uv", ["run", "--no-sync", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
     await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
     // a live-tools task drops the narrow eval tool policy so the session carries zeta's full default tool set, exactly
