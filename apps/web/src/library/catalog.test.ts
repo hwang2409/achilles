@@ -40,18 +40,29 @@ test.each(rows)("projects $label without retaining unlisted fields", ({ input, s
 
 // library_read_v1 catalog pages (newer zeta).
 const current = { scope: "home", editable: true, filename: "index-cards/SKILL.md", diagnostics: [] };
-const page = (items: unknown[], next_offset?: number) => ({ revision: "r", data: { items, ...(next_offset === undefined ? {} : { next_offset }) } });
+// No data.diagnostics: the shape zeta a6cc1bd8a sends, before the page-level list existed.
+const page = (items: unknown[], next_offset?: number, diagnostics?: unknown) =>
+  ({ revision: "r", data: { items, ...(next_offset === undefined ? {} : { next_offset }), ...(diagnostics === undefined ? {} : { diagnostics }) } });
+const warn = (reason: string, file = "index-cards/SKILL.md") => ({ source: "home", file, reason });
+const none = { items: [], more: 0 };
 const currentSkill = { ...skill, ...current };
 const currentProfile = { ...profile, ...current, filename: null };
 const kept = { ...summary, scope: "home", editable: true, diagnostics: { items: [], more: 0 } };
 const pageRows = [
   { label: "skill page with next offset", kind: "skills", input: page([currentSkill, { ...currentSkill, name: "sort", source: "packaged", scope: "effective", editable: true }], 2),
-    expected: { state: "data", nextOffset: 2, rows: [{ ...kept, keywords: ["cards"] }, { ...kept, keywords: ["cards"], name: "sort", source: "packaged", scope: "effective", editable: false }] } },
+    expected: { state: "data", nextOffset: 2, skipped: none, rows: [{ ...kept, keywords: ["cards"] }, { ...kept, keywords: ["cards"], name: "sort", source: "packaged", scope: "effective", editable: false }] } },
   { label: "profile page at the end", kind: "agent-profiles", input: page([currentProfile]),
-    expected: { state: "data", nextOffset: null, rows: [{ ...kept, model: null, tools: null, maxTurns: null, allowDelegation: false, acceptsFollowUps: true, explicitFinish: false }] } },
-  { label: "diagnostics bounded to five plus a count", kind: "skills",
-    input: page([{ ...currentSkill, diagnostics: ["a", { message: "b" }, "c", "d", "x".repeat(900), "f", "g"] }]),
-    expected: { state: "data", nextOffset: null, rows: [{ ...kept, keywords: ["cards"], diagnostics: { items: ["a", "b", "c", "d", "x".repeat(500)], more: 2 } }] } },
+    expected: { state: "data", nextOffset: null, skipped: none, rows: [{ ...kept, model: null, tools: null, maxTurns: null, allowDelegation: false, acceptsFollowUps: true, explicitFinish: false }] } },
+  { label: "row diagnostics keep five reasons, each cut to 500 chars, plus a count", kind: "skills",
+    input: page([{ ...currentSkill, diagnostics: ["a", "b", "c", "d", "x".repeat(900), "f", "g"].map((reason) => warn(reason)) }], undefined, []),
+    expected: { state: "data", nextOffset: null, skipped: none, rows: [{ ...kept, keywords: ["cards"], diagnostics: { items: ["a", "b", "c", "d", "x".repeat(500)], more: 2 } }] } },
+  { label: "page diagnostics keep twenty skipped or shadowed files plus a count", kind: "skills",
+    input: page([currentSkill], undefined, Array.from({ length: 23 }, (_, i) => warn(`skipped ${i}`, i ? `bad-${i}/SKILL.md` : "y".repeat(900)))),
+    expected: { state: "data", nextOffset: null, rows: [{ ...kept, keywords: ["cards"] }], skipped: {
+      items: Array.from({ length: 20 }, (_, i) => warn(`skipped ${i}`, i ? `bad-${i}/SKILL.md` : "y".repeat(500))), more: 3 } } },
+  { label: "malformed page diagnostic", kind: "skills", input: page([currentSkill], undefined, [{ ...warn("r"), source: "elsewhere" }]), expected: { state: "invalid" } },
+  { label: "page diagnostics not a list", kind: "skills", input: page([currentSkill], undefined, { file: "x" }), expected: { state: "invalid" } },
+  { label: "row diagnostic missing its reason", kind: "skills", input: page([{ ...currentSkill, diagnostics: [{ source: "home", file: "x" }] }]), expected: { state: "invalid" } },
   { label: "missing data", kind: "skills", input: { revision: "r" }, expected: { state: "invalid" } },
   { label: "bad next offset", kind: "skills", input: page([currentSkill], -1), expected: { state: "invalid" } },
   { label: "missing editable", kind: "skills", input: page([{ ...currentSkill, editable: undefined }]), expected: { state: "invalid" } },

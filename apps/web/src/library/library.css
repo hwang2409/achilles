@@ -73,3 +73,8 @@
 .library-flag { color: var(--fulcrum-warn); }
 .library-body { margin: 0; padding: 12px; font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); }
 .library-body + .library-flag { margin: 8px 0 0; }
+.library-group button .library-warning { color: var(--fulcrum-warn); }
+.library-skipped { margin: 12px 16px; font-size: 12px; color: var(--fulcrum-muted); }
+.library-skipped summary { min-height: 36px; display: flex; align-items: center; cursor: pointer; }
+.library-skipped ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.library-skipped li span { color: var(--fulcrum-fg); }

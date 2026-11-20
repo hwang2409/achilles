@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
-import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogRow, type LibraryKind } from "./catalog";
+import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
@@ -15,7 +15,7 @@ const narrow = "(max-width: 760px), (max-height: 500px)";
 const yesNo = (value: boolean) => value ? "yes" : "no";
 const PAGE = { scope: "effective", limit: 100 } as const;
 
-type View = { state: "empty" } | { state: "no-session" } | { state: "invalid" } | { state: "data"; rows: CatalogRow[]; nextOffset: number | null } | { state: "failed"; problem: Problem };
+type View = { state: "empty" } | { state: "no-session" } | { state: "invalid" } | { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Extract<CatalogPage, { state: "data" }>["skipped"] | null } | { state: "failed"; problem: Problem };
 type Problem = { message: string; retry: boolean };
 type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "failed"; problem: Problem };
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
@@ -56,10 +56,10 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         if (reads.catalog) {
           const page = projectCatalogPage(await client.request(methods.catalog, PAGE, { signal: abort.signal }), kind);
           view = page.state === "invalid" ? { state: "failed", problem: unreadable }
-            : page.rows.length ? { state: "data", rows: appendPage([], page.rows), nextOffset: page.nextOffset } : { state: "empty" };
+            : page.rows.length ? { state: "data", rows: appendPage([], page.rows), nextOffset: page.nextOffset, skipped: page.skipped } : { state: "empty" };
         } else {
           const snapshot = projectCatalog(await client.request("status", {}, { signal: abort.signal }), kind);
-          view = snapshot.state === "data" ? { ...snapshot, nextOffset: null } : snapshot;
+          view = snapshot.state === "data" ? { ...snapshot, nextOffset: null, skipped: null } : snapshot;
         }
       } catch (error) {
         view = reads.catalog ? { state: "failed", problem: problemOf(error) } : { state: "invalid" };
@@ -74,10 +74,10 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
 
   const rows = catalog?.state === "data" ? catalog.rows : [];
   const selected = rows.find(({ name }) => name === selection);
-  // After "load more", keyboard focus moves to the first new row shown (or the filter when none is visible).
+  // After "load more" or "refresh list", keyboard focus moves to the first new row shown (or the filter when none is visible).
   useEffect(() => {
     const added = focusNew.current;
-    if (!added) return;
+    if (!added || catalog?.state !== "data") return;
     focusNew.current = null;
     const rowButtons = [...(list.current?.querySelectorAll<HTMLButtonElement>("[data-row]") ?? [])];
     (rowButtons.find((button) => added.has(button.dataset.row ?? "")) ?? search.current)?.focus();
@@ -107,7 +107,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
       if (page.state === "invalid") next = unreadable;
       else if (started === attemptRef.current) {
         focusNew.current = new Set(page.rows.map(({ name }) => name).filter((name) => !rows.some((row) => row.name === name)));
-        setCatalog((view) => view?.state === "data" ? { state: "data", rows: appendPage(view.rows, page.rows), nextOffset: page.nextOffset } : view);
+        setCatalog((view) => view?.state === "data" ? { state: "data", rows: appendPage(view.rows, page.rows), nextOffset: page.nextOffset, skipped: page.skipped } : view);
       }
     } catch (error) {
       next = problemOf(error);
@@ -143,7 +143,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
       {sourceTiers.map((source) => {
         const group = matches.filter((row) => row.source === source);
         return group.length > 0 && <section className="library-group" key={source} aria-labelledby={`library-${source}`}>
-          <h2 id={`library-${source}`}>{source} <small>{tierRules[source]} · {group.length}{partial && " loaded"}</small></h2>
+          <h2 id={`library-${source}`}>{source} <small>{tierRules[source]} · {group.length}{partial && " loaded"}{problemCount(group)}</small></h2>
           <ul>
             {group.map((row) => <li key={row.name}>
               <button type="button" data-row={row.name} aria-current={row === selected || undefined} onClick={(event) => {
@@ -153,6 +153,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
                 <strong>{row.name}</strong>
                 {!row.editable && <small>read-only</small>}
                 <span>{row.description}</span>
+                {row.diagnostics?.items.length ? <span className="library-warning">warning · {row.diagnostics.items[0]}</span> : null}
               </button>
             </li>)}
           </ul>
@@ -164,6 +165,13 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
       </div>}
       {reads.catalog && !rows.some(({ source }) => source === "project") &&
         <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
+      {catalog.skipped && catalog.skipped.items.length > 0 && <details className="library-skipped">
+        <summary>{catalog.skipped.items.length + catalog.skipped.more} files skipped or shadowed</summary>
+        <ul>
+          {catalog.skipped.items.map(({ source, file, reason }, i) => <li key={i}><span>{source} · {file}</span> {reason}</li>)}
+          {catalog.skipped.more > 0 && <li>{catalog.skipped.more} more</li>}
+        </ul>
+      </details>}
     </section>
     <section className="library-detail" aria-label="catalog detail">
       {selected ? <>
@@ -176,13 +184,14 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         <dl className="library-fields">
           <Field label="source">{selected.source}{!selected.editable && " · read-only"}</Field>
           <Metadata row={selected} />
-          {selected.diagnostics?.items.length ? <Field label="diagnostics"><ul className="library-diagnostics">
+          {selected.diagnostics?.items.length ? <Field label="warnings"><ul className="library-diagnostics">
             {selected.diagnostics.items.map((message, i) => <li key={i}>{message}</li>)}
             {selected.diagnostics.more > 0 && <li>{selected.diagnostics.more} more</li>}
           </ul></Field> : null}
         </dl>
         {reads.catalog && reads.read ? <LibraryText key={rowKey(selected)} client={client} method={methods.read} row={selected} noun={noun}
           onGone={() => {
+            focusNew.current = new Set();
             setSelection(null);
             refresh();
           }} />
@@ -266,6 +275,11 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
       {reveal.body.truncated && <p className="library-flag">text truncated at 128 KiB</p>}
     </div>}
   </section>;
+}
+
+function problemCount(rows: CatalogRow[]) {
+  const count = rows.filter((row) => row.diagnostics?.items.length).length;
+  return count > 0 && ` · ${count} ${count === 1 ? "has" : "have"} a problem`;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

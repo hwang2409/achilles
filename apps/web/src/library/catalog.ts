@@ -3,9 +3,13 @@ type Source = typeof sourceTiers[number];
 
 const scopes = ["effective", "home", "project"] as const;
 type Scope = typeof scopes[number];
-// Older zeta reports no diagnostics (null); a newer catalog keeps the first few messages and counts the rest.
-type Diagnostics = { items: string[]; more: number } | null;
-export const DIAGNOSTICS_SHOWN = 5;
+// Diagnostics are untrusted text: keep the first few, cut each one, and count the rest.
+type Bounded<T> = { items: T[]; more: number };
+// The status snapshot reports no diagnostics (null); a library_read_v1 row keeps its reasons.
+type Diagnostics = Bounded<string> | null;
+export type FileProblem = { source: Source; file: string; reason: string };
+const ROW_DIAGNOSTICS = 5;
+const PAGE_DIAGNOSTICS = 20;
 const DIAGNOSTIC_CHARS = 500;
 
 type Summary = { name: string; description: string; source: Source; scope: Scope; editable: boolean; diagnostics: Diagnostics };
@@ -50,19 +54,27 @@ const adapters = {
 };
 export type LibraryKind = keyof typeof adapters;
 export type Catalog = { state: "data"; rows: CatalogRow[] } | { state: "empty" | "no-session" | "invalid" };
-export type CatalogPage = { state: "data"; rows: CatalogRow[]; nextOffset: number | null } | { state: "invalid" };
+// `skipped`: files the loader skipped or a higher tier shadowed (zeta repeats the full list on every page).
+export type CatalogPage = { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Bounded<FileProblem> } | { state: "invalid" };
 export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read });
 
 const offset = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const bySource = (rows: CatalogRow[]) => rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source));
 
-function diagnostics(value: unknown): Diagnostics | undefined {
+function problem(entry: unknown): FileProblem | undefined {
+  if (!record(entry) || typeof entry.file !== "string" || typeof entry.reason !== "string") return undefined;
+  const source = sourceTiers.find((tier) => tier === entry.source);
+  return source && { source, file: entry.file.slice(0, DIAGNOSTIC_CHARS), reason: entry.reason.slice(0, DIAGNOSTIC_CHARS) };
+}
+
+// Every entry must be a well-formed {source, file, reason}; one bad entry rejects the list.
+function bounded<T>(value: unknown, cap: number, keep: (entry: FileProblem) => T): Bounded<T> | undefined {
   if (!Array.isArray(value)) return undefined;
-  const items: string[] = [];
+  const items: T[] = [];
   for (const entry of value) {
-    const message = typeof entry === "string" ? entry : record(entry) && typeof entry.message === "string" ? entry.message : undefined;
-    if (message === undefined) return undefined;
-    if (items.length < DIAGNOSTICS_SHOWN) items.push(message.slice(0, DIAGNOSTIC_CHARS));
+    const parsed = problem(entry);
+    if (!parsed) return undefined;
+    if (items.length < cap) items.push(keep(parsed));
   }
   return { items, more: value.length - items.length };
 }
@@ -70,7 +82,9 @@ function diagnostics(value: unknown): Diagnostics | undefined {
 // One library_read_v1 catalog page: keep display metadata only; any malformed row rejects the page.
 export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogPage {
   const data = record(result) ? result.data : undefined;
-  if (!record(data) || !Array.isArray(data.items) || !(data.next_offset === undefined || offset(data.next_offset))) return { state: "invalid" };
+  // zeta before the page-level list (a6cc1bd8a) omits data.diagnostics: nothing was reported, so show nothing.
+  const skipped = record(data) && data.diagnostics !== undefined ? bounded(data.diagnostics, PAGE_DIAGNOSTICS, (entry) => entry) : { items: [], more: 0 };
+  if (!record(data) || !Array.isArray(data.items) || !(data.next_offset === undefined || offset(data.next_offset)) || !skipped) return { state: "invalid" };
   const rows: CatalogRow[] = [];
   const names = new Set<string>();
   for (const row of data.items) {
@@ -78,7 +92,7 @@ export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogP
     const { name, description, editable } = row;
     const source = sourceTiers.find((tier) => tier === row.source);
     const scope = scopes.find((value) => value === row.scope);
-    const found = diagnostics(row.diagnostics);
+    const found = bounded(row.diagnostics, ROW_DIAGNOSTICS, ({ reason }) => reason);
     if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !source || !scope ||
         typeof editable !== "boolean" || !found || names.has(name)) return { state: "invalid" };
     const item = adapters[kind].fields(row, { name, description, source, scope, editable: editable && source !== "packaged", diagnostics: found });
@@ -86,7 +100,7 @@ export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogP
     rows.push(item);
     names.add(name);
   }
-  return { state: "data", rows, nextOffset: data.next_offset ?? null };
+  return { state: "data", rows, nextOffset: data.next_offset ?? null, skipped };
 }
 
 // Live pages can shift between requests: keep the first row seen for each name.
