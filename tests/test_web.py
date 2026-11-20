@@ -749,6 +749,7 @@ def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) ->
     response = client.post(path, json={"session_id": "new-session"})
     assert response.status_code == 200
     assert response.json()["updated_at"] == "old"
+    assert response.json().get("purpose") == "chat"
     with store.transaction() as db:
         assert (
             db.execute("SELECT COUNT(*) FROM chat WHERE session_id='new-session'").fetchone()[0]
@@ -757,6 +758,42 @@ def test_register_chat_is_idempotent_and_rejects_another_page(tmp_path: Path) ->
     assert (
         client.post("/api/pages/other/chats", json={"session_id": "new-session"}).status_code == 409
     )
+
+
+def test_register_page_build_chat(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    client = chat_client()
+    path = "/api/pages/home/chats"
+    body = {"session_id": "build-chat", "purpose": "page_build"}
+    response = client.post(path, json=body)
+    assert response.status_code == 200
+    assert response.json().get("purpose") == "page_build"
+    assert store.chat("build-chat")["purpose"] == "page_build"
+    assert store.chats(1, include="build-chat")[0]["purpose"] == "page_build"
+    assert client.post(path, json=body).json() == response.json()
+
+
+def test_register_chat_rejects_a_conflicting_purpose(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    client = chat_client()
+    path = "/api/pages/home/chats"
+    initial = client.post(path, json={"session_id": "registered"})
+    assert initial.status_code == 200
+    response = client.post(path, json={"session_id": "registered", "purpose": "page_build"})
+    assert response.status_code == 409
+    assert response.text == "session already registered with a different purpose"
+    assert store.chat("registered") == initial.json()
+
+
+def test_register_chat_rejects_invalid_purpose_without_writing(tmp_path: Path) -> None:
+    store = PageStore(tmp_path / "achilles")
+    client = chat_client()
+    for purpose in ("unknown", "", None, False, []):
+        response = client.post(
+            "/api/pages/home/chats", json={"session_id": "invalid", "purpose": purpose}
+        )
+        assert response.status_code == 400
+        assert store.chats(1, include="invalid") == []
 
 
 def test_patch_chat_updates_fields_and_validates_input() -> None:

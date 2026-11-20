@@ -11,6 +11,7 @@ export type PageLink = { id: string; route: string; title: string; created_by_ro
 
 export type Chat = {
   session_id: string;
+  purpose: "chat" | "page_build";
   page_id: string;
   page_route: string;
   page_title: string;
