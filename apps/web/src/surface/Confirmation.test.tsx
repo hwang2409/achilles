@@ -1,8 +1,10 @@
+import "../test-dom";
 // @ts-expect-error Bun supplies this module at test time; the web project does not install Bun types.
 import { afterEach, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { useState } from "react";
 import { Confirmation, reviewText as text, type ConfirmationProps } from "./Confirmation";
+// bun links CommonJS react-dom before this file's imports run, so it loads only after the DOM above exists.
+const { act, cleanup, fireEvent, render, within } = await import("@testing-library/react");
 
 afterEach(() => { cleanup(); document.body.replaceChildren(); });
 

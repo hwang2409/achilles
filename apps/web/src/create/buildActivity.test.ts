@@ -374,13 +374,30 @@ test("a read sent before the live pass saw the build current is dropped", async 
   expect(rowOf(hook)).toEqual({ label: "last known building · not the current session", receipt: null });
 });
 
-test("one read in flight, and only the eight builds the chat list shows", async () => {
+test("one read in flight, and only the builds of one chat-list page", async () => {
   const waiting: ((value: unknown) => void)[] = [];
-  const ids = Array.from({ length: 10 }, (_, n) => `b${n + 1}`);
+  const ids = Array.from({ length: 52 }, (_, n) => `b${n + 1}`);
   const zeta = serveZeta({ status: () => idle("newer"), read: () => new Promise((resolve) => waiting.push(resolve)) });
   await mount(zeta, builds(...ids));
-  for (let i = 0; i < 12 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
-  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ids.slice(0, 8) });
+  for (let i = 0; i < 60 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
+  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ids.slice(0, 50) });
+});
+
+test("a new turn during an in-flight read: the next page load reads again", async () => {
+  const held = Promise.withResolvers<unknown>();
+  let replies = [() => held.promise, () => new Promise(() => {})];
+  const first = serveZeta({ status: () => idle("newer"), read: () => replies.shift()!() });
+  const hook = await mount(first, builds("b1"));
+  // the chat list moves updated_at while the first read is in flight; the reply proves the older turn
+  hook.rerender({ client: first.client, chats: [{ ...builds("b1")[0]!, updated_at: "2030-01-02" }] });
+  await settle();
+  held.resolve(rows(done));
+  await settle();
+  hook.unmount();
+  replies = [];
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(done) });
+  await mount(zeta, [{ ...builds("b1")[0]!, updated_at: "2030-01-02" }]);
+  expect(zeta.reads()).toEqual(["b1"]);
 });
 
 test("a chat-list reload with the same updated_at reads nothing; a new turn reads once", async () => {
