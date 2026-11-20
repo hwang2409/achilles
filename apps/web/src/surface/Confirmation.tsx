@@ -9,7 +9,7 @@ export type ReviewText = string & { readonly [safeText]: true };
 export function reviewText<const T extends string>(text: string extends T ? never : T): ReviewText;
 export function reviewText(text: string): ReviewText { return text as ReviewText; }
 
-export type Failure = "changed" | "denied" | "not-applied" | "refused";
+type Failure = "changed" | "denied" | "not-applied" | "refused";
 const failureCopy: Record<Failure, string> = {
   changed: "not changed. the state changed elsewhere; keep the current state and refresh before trying again.",
   denied: "not changed. check your access before trying again.",
