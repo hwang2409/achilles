@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { titleOf, type Chat, type PageLink } from "../surface/AgentNavAdapter";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { onRunEnd } from "../zeta/turnEnd";
+import { supportsFeature } from "../zeta/connection";
 
 // The one owner of displayed page-build state. Nothing else reads chat.last_state for page_build chats.
 export type BuildState = "building" | "needs you" | "done" | "unfinished" | "failed";
@@ -61,15 +62,17 @@ function createdRoute(content: unknown) {
 }
 
 // The state the live status and history prove, or null when they do not show how the last turn ended.
-function classify(status: Record<string, unknown>, { routes, lastCreateFailed, latestEnd }: Collected): BuildState | null {
-  if (array(status.pending_approvals).length) return "needs you";
-  if (status.state === "running" || status.state === "tool") return "building";
-  const ended = status.state === "idle" && typeof latestEnd?.turn_id === "string" && latestEnd.turn_id === object(status.last_turn_outcome)?.turn_id;
+// With no status (a session that is not current), rows prove only a terminal state: a turn end after the last user row.
+function classify(status: Record<string, unknown> | null, { routes, lastCreateFailed, latestEnd }: Collected): BuildState | null {
+  if (array(status?.pending_approvals).length) return "needs you";
+  if (status?.state === "running" || status?.state === "tool") return "building";
+  const ended = typeof latestEnd?.turn_id === "string" && (!status || (status.state === "idle" && latestEnd.turn_id === object(status.last_turn_outcome)?.turn_id));
   if (!ended) return null;
   return latestEnd!.reason === "error" || lastCreateFailed ? "failed" : routes.length ? "done" : "unfinished";
 }
 
-function fromHistory(status: Record<string, unknown>, history: unknown): Seen | null {
+// `more`: the reply field that is null when the page holds the whole history (session_history: next_before, session_history_read: next_cursor).
+function fromHistory(status: Record<string, unknown> | null, history: unknown, more: "next_before" | "next_cursor" = "next_before"): Seen | null {
   const page = object(history);
   const messages = page?.messages;
   if (!Array.isArray(messages)) throw new Error("missing build history");
@@ -77,8 +80,8 @@ function fromHistory(status: Record<string, unknown>, history: unknown): Seen | 
   const state = classify(status, collected);
   if (!state) return null;
   // A missing create_page call is evidence only when the page holds the whole history.
-  const unproven = state === "unfinished" && !collected.calledCreate && page!.next_before !== null;
-  const pendingTools = array(status.pending_approvals).map((raw) => object(object(raw)?.tool_call)?.name).filter((name): name is string => typeof name === "string");
+  const unproven = state === "unfinished" && !collected.calledCreate && page![more] !== null;
+  const pendingTools = array(status?.pending_approvals).map((raw) => object(object(raw)?.tool_call)?.name).filter((name): name is string => typeof name === "string");
   const turn = active(state) ? undefined : collected.latestEnd!.turn_id as string;
   return { state, routes: collected.routes, turn, unproven, tools: active(state) ? [...new Set([...pendingTools, ...collected.openCalls])] : [] };
 }
@@ -90,7 +93,7 @@ const observationKey = (id: string) => `achilles:build-observed:${id}`;
 
 // Per-tab memory: what this tab observed live, and which receipts it acknowledged (Q1).
 // shortcut: entries are never pruned; a tab's session storage holds one small row per build it watched.
-export function buildMemory(storage: () => Store) {
+function buildMemory(storage: () => Store) {
   const local = new Map<string, string>();
   const read = (key: string) => { try { return storage().getItem(key) ?? local.get(key) ?? null; } catch { return local.get(key) ?? null; } };
   const write = (key: string, value: string) => { local.set(key, value); try { storage().setItem(key, value); } catch { /* storage may be disabled */ } };
@@ -116,7 +119,8 @@ export function buildMemory(storage: () => Store) {
     seen,
     // A live observation merged with what this tab remembers: a confirmed route is never downgraded (Q2).
     // Each turn end that leaves the build done is one completion, numbered when this tab first sees it.
-    observe(id: string, live: Observation & { unproven?: boolean }): Observation | undefined {
+    // `quiet`: a completion this tab never saw run is stored as done 0, which is always seen, so it never shows a receipt.
+    observe(id: string, live: Observation & { unproven?: boolean }, quiet = false): Observation | undefined {
       const before = observed(id);
       const routes = [...new Set([...before?.routes ?? [], ...live.routes])];
       if (live.unproven && !routes.length) {
@@ -125,7 +129,7 @@ export function buildMemory(storage: () => Store) {
       }
       const state = live.state === "unfinished" && routes.length ? "done" : live.state;
       const turn = state === "done" ? live.turn : undefined;
-      const done = state !== "done" ? undefined : before?.state === "done" && before.turn === turn && before.done !== undefined ? before.done : nextDone();
+      const done = state !== "done" ? undefined : before?.state === "done" && before.turn === turn && before.done !== undefined ? before.done : quiet ? 0 : nextDone();
       const next = { state, routes, turn, done };
       write(observationKey(id), JSON.stringify(next));
       return next;
@@ -152,55 +156,186 @@ type Memory = ReturnType<typeof buildMemory>;
 type Request = ZetaClient["request"];
 const POLL_MS = 2000;
 const RETRY_MS = [2000, 5000, 10000];
+const READ_FEATURE = "session_history_read_v1";
+const BUSY_TRIES = 3;
+const errorCode = (error: unknown) => object(error)?.code;
+const errorData = (error: unknown) => object(object(error)?.data);
+// A run-end read of a build that status says is not current: its rows (null: no turn end in view), or no reply.
+type Ended = { id: string; seen: Seen | null } | { id: string; failed: true };
 
-// One status (and, for a current build, one history) read per refresh; one timer at most.
-async function readLive(chats: readonly Chat[], request: Request, signal: AbortSignal): Promise<Live> {
+// One status read per pass, and one history read of the current build. A build whose run just ended is read together
+// with status, not after it: a chat waiting for zeta attaches on the same agent_end, and the pinned server then cannot read it.
+async function readLive(chats: readonly Chat[], request: Request, signal: AbortSignal, ended?: string): Promise<Live & { ended?: Ended }> {
   const options = { signal, timeoutMs: 8000 };
+  const endedHistory = ended === undefined ? undefined : request("session_history", { session_id: ended, before: null }, options);
+  const endedRead = endedHistory?.then((history): Ended => ({ id: ended!, seen: fromHistory(null, history) }), (): Ended => ({ id: ended!, failed: true }));
+  endedRead?.catch(() => ({})); // a malformed reply is read below; it is never an unhandled rejection
   try {
     const status = object(await request("status", {}, options));
     const id = object(status?.session)?.session_id;
-    if (!status || typeof id !== "string" || !chats.some((chat) => isBuild(chat) && chat.session_id === id) || signal.aborted) return { current: null, reason: "not the current session" };
+    const other = ended !== undefined && ended !== id ? await endedRead!.catch((): Ended => ({ id: ended, failed: true })) : undefined;
+    if (!status || typeof id !== "string" || !chats.some((chat) => isBuild(chat) && chat.session_id === id) || signal.aborted) return { current: null, reason: "not the current session", ended: other };
     // The pinned server can read only the runtime's current session. Its null cursor selects one bounded tail page.
-    const history = await request("session_history", { session_id: id, before: null }, options);
-    return { current: id, observed: fromHistory(status, history) ?? undefined, reason: null };
+    const history = await (id === ended ? endedHistory! : request("session_history", { session_id: id, before: null }, options));
+    return { current: id, observed: fromHistory(status, history) ?? undefined, reason: null, ended: other };
   } catch (error) {
     // A runtime switch between status and history returns NO_ACTIVE_SESSION.
-    return { current: null, reason: object(error)?.code === -32003 ? "not the current session" : "zeta offline" };
+    return { current: null, reason: errorCode(error) === -32003 ? "not the current session" : "zeta offline" };
   }
 }
 
-function createBuildReader(memory: Memory, publish: (live: Live) => void, reloadPages: (routes: string[]) => void) {
+// The live pass (status, the current build) and, when zeta granted session_history_read_v1, a serial queue that reads
+// builds that are not current, on demand only: first sight, a new turn (updated_at moved), its run end, a manual refresh.
+// A trigger during a pass runs one more pass after it; only a client change or unmount aborts.
+// shortcut: this is the only session_history_read caller; a second caller must move the queue to one per-client owner, so
+// the server's one-read-in-flight budget stays in one place.
+function createBuildReader(memory: Memory, publish: (live: Live) => void, reloadPages: (routes: string[]) => void, changed: () => void) {
   let generation = 0;
   let misses = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let controller: AbortController | undefined;
-  const stop = () => {
-    generation++;
-    clearTimeout(timer);
-    controller?.abort();
+  let controller = new AbortController();
+  let latest: { chats: readonly Chat[]; client: ZetaClient | null } = { chats: [], client: null };
+  let running = false;
+  let again = false;
+  const ended = new Set<string>();
+  // The session the last live pass proved current, and a stamp each time a pass saw a session current.
+  let current: string | null = null;
+  let stamps = 0;
+  const liveSeen = new Map<string, number>();
+  // The queue. `epoch` moves on a client change, unmount, and manual refresh; a reply from an older epoch is dropped.
+  let epoch = 0;
+  let reads = true;
+  let queue: string[] = [];
+  let inFlight: { id: string; epoch: number; stamp?: number } | undefined;
+  let busyTimer: ReturnType<typeof setTimeout> | undefined;
+  const readKeys = new Map<string, string | undefined>();
+  const busyTries = new Map<string, number>();
+  const updatedAt = (id: string) => latest.chats.find((chat) => chat.session_id === id)?.updated_at;
+
+  // Rows prove only a turn end. 4.5: a completion this tab never saw run is quiet (no receipt).
+  const prove = (id: string, seen: Seen | null) => {
+    if (!seen) return;
+    const merged = memory.observe(id, seen, !active(memory.observed(id)?.state ?? "done"));
+    changed();
+    if (merged?.routes.length) reloadPages(merged.routes);
   };
-  const refresh = async (chats: readonly Chat[], request?: Request) => {
-    stop();
-    const current = generation;
-    if (!request) return publish({ current: null, reason: "zeta offline" });
+  const enqueue = (forced: readonly string[]) => {
+    const { chats, client } = latest;
+    if (!client || !reads || !supportsFeature(client, READ_FEATURE)) return;
+    const builds = chats.filter(isBuild);
+    // The same four builds /create shows, and any build this tab last knew as active.
+    const shown = new Set(builds.slice(0, 4).map((chat) => chat.session_id));
+    for (const chat of builds) {
+      const id = chat.session_id;
+      if (id === current || queue.includes(id)) continue;
+      const wanted = shown.has(id) || active(memory.observed(id)?.state ?? "done");
+      if (forced.includes(id) || (wanted && readKeys.get(id) !== chat.updated_at)) queue.push(id);
+    }
+    pump();
+  };
+  const pump = () => {
+    const { client } = latest;
+    if (inFlight || busyTimer || !client) return;
+    const id = queue.shift();
+    if (id === undefined) return;
+    const sent = inFlight = { id, epoch, stamp: liveSeen.get(id) };
+    readKeys.set(id, updatedAt(id));
+    client.request("session_history_read", { session_id: id, limit: 128 }, { signal: controller.signal, timeoutMs: 12000 })
+      .then((page) => settle(sent, page), (error) => settle(sent, undefined, error ?? Error("read failed")));
+  };
+  const settle = (sent: NonNullable<typeof inFlight>, page: unknown, error?: unknown) => {
+    if (inFlight !== sent) return;
+    inFlight = undefined;
+    const { id } = sent;
+    const code = errorCode(error);
+    if (sent.epoch !== epoch) { /* a manual refresh cleared the keys: the next pass asks again */ }
+    else if (error === undefined) {
+      // A stale read: the live pass saw this session current since it was sent. The next pass asks again.
+      if (id === current || liveSeen.get(id) !== sent.stamp) readKeys.delete(id);
+      else {
+        busyTries.delete(id);
+        try { prove(id, fromHistory(null, page, "next_cursor")); } catch { /* an unknown reply is no claim */ }
+      }
+    } else if (code === -32004) {
+      // Another read is in flight on this serve (another tab or client): wait at least what zeta asks, with jitter,
+      // before the next read. After the last try the wait still holds, then the queue moves on without this build.
+      const tries = (busyTries.get(id) ?? 0) + 1;
+      busyTries.set(id, tries);
+      const wait = Math.max(2000, Number(errorData(error)?.retry_after_ms) || 0) + Math.random() * 500;
+      busyTimer = setTimeout(() => {
+        busyTimer = undefined;
+        if (tries < BUSY_TRIES && !queue.includes(id)) queue.unshift(id);
+        pump();
+      }, wait);
+    } else if (code === -32601) { reads = false; queue = []; }
+    // The build became zeta's attached session: the live pass reads it now.
+    else if (code === -32602 && errorData(error)?.code !== "session_not_found") run();
+    pump();
+  };
+
+  const once = async (mine: number) => {
+    clearTimeout(timer);
+    const { chats, client } = latest;
+    const runEnds = [...ended].filter((id) => chats.some((chat) => isBuild(chat) && chat.session_id === id));
+    ended.clear();
+    if (!client) return publish({ current: current = null, reason: "zeta offline" });
     // No page builds: nothing to read, and no extra status call.
-    if (!chats.some(isBuild)) return publish({ current: null, reason: "not the current session" });
-    controller = new AbortController();
-    const read = await readLive(chats, request, controller.signal);
-    if (current !== generation) return;
+    if (!chats.some(isBuild)) return publish({ current: current = null, reason: "not the current session" });
+    const read = await readLive(chats, client.request, controller.signal, runEnds.at(-1));
+    if (mine !== generation) return;
+    current = read.current;
+    if (read.current) liveSeen.set(read.current, ++stamps);
     if (read.current && !read.observed) memory.forgetActive(read.current);
     const merged = read.current && read.observed ? memory.observe(read.current, read.observed) : undefined;
-    const live = { ...read, observed: merged && { ...read.observed!, ...merged } };
+    const live = { current: read.current, reason: read.reason, observed: merged && { ...read.observed!, ...merged } };
     publish(live);
     if (live.observed?.routes.length) reloadPages(live.observed.routes);
-    const again = () => void refresh(chats, request);
+    // A terminal state proven live needs no read when the build stops being current, until a new turn starts.
+    if (read.current && live.observed && !active(live.observed.state)) readKeys.set(read.current, updatedAt(read.current));
+    const proven = read.ended && "seen" in read.ended ? read.ended : undefined;
+    if (proven) { prove(proven.id, proven.seen); readKeys.set(proven.id, updatedAt(proven.id)); }
+    enqueue(runEnds.filter((id) => id !== read.current && id !== proven?.id));
     // Poll a live active build; after an outage, retry with backoff while this tab remembers an active build.
     const waiting = live.reason === "zeta offline" && chats.some((chat) => isBuild(chat) && active(memory.observed(chat.session_id)?.state ?? "done"));
     misses = live.reason === "zeta offline" ? misses + 1 : 0;
-    if (live.observed && active(live.observed.state)) timer = setTimeout(again, POLL_MS);
-    else if (waiting) timer = setTimeout(again, RETRY_MS[Math.min(misses, RETRY_MS.length) - 1]);
+    if (live.observed && active(live.observed.state)) timer = setTimeout(run, POLL_MS);
+    else if (waiting) timer = setTimeout(run, RETRY_MS[Math.min(misses, RETRY_MS.length) - 1]);
   };
-  return { refresh, stop };
+  function run() {
+    if (running) { again = true; return; }
+    running = true;
+    const mine = generation;
+    void (async () => {
+      try { do { again = false; await once(mine); } while (again && mine === generation); }
+      finally { if (mine === generation) running = false; }
+    })();
+  }
+  const stop = () => {
+    generation++;
+    epoch++;
+    running = again = false;
+    ended.clear();
+    clearTimeout(timer);
+    clearTimeout(busyTimer);
+    busyTimer = undefined;
+    controller.abort();
+    controller = new AbortController();
+    queue = [];
+    inFlight = undefined;
+    readKeys.clear();
+    busyTries.clear();
+    reads = true;
+  };
+  return {
+    refresh(chats: readonly Chat[], client: ZetaClient | null, endedId?: string) {
+      latest = { chats, client };
+      if (endedId !== undefined) ended.add(endedId);
+      run();
+    },
+    stop,
+    // A manual refresh: every wanted build is read again (one at a time).
+    forget: () => { epoch++; readKeys.clear(); busyTries.clear(); },
+  };
 }
 
 export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: string[]; tools: string[] };
@@ -248,18 +383,17 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
     if (!missing.length) return;
     missing.forEach((route) => pageCheck.requested.add(route));
     pageCheck.reloadPages();
-  }));
+  }, () => setRevision((value) => value + 1)));
   const [retry, setRetry] = useState(0);
   const [latest] = useState(() => ({ chats }));
   latest.chats = chats;
-  useEffect(() => {
-    void reader.refresh(chats, client?.request);
-    return reader.stop;
-  }, [chats, client, reader, retry]);
+  // Only a client change or unmount aborts reads; a new chat list or a retry joins the reads in flight.
+  useEffect(() => reader.stop, [client, reader]);
+  useEffect(() => reader.refresh(chats, client), [chats, client, reader, retry]);
   // A build's run end is read at once: a chat waiting for zeta attaches on the same frame, and after that switch the
   // pinned server can no longer read the build. Subscribed once per client, so it runs before later waiting chats.
   useEffect(() => client ? onRunEnd(client, (id) => {
-    if (latest.chats.some((chat) => isBuild(chat) && chat.session_id === id)) void reader.refresh(latest.chats, client.request);
+    if (latest.chats.some((chat) => isBuild(chat) && chat.session_id === id)) reader.refresh(latest.chats, client, id);
   }) : undefined, [client, latest, reader]);
   const activity = useMemo(() => projectBuilds(chats, live, memory), [chats, live, memory, revision]);
   // Same-document navigation (back/forward) can land on the receipt's page.
@@ -278,7 +412,7 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
     // The text the shell's live region should speak once, or null when this completion was already announced.
     announcement: receipt && !memory.announced(receipt) ? `${titleOf(receipt.chat)} finished · ${receipt.route} is ready` : null,
     markAnnounced: () => { if (receipt) memory.markAnnounced(receipt); },
-    refresh: () => { pageCheck.requested.clear(); pageCheck.reloadPages(); setRetry((value) => value + 1); },
+    refresh: () => { reader.forget(); pageCheck.requested.clear(); pageCheck.reloadPages(); setRetry((value) => value + 1); },
     dismissReceipt: () => {
       if (!receipt) return;
       memory.acknowledge(receipt);

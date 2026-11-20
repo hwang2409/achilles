@@ -124,7 +124,15 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 200); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { setActiveResult(0); }, [search]);
   useEffect(() => { void pageListOwner.current!.reload(null); }, [pageRefreshKey]);
-  useEffect(() => { void chatListOwner.current!.reload(search); }, [refreshKey, search]);
+  // Q4: a build started in another tab appears when this tab comes back, with one chat-list read and no polling.
+  const [backKey, setBackKey] = useState(0);
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible") setBackKey((value) => value + 1); };
+    addEventListener("focus", back);
+    document.addEventListener("visibilitychange", back);
+    return () => { removeEventListener("focus", back); document.removeEventListener("visibilitychange", back); };
+  }, []);
+  useEffect(() => { void chatListOwner.current!.reload(search); }, [refreshKey, backKey, search]);
   useEffect(() => () => {
     pageListOwner.current?.dispose();
     chatListOwner.current?.dispose();
