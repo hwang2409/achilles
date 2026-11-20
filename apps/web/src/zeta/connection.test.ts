@@ -43,7 +43,7 @@ const controllerRole = { role: "controller", reason: null } as const;
 const observerRole = { role: "observer", reason: null } as const;
 const refusedAt = new Date(2030, 0, 1, 10, 31).getTime();
 const refusedRole = { ...observerRole, reason: refusedReason(refusedAt) };
-const refused = /^at .{1,15} another tab had control\. try again when it is done\.$/;
+const refused = /^at .{1,15} another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/;
 test.each([
   ["connect on a read-only route", controllerRole, ["connect_read_only", "observer_busy", "retry"], observerRole],
   ["connect on a writable route", observerRole, ["connect_writable", "retry"], controllerRole],
@@ -308,18 +308,23 @@ describe("connection role and terminal matrix", () => {
 });
 
 describe("withControl borrows control for one read and always gives it back", () => {
-  type Row = { name: string; slotFree: boolean; read: "ok" | "fails" | "drops"; result: "value" | "error" | "refused"; reads: number };
+  type Row = { name: string; slotFree: boolean; read: "ok" | "fails" | "drops" | "hangs"; result: "value" | "error" | "refused" | "no answer"; reads: number };
   test.each<Row>([
     { name: "read succeeds -> released", slotFree: true, read: "ok", result: "value", reads: 1 },
     { name: "read fails -> released", slotFree: true, read: "fails", result: "error", reads: 1 },
     { name: "take refused -> no read sent, nothing to release", slotFree: false, read: "ok", result: "refused", reads: 0 },
     { name: "drop during read -> observer after reconnect, never holding", slotFree: true, read: "drops", result: "error", reads: 1 },
+    { name: "no answer within the limit -> released, then no answer", slotFree: true, read: "hangs", result: "no answer", reads: 1 },
   ])("$name", async ({ slotFree, read, result, reads }) => {
     const sockets: { role: string; open: boolean; drop: () => void }[] = [];
+    // the 20 s borrow limit fires only when the test says so; other timers stay real.
+    const limits: (() => void)[] = [];
     const connection = createConnection({
       readOnly: "upgradable",
       origin: "http://localhost",
       discover: async () => discovery,
+      setTimer: (callback, ms) => ms === 20_000 ? limits.push(callback) : setTimeout(callback, ms),
+      clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
       connect: async (_discovery, role) => {
         if (role === "controller" && !slotFree) throw new ZetaError("busy", -32001);
         let closed = () => {};
@@ -331,15 +336,25 @@ describe("withControl borrows control for one read and always gives it back", ()
     try {
       await flush();
       const sent: string[] = [];
-      const outcome = await connection.withControl(async (client) => {
+      let outcome = "pending";
+      let controllerOpenAtOutcome = false;
+      void connection.withControl(async (client) => {
         sent.push((client as unknown as { authority: string }).authority);
         if (read === "fails") throw new Error("read failed");
         if (read === "drops") { sockets.find((socket) => socket.role === "controller" && socket.open)!.drop(); throw new Error("closed"); }
+        if (read === "hangs") return new Promise<string>(() => {});
         return "text";
-      }).then((value) => "refused" in value ? "refused" : "value", () => "error");
+      }).then((value) => "refused" in value ? "refused" : "value", (error) => error instanceof Error && error.constructor.name === "NoAnswer" ? "no answer" : "error").then((value) => {
+        outcome = value;
+        controllerOpenAtOutcome = sockets.some((socket) => socket.role === "controller" && socket.open);
+      });
+      await flush();
+      limits.forEach((fire) => fire());
+      await flush();
       connection.retryNow();
       await flush();
       expect(outcome).toBe(result);
+      expect(controllerOpenAtOutcome).toBe(false);
       expect(sent).toEqual(Array(reads).fill("controller"));
       expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
       expect(sockets.filter((socket) => socket.role === "controller" && socket.open)).toEqual([]);
