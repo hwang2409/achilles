@@ -126,6 +126,7 @@ test("two evals that pick the same achilles port each use their own achilles", a
     await writeFile(stackPath, stackSource.replace("const achillesPort = await freePort();", `const achillesPort = await (async () => { const fs = await import("node:fs"); const port = await freePort(); try { fs.writeFileSync(${JSON.stringify(portFile)}, String(port), { flag: "wx" }); return port; } catch { const taken = fs.readFileSync(${JSON.stringify(portFile)}, "utf8"); if (!taken) return port; fs.writeFileSync(${JSON.stringify(portFile)}, ""); return Number(taken); } })();`));
     await mkdir(join(target, "apps", "web", "dist"), { recursive: true });
     await writeFile(join(target, "apps", "web", "dist", "index.html"), "<!doctype html><body>ready</body>");
+    { const s2 = await readFile(stackPath, "utf8"); await writeFile(stackPath, s2.replace("throw new Error(`${label}${/EADDRINUSE", "throw new Error(`DEBUG<<${text.slice(-3000)}>> ${label}${/EADDRINUSE")); } // TEMP DEBUG
     const results = await Promise.all(["a", "b"].map(name => runEval(target, "harness-smoke", { REPORT_DIR: join(parent, `report-${name}`) })));
     expect(await readFile(portFile, "utf8"), "the second eval was not handed the first eval's port").toBe("");
     for (const result of results) expect(result.task.status, JSON.stringify(result.task)).toBe("pass");
