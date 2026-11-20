@@ -124,7 +124,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor-actions { flex-wrap: wrap; }
 .library-editor-actions[role="group"] { align-items: center; flex-wrap: nowrap; }
 .library-editor-actions[role="group"] > span { flex: 1 1 auto; min-width: 0; }
-.library-nowrap { white-space: nowrap; }
+.library-name { overflow-wrap: anywhere; }
 /* the save outcome takes its own row in the sticky bar, above the buttons */
 .library-editor-actions > p { flex-basis: 100%; margin: 0; }
 .library-editor-actions button { flex: none; white-space: nowrap; }
