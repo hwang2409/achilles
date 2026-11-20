@@ -58,7 +58,7 @@ test("a page with no rows still lists the files zeta skipped", async () => {
 test("a draft stays visible and read-only when zeta stops allowing the save, and nothing is sent", async () => {
   const calls: string[] = [];
   const client = { request: (method: string) => { calls.push(method); return Promise.resolve({ revision: "r", data: { items: [] } }); } } as unknown as ZetaClient;
-  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null };
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map() };
   const props = { client, kind: "skills" as const, reads: { catalog: true, read: true } };
   const view = render(createElement(LibraryModule, { ...props, write }));
   await view.findByText("no skills found");
@@ -106,9 +106,9 @@ function editZeta(fixture: Fixture) {
   };
   return zeta;
 }
-const writable = { controller: true, allowed: true, takeControl: async () => null, feedback: null };
+const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map() });
 const textarea = (view: ReturnType<typeof render>, label: RegExp) => view.getByLabelText(label) as HTMLTextAreaElement;
-async function openEditor(zeta: ReturnType<typeof editZeta>, write: typeof writable = writable) {
+async function openEditor(zeta: ReturnType<typeof editZeta>, write: ReturnType<typeof writable> = writable()) {
   const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
   fireEvent.click(await view.findByRole("button", { name: /alpha/ }));
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
@@ -174,7 +174,7 @@ test("a stale save shows the conflict bar, sends nothing more, and loading the l
 test("an observer refusal offers take control, keeps the draft across the client swap, and the next save works", async () => {
   const zeta = editZeta({ document: fileText, writeErrors: [Object.assign(new Error("observer"), { code: -32008, data: { reason: "observer_read_only" } })] });
   let taken = 0;
-  const write = { ...writable, takeControl: async () => { taken++; return null; } };
+  const write = { ...writable(), takeControl: async () => { taken++; return null; } };
   const view = await openEditor(zeta, write);
   const edited = fileText.replace("original", "edited");
   await type(view, edited);
@@ -219,9 +219,21 @@ test.each<[string, Fixture, string]>([
   ["packaged", { document: fileText, source: "packaged" }, "built-in items are read-only."],
 ])("no edit control when the read has no document: %s", async (_name, fixture, why) => {
   const zeta = editZeta(fixture);
-  const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write: writable }));
+  const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write: writable() }));
   fireEvent.click(await view.findByRole("button", { name: /alpha/ }));
   fireEvent.click(view.getByRole("button", { name: "show skill text" }));
   expect((await view.findByText((text) => text.startsWith(why))).className).toBe("library-edit-why");
   expect(view.container.querySelector('[data-write-surface="library.edit"]')).toBeNull();
+});
+
+test("an open edit survives a socket drop that unmounts the library", async () => {
+  const zeta = editZeta({ document: fileText });
+  const write = writable();
+  const view = await openEditor(zeta, write);
+  await type(view, `${fileText}draft\n`);
+  view.unmount();
+  const again = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
+  expect(textarea(again, /^alpha · file text/).value).toBe(`${fileText}draft\n`);
+  await press(again, "save skill");
+  expect(zeta.writes()).toEqual([{ name: "alpha", scope: "home", revision: await sha(fileText), mutation: { document: `${fileText}draft\n` } }]);
 });

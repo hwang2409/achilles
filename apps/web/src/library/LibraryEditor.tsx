@@ -5,8 +5,13 @@ import { createProblems, nameProblem, SAVED_NOTICE, type createLibraryWriter, ty
 
 type Writer = ReturnType<typeof createLibraryWriter>;
 type Failure = Exclude<WriteOutcome, { status: "saved" }>;
+/** What the user typed in the create form. Kept in memory only, never in storage or the URL: a draft can hold a secret. */
+export type CreateDraft = { name: string; description: string; scope: WriteScope; edited: string | null };
 type Props = {
   client: ZetaClient; kind: LibraryKind; writer: Writer; rows: CatalogRow[];
+  /** Starts the form from this draft; every change is reported back, so the owner can restore it after a remount. */
+  draft: CreateDraft | undefined;
+  onDraft: (draft: CreateDraft) => void;
   /** The catalog method used to probe project scope; null when this zeta has no live catalog. */
   catalogMethod: string | null;
   takeControl: () => Promise<string | null>;
@@ -23,15 +28,14 @@ const header = (kind: LibraryKind, name: string, description: string) =>
   `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n${kind === "skills" ? "keywords: []\n" : ""}---\n` +
   (kind === "skills" ? "describe when and how to use this skill.\n" : "describe how this agent works.\n");
 
-/** The create form. Its text lives only in this component's memory (a draft can hold a secret), and the component
- * keeps its place when take control swaps the client, so the draft survives. */
-export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeControl, feedback, blocked, onCreated, onOpen, onClose }: Props) {
+/** The create form. The draft is mirrored to `onDraft`, so a socket drop that unmounts the form does not lose it. */
+export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, catalogMethod, takeControl, feedback, blocked, onCreated, onOpen, onClose }: Props) {
   const noun = kind === "skills" ? "skill" : "profile";
   const id = useId();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [scope, setScope] = useState<WriteScope>("home");
-  const [edited, setEdited] = useState<string | null>(null);
+  const [name, setName] = useState(draft?.name ?? "");
+  const [description, setDescription] = useState(draft?.description ?? "");
+  const [scope, setScope] = useState<WriteScope>(draft?.scope ?? "home");
+  const [edited, setEdited] = useState<string | null>(draft?.edited ?? null);
   const [project, setProject] = useState<"checking" | "available" | string>(catalogMethod ? "checking" : "needs a newer zeta");
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -47,6 +51,7 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     nameField.current?.focus();
     return () => abort.current?.abort();
   }, []);
+  useEffect(() => { onDraft({ name, description, scope, edited }); }, [name, description, scope, edited]);
   // Project scope needs an open chat in a project; ask zeta once with a one-row read.
   useEffect(() => {
     if (!catalogMethod) return;
@@ -135,23 +140,27 @@ export function uneditable(body: Body) {
   return null;
 }
 
+/** An open edit, kept in memory only (it can hold a secret). `base`: the read the user opened or last saved; its
+ * revision is the only one a save may send. `mine`: the user's text kept beside the latest version after a conflict. */
+export type EditDraft = { target: WriteTarget; base: { revision: string; document: string }; text: string; mine: string | null };
 type EditProps = {
-  client: ZetaClient; writer: Writer; target: WriteTarget & { scope: WriteScope };
-  /** The read the user opened: its revision is the only base a save may send. `onSaved` runs after each save; the
-   * editor shows the saved notice itself while the text is unchanged. */
-  opened: { revision: string; document: string };
+  client: ZetaClient; writer: Writer;
+  /** Starts the editor from this draft; every change is reported back, so a socket drop that unmounts it loses nothing.
+   * `onSaved` runs after each save; the editor shows the saved notice itself while the text is unchanged. */
+  draft: EditDraft; onDraft: (draft: EditDraft) => void;
   takeControl: () => Promise<string | null>; feedback: string | null; blocked: string | null;
   onSaved: (redacted: boolean) => void; onClose: () => void;
 };
 
 /** Edits one existing file. Like the create form, its text lives only in memory and survives a client swap. */
-export function LibraryEdit({ client, writer, target, opened, takeControl, feedback, blocked, onSaved, onClose }: EditProps) {
+export function LibraryEdit({ client, writer, draft, onDraft, takeControl, feedback, blocked, onSaved, onClose }: EditProps) {
+  const { target } = draft;
   const noun = target.kind === "skills" ? "skill" : "profile";
   const id = useId();
-  const [base, setBase] = useState(opened);
-  const [text, setText] = useState(opened.document);
+  const [base, setBase] = useState(draft.base);
+  const [text, setText] = useState(draft.text);
   // after "load the latest version": the user's text, kept read-only beside zeta's for a manual merge.
-  const [mine, setMine] = useState<string | null>(null);
+  const [mine, setMine] = useState(draft.mine);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
@@ -165,6 +174,7 @@ export function LibraryEdit({ client, writer, target, opened, takeControl, feedb
   const problems = createProblems(target.name, text);
 
   useEffect(() => { field.current?.focus(); }, []);
+  useEffect(() => { onDraft({ target, base, text, mine }); }, [base, text, mine]);
   useEffect(() => { if (failure || (tried && problems.length)) alert.current?.focus(); }, [failure, tried]);
   useEffect(() => { if (confirmDiscard) keep.current?.focus(); }, [confirmDiscard]);
   // the browser asks before a reload, a close or a full page load (the library tabs) drops unsaved text.
