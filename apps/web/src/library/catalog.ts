@@ -1,7 +1,18 @@
 export const sourceTiers = ["project", "home", "packaged"] as const;
 type Source = typeof sourceTiers[number];
 
-type Summary = { name: string; description: string; source: Source };
+const scopes = ["effective", "home", "project"] as const;
+type Scope = typeof scopes[number];
+// Diagnostics are untrusted text: keep the first few, cut each one, and count the rest.
+type Bounded<T> = { items: T[]; more: number };
+// The status snapshot reports no diagnostics (null); a library_read_v1 row keeps its reasons.
+type Diagnostics = Bounded<string> | null;
+export type FileProblem = { source: Source; file: string; reason: string };
+const ROW_DIAGNOSTICS = 5;
+const PAGE_DIAGNOSTICS = 20;
+const DIAGNOSTIC_CHARS = 500;
+
+type Summary = { name: string; description: string; source: Source; scope: Scope; editable: boolean; diagnostics: Diagnostics };
 type Skill = Summary & { keywords: string[] };
 type Profile = Summary & {
   tools: string[] | null;
@@ -21,11 +32,15 @@ const strings = (value: unknown): value is string[] =>
 const adapters = {
   skills: {
     key: "skill_catalog",
+    catalog: "skill_catalog",
+    read: "skill_read",
     fields: (row: Record<string, unknown>, summary: Summary): Skill | null =>
       strings(row.keywords) ? { ...summary, keywords: [...row.keywords] } : null,
   },
   "agent-profiles": {
     key: "agent_catalog",
+    catalog: "agent_profile_catalog",
+    read: "agent_profile_read",
     fields: (row: Record<string, unknown>, summary: Summary): Profile | null => {
       const { tools, model, allow_delegation, accepts_follow_ups, explicit_finish, max_turns } = row;
       if (!(tools === null || strings(tools)) || !(model === null || typeof model === "string") ||
@@ -39,6 +54,67 @@ const adapters = {
 };
 export type LibraryKind = keyof typeof adapters;
 export type Catalog = { state: "data"; rows: CatalogRow[] } | { state: "empty" | "no-session" | "invalid" };
+// `skipped`: files the loader skipped or a higher tier shadowed (zeta repeats the full list on every page).
+export type CatalogPage = { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Bounded<FileProblem> } | { state: "invalid" };
+export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read });
+
+const offset = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const bySource = (rows: CatalogRow[]) => rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source));
+
+function problem(entry: unknown): FileProblem | undefined {
+  if (!record(entry) || typeof entry.file !== "string" || typeof entry.reason !== "string") return undefined;
+  const source = sourceTiers.find((tier) => tier === entry.source);
+  return source && { source, file: entry.file.slice(0, DIAGNOSTIC_CHARS), reason: entry.reason.slice(0, DIAGNOSTIC_CHARS) };
+}
+
+// Every entry must be a well-formed {source, file, reason}; one bad entry rejects the list.
+function bounded<T>(value: unknown, cap: number, keep: (entry: FileProblem) => T): Bounded<T> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items: T[] = [];
+  for (const entry of value) {
+    const parsed = problem(entry);
+    if (!parsed) return undefined;
+    if (items.length < cap) items.push(keep(parsed));
+  }
+  return { items, more: value.length - items.length };
+}
+
+// One library_read_v1 catalog page: keep display metadata only; any malformed row rejects the page.
+export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogPage {
+  const data = record(result) ? result.data : undefined;
+  // zeta before the page-level list (a6cc1bd8a) omits data.diagnostics: nothing was reported, so show nothing.
+  const skipped = record(data) && data.diagnostics !== undefined ? bounded(data.diagnostics, PAGE_DIAGNOSTICS, (entry) => entry) : { items: [], more: 0 };
+  if (!record(data) || !Array.isArray(data.items) || !(data.next_offset === undefined || offset(data.next_offset)) || !skipped) return { state: "invalid" };
+  const rows: CatalogRow[] = [];
+  const names = new Set<string>();
+  for (const row of data.items) {
+    if (!record(row)) return { state: "invalid" };
+    const { name, description, editable } = row;
+    const source = sourceTiers.find((tier) => tier === row.source);
+    const scope = scopes.find((value) => value === row.scope);
+    const found = bounded(row.diagnostics, ROW_DIAGNOSTICS, ({ reason }) => reason);
+    if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !source || !scope ||
+        typeof editable !== "boolean" || !found || names.has(name)) return { state: "invalid" };
+    const item = adapters[kind].fields(row, { name, description, source, scope, editable: editable && source !== "packaged", diagnostics: found });
+    if (!item) return { state: "invalid" };
+    rows.push(item);
+    names.add(name);
+  }
+  return { state: "data", rows, nextOffset: data.next_offset ?? null, skipped };
+}
+
+// Live pages can shift between requests: keep the first row seen for each name.
+export const appendPage = (rows: CatalogRow[], page: CatalogRow[]) =>
+  bySource([...rows, ...page.filter((row) => !rows.some(({ name }) => name === row.name))]);
+
+export type Body = { text: string; redacted: boolean; truncated: boolean };
+// The body is untrusted user text: keep only the text and its two flags, never the frontmatter.
+export function projectBody(result: unknown, name: string): Body | null {
+  const data = record(result) ? result.data : undefined;
+  if (!record(data) || data.name !== name || typeof data.body !== "string" || typeof data.redacted !== "boolean" ||
+      !(data.truncated === undefined || typeof data.truncated === "boolean")) return null;
+  return { text: data.body, redacted: data.redacted, truncated: data.truncated === true };
+}
 
 // Keep only display metadata; never retain the status envelope or raw rows.
 export function projectCatalog(status: unknown, kind: LibraryKind): Catalog {
@@ -60,10 +136,11 @@ export function projectCatalog(status: unknown, kind: LibraryKind): Catalog {
     if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !source || names.has(name)) {
       return { state: "invalid" };
     }
-    const item = adapter.fields(row, { name, description, source });
+    const item = adapter.fields(row, { name, description, source, scope: source === "packaged" ? "effective" : source,
+      editable: source !== "packaged", diagnostics: null });
     if (!item) return { state: "invalid" };
     rows.push(item);
     names.add(name);
   }
-  return { state: "data", rows: rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source)) };
+  return { state: "data", rows: bySource(rows) };
 }
