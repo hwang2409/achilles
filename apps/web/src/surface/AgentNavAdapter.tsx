@@ -5,12 +5,20 @@ import { createListOwner, initialListState, type ListOwner, type ListState } fro
 import { useInlineRename } from "../useInlineRename";
 import { useFocusAfterCommit } from "../keyboard";
 import { surfaceHref } from "./routes";
-import { ModuleState } from "./ModuleState";
 import { WRITE_SURFACE } from "../writeSurfaces";
 
 type BuildRow = Pick<BuildActivity["rows"][number], "chat" | "state" | "stale">;
 
-export type PageLink = { id: string; route: string; title: string; created_by_route?: string | null };
+export type PageLink = {
+  id: string;
+  route: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  create_mode: boolean;
+  chat_count: number;
+  created_by_route: string | null;
+};
 
 export type Chat = {
   session_id: string;
@@ -214,21 +222,13 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
   return {
     loading, query, pageEntries, searchChats,
     pageCatalog: pageList, recentChats, pageRows: pageList.items ?? emptyPages,
-    reloadPages: () => { void pageListOwner.current!.reload(null); },
+    reloadPages: () => void pageListOwner.current!.reload(null),
+    morePages: loadOlder,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
     searchControl: (close: () => void) => loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="search chats / pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>,
     counts: {
       pages: { total: pageList.items && !pageList.error ? `${pageRows.length}${pageList.next ? "+" : ""}` : undefined },
       chats: { total: !search && chatList.items && !chatList.error ? `${chats.length}${chatList.next ? "+" : ""}` : undefined, waiting: waitingTotal },
-    },
-    pages: () => {
-      if (pageList.error) return <ModuleState kind="failed" title="the page catalog did not load" action={{ label: "retry", run: () => void pageListOwner.current!.reload(null) }} />;
-      if (pageList.items === null) return <ModuleState kind="loading" title="reading pages…" />;
-      if (!pageRows.length) return <ModuleState kind="empty" title="no pages yet" />;
-      return <section className="page-list" aria-label="page catalog" data-list-state={listStatus(pageList)} data-loaded-count={pageRows.length}>
-        {pageRows.map((item) => <a key={item.id} data-page-id={item.id} href={surfaceHref(item.route)} title={item.title} aria-label={item.title}><span>/</span><b>{item.title}</b></a>)}
-        {pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}
-      </section>;
     },
     recent: (close: () => void, builds: readonly BuildRow[]) => {
       const projectedBuild = (chat: Chat) => chat.purpose === "page_build" ? builds.find((row) => row.chat.session_id === chat.session_id) : undefined;

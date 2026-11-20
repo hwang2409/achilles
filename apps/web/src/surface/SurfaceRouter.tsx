@@ -3,6 +3,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react
 import { AgentSurface } from "../App";
 import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
 import { AppShell, type AppShellProps } from "../AppShell";
+import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, type Connection } from "../zeta";
@@ -59,7 +60,7 @@ function CatalogShell({ renderShell, route, connectionStatus, banner, children }
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
   return renderShell({ current: route, nav, banner, connectionStatus,
     newChat: { available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) },
-    children: () => route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages()}</ModuleFrame> : children,
+    children: () => route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} /> : children,
   });
 }
 
