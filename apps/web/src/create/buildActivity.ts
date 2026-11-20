@@ -18,8 +18,9 @@ const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const isRoute = (route: unknown): route is string => typeof route === "string" && /^\/(?!\/)[^?#\\\s]+$/.test(route);
 
 type Collected = { routes: string[]; openCalls: string[]; calledCreate: boolean; lastCreateFailed: boolean; latestEnd?: Record<string, unknown> };
-// Q2: the user denying or zeta cancelling the call is not a failure.
-const notFailure = (content: unknown) => typeof content === "string" && (content.startsWith("tool execution denied") || content.startsWith("tool execution canceled"));
+// Q2: a call that never ran is not a failure: the user denied it, zeta canceled it, or zeta asks again after a restart.
+const notRun = ["tool execution denied", "tool execution canceled", "tool changed after approval"];
+const notFailure = (content: unknown) => typeof content === "string" && notRun.some((prefix) => content.startsWith(prefix));
 
 // Successful create_page routes, in result order, from one history page. Unknown shapes are not pages.
 function collectCreateRoutes(messages: readonly unknown[]): Collected {
