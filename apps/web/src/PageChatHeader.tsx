@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { PageChatCatalog, timeLabel, titleOf, type Chat } from "./surface/AgentNavAdapter";
+import { buildLabel, buildTone, type BuildRow } from "./create/buildActivity";
 import { restorableFocus } from "./keyboard";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./page-chat-header.css";
@@ -121,8 +122,7 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         <div role="listbox" id="page-chat-choices" aria-labelledby="page-chat-count" aria-busy={catalog.loading}>
           {chats.map((chat) => <button type="button" key={chat.session_id} className="page-chat-choice" role="option" data-popup-row tabIndex={-1} aria-selected={chat.session_id === sessionId} onClick={() => select(chat)}>
             <span className="page-chat-choice-title" title={titleOf(chat)}>{titleOf(chat)}</span>
-            {/* a page build's state belongs to the build owner (create/buildActivity); this list makes no claim for it */}
-            {chat.purpose === "page_build" ? <span /> : <span className={`page-chat-status state-${chat.last_state ?? "idle"}`}>{chat.last_state === "approval" ? "needs you" : chat.last_state ?? "idle"}</span>}
+            {chat.purpose === "page_build" ? <BuildState build={catalog.builds.find((row) => row.chat.session_id === chat.session_id)} /> : <span className={`page-chat-status state-${chat.last_state ?? "idle"}`}>{chat.last_state === "approval" ? "needs you" : chat.last_state ?? "idle"}</span>}
             <time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time>
           </button>)}
         </div>
@@ -153,4 +153,10 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
     </div>
     {newReason && <div className="page-chat-new-reason" id="page-chat-new-reason">{newReason}</div>}
   </>;
+}
+
+// A page build's state comes only from the build owner (create/buildActivity), in the nav's words; no row is no claim.
+function BuildState({ build }: { build?: BuildRow }) {
+  const label = build && buildLabel(build);
+  return label ? <span className={`page-chat-status state-${buildTone(build) ?? "idle"}`} title={label}>{label}</span> : <span />;
 }

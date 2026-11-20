@@ -40,7 +40,7 @@ const done = [call(), result, end];
 const madeExpenses = [call("expenses-call"), resultOf("expenses-call", '{"route":"/expenses"}'), end];
 
 /** One page load: zeta's status reply, and the history reply when the status names a build. */
-type Load = { status: object | Error; history?: unknown[] | Error; superseded?: unknown[] };
+type Load = { status: object | Error; history?: unknown[] | Error; superseded?: unknown[]; older?: boolean };
 type Shown = { state: string | null; reason?: string | null; results?: string[]; tools?: string[] };
 type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: number; cold?: boolean; at?: string };
 
@@ -49,7 +49,7 @@ const ROWS: Row[] = [
   { name: "active running", loads: [{ status: running, history: [call()] }], shown: { state: "building", reason: null, tools: ["achilles__create_page"] }, building: 1, receipt: null },
   { name: "active needs you", loads: [{ status: approval, history: [call()] }], shown: { state: "needs you", reason: null, tools: ["achilles__create_page"] }, needsYou: 1 },
   { name: "active idle with a confirmed route", loads: [{ status: idle(), history: done }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: "/reading-list" },
-  { name: "active idle, result route not yet in the catalog", pages: [], loads: [{ status: idle(), history: done }], shown: { state: "unfinished", results: [] }, receipt: null },
+  { name: "L1: a confirmed route outside the loaded catalog is done", pages: [], loads: [{ status: idle(), history: done }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/reading-list" },
   { name: "active idle with no result", loads: [{ status: idle(), history: [call(), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "unknown result shapes are not pages", loads: [{ status: idle(), history: [call(undefined, "another__create_page"), result, resultOf("orphan", '{"route":"/expenses"}'), call("bad"), resultOf("bad", "not JSON"), call("bare"), resultOf("bare", '{"existing":true}'), end] }], shown: { state: "unfinished", results: [] } },
   { name: "is_error result", loads: [{ status: idle(), history: [call("error"), resultOf("error", "boom", true), end] }], shown: { state: "failed", reason: null, results: [] } },
@@ -64,12 +64,15 @@ const ROWS: Row[] = [
   { name: "m1: nothing remembered and zeta offline", loads: [{ status: offline }], shown: { state: null, results: [] }, building: 0, needsYou: 0 },
   { name: "m2: a sixth page build with persisted running", chats: [chat, habit, ...[1, 2, 3, 4].map((n) => ({ ...chat, session_id: `build-${n}` }))].reverse(), loads: [{ status: idle("newer") }], shown: { state: null }, building: 0 },
   { name: "an ordinary running chat never appears", chats: [ordinary], id: ordinary.session_id, loads: [{ status: running }], shown: { state: "absent" }, building: 0 },
-  { name: "receipt names the first result the catalog confirms (Q3)", pages: [expenses], loads: [{ status: idle(), history: [call(), result, call("existing"), resultOf("existing", '{"route":"/expenses","existing":true}'), end] }], shown: { state: "done", results: ["/expenses"] }, receipt: "/expenses" },
   { name: "an outage during a build, then recovery, is live again", loads: [{ status: running, history: [call()] }, { status: offline }], recover: { status: running, history: [call()] }, shown: { state: "building", reason: null }, building: 1 },
   { name: "a reload shows the kept receipt on the first render, before any catalog or zeta read", cold: true, loads: [{ status: idle(), history: done }, { status: offline }], shown: { state: "absent" }, receipt: "/reading-list" },
   { name: "acknowledging the newest receipt acknowledges older completions (Q1)", chats: [habit, chat], pages: [reading, expenses], dismiss: 1, loads: [{ status: idle(), history: done }, { status: idle(habit.session_id), history: madeExpenses }, { status: idle("newer") }], shown: { state: "done", results: ["/reading-list"] }, receipt: null },
   { name: "a build that finishes after an acknowledgement shows a new receipt", chats: [third, chat], pages: [reading, expenses], dismiss: 0, loads: [{ status: idle(), history: done }, { status: idle(third.session_id), history: madeExpenses }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/expenses" },
   { name: "a remembered confirmed route survives a later tail without the result", loads: [{ status: idle(), history: done }, { status: idle(), history: [call("later", "achilles__update_page"), end] }], shown: { state: "done", reason: null, results: ["/reading-list"] } },
+  { name: "a canceled create_page call is unfinished, not failed", loads: [{ status: idle(), history: [call("cancel"), resultOf("cancel", "tool execution canceled", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
+  { name: "L7: a tail without the create_page call and nothing remembered is no claim", loads: [{ status: idle(), history: [end], older: true }], shown: { state: null } },
+  { name: "L6: a follow-up turn that ends on a build is a new completion", dismiss: 0, loads: [{ status: idle(), history: done }, { status: { ...idle(), last_turn_outcome: { turn_id: "follow-turn" } }, history: [{ role: "user", content: [] }, { ...end, data: { turn_id: "follow-turn", reason: "completed" } }], older: true }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/reading-list" },
+  { name: "L6: a build that finished later is the receipt, whatever the chat list order", chats: [chat, habit], pages: [reading, expenses], loads: [{ status: idle(), history: done }, { status: idle(habit.session_id), history: madeExpenses }], shown: { state: "done" }, receipt: "/expenses" },
   { name: "a denied create_page approval is unfinished, not failed", loads: [{ status: idle(), history: [call("deny"), resultOf("deny", "tool execution denied", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "the tab saw the build idle with no turn end: no last known building later", loads: [{ status: running, history: [call()] }, { status: idle(), history: [call()] }, { status: idle("newer") }], shown: { state: null }, building: 0 },
   { name: "a receipt for the page this tab is on is acknowledged", at: "/reading-list", loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
@@ -88,7 +91,7 @@ function fakeZeta(first: Load, hold = false) {
       expect(params).toEqual({ session_id: (load.status as { session: { session_id: string } }).session.session_id, before: null });
       if (hold) return held.promise;
       if (load.history instanceof Error) throw load.history;
-      return { messages: load.history };
+      return { messages: load.history, next_before: load.older ? 5 : null };
     },
   } as unknown as ZetaClient;
   return { client, calls, release: (messages: unknown[]) => held.resolve({ messages }), become: (next: Load) => { load = next; } };
@@ -114,7 +117,7 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
       // a cold load starts with neither catalog loaded
       const cold = row.cold && load === row.loads.at(-1);
       hook = renderHook(({ client }) => useBuildActivity({ client, chats: cold ? noChats : chats, pages: cold ? null : pages, reloadPages: () => {} }), { initialProps: { client: first.client } });
-      if (cold) expect(hook.result.current.latestReceipt?.page.route).toBe(row.receipt!);
+      if (cold) expect(hook.result.current.latestReceipt?.route).toBe(row.receipt!);
       if (load.superseded) {
         late.push(first);
         for (let i = 0; i < 50 && first.calls.length < 2; i++) await flush();
@@ -135,10 +138,10 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
     }
     const activity = hook!.result.current;
     const found = activity.rows.find((build) => build.chat.session_id === id) as Record<string, unknown> | undefined;
-    const shown = found ? Object.fromEntries(Object.keys(row.shown).map((key) => [key, key === "results" ? (found.results as PageLink[]).map((page) => page.route) : found[key]])) : { state: "absent" };
+    const shown = found ? Object.fromEntries(Object.keys(row.shown).map((key) => [key, found[key]])) : { state: "absent" };
     expect({ row: row.name, state: shown.state }).toEqual({ row: row.name, state: row.shown.state });
     expect({ row: row.name, ...shown }).toEqual({ row: row.name, ...row.shown });
-    expect({ building: activity.building, needsYou: activity.needsYou, receipt: activity.latestReceipt?.page.route ?? null })
+    expect({ building: activity.building, needsYou: activity.needsYou, receipt: activity.latestReceipt?.route ?? null })
       .toMatchObject({ ...(row.building === undefined ? {} : { building: row.building }), ...(row.needsYou === undefined ? {} : { needsYou: row.needsYou }), ...(row.receipt === undefined ? {} : { receipt: row.receipt }) });
   } finally {
     hook?.unmount();
@@ -149,25 +152,54 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
   }
 });
 
-test("open page goes to the shown receipt's page, not the next unseen one", async () => {
-  // flushSync: a browser re-renders before it follows the link, as React flushes a discrete event's update first
-  const receipts = [{ chat: habit, page: expenses, done: 2 }, { chat, page: reading, done: 1 }];
+// The real shell with a stand-in activity. The interceptor answers the chat list and any page the test window navigates to.
+function mountShell({ needsYou = 0, sessionId = null as string | null, waiting = 0, chats = [] as Chat[] } = {}) {
+  const receipts = [{ chat: habit, route: "/expenses", turn: "t2", done: 2 }, { chat, route: "/reading-list", turn: "t1", done: 1 }];
+  const dismissed: string[] = [];
   function Shell() {
-    const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
+    const nav = useAgentNavAdapter({ sessionId, waiting, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
     const [shown, setShown] = useState(0);
-    const activity = { rows: [], latestReceipt: receipts[shown] ?? null, building: 0, needsYou: 0, announcement: "", refresh: () => {}, dismissReceipt: () => flushSync(() => setShown((value) => value + 1)) };
+    // flushSync: a browser re-renders before it follows the link, as React flushes a discrete event's update first
+    const dismissReceipt = () => { dismissed.push(receipts[shown]!.route); flushSync(() => setShown((value) => value + 1)); };
+    const activity = { rows: [], latestReceipt: receipts[shown] ?? null, building: 0, needsYou, announcement: null, markAnnounced: () => {}, refresh: () => {}, dismissReceipt };
     return createElement(AppShell, { activity, current: chatsRoute, nav, newChat: { available: false, run: () => {} }, connectionStatus: { label: "zeta connected", connected: true } }, createElement(ShellDockSlot));
   }
-  // the link navigates the test window: answer its page request locally
   const settings = (window as unknown as { happyDOM: { settings: { fetch: { interceptor: unknown } } } }).happyDOM.settings.fetch;
-  settings.interceptor = { beforeAsyncRequest: async () => new Response("") };
+  settings.interceptor = { beforeAsyncRequest: async ({ request }: { request: Request }) => new URL(request.url).pathname === "/api/chats"
+    ? Response.json({ chats, next: null, approval_count: 0 }) : new Response("") };
+  const view = render(createElement(Shell));
+  return { view, dismissed, close: () => { settings.interceptor = null; history.replaceState(null, "", "/"); } };
+}
+
+test("open page goes to the shown receipt's page, not the next unseen one", () => {
+  const shell = mountShell();
   try {
-    const view = render(createElement(Shell));
-    const open = view.getByText("open page");
-    act(() => { open.click(); });
+    act(() => { shell.view.getByText("open page").click(); });
     expect(location.pathname).toBe("/expenses");
-  } finally {
-    settings.interceptor = null;
-    history.replaceState(null, "", "/");
-  }
+  } finally { shell.close(); }
+});
+
+test("open page: a new-tab click is the browser's, Space opens like a button", () => {
+  const shell = mountShell();
+  try {
+    const open = shell.view.getByText("open page");
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      const click = new MouseEvent("click", { bubbles: true, cancelable: true, ...modifier });
+      act(() => { open.dispatchEvent(click); });
+      expect({ modifier, prevented: click.defaultPrevented, dismissed: shell.dismissed }).toEqual({ modifier, prevented: false, dismissed: [] });
+      history.replaceState(null, "", "/");
+    }
+    act(() => { open.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })); });
+    expect({ path: location.pathname, dismissed: shell.dismissed }).toEqual({ path: "/expenses", dismissed: ["/expenses"] });
+  } finally { shell.close(); }
+});
+
+test("a build that needs you is counted once in the chats badge", async () => {
+  const build = { ...chat, last_state: "approval" as const };
+  const shell = mountShell({ needsYou: 1, sessionId: build.session_id, waiting: 1, chats: [build] });
+  try {
+    const badge = () => shell.view.container.querySelector('a[aria-label="chats"] .waiting-count')?.textContent;
+    for (let i = 0; i < 50 && !shell.view.container.querySelector(".chat-row"); i++) await flush();
+    expect(badge()).toBe("1");
+  } finally { shell.close(); }
 });

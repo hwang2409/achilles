@@ -10,7 +10,7 @@ const longTitle = "notes on a very long synthetic reading list ".repeat(4).trim(
 
 function setup() {
   const called: string[] = [];
-  const value = { chats: [row("recent", "page", longTitle), row("outside", "other"), row("current"), row("older")], loading: false, error: false, next: "cursor" as string | null, reload: () => called.push("reload"), more: () => called.push("more"), clearSearch: () => {} };
+  const value = { chats: [row("recent", "page", longTitle), row("outside", "other"), row("current"), row("older")], loading: false, error: false, next: "cursor" as string | null, reload: () => called.push("reload"), more: () => called.push("more"), clearSearch: () => {}, builds: [] };
   const shell = () => createElement(PageChatCatalog.Provider, { value }, createElement(PageChatHeader, {
     pageId: "page", sessionId: "current", title: "fixture", state: "idle", stateLabel: "idle", onSelect: (chat) => called.push(chat.session_id), newChat: () => {}, approval: { checked: true, action: () => called.push("approval") }, create: { checked: true, action: () => called.push("create") }, close: () => called.push("close"), closeRef: null,
   }));

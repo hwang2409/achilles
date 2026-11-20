@@ -54,7 +54,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
                   <small className="build-meta">{label && <em>{label}</em>}<time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></small></span>
                   <b>{state === "needs you" && !reason ? "answer" : "open chat"}</b></a>
                 {tools.length > 0 && <small className="build-tools">{tools.map((tool) => tool.replace(/^achilles__/, "")).join(" · ")}</small>}
-                {results.length > 0 && <ul className="build-results" aria-label="result pages">{results.map((page) => <li key={page.id}><a href={surfaceHref(page.route)}>{page.route}</a></li>)}</ul>}
+                {results.length > 0 && <ul className="build-results" aria-label="result pages">{results.map((route) => <li key={route}><a href={surfaceHref(route)}>{route}</a></li>)}</ul>}
               </li>;
             })}</ul>}
         </section>

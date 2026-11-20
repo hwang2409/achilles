@@ -1112,7 +1112,11 @@ class PageStore:
     def approval_count(self) -> int:
         with self._connect() as db:
             return int(
-                db.execute("SELECT COUNT(*) FROM chat WHERE last_state='approval'").fetchone()[0]
+                # a page build's state belongs to the web client's build owner, not to last_state
+                db.execute(
+                    "SELECT COUNT(*) FROM chat "
+                    "WHERE last_state='approval' AND purpose<>'page_build'"
+                ).fetchone()[0]
             )
 
     def register_chat(self, page_id: str, session_id: str, purpose: str = "chat") -> dict[str, Any]:

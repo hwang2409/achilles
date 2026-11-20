@@ -663,6 +663,9 @@ def test_chat_list_orders_pages_and_uses_stable_cursor(tmp_path: Path) -> None:
     filtered = client.get("/api/chats?limit=1&q=chat%20d").json()
     assert [row["session_id"] for row in filtered["chats"]] == ["d"]
     assert filtered["approval_count"] == 1
+    with store.transaction() as db:
+        db.execute("UPDATE chat SET purpose='page_build' WHERE session_id='a'")
+    assert client.get("/api/chats?limit=1").json()["approval_count"] == 0
     assert client.get("/api/chats?limit=201").status_code == 400
     assert client.get("/api/chats?limit=invalid").status_code == 400
     assert client.get("/api/chats?before=missing").status_code == 400

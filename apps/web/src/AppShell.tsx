@@ -40,6 +40,8 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   const displaySettings = Boolean(workspace) || settingsPlace;
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const liveRegion = useRef<HTMLSpanElement>(null);
+  const [spoken, setSpoken] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -162,21 +164,35 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     ] : [],
   ];
   const receipt = activity.latestReceipt;
-  const receiptHref = receipt ? surfaceHref(receipt.page.route) : "";
+  const receiptHref = receipt ? surfaceHref(receipt.route) : "";
+  // Go to this receipt's page before the acknowledgement re-renders the link with the next receipt.
+  const openReceipt = () => { location.assign(receiptHref); activity.dismissReceipt(); };
   const showNavActivity = narrow ? drawer : !collapsed;
+  const pending = activity.announcement;
+  useEffect(() => {
+    if (!pending) return;
+    // The text is set, and the completion marked announced, only while a screen reader can reach the region.
+    const speak = () => {
+      if ((narrow && drawer) || !liveRegion.current || liveRegion.current.closest("[inert], [aria-hidden='true']") || document.querySelector("dialog[open]:modal")) return;
+      setSpoken(pending);
+      activity.markAnnounced();
+    };
+    speak();
+    document.addEventListener("close", speak, true);
+    return () => document.removeEventListener("close", speak, true);
+  }, [pending, narrow, drawer]);
   // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
   const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
   const dock = (status || receipt) ? <div className="build-dock">
     {status}
     {receipt && <aside className="build-receipt" aria-label="build receipt">
-      <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
+      <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.route} is ready</span>
       <a className="build-open" href={receiptHref} onClick={(event) => {
+        // a new-tab or new-window click is the browser's: no acknowledgement
         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        // Go to this receipt's page before the acknowledgement re-renders the link with the next receipt.
         event.preventDefault();
-        location.assign(receiptHref);
-        activity.dismissReceipt();
-      }}>open page</a>
+        openReceipt();
+      }} onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); openReceipt(); } }}>open page</a>
       <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
     </aside>}
   </div> : null;
@@ -185,7 +201,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
       action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "starting…" : "new chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
-      search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer, activity.rows)} />
+      search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className="shell-header">
@@ -193,12 +209,12 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
         {header}
       </div>
       {workspace && dock}
-      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
+      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows }}>{settingsPlace ? <ModuleFrame title={current.label}>
         <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
       </ModuleFrame> : children}</PageChatCatalog.Provider></ShellDock.Provider>
-      {/* last in main, so it never separates the shell header from the route frame */}
-      <span className="visually-hidden" role="status">{activity.announcement}</span>
     </main>
+    {/* outside main and the drawer, so it is never inert or aria-hidden */}
+    <span ref={liveRegion} className="visually-hidden" role="status">{spoken}</span>
     {displaySettings && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} onClose={closePalette} />}

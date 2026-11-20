@@ -1,5 +1,5 @@
 import { createContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { buildLabel, type BuildRow } from "../create/buildActivity";
+import { buildLabel, buildTone, type BuildRow } from "../create/buildActivity";
 import { Highlight, type PaletteEntry } from "../CommandPalette";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "../pageList";
 import { useInlineRename } from "../useInlineRename";
@@ -41,6 +41,7 @@ export const PageChatCatalog = createContext<{
   reload: () => void;
   more: () => void;
   clearSearch: () => void;
+  builds: readonly BuildRow[];
 } | null>(null);
 
 export const chatHref = (chat: Chat) => {
@@ -129,7 +130,9 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     chatListOwner.current?.dispose();
   }, []);
   const pageRows = pageList.items ?? [];
-  const waitingTotal = Math.max(waiting, chatList.meta);
+  // A page build that needs you is counted by the build owner (the shell adds it), so the current build's wait is not counted here.
+  const currentIsBuild = [...recentChats, ...chats].some((chat) => chat.session_id === sessionId && chat.purpose === "page_build");
+  const waitingTotal = Math.max(currentIsBuild ? 0 : waiting, chatList.meta);
   const groups = useMemo(() => {
     const values = new Map<string, Chat[]>();
     for (const chat of chats ?? []) { const group = groupLabel(chat.updated_at); values.set(group, [...(values.get(group) ?? []), chat]); }
@@ -250,8 +253,7 @@ function ChatRow({ chat, build, current, active, index, query, onSelect, onRenam
   // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
   // A page build's state comes only from the build owner; with no row there is no claim.
-  const live = build && !build.reason ? build.state : null;
-  const state = chat.purpose === "page_build" ? live === "building" ? "running" : live === "needs you" ? "approval" : live : chat.last_state;
+  const state = chat.purpose === "page_build" ? buildTone(build) : chat.last_state;
   const label = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
   const meta = <span><span className="chat-row-meta" title={chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;

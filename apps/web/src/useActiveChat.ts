@@ -649,7 +649,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
 
   const continueWaitingChat = useCallback(async () => {
     if (!canWrite) return;
-    const waiting = await findNewestChat((chat) => chat.last_state === "approval");
+    const waiting = await findNewestChat((chat) => chat.last_state === "approval" && chat.purpose !== "page_build");
     if (waiting) selectChat(waiting);
   }, [canWrite, selectChat]);
 

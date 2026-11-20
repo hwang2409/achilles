@@ -53,7 +53,7 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
   if (!supportsFeature(client, TELEMETRY_FEATURE)) {
     const stateFeature = "state_read_v1";
     return (
-      <div className="telemetry-placeholder">
+      <><ShellDockSlot /><div className="telemetry-placeholder">
         <section className="telemetry-notice">
           <p className="telemetry-eyebrow" role="status">telemetry · needs a newer zeta</p>
           <h1>this zeta can't show telemetry yet</h1>
@@ -74,7 +74,7 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
             <a href="/">back to chats</a>
           </div>
         </section>
-      </div>
+      </div></>
     );
   }
   const detail = sessionOf(path);

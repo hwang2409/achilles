@@ -5,9 +5,11 @@ import type { ZetaClient } from "@fulcrum/zeta";
 // The one owner of displayed page-build state. Nothing else reads chat.last_state for page_build chats.
 export type BuildState = "building" | "needs you" | "done" | "unfinished" | "failed";
 export type BuildReason = "zeta offline" | "not the current session" | "checking zeta";
-// `done` orders completions in this tab: a counter taken when the build is first seen done.
-type Observation = { state: BuildState; routes: string[]; done?: number };
-type Live = { current: string | null; observed?: Observation & { tools: string[] }; reason: BuildReason | null };
+// `turn` is the turn end that made a build done; `done` orders completions in this tab: a counter taken when this tab first saw that turn end.
+type Observation = { state: BuildState; routes: string[]; turn?: string; done?: number };
+// `unproven`: the turn ended with no route in view, but the page does not hold the whole history (Q2: no evidence, no claim).
+type Seen = Observation & { tools: string[]; unproven?: boolean };
+type Live = { current: string | null; observed?: Seen; reason: BuildReason | null };
 const states: readonly BuildState[] = ["building", "needs you", "done", "unfinished", "failed"];
 const active = (state: BuildState) => state === "building" || state === "needs you";
 const isBuild = (chat: Chat) => chat.purpose === "page_build";
@@ -15,13 +17,16 @@ const object = (value: unknown): Record<string, unknown> | undefined => value !=
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const isRoute = (route: unknown): route is string => typeof route === "string" && /^\/(?!\/)[^?#\\\s]+$/.test(route);
 
-type Collected = { routes: string[]; openCalls: string[]; lastCreateFailed: boolean; latestEnd?: Record<string, unknown> };
+type Collected = { routes: string[]; openCalls: string[]; calledCreate: boolean; lastCreateFailed: boolean; latestEnd?: Record<string, unknown> };
+// Q2: the user denying or zeta cancelling the call is not a failure.
+const notFailure = (content: unknown) => typeof content === "string" && (content.startsWith("tool execution denied") || content.startsWith("tool execution canceled"));
 
 // Successful create_page routes, in result order, from one history page. Unknown shapes are not pages.
 function collectCreateRoutes(messages: readonly unknown[]): Collected {
   const calls = new Map<string, string>();
   const routes = new Set<string>();
   let lastCreateFailed = false;
+  let calledCreate = false;
   let latestEnd: Record<string, unknown> | undefined;
   for (const raw of messages) {
     const row = object(raw);
@@ -31,6 +36,7 @@ function collectCreateRoutes(messages: readonly unknown[]): Collected {
       for (const block of array(row.content).map(object)) {
         const call = block?.type === "tool_use" && object(block.tool_call);
         if (call && typeof call.id === "string" && typeof call.name === "string") calls.set(call.id, call.name);
+        if (call && call.name === "achilles__create_page") calledCreate = true;
       }
     }
     const result = row?.role === "tool_result" ? object(row.tool_result) : undefined;
@@ -40,11 +46,9 @@ function collectCreateRoutes(messages: readonly unknown[]): Collected {
     if (name !== "achilles__create_page") continue;
     const route = result.is_error === false ? createdRoute(result.content) : undefined;
     if (route) routes.add(route);
-    // Q2: a denied approval is the user's choice, not a failure.
-    const denied = typeof result.content === "string" && result.content.startsWith("tool execution denied");
-    if (route || (result.is_error === true && !denied)) lastCreateFailed = !route;
+    if (route || (result.is_error === true && !notFailure(result.content))) lastCreateFailed = !route;
   }
-  return { routes: [...routes], openCalls: [...calls.values()], lastCreateFailed, latestEnd };
+  return { routes: [...routes], openCalls: [...calls.values()], calledCreate, lastCreateFailed, latestEnd };
 }
 
 function createdRoute(content: unknown) {
@@ -63,18 +67,23 @@ function classify(status: Record<string, unknown>, { routes, lastCreateFailed, l
   return latestEnd!.reason === "error" || lastCreateFailed ? "failed" : routes.length ? "done" : "unfinished";
 }
 
-function fromHistory(status: Record<string, unknown>, history: unknown): (Observation & { tools: string[] }) | null {
-  const messages = object(history)?.messages;
+function fromHistory(status: Record<string, unknown>, history: unknown): Seen | null {
+  const page = object(history);
+  const messages = page?.messages;
   if (!Array.isArray(messages)) throw new Error("missing build history");
   const collected = collectCreateRoutes(messages);
   const state = classify(status, collected);
   if (!state) return null;
+  // A missing create_page call is evidence only when the page holds the whole history.
+  const unproven = state === "unfinished" && !collected.calledCreate && page!.next_before !== null;
   const pendingTools = array(status.pending_approvals).map((raw) => object(object(raw)?.tool_call)?.name).filter((name): name is string => typeof name === "string");
-  return { state, routes: collected.routes, tools: active(state) ? [...new Set([...pendingTools, ...collected.openCalls])] : [] };
+  const turn = active(state) ? undefined : collected.latestEnd!.turn_id as string;
+  return { state, routes: collected.routes, turn, unproven, tools: active(state) ? [...new Set([...pendingTools, ...collected.openCalls])] : [] };
 }
 
 type Store = Pick<Storage, "getItem" | "setItem">;
-type Receipt = { chat: Chat; page: PageLink; done: number };
+// A confirmed route from a non-error create_page result. Done never waits for the page catalog.
+type Receipt = { chat: Chat; route: string; turn: string; done: number };
 const observationKey = (id: string) => `achilles:build-observed:${id}`;
 
 // Per-tab memory: what this tab observed live, and which receipts it acknowledged (Q1).
@@ -88,7 +97,8 @@ export function buildMemory(storage: () => Store) {
       const value = object(JSON.parse(read(observationKey(id)) ?? "null"));
       const routes = array(value?.routes);
       const done = typeof value?.done === "number" ? value.done : undefined;
-      if (states.includes(value?.state as BuildState) && routes.every(isRoute)) return { state: value!.state as BuildState, routes: routes as string[], done };
+      const turn = typeof value?.turn === "string" ? value.turn : undefined;
+      if (states.includes(value?.state as BuildState) && routes.every(isRoute)) return { state: value!.state as BuildState, routes: routes as string[], turn, done };
     } catch { /* an unknown row is no observation */ }
     return undefined;
   };
@@ -102,14 +112,19 @@ export function buildMemory(storage: () => Store) {
   return {
     observed,
     seen,
-    // A live observation merged with what this tab remembers: a confirmed route is never downgraded (Q2),
-    // and a completion keeps the order number it got when this tab first saw it done.
-    observe(id: string, live: Observation): Observation {
+    // A live observation merged with what this tab remembers: a confirmed route is never downgraded (Q2).
+    // Each turn end that leaves the build done is one completion, numbered when this tab first sees it.
+    observe(id: string, live: Observation & { unproven?: boolean }): Observation | undefined {
       const before = observed(id);
       const routes = [...new Set([...before?.routes ?? [], ...live.routes])];
+      if (live.unproven && !routes.length) {
+        if (before && active(before.state)) write(observationKey(id), "null");
+        return before && !active(before.state) ? before : undefined;
+      }
       const state = live.state === "unfinished" && routes.length ? "done" : live.state;
-      const done = state !== "done" ? undefined : before?.state === "done" && before.done !== undefined ? before.done : nextDone();
-      const next = { state, routes, done };
+      const turn = state === "done" ? live.turn : undefined;
+      const done = state !== "done" ? undefined : before?.state === "done" && before.turn === turn && before.done !== undefined ? before.done : nextDone();
+      const next = { state, routes, turn, done };
       write(observationKey(id), JSON.stringify(next));
       return next;
     },
@@ -119,20 +134,16 @@ export function buildMemory(storage: () => Store) {
     receipt(): Receipt | undefined {
       try {
         const value = object(JSON.parse(read("achilles:build-receipt-shown") ?? "null"));
-        const chat = object(value?.chat), page = object(value?.page);
-        if (typeof chat?.session_id === "string" && typeof page?.id === "string" && isRoute(page.route) && typeof value?.done === "number") return { chat: chat as Chat, page: page as PageLink, done: value.done };
+        const chat = object(value?.chat);
+        if (typeof chat?.session_id === "string" && isRoute(value?.route) && typeof value.turn === "string" && typeof value.done === "number") return { chat: chat as Chat, route: value.route, turn: value.turn, done: value.done };
       } catch { /* an unknown row is no receipt */ }
       return undefined;
     },
     keepReceipt: (receipt: Receipt) => write("achilles:build-receipt-shown", JSON.stringify(receipt)),
     acknowledge: ({ done }: Receipt) => { if (!seen(done)) write("achilles:build-acked-through", String(done)); },
-    // True only the first time this tab asks, so a receipt is announced once and not on every route load.
-    announce(id: string, route: string) {
-      const key = `achilles:build-receipt:${JSON.stringify([id, route])}:announced`;
-      if (read(key) === "1") return false;
-      write(key, "1");
-      return true;
-    },
+    // A receipt is announced once per completion; the shell marks it only after it set the text in a live region that can speak.
+    announced: ({ chat, turn }: Receipt) => read(`achilles:build-announced:${JSON.stringify([chat.session_id, turn])}`) === "1",
+    markAnnounced: ({ chat, turn }: Receipt) => write(`achilles:build-announced:${JSON.stringify([chat.session_id, turn])}`, "1"),
   };
 }
 type Memory = ReturnType<typeof buildMemory>;
@@ -176,7 +187,8 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     const read = await readLive(chats, request, controller.signal);
     if (current !== generation) return;
     if (read.current && !read.observed) memory.forgetActive(read.current);
-    const live = read.current && read.observed ? { ...read, observed: { ...read.observed, ...memory.observe(read.current, read.observed) } } : read;
+    const merged = read.current && read.observed ? memory.observe(read.current, read.observed) : undefined;
+    const live = { ...read, observed: merged && { ...read.observed!, ...merged } };
     publish(live);
     if (live.observed?.routes.length) reloadPages(live.observed.routes);
     const again = () => void refresh(chats, request);
@@ -189,33 +201,33 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   return { refresh, stop };
 }
 
-export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: PageLink[]; tools: string[] };
+export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: string[]; tools: string[] };
 // A reason marks a remembered state that is not live now; it is never counted.
 export const buildLabel = ({ state, reason }: Pick<BuildRow, "state" | "reason">) => state === null ? null : reason ? `last known ${state} · ${reason}` : state;
+// The chat-list state class for a build row: only live states get a live tone.
+export const buildTone = (row?: BuildRow) => !row?.state || row.reason ? null : row.state === "building" ? "running" : row.state === "needs you" ? "approval" : row.state;
 
-function projectBuilds(chats: readonly Chat[], pages: readonly PageLink[] | null, live: Live, memory: Memory) {
+function projectBuilds(chats: readonly Chat[], live: Live, memory: Memory) {
   let latestReceipt: Receipt | null = null;
   const rows: BuildRow[] = [];
   for (const chat of chats.filter(isBuild)) {
     const isLive = live.current === chat.session_id;
-    const known = isLive ? live.observed : memory.observed(chat.session_id);
+    // With no proof from the live read, what this tab remembers stands (active states were dropped when it saw the session idle).
+    const known = (isLive && live.observed) || memory.observed(chat.session_id);
     const tools = isLive ? live.observed?.tools ?? [] : [];
-    if (!known || (known.routes.length && known.state === "done" && pages === null)) {
+    if (!known) {
       rows.push({ chat, state: null, reason: null, results: [], tools });
       continue;
     }
-    const results = known.routes.flatMap((route) => pages?.find((page) => page.route === route) ?? []);
-    const state = known.state === "done" && !results.length ? "unfinished" : known.state;
+    const { state, turn, done, routes: results } = known;
     const reason = !isLive && active(state) ? live.reason ?? "not the current session" : null;
-    // Q3: the first result route that the catalog confirms names the compact receipt.
-    const done = known.done;
-    // Q1: the newest completion this tab saw and has not acknowledged.
-    if (state === "done" && done !== undefined && !memory.seen(done) && done > (latestReceipt?.done ?? 0)) latestReceipt = { chat, page: results[0]!, done };
+    // Q1: the newest completion this tab saw and has not acknowledged; Q3: its first result names the receipt.
+    if (state === "done" && turn !== undefined && done !== undefined && results.length && !memory.seen(done) && done > (latestReceipt?.done ?? 0)) latestReceipt = { chat, route: results[0]!, turn, done };
     rows.push({ chat, state, reason, results, tools });
   }
   const count = (state: BuildState) => rows.filter((row) => row.state === state && !row.reason).length;
-  // Until both catalogs load, the receipt this tab last showed stands in, so it renders at once and nothing shifts.
-  const kept = !latestReceipt && (!chats.length || pages === null) ? memory.receipt() : undefined;
+  // Until the chat list loads, the receipt this tab last showed stands in, so it renders at once and nothing shifts.
+  const kept = !latestReceipt && !chats.length ? memory.receipt() : undefined;
   if (kept && !memory.seen(kept.done)) latestReceipt = kept;
   return { rows, latestReceipt, building: count("building"), needsYou: count("needs you") };
 }
@@ -240,19 +252,23 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
     void reader.refresh(chats, client?.request);
     return reader.stop;
   }, [chats, client, reader, retry]);
-  const activity = useMemo(() => projectBuilds(chats, pages, live, memory), [chats, pages, live, memory, revision]);
-  // The shell mounts its status region empty; the text arrives later so screen readers announce it.
-  const [announcement, setAnnouncement] = useState("");
+  const activity = useMemo(() => projectBuilds(chats, live, memory), [chats, live, memory, revision]);
+  // Same-document navigation (back/forward) can land on the receipt's page.
+  useEffect(() => {
+    const moved = () => setRevision((value) => value + 1);
+    addEventListener("popstate", moved);
+    return () => removeEventListener("popstate", moved);
+  }, []);
   const shown = activity.latestReceipt;
-  // A receipt for the page this tab is on is already seen.
-  const onItsPage = shown?.page.route === location.pathname;
+  // A receipt for the page this tab is on is already seen. Read at each render: every pushState here comes with a state update.
+  const onItsPage = shown?.route === location.pathname;
   useEffect(() => { if (shown && onItsPage) { memory.acknowledge(shown); setRevision((value) => value + 1); } }, [shown, onItsPage, memory]);
   const receipt = onItsPage ? null : shown;
   useEffect(() => { if (receipt) memory.keepReceipt(receipt); }, [receipt, memory]);
-  useEffect(() => {
-    if (receipt && memory.announce(receipt.chat.session_id, receipt.page.route)) setAnnouncement(`${titleOf(receipt.chat)} finished · ${receipt.page.route} is ready`);
-  }, [receipt?.chat.session_id, receipt?.page.route, memory]);
-  return { ...activity, latestReceipt: receipt, announcement,
+  return { ...activity, latestReceipt: receipt,
+    // The text the shell's live region should speak once, or null when this completion was already announced.
+    announcement: receipt && !memory.announced(receipt) ? `${titleOf(receipt.chat)} finished · ${receipt.route} is ready` : null,
+    markAnnounced: () => { if (receipt) memory.markAnnounced(receipt); },
     refresh: () => { pageCheck.requested.clear(); pageCheck.reloadPages(); setRetry((value) => value + 1); },
     dismissReceipt: () => {
       if (!receipt) return;
