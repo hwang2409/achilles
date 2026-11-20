@@ -304,16 +304,14 @@ test("rows with no turn end are no claim: the fallback label stays", async () =>
 
 test("-32004: the read waits at least retry_after_ms before it asks again", async () => {
   jest.useFakeTimers(); fakeClock = true;
-  let replies = 0;
-  const zeta = serveZeta({ status: () => idle("newer"), read: () => { if (replies++ === 0) throw busy; return rows(done); } });
+  const at: number[] = [];
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { at.push(Date.now()); if (at.length === 1) throw busy; return rows(done); } });
   const hook = await mount(zeta);
-  // bun's fake clock also counts the real ms that pass between scheduling and advancing: check well before 2000 ms
-  act(() => { jest.advanceTimersByTime(1500); });
-  await settle();
-  expect(zeta.reads().length).toBe(1);
-  act(() => { jest.advanceTimersByTime(1100); });
+  // bun's fake clock follows real time across event-loop ticks, so compare the times the fake read saw, on the timer's clock
+  act(() => { jest.advanceTimersByTime(2600); });
   await settle();
   expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 2, label: "done", receipt: null });
+  expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(2000);
 });
 
 test("-32004 three times: three reads, then no claim until a new demand", async () => {
@@ -438,6 +436,31 @@ test("run end: a chat-list change while the build's history is in flight does no
   held.resolve({ messages: done, next_before: null });
   await settle();
   expect(rowOf(hook)).toEqual({ label: "done", receipt: "/reading-list" });
+});
+
+test("one read in flight: new chats and a run end during a busy wait or a held read send no second read", async () => {
+  jest.useFakeTimers(); fakeClock = true;
+  const held: ((value: unknown) => void)[] = [];
+  let first = true;
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { if (first) { first = false; throw busy; } return new Promise((resolve) => held.push(resolve)); } });
+  const end = runEnds(zeta.client);
+  const hook = await mount(zeta, builds("b1", "b2"));
+  // b1 is busy and waits; b2 is queued. A new turn on b2 and its run end must not read during the wait.
+  hook.rerender({ client: zeta.client, chats: [builds("b1")[0]!, { ...builds("b2")[0]!, updated_at: "2030-01-02" }] });
+  end("b2");
+  await settle();
+  expect(zeta.reads()).toEqual(["b1"]);
+  act(() => { jest.advanceTimersByTime(2600); });
+  await settle();
+  expect(zeta.reads()).toEqual(["b1", "b1"]);
+  // b1's second read is held. Another new turn on b2 and a run end must not send b2 beside it.
+  hook.rerender({ client: zeta.client, chats: [builds("b1")[0]!, { ...builds("b2")[0]!, updated_at: "2030-01-03" }] });
+  end("b2");
+  await settle();
+  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ["b1", "b1"] });
+  held.shift()!(rows([]));
+  await settle();
+  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ["b1", "b1", "b2"] });
 });
 
 test("a second tab on a workspace route sees another tab's build when it comes back", async () => {

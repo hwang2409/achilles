@@ -257,13 +257,16 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
         try { prove(id, fromHistory(null, page, "next_cursor")); } catch { /* an unknown reply is no claim */ }
       }
     } else if (code === -32004) {
-      // Another read is in flight on this serve (another tab or client): wait at least what zeta asks, with jitter.
+      // Another read is in flight on this serve (another tab or client): wait at least what zeta asks, with jitter,
+      // before the next read. After the last try the wait still holds, then the queue moves on without this build.
       const tries = (busyTries.get(id) ?? 0) + 1;
       busyTries.set(id, tries);
-      if (tries < BUSY_TRIES) {
-        const wait = Math.max(2000, Number(errorData(error)?.retry_after_ms) || 0) + Math.random() * 500;
-        busyTimer = setTimeout(() => { busyTimer = undefined; if (!queue.includes(id)) queue.unshift(id); pump(); }, wait);
-      }
+      const wait = Math.max(2000, Number(errorData(error)?.retry_after_ms) || 0) + Math.random() * 500;
+      busyTimer = setTimeout(() => {
+        busyTimer = undefined;
+        if (tries < BUSY_TRIES && !queue.includes(id)) queue.unshift(id);
+        pump();
+      }, wait);
     } else if (code === -32601) { reads = false; queue = []; }
     // The build became zeta's attached session: the live pass reads it now.
     else if (code === -32602 && errorData(error)?.code !== "session_not_found") run();
