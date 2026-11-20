@@ -100,7 +100,7 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
 }
 
 export const receipt = (enabled: boolean) => enabled
-  ? reviewText("telemetry is on. restart zeta to start recording.")
+  ? reviewText("telemetry is on. restart zeta to start recording. a zeta without zeta[otel] does not start; turn it off here.")
   : reviewText("telemetry is off. restart zeta to stop recording.");
 type Committed = { status: "committed"; receipt: ReviewText; value: ReviewText };
 type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;

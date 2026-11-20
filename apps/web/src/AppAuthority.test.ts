@@ -443,7 +443,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       return;
     }
     // the time is its own element: match the receipt's whole text
-    expect(await app.findByText((_, node) => node?.tagName === "P" && /^at .+: telemetry is on\. restart zeta to start recording\.$/.test(node.textContent ?? ""))).toBeTruthy();
+    expect(await app.findByText((_, node) => node?.tagName === "P" && /^at .+: telemetry is on\. restart zeta to start recording\. a zeta without zeta\[otel\] does not start; turn it off here\.$/.test(node.textContent ?? ""))).toBeTruthy();
     expect(app.getByText("restart zeta serve. this list goes away when you leave this page.")).toBeTruthy();
     didWrite(writes, "home_settings_update");
   } },

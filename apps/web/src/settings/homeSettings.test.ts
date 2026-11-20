@@ -60,7 +60,7 @@ describe("write", () => {
   test("update params are exactly the revision and one change, sent once inside the borrow", async () => {
     const zeta = fakeZeta({ home_settings_update: [updated(true)] });
     const { op, seen } = change(zeta);
-    expect(await op.execute()).toMatchObject({ status: "committed", receipt: "telemetry is on. restart zeta to start recording." });
+    expect(await op.execute()).toMatchObject({ status: "committed", receipt: "telemetry is on. restart zeta to start recording. a zeta without zeta[otel] does not start; turn it off here." });
     expect(zeta.calls).toEqual([["home_settings_update", { expected_revision: rev("a"), changes: [{ key: "telemetry.enabled", value: true }] }]]);
     expect(seen.committed).toEqual([[{ revision: rev("b"), telemetry: "on", editable: true, malformed: false }, { sessions: ["s1"], complete: true }]]);
   });
