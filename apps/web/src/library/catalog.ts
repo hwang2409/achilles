@@ -1,7 +1,14 @@
 export const sourceTiers = ["project", "home", "packaged"] as const;
 type Source = typeof sourceTiers[number];
 
-type Summary = { name: string; description: string; source: Source };
+const scopes = ["effective", "home", "project"] as const;
+type Scope = typeof scopes[number];
+// Older zeta reports no diagnostics (null); a newer catalog keeps the first few messages and counts the rest.
+type Diagnostics = { items: string[]; more: number } | null;
+export const DIAGNOSTICS_SHOWN = 5;
+const DIAGNOSTIC_CHARS = 500;
+
+type Summary = { name: string; description: string; source: Source; scope: Scope; editable: boolean; diagnostics: Diagnostics };
 type Skill = Summary & { keywords: string[] };
 type Profile = Summary & {
   tools: string[] | null;
@@ -21,11 +28,15 @@ const strings = (value: unknown): value is string[] =>
 const adapters = {
   skills: {
     key: "skill_catalog",
+    catalog: "skill_catalog",
+    read: "skill_read",
     fields: (row: Record<string, unknown>, summary: Summary): Skill | null =>
       strings(row.keywords) ? { ...summary, keywords: [...row.keywords] } : null,
   },
   "agent-profiles": {
     key: "agent_catalog",
+    catalog: "agent_profile_catalog",
+    read: "agent_profile_read",
     fields: (row: Record<string, unknown>, summary: Summary): Profile | null => {
       const { tools, model, allow_delegation, accepts_follow_ups, explicit_finish, max_turns } = row;
       if (!(tools === null || strings(tools)) || !(model === null || typeof model === "string") ||
@@ -39,6 +50,57 @@ const adapters = {
 };
 export type LibraryKind = keyof typeof adapters;
 export type Catalog = { state: "data"; rows: CatalogRow[] } | { state: "empty" | "no-session" | "invalid" };
+export type CatalogPage = { state: "data"; rows: CatalogRow[]; nextOffset: number | null } | { state: "invalid" };
+export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read });
+
+const offset = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const bySource = (rows: CatalogRow[]) => rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source));
+
+function diagnostics(value: unknown): Diagnostics | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items: string[] = [];
+  for (const entry of value) {
+    const message = typeof entry === "string" ? entry : record(entry) && typeof entry.message === "string" ? entry.message : undefined;
+    if (message === undefined) return undefined;
+    if (items.length < DIAGNOSTICS_SHOWN) items.push(message.slice(0, DIAGNOSTIC_CHARS));
+  }
+  return { items, more: value.length - items.length };
+}
+
+// One library_read_v1 catalog page: keep display metadata only; any malformed row rejects the page.
+export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogPage {
+  const data = record(result) ? result.data : undefined;
+  if (!record(data) || !Array.isArray(data.items) || !(data.next_offset === undefined || offset(data.next_offset))) return { state: "invalid" };
+  const rows: CatalogRow[] = [];
+  const names = new Set<string>();
+  for (const row of data.items) {
+    if (!record(row)) return { state: "invalid" };
+    const { name, description, editable } = row;
+    const source = sourceTiers.find((tier) => tier === row.source);
+    const scope = scopes.find((value) => value === row.scope);
+    const found = diagnostics(row.diagnostics);
+    if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !source || !scope ||
+        typeof editable !== "boolean" || !found || names.has(name)) return { state: "invalid" };
+    const item = adapters[kind].fields(row, { name, description, source, scope, editable: editable && source !== "packaged", diagnostics: found });
+    if (!item) return { state: "invalid" };
+    rows.push(item);
+    names.add(name);
+  }
+  return { state: "data", rows, nextOffset: data.next_offset ?? null };
+}
+
+// Live pages can shift between requests: keep the first row seen for each name.
+export const appendPage = (rows: CatalogRow[], page: CatalogRow[]) =>
+  bySource([...rows, ...page.filter((row) => !rows.some(({ name }) => name === row.name))]);
+
+export type Body = { text: string; redacted: boolean; truncated: boolean };
+// The body is untrusted user text: keep only the text and its two flags, never the frontmatter.
+export function projectBody(result: unknown, name: string): Body | null {
+  const data = record(result) ? result.data : undefined;
+  if (!record(data) || data.name !== name || typeof data.body !== "string" || typeof data.redacted !== "boolean" ||
+      !(data.truncated === undefined || typeof data.truncated === "boolean")) return null;
+  return { text: data.body, redacted: data.redacted, truncated: data.truncated === true };
+}
 
 // Keep only display metadata; never retain the status envelope or raw rows.
 export function projectCatalog(status: unknown, kind: LibraryKind): Catalog {
@@ -60,10 +122,11 @@ export function projectCatalog(status: unknown, kind: LibraryKind): Catalog {
     if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !source || names.has(name)) {
       return { state: "invalid" };
     }
-    const item = adapter.fields(row, { name, description, source });
+    const item = adapter.fields(row, { name, description, source, scope: source === "packaged" ? "effective" : source,
+      editable: source !== "packaged", diagnostics: null });
     if (!item) return { state: "invalid" };
     rows.push(item);
     names.add(name);
   }
-  return { state: "data", rows: rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source)) };
+  return { state: "data", rows: bySource(rows) };
 }
