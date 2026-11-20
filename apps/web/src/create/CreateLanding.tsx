@@ -43,7 +43,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
           {starters.map((starter) => <button type="button" key={starter} disabled={build.pending || build.locked} onClick={() => { build.setDraft(starter); prompt.current?.focus(); }}>{starter}</button>)}
         </div>
         <section aria-labelledby="create-open">
-          <header><h2 id="create-open">recent builds</h2>{(activity.stale || activity.rows.some((row) => row.reason)) && <button type="button" onClick={activity.refresh}>refresh</button>}</header>
+          <header><h2 id="create-open">recent builds</h2>{(activity.stale || activity.rows.some((row) => row.reason)) && <button type="button" title={activity.stale ? "could not check: zeta was busy" : undefined} onClick={activity.refresh}>refresh</button>}</header>
           {!activity.rows.length ? catalog.error ? <p>could not load builds. <button type="button" onClick={catalog.reload}>retry</button></p>
             : catalog.loading ? <p role="status">reading recent builds…</p> : <p>no recent page builds.</p>
             : <ul>{activity.rows.slice(0, 4).map((row) => <BuildCard key={row.chat.session_id} row={row} onScreen={activity.onScreen} />)}</ul>}

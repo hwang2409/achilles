@@ -25,6 +25,7 @@
 .create-landing section { margin-top: 32px; }
 .create-landing section header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
 .create-landing section header :is(a, span), .create-landing small { color: var(--fulcrum-muted); font-size: 12px; }
+.create-landing section header button { min-height: 24px; }
 .create-landing h2 { margin: 0; font-size: 15px; }
 .create-landing ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .create-landing li > a { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; }
