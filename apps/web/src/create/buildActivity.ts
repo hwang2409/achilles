@@ -14,10 +14,10 @@ const object = (value: unknown): Record<string, unknown> | undefined => value !=
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const isRoute = (route: unknown): route is string => typeof route === "string" && /^\/(?!\/)[^?#\\\s]+$/.test(route);
 
-// Returns null when the history does not prove how the last turn ended.
-function fromHistory(status: Record<string, unknown>, history: unknown): (Observation & { tools: string[] }) | null {
-  const messages = object(history)?.messages;
-  if (!Array.isArray(messages)) throw new Error("missing build history");
+type Collected = { routes: string[]; openCalls: string[]; lastCreateFailed: boolean; latestEnd?: Record<string, unknown> };
+
+// Successful create_page routes, in result order, from one history page. Unknown shapes are not pages.
+export function collectCreateRoutes(messages: readonly unknown[]): Collected {
   const calls = new Map<string, string>();
   const routes = new Set<string>();
   let lastCreateFailed = false;
@@ -27,37 +27,47 @@ function fromHistory(status: Record<string, unknown>, history: unknown): (Observ
     if (row?.role === "user") latestEnd = undefined;
     if (row?.role === "system" && row.event === "served_turn_end") latestEnd = object(row.data);
     if (row?.role === "assistant") {
-      for (const rawBlock of array(row.content)) {
-        const block = object(rawBlock);
+      for (const block of array(row.content).map(object)) {
         const call = block?.type === "tool_use" && object(block.tool_call);
         if (call && typeof call.id === "string" && typeof call.name === "string") calls.set(call.id, call.name);
       }
     }
-    if (row?.role !== "tool_result") continue;
-    const result = object(row.tool_result);
+    const result = row?.role === "tool_result" ? object(row.tool_result) : undefined;
     if (!result || typeof result.tool_call_id !== "string") continue;
     const name = calls.get(result.tool_call_id);
     calls.delete(result.tool_call_id);
     if (name !== "achilles__create_page") continue;
-    if (result.is_error === true) lastCreateFailed = true;
-    if (result.is_error !== false || typeof result.content !== "string") continue;
-    try {
-      const route = object(JSON.parse(result.content))?.route;
-      if (isRoute(route)) {
-        routes.add(route);
-        lastCreateFailed = false;
-      }
-    } catch { /* an unknown result is not a page */ }
+    const route = result.is_error === false ? createdRoute(result.content) : undefined;
+    if (route) routes.add(route);
+    if (route || result.is_error === true) lastCreateFailed = !route;
   }
-  const pending = array(status.pending_approvals);
+  return { routes: [...routes], openCalls: [...calls.values()], lastCreateFailed, latestEnd };
+}
+
+function createdRoute(content: unknown) {
+  try {
+    const route = typeof content === "string" ? object(JSON.parse(content))?.route : undefined;
+    return isRoute(route) ? route : undefined;
+  } catch { return undefined; }
+}
+
+// The state the live status and history prove, or null when they do not show how the last turn ended.
+export function classify(status: Record<string, unknown>, { routes, lastCreateFailed, latestEnd }: Collected): BuildState | null {
+  if (array(status.pending_approvals).length) return "needs you";
+  if (status.state === "running" || status.state === "tool") return "building";
   const ended = status.state === "idle" && typeof latestEnd?.turn_id === "string" && latestEnd.turn_id === object(status.last_turn_outcome)?.turn_id;
-  const state: BuildState | null = pending.length ? "needs you"
-    : status.state === "running" || status.state === "tool" ? "building"
-    : !ended ? null
-    : latestEnd!.reason === "error" || lastCreateFailed ? "failed" : routes.size ? "done" : "unfinished";
+  if (!ended) return null;
+  return latestEnd!.reason === "error" || lastCreateFailed ? "failed" : routes.length ? "done" : "unfinished";
+}
+
+function fromHistory(status: Record<string, unknown>, history: unknown): (Observation & { tools: string[] }) | null {
+  const messages = object(history)?.messages;
+  if (!Array.isArray(messages)) throw new Error("missing build history");
+  const collected = collectCreateRoutes(messages);
+  const state = classify(status, collected);
   if (!state) return null;
-  const pendingTools = pending.map((raw) => object(object(raw)?.tool_call)?.name).filter((name): name is string => typeof name === "string");
-  return { state, routes: [...routes], tools: active(state) ? [...new Set([...pendingTools, ...calls.values()])] : [] };
+  const pendingTools = array(status.pending_approvals).map((raw) => object(object(raw)?.tool_call)?.name).filter((name): name is string => typeof name === "string");
+  return { state, routes: collected.routes, tools: active(state) ? [...new Set([...pendingTools, ...collected.openCalls])] : [] };
 }
 
 type Store = Pick<Storage, "getItem" | "setItem">;
@@ -93,9 +103,28 @@ export function buildMemory(storage: () => Store) {
 }
 type Memory = ReturnType<typeof buildMemory>;
 type Request = ZetaClient["request"];
+const POLL_MS = 2000;
+const RETRY_MS = [2000, 5000, 10000];
+
+// One status (and, for a current build, one history) read per refresh; one timer at most.
+async function readLive(chats: readonly Chat[], request: Request, signal: AbortSignal): Promise<Live> {
+  const options = { signal, timeoutMs: 8000 };
+  try {
+    const status = object(await request("status", {}, options));
+    const id = object(status?.session)?.session_id;
+    if (!status || typeof id !== "string" || !chats.some((chat) => isBuild(chat) && chat.session_id === id) || signal.aborted) return { current: null, reason: "not the current session" };
+    // The pinned server can read only the runtime's current session. Its null cursor selects one bounded tail page.
+    const history = await request("session_history", { session_id: id, before: null }, options);
+    return { current: id, observed: fromHistory(status, history) ?? undefined, reason: null };
+  } catch (error) {
+    // A runtime switch between status and history returns NO_ACTIVE_SESSION.
+    return { current: null, reason: object(error)?.code === -32003 ? "not the current session" : "zeta offline" };
+  }
+}
 
 function createBuildReader(memory: Memory, publish: (live: Live) => void, reloadPages: (routes: string[]) => void) {
   let generation = 0;
+  let misses = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let controller: AbortController | undefined;
   const stop = () => {
@@ -108,25 +137,17 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     const current = generation;
     if (!request) return publish({ current: null, reason: "zeta offline" });
     controller = new AbortController();
-    const options = { signal: controller.signal, timeoutMs: 8000 };
-    let live: Live = { current: null, reason: "not the current session" };
-    try {
-      const status = object(await request("status", {}, options));
-      const id = object(status?.session)?.session_id;
-      if (status && typeof id === "string" && chats.some((chat) => isBuild(chat) && chat.session_id === id) && !options.signal.aborted) {
-        // The pinned server can read only the runtime's current session. Its null cursor selects one bounded tail page.
-        const history = await request("session_history", { session_id: id, before: null }, options);
-        live = { current: id, observed: fromHistory(status, history) ?? undefined, reason: null };
-      }
-    } catch (error) {
-      // A runtime switch between status and history returns NO_ACTIVE_SESSION.
-      live = { current: null, reason: object(error)?.code === -32003 ? "not the current session" : "zeta offline" };
-    }
+    const live = await readLive(chats, request, controller.signal);
     if (current !== generation) return;
     if (live.current && live.observed) memory.observe(live.current, live.observed);
     publish(live);
     if (live.observed?.routes.length) reloadPages(live.observed.routes);
-    if (live.observed && active(live.observed.state)) timer = setTimeout(() => void refresh(chats, request), 2000);
+    const again = () => void refresh(chats, request);
+    // Poll a live active build; after an outage, retry with backoff while this tab remembers an active build.
+    const waiting = live.reason === "zeta offline" && chats.some((chat) => isBuild(chat) && active(memory.observed(chat.session_id)?.state ?? "done"));
+    misses = live.reason === "zeta offline" ? misses + 1 : 0;
+    if (live.observed && active(live.observed.state)) timer = setTimeout(again, POLL_MS);
+    else if (waiting) timer = setTimeout(again, RETRY_MS[Math.min(misses, RETRY_MS.length) - 1]);
   };
   return { refresh, stop };
 }
@@ -149,10 +170,8 @@ function projectBuilds(chats: readonly Chat[], pages: readonly PageLink[] | null
     const results = known.routes.flatMap((route) => pages?.find((page) => page.route === route) ?? []);
     const state = known.state === "done" && !results.length ? "unfinished" : known.state;
     const reason = !isLive && active(state) ? live.reason ?? "not the current session" : null;
-    if (!latestReceipt && state === "done") {
-      const page = results.find((page) => page.route === known.routes[0]);
-      if (page && !memory.seen(chat.session_id, page.route)) latestReceipt = { chat, page };
-    }
+    // Q3: the first result route that the catalog confirms names the compact receipt.
+    if (!latestReceipt && state === "done" && !memory.seen(chat.session_id, results[0]!.route)) latestReceipt = { chat, page: results[0]! };
     rows.push({ chat, state, reason, results, tools });
   }
   const count = (state: BuildState) => rows.filter((row) => row.state === state && !row.reason).length;

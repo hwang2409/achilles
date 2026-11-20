@@ -1,5 +1,5 @@
 import "../test-dom";
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, jest, test } from "bun:test";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { Chat, PageLink } from "../surface/AgentNavAdapter";
@@ -34,7 +34,7 @@ const done = [call(), result, end];
 /** One page load: zeta's status reply, and the history reply when the status names a build. */
 type Load = { status: object | Error; history?: unknown[] | Error; superseded?: unknown[] };
 type Shown = { state: string | null; reason?: string | null; results?: string[]; tools?: string[] };
-type Row = { name: string; loads: Load[]; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: boolean };
+type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: boolean };
 
 // Each load is a fresh page load in the same tab (same sessionStorage); the last one is asserted.
 const ROWS: Row[] = [
@@ -56,11 +56,14 @@ const ROWS: Row[] = [
   { name: "m1: nothing remembered and zeta offline", loads: [{ status: offline }], shown: { state: null, results: [] }, building: 0, needsYou: 0 },
   { name: "m2: a sixth page build with persisted running", chats: [chat, habit, ...[1, 2, 3, 4].map((n) => ({ ...chat, session_id: `build-${n}` }))].reverse(), loads: [{ status: idle("newer") }], shown: { state: null }, building: 0 },
   { name: "an ordinary running chat never appears", chats: [ordinary], id: ordinary.session_id, loads: [{ status: running }], shown: { state: "absent" }, building: 0 },
+  { name: "receipt names the first result the catalog confirms (Q3)", pages: [expenses], loads: [{ status: idle(), history: [call(), result, call("existing"), resultOf("existing", '{"route":"/expenses","existing":true}'), end] }], shown: { state: "done", results: ["/expenses"] }, receipt: "/expenses" },
+  { name: "an outage during a build, then recovery, is live again", loads: [{ status: running, history: [call()] }, { status: offline }], recover: { status: running, history: [call()] }, shown: { state: "building", reason: null }, building: 1 },
   { name: "a stale response arriving after a newer one", loads: [{ status: idle(), history: done, superseded: [call()] }], shown: { state: "done", tools: [] }, building: 0 },
 ];
 
-function fakeZeta(load: Load, hold = false) {
+function fakeZeta(first: Load, hold = false) {
   const calls: string[] = [];
+  let load = first;
   const held = Promise.withResolvers<unknown>();
   const client = {
     request: async (method: string, params: unknown) => {
@@ -73,10 +76,11 @@ function fakeZeta(load: Load, hold = false) {
       return { messages: load.history };
     },
   } as unknown as ZetaClient;
-  return { client, calls, release: (messages: unknown[]) => held.resolve({ messages }) };
+  return { client, calls, release: (messages: unknown[]) => held.resolve({ messages }), become: (next: Load) => { load = next; } };
 }
 
-const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+let fakeClock = false;
+const flush = () => act(async () => { await new Promise((resolve) => { setTimeout(resolve, 0); if (fakeClock) jest.advanceTimersByTime(0); }); });
 
 test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) => {
   const chats = row.chats ?? [chat];
@@ -87,6 +91,7 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
   try {
     for (const load of row.loads) {
       hook?.unmount();
+      if (row.recover && load === row.loads.at(-1)) { jest.useFakeTimers(); fakeClock = true; }
       const zeta = fakeZeta(load);
       const first = load.superseded ? fakeZeta({ status: load.status }, true) : zeta;
       hook = renderHook(({ client }) => useBuildActivity({ client, chats, pages, reloadPages: () => {} }), { initialProps: { client: first.client } });
@@ -100,6 +105,13 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
       await flush();
       if (load.superseded) { first.release(load.superseded); await flush(); }
       if (row.dismiss && load === row.loads[0]) act(() => hook!.result.current.dismissReceipt());
+      if (row.recover && load === row.loads.at(-1)) {
+        // the retry timer was set by the outage read; the fake clock fires it without waiting
+        expect(hook.result.current.rows[0]).toMatchObject({ state: "building", reason: "zeta offline" });
+        zeta.become(row.recover);
+        jest.advanceTimersByTime(2000);
+        await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); });
+      }
     }
     const activity = hook!.result.current;
     const found = activity.rows.find((build) => build.chat.session_id === id) as Record<string, unknown> | undefined;
@@ -110,6 +122,8 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
       .toMatchObject({ ...(row.building === undefined ? {} : { building: row.building }), ...(row.needsYou === undefined ? {} : { needsYou: row.needsYou }), ...(row.receipt === undefined ? {} : { receipt: row.receipt }) });
   } finally {
     hook?.unmount();
+    jest.useRealTimers();
+    fakeClock = false;
     late.forEach((zeta) => zeta.release([]));
   }
 });
