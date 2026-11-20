@@ -37,7 +37,8 @@
 .library-notice { margin-top: 24px; padding: 16px; border: 1px dashed var(--fulcrum-border); }
 .library-notice p { margin: 8px 0 0; }
 .library-back { display: none; padding-inline: 10px; }
-.library-unavailable .module-state { padding-bottom: 8px; }
+.library :is(.library-unavailable, .library-empty) .module-state { padding-bottom: 8px; }
+.library-empty .library-skipped { margin-inline: clamp(16px, 5vw, 72px); }
 .library-unavailable a { min-height: 44px; margin-left: clamp(16px, 5vw, 72px); border: 1px solid var(--fulcrum-border); }
 
 @media (min-width: 761px) and (min-height: 501px) {

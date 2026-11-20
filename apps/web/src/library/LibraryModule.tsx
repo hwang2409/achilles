@@ -135,10 +135,10 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     action={catalog.problem.retry ? { label: "retry", run: refresh } : undefined} />;
   else if (catalog.state === "invalid") content = <ModuleState kind="failed" title="could not read the catalog" detail="refresh to try the active session snapshot again." />;
   else if (catalog.state === "empty") content = reads.catalog
-    ? <>
+    ? <div className="library-empty">
       <ModuleState kind="empty" title={`no ${title} found`} detail="zeta reported no entries in the effective scope." />
       {catalog.skipped && <SkippedFiles skipped={catalog.skipped} />}
-    </>
+    </div>
     : <ModuleState kind="empty" title={`no ${title} in this snapshot`} detail="the active session did not report any entries for this catalog." />;
   else if (catalog.state === "no-session") content = <div className="library-unavailable">
     <ModuleState kind="unsupported" title="no active session" detail="this zeta only reports library catalogs for an active session." />
