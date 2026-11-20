@@ -10,7 +10,7 @@ import { chatsRoute } from "../surface/routes";
 import type { Transport, ZetaClient } from "@fulcrum/zeta";
 import { teeRunEnds } from "../zeta/turnEnd";
 import type { Chat, PageLink } from "../surface/AgentNavAdapter";
-import { useBuildActivity } from "./buildActivity";
+import { buildLabel, useBuildActivity } from "./buildActivity";
 
 afterEach(() => { cleanup(); sessionStorage.clear(); });
 
@@ -87,6 +87,7 @@ function fakeZeta(first: Load, hold = false) {
   let load = first;
   const held = Promise.withResolvers<unknown>();
   const client = {
+    features: [],
     request: async (method: string, params: unknown) => {
       calls.push(method);
       if (method === "status") { if (load.status instanceof Error) throw load.status; return load.status; }
@@ -225,4 +226,236 @@ test("a build's run end is read at once, not at the next poll", async () => {
   } finally {
     hook.unmount();
   }
+});
+
+// session_history_read_v1: builds that are not zeta's attached session, read on demand through the one build owner.
+const READ = "session_history_read_v1";
+type Call = { method: string; params: { session_id?: string } };
+type Handler = (params: { session_id: string }) => unknown;
+const busy = Object.assign(Error("a session read is in flight"), { code: -32004, data: { retry_after_ms: 2000 } });
+const rows = (messages: unknown[]) => ({ messages, next_cursor: null });
+const builds = (...ids: string[]) => ids.map((session_id) => ({ ...chat, session_id }));
+
+/** A zeta whose replies are functions of the request, so a row can hold, fail, or change any of them. */
+function serveZeta({ features = [READ], status, history = () => ({ messages: [call()], next_before: null }), read = () => rows([]) }: { features?: string[]; status: () => unknown; history?: Handler; read?: Handler }) {
+  const calls: Call[] = [];
+  let reading = 0;
+  let mostReading = 0;
+  const client = {
+    features,
+    request: async (method: string, params: { session_id: string }) => {
+      calls.push({ method, params });
+      if (method === "status") return status();
+      if (method === "session_history") return history(params);
+      expect(method).toBe("session_history_read");
+      mostReading = Math.max(mostReading, ++reading);
+      try { return await read(params); } finally { reading--; }
+    },
+  } as unknown as ZetaClient;
+  const count = (method: string) => calls.filter((one) => one.method === method).length;
+  return { client, calls, count, reads: () => calls.filter((one) => one.method === "session_history_read").map((one) => one.params.session_id), mostReading: () => mostReading };
+}
+
+const settle = async () => { for (let i = 0; i < 20; i++) await flush(); };
+type Mounted = ReturnType<typeof renderHook<ReturnType<typeof useBuildActivity>, { client: ZetaClient; chats: Chat[] }>>;
+const mounted: Mounted[] = [];
+async function mount(zeta: ReturnType<typeof serveZeta>, chats: Chat[] = [chat]) {
+  const hook: Mounted = renderHook(({ client, chats }) => useBuildActivity({ client, chats, pages: [reading], reloadPages: () => {} }), { initialProps: { client: zeta.client, chats } });
+  mounted.push(hook);
+  await settle();
+  return hook;
+}
+const rowOf = (hook: Mounted, id = chat.session_id) => {
+  const row = hook.result.current.rows.find((build) => build.chat.session_id === id);
+  return { label: row ? buildLabel(row) : "absent", receipt: hook.result.current.latestReceipt?.route ?? null };
+};
+/** This tab watched the build run: a live pass saw it running. */
+async function rememberBuilding() {
+  (await mount(serveZeta({ status: () => running }))).unmount();
+}
+afterEach(() => { mounted.splice(0).forEach((hook) => hook.unmount()); jest.useRealTimers(); fakeClock = false; });
+
+test("flag absent: a remembered build keeps today's fallback and is never read", async () => {
+  await rememberBuilding();
+  const zeta = serveZeta({ features: [], status: () => idle("newer"), read: () => rows(done) });
+  const hook = await mount(zeta);
+  expect({ ...rowOf(hook), reads: zeta.reads() }).toEqual({ label: "last known building · not the current session", receipt: null, reads: [] });
+});
+
+test("flag present: a remembered build that finished elsewhere is done, with its receipt", async () => {
+  await rememberBuilding();
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(done) });
+  const hook = await mount(zeta);
+  expect({ ...rowOf(hook), reads: zeta.reads() }).toEqual({ label: "done", receipt: "/reading-list", reads: [chat.session_id] });
+});
+
+test("flag present: a build this tab never saw run is done with no receipt (quiet)", async () => {
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(done) });
+  const hook = await mount(zeta);
+  expect(rowOf(hook)).toEqual({ label: "done", receipt: null });
+});
+
+test("rows with no turn end are no claim: the fallback label stays", async () => {
+  await rememberBuilding();
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows([call()]) });
+  const hook = await mount(zeta);
+  expect({ ...rowOf(hook), reads: zeta.reads().length }).toEqual({ label: "last known building · not the current session", receipt: null, reads: 1 });
+});
+
+test("-32004: the read waits at least retry_after_ms before it asks again", async () => {
+  jest.useFakeTimers(); fakeClock = true;
+  let replies = 0;
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { if (replies++ === 0) throw busy; return rows(done); } });
+  const hook = await mount(zeta);
+  act(() => { jest.advanceTimersByTime(1999); });
+  await settle();
+  expect(zeta.reads().length).toBe(1);
+  act(() => { jest.advanceTimersByTime(600); });
+  await settle();
+  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 2, label: "done", receipt: null });
+});
+
+test("-32004 three times: three reads, then no claim until a new demand", async () => {
+  await rememberBuilding();
+  jest.useFakeTimers(); fakeClock = true;
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { throw busy; } });
+  const hook = await mount(zeta);
+  for (let i = 0; i < 4; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
+  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
+  await settle();
+  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 3, label: "last known building · not the current session", receipt: null });
+});
+
+test("a read sent before the live pass saw the build current is dropped", async () => {
+  let current: unknown = idle("newer");
+  const held = Promise.withResolvers<unknown>();
+  const zeta = serveZeta({ status: () => current, read: () => held.promise });
+  const hook = await mount(zeta);
+  expect(zeta.reads()).toEqual([chat.session_id]);
+  // the build attaches and runs, then another session attaches; the old read answers last
+  current = running;
+  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
+  await settle();
+  current = idle("newer");
+  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
+  await settle();
+  held.resolve(rows(done));
+  await settle();
+  expect(rowOf(hook)).toEqual({ label: "last known building · not the current session", receipt: null });
+});
+
+test("one read in flight, and only the four builds /create shows", async () => {
+  const waiting: ((value: unknown) => void)[] = [];
+  const ids = ["b1", "b2", "b3", "b4", "b5", "b6"];
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => new Promise((resolve) => waiting.push(resolve)) });
+  await mount(zeta, builds(...ids));
+  for (let i = 0; i < 10 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
+  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ids.slice(0, 4) });
+});
+
+test("a chat-list reload with the same updated_at reads nothing; a new turn reads once", async () => {
+  const zeta = serveZeta({ status: () => idle("newer") });
+  const hook = await mount(zeta);
+  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
+  await settle();
+  expect(zeta.reads().length).toBe(1);
+  hook.rerender({ client: zeta.client, chats: [{ ...chat, updated_at: "2030-01-02" }] });
+  await settle();
+  expect(zeta.reads().length).toBe(2);
+});
+
+test.each([
+  ["session_not_found", Object.assign(Error("unknown session"), { code: -32602, data: { code: "session_not_found" } })],
+  ["-32007", Object.assign(Error("refused"), { code: -32007 })],
+  ["-32005", Object.assign(Error("state unavailable"), { code: -32005 })],
+])("%s: no claim and no retry", async (_name, error) => {
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { throw error; } });
+  const hook = await mount(zeta);
+  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
+  await settle();
+  expect({ reads: zeta.reads().length, status: zeta.count("status"), ...rowOf(hook) }).toEqual({ reads: 1, status: 2, label: null, receipt: null });
+});
+
+test("-32602 for the attached session asks for one more live pass", async () => {
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { throw Object.assign(Error("page it with session_history"), { code: -32602 }); } });
+  await mount(zeta);
+  expect({ reads: zeta.reads().length, status: zeta.count("status") }).toEqual({ reads: 1, status: 2 });
+});
+
+/** A run end for `id`, delivered off the socket as the app's transport does. */
+function runEnds(client: ZetaClient) {
+  let deliver: (text: string) => void = () => {};
+  teeRunEnds({ send: () => {}, close: () => {}, onMessage: (callback: (text: string) => void) => { deliver = callback; } } as unknown as Transport, () => client).onMessage(() => {});
+  return (id = chat.session_id) => act(() => deliver(JSON.stringify({ method: "event", params: { event: "agent_end", session_id: id } })));
+}
+
+test("run end: the build's history goes out with status, not after it", async () => {
+  let status: () => unknown = () => running;
+  let history: Handler = () => ({ messages: [call()], next_before: null });
+  const zeta = serveZeta({ features: [], status: () => status(), history: (params) => history(params) });
+  const end = runEnds(zeta.client);
+  const hook = await mount(zeta);
+  const held = Promise.withResolvers<unknown>();
+  status = () => held.promise;
+  history = () => ({ messages: done, next_before: null });
+  const before = zeta.calls.length;
+  end();
+  await settle();
+  // status is still unanswered here
+  expect(zeta.calls.slice(before).map((one) => `${one.method} ${one.params.session_id ?? ""}`.trim()).sort()).toEqual([`session_history ${chat.session_id}`, "status"]);
+  held.resolve(idle());
+  await settle();
+  expect(rowOf(hook)).toEqual({ label: "done", receipt: "/reading-list" });
+});
+
+test("run end: another session attached first, the build's history still proves done", async () => {
+  let status: unknown = running;
+  let history: unknown = { messages: [call()], next_before: null };
+  const zeta = serveZeta({ features: [], status: () => status, history: () => history });
+  const end = runEnds(zeta.client);
+  const hook = await mount(zeta);
+  status = idle("newer");
+  history = { messages: done, next_before: null };
+  end();
+  await settle();
+  expect(rowOf(hook)).toEqual({ label: "done", receipt: "/reading-list" });
+});
+
+test("run end: a chat-list change while the build's history is in flight does not drop it", async () => {
+  const held = Promise.withResolvers<unknown>();
+  let history: Handler = () => ({ messages: [call()], next_before: null });
+  let status: unknown = running;
+  const zeta = serveZeta({ features: [], status: () => status, history: (params) => history(params) });
+  const end = runEnds(zeta.client);
+  const hook = await mount(zeta);
+  status = idle();
+  history = () => { history = () => { throw inactive; }; return held.promise; };
+  end();
+  await settle();
+  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
+  await settle();
+  held.resolve({ messages: done, next_before: null });
+  await settle();
+  expect(rowOf(hook)).toEqual({ label: "done", receipt: "/reading-list" });
+});
+
+test("a second tab on a workspace route sees another tab's build when it comes back", async () => {
+  let listed: Chat[] = [];
+  const settings = (window as unknown as { happyDOM: { settings: { fetch: { interceptor: unknown } } } }).happyDOM.settings.fetch;
+  settings.interceptor = { beforeAsyncRequest: async ({ request }: { request: Request }) => new URL(request.url).pathname === "/api/chats"
+    ? Response.json({ chats: listed, next: null, approval_count: 0 }) : Response.json({ pages: [], next: null }) };
+  const zeta = serveZeta({ status: () => idle(), history: () => ({ messages: done, next_before: null }) });
+  // the same nav a chat, /create, or page route uses (AgentSurface passes its own refresh key, not a focus key)
+  const view = renderHook(() => {
+    const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: true, refreshKey: 0, pageRefreshKey: 0 });
+    return useBuildActivity({ client: zeta.client, chats: nav.recentChats, pages: [reading], reloadPages: () => {} });
+  });
+  try {
+    await settle();
+    expect(view.result.current.rows).toEqual([]);
+    listed = [chat];
+    act(() => { dispatchEvent(new Event("focus")); });
+    for (let i = 0; i < 5; i++) await settle();
+    expect(view.result.current.rows.map((row) => [row.chat.session_id, buildLabel(row)])).toEqual([[chat.session_id, "done"]]);
+  } finally { view.unmount(); settings.interceptor = null; }
 });

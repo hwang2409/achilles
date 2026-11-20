@@ -65,15 +65,7 @@ function BuildShell({ client, children, ...props }: BuildShellProps & { client: 
 }
 
 function CatalogShell({ renderShell, route, connectionStatus, banner, children }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
-  // Q4: a build started in another tab appears when this tab comes back, with one chat-list read and no polling.
-  const [refreshKey, setRefreshKey] = useState(0);
-  useEffect(() => {
-    const back = () => { if (document.visibilityState === "visible") setRefreshKey((value) => value + 1); };
-    addEventListener("focus", back);
-    document.addEventListener("visibilitychange", back);
-    return () => { removeEventListener("focus", back); document.removeEventListener("visibilitychange", back); };
-  }, []);
-  const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey, pageRefreshKey: 0 });
+  const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
   return renderShell({ current: route, nav, banner, connectionStatus,
     newChat: { available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) },
     children: () => route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} /> : children,
