@@ -6,6 +6,11 @@ import { projectCatalog, sourceTiers, type Catalog, type CatalogRow, type Librar
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
+const tierRules = {
+  project: "wins over home",
+  home: "wins over packaged",
+  packaged: "read-only",
+};
 const narrow = "(max-width: 760px), (max-height: 500px)";
 const yesNo = (value: boolean) => value ? "yes" : "no";
 
@@ -72,7 +77,7 @@ export function LibraryModule({ client, kind }: { client: ZetaClient; kind: Libr
       {sourceTiers.map((source) => {
         const group = matches.filter((row) => row.source === source);
         return group.length > 0 && <section className="library-group" key={source} aria-labelledby={`library-${source}`}>
-          <h2 id={`library-${source}`}>{source} <small>{group.length}</small></h2>
+          <h2 id={`library-${source}`}>{source} <small>{tierRules[source]} · {group.length}</small></h2>
           <ul>
             {group.map((row) => <li key={row.name}>
               <button type="button" aria-current={row === selected || undefined} onClick={(event) => {
