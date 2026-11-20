@@ -5,7 +5,7 @@ import { PageChatCatalog, type Chat } from "./surface/AgentNavAdapter";
 import { PageChatHeader } from "./PageChatHeader";
 
 const { fireEvent, render } = await import("@testing-library/react");
-const row = (id: string, page_id = "page", title = id): Chat => ({ session_id: id, page_id, page_route: "/fixture", page_title: "fixture", title, last_state: "approval", created_at: "2026-01-01", updated_at: "2026-01-01" });
+const row = (id: string, page_id = "page", title = id): Chat => ({ session_id: id, purpose: "chat", page_id, page_route: "/fixture", page_title: "fixture", title, last_state: "approval", created_at: "2026-01-01", updated_at: "2026-01-01" });
 const longTitle = "notes on a very long synthetic reading list ".repeat(4).trim();
 
 function setup() {

@@ -300,6 +300,9 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+CHAT_PURPOSES = ("chat", "page_build")
+
+
 def chat_row(row) -> dict[str, Any]:
     return {
         **dict(row),
@@ -662,6 +665,7 @@ class PageStore:
             db.execute("ALTER TABLE page ADD COLUMN credential_hash TEXT")
         ensure_column(db, "page", "created_by_page_id", "TEXT REFERENCES page(id)")
         ensure_column(db, "page_record", "revision", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(db, "chat", "purpose", "TEXT NOT NULL DEFAULT 'chat'")
         ensure_column(db, "chat", "titled_by_user", "INTEGER NOT NULL DEFAULT 0")
         # default 1: rows from before this column, or written by older code, count as sent and
         # stay listed; only register_chat/save_session insert a new chat as 0 until its first send.
@@ -1098,7 +1102,7 @@ class PageStore:
             rows = db.execute(
                 "SELECT c.session_id,c.page_id,p.route AS page_route,p.title AS page_title,"
                 "c.title,c.first_title,c.created_at,c.updated_at,c.last_state,c.titled_by_user,"
-                "c.message_sent FROM chat c "
+                "c.message_sent,c.purpose FROM chat c "
                 f"JOIN page p ON p.id=c.page_id {where} "
                 "ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?",
                 (*parameters, limit + 1),
@@ -1111,28 +1115,33 @@ class PageStore:
                 db.execute("SELECT COUNT(*) FROM chat WHERE last_state='approval'").fetchone()[0]
             )
 
-    def register_chat(self, page_id: str, session_id: str) -> dict[str, Any]:
+    def register_chat(self, page_id: str, session_id: str, purpose: str = "chat") -> dict[str, Any]:
+        if purpose not in CHAT_PURPOSES:
+            raise ValueError("purpose must be chat or page_build")
         with self.transaction() as db:
             if db.execute("SELECT 1 FROM page WHERE id=?", (page_id,)).fetchone() is None:
                 raise KeyError(page_id)
             stamp = now()
             db.execute(
-                "INSERT OR IGNORE INTO chat(session_id,page_id,created_at,updated_at,message_sent) "
-                "VALUES(?,?,?,?,0)",
-                (session_id, page_id, stamp, stamp),
+                "INSERT OR IGNORE INTO chat"
+                "(session_id,page_id,created_at,updated_at,message_sent,purpose) "
+                "VALUES(?,?,?,?,0,?)",
+                (session_id, page_id, stamp, stamp, purpose),
             )
             row = db.execute(
-                "SELECT page_id FROM chat WHERE session_id=?", (session_id,)
+                "SELECT page_id,purpose FROM chat WHERE session_id=?", (session_id,)
             ).fetchone()
             if row["page_id"] != page_id:
                 raise ValueError("session belongs to another page")
+            if row["purpose"] != purpose:
+                raise ValueError("session already registered with a different purpose")
         return self.chat(session_id)
 
     def chat(self, session_id: str) -> dict[str, Any]:
         with self._connect() as db:
             row = db.execute(
                 "SELECT session_id,page_id,title,first_title,created_at,updated_at,last_state,"
-                "titled_by_user,message_sent FROM chat WHERE session_id=?",
+                "titled_by_user,message_sent,purpose FROM chat WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if row is None:
