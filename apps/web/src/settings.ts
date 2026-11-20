@@ -99,8 +99,11 @@ export function updateSettings(patch: Partial<Omit<Settings, "v">>): void {
   listeners.forEach((listener) => listener());
 }
 
+// reset never changes auto-approve: turning it on needs its own confirm
+export const resetTarget = (settings: Settings): Settings => ({ ...defaultSettings, autoApproveDefault: settings.autoApproveDefault });
+
 export function resetSettings(): void {
-  current = { ...defaultSettings };
+  current = resetTarget(current);
   if (typeof localStorage !== "undefined") localStorage.setItem(SETTINGS_KEY, JSON.stringify(current));
   applySettings(current);
   listeners.forEach((listener) => listener());
