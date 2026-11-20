@@ -69,10 +69,11 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   const scrolled = useRef(false);
   const reread = useCallback(() => {
     const mine = ++generation.current;
-    readHomeSettings(client).then(
+    // the live client: a reread asked for by a borrowed write runs after control went back
+    readHomeSettings(live() ?? client).then(
       (settings) => { if (mine === generation.current) setLoad({ kind: "ready", settings }); },
       (error) => { if (mine === generation.current) setLoad({ kind: "failed", unsafe: (error as { data?: { code?: unknown } })?.data?.code === "settings_unsafe" }); });
-  }, [client]);
+  }, [client, live]);
   useEffect(() => {
     reread();
     // zeta sends no change event: read again when the tab comes back

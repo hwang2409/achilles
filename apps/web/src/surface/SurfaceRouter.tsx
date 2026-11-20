@@ -43,6 +43,7 @@ export function SurfaceRouter() {
   const [projectsDropped] = useState(() => new Set<string>());
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
+  const [liveClient] = useState(() => () => connection.client);
   const takeLibraryControl = async () => {
     setLibraryControl(null);
     const reason = await connection.takeControl();
@@ -68,7 +69,7 @@ export function SurfaceRouter() {
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
   } else if (route.id === "settings") {
-    content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={() => connection.client} />;
+    content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }

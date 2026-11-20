@@ -18,7 +18,7 @@
 .sp-note { color: var(--fulcrum-warn); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .sp-row { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--fulcrum-border); scroll-margin-top: 16px; }
 .sp-row-text { display: flex; flex-direction: column; gap: 4px; }
-.sp-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--fulcrum-border); padding: 4px 10px; }
+.sp-switch { font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, "JetBrains Mono", monospace); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--fulcrum-border); padding: 4px 10px; }
 .sp-switch > .sp-value { margin-inline-start: auto; }
 .sp-switch > .sp-note { flex-basis: 100%; }
 .sp-value { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
@@ -34,9 +34,9 @@
 @media (max-width: 720px) {
   .sp { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 16px; }
   .sp-subnav { position: static; border: 1px solid var(--fulcrum-border); }
-  .sp-subnav a { min-height: 44px; display: flex; align-items: center; }
+  .sp-subnav a { min-height: 44px; display: flex; align-items: center; gap: 6px; }
   .sp-subnav a + a { border-top-color: var(--fulcrum-border); }
   .sp-defaults > div { grid-template-columns: minmax(0, 1fr); }
   .sp-defaults dd { grid-column: 1; }
-  .sp-switch button, .sp .confirmation-row button { min-height: 44px; }
+  .sp-switch button, .sp .confirmation-row button, .sp-content section > button { min-height: 44px; }
 }
