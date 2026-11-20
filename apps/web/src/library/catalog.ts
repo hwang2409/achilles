@@ -34,6 +34,7 @@ const adapters = {
     key: "skill_catalog",
     catalog: "skill_catalog",
     read: "skill_read",
+    write: "skill_write",
     fields: (row: Record<string, unknown>, summary: Summary): Skill | null =>
       strings(row.keywords) ? { ...summary, keywords: [...row.keywords] } : null,
   },
@@ -41,6 +42,7 @@ const adapters = {
     key: "agent_catalog",
     catalog: "agent_profile_catalog",
     read: "agent_profile_read",
+    write: "agent_profile_write",
     fields: (row: Record<string, unknown>, summary: Summary): Profile | null => {
       const { tools, model, allow_delegation, accepts_follow_ups, explicit_finish, max_turns } = row;
       if (!(tools === null || strings(tools)) || !(model === null || typeof model === "string") ||
@@ -56,7 +58,7 @@ export type LibraryKind = keyof typeof adapters;
 export type Catalog = { state: "data"; rows: CatalogRow[] } | { state: "empty" | "no-session" | "invalid" };
 // `skipped`: files the loader skipped or a higher tier shadowed (zeta repeats the full list on every page).
 export type CatalogPage = { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Bounded<FileProblem> } | { state: "invalid" };
-export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read });
+export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read, write: adapters[kind].write });
 
 const offset = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const bySource = (rows: CatalogRow[]) => rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source));

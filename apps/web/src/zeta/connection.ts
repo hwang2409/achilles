@@ -82,8 +82,8 @@ export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
 export type ConnectionDeps = {
   /** The page origin the server's `--ws-origin` allowlist must contain. */
   origin: string;
-  /** This document can only connect as an observer. */
-  readOnly?: boolean;
+  /** `locked`: this document only connects as an observer. `upgradable`: observer at load; `takeControl` may promote it. */
+  readOnly?: "locked" | "upgradable";
   /** `{ start }` when zeta is not running and the server names the command that starts it. */
   discover?: () => Promise<ZetaDiscovery | { start: string } | null>;
   connect?: (discovery: ZetaDiscovery, role: ZetaRole, opened?: (close: () => void) => void) => Promise<ZetaClient>;
@@ -113,7 +113,7 @@ export type Connection = {
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "session_history_read_v1"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
@@ -147,7 +147,7 @@ async function connectRole(discovery: ZetaDiscovery, role: ZetaRole, opened?: (c
  */
 export function createConnection({
   origin,
-  readOnly = false,
+  readOnly,
   discover = async () => {
     const response = await fetch("/api/zeta/discovery", { cache: "no-store" });
     if (response.ok) return await response.json();
@@ -274,7 +274,7 @@ export function createConnection({
       void attempt();
     },
     async takeControl() {
-      if (readOnly || stopped || takingControl || state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return null;
+      if (readOnly === "locked" || stopped || takingControl || state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return null;
       const observer = client;
       const discovery = liveDiscovery;
       takingControl = true;

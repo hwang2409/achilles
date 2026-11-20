@@ -98,8 +98,8 @@ describe("createConnection controller capacity vs version mismatch", () => {
   });
 
   test.each([
-    ["read-only", true, "observer"],
-    ["writable", false, "controller"],
+    ["locked read-only", "locked", "observer"],
+    ["writable", undefined, "controller"],
   ] as const)("connects and reconnects on a %s route", async (_route, readOnly, authority) => {
     const roles: string[] = [];
     let drop = () => {};
@@ -115,7 +115,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
       await flush();
       expect(connection.state).toEqual({ phase: "connected", authority });
       expect(connection.client).toBe(client);
-      expect(connection.observerPresentation).toBe(readOnly);
+      expect(connection.observerPresentation).toBe(authority === "observer");
       await connection.takeControl();
       drop();
       connection.retryNow();
@@ -124,6 +124,37 @@ describe("createConnection controller capacity vs version mismatch", () => {
       expect(connection.state).toEqual({ phase: "connected", authority });
     } finally { connection.stop(); }
   });
+  test("an upgradable route starts as observer, takes control on request, and a refusal keeps the live observer", async () => {
+    const roles: string[] = [];
+    let slotFree = false;
+    let observerCloses = 0;
+    const observer = { onClose() {}, close() { observerCloses++; } };
+    const controller = { onClose() {}, close() {} };
+    const connection = createConnection({
+      readOnly: "upgradable",
+      origin: "http://localhost",
+      discover: async () => discovery,
+      connect: async (_discovery, role) => {
+        roles.push(role);
+        if (role === "controller" && !slotFree) throw new ZetaError("busy", -32001);
+        return (role === "observer" ? observer : controller) as never;
+      },
+    });
+    try {
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
+      expect(await connection.takeControl()).toBe(refusedRole.reason);
+      expect(connection.client).toBe(observer);
+      expect(observerCloses).toBe(0);
+      slotFree = true;
+      expect(await connection.takeControl()).toBeNull();
+      expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
+      expect(connection.client).toBe(controller);
+      expect(observerCloses).toBe(1);
+      expect(roles).toEqual(["observer", "controller", "controller"]);
+    } finally { connection.stop(); }
+  });
+
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller
   // connects (the second-tab case) and -32002 "protocol_mismatch" for a real version mismatch. @fulcrum/zeta
   // surfaces these as ZetaError kinds "busy" and "version_mismatch". The two must not collapse into one state.
