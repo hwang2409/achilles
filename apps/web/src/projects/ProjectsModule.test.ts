@@ -19,9 +19,12 @@ const answers: Record<string, (params: { cursor?: string | null }) => unknown> =
   project_show: () => ({ memory: { digest: "d", kinds: ["brief", "decisions"].map((key) => ({ key, rendered: `${key} text body`, rendered_truncated: false })) } }),
 };
 
-/** One zeta: `held` methods never answer until the socket that asked closes; `release()` answers a held show. */
+/** One zeta: `held` methods never answer until the socket that asked closes; `release()` answers a held show.
+ * `busy` requests ("method cursor") fail once with -32005 on a live socket. `asked` counts requests over every socket. */
 function fakeZeta() {
   const held = new Set<string>();
+  const busy = new Set<string>();
+  const asked: string[] = [];
   const shows: (() => void)[] = [];
   const connect = () => {
     const rejects = new Set<(error: unknown) => void>();
@@ -30,6 +33,8 @@ function fakeZeta() {
       closed: false,
       request: (method: string, params: { cursor?: string | null }) => new Promise((resolve, reject) => {
         if (client.closed) return reject(new ZetaError("closed", 1006));
+        asked.push(method);
+        if (busy.delete(`${method} ${params.cursor ?? null}`)) return reject(Object.assign(new Error("busy"), { code: -32005 }));
         rejects.add(reject);
         const answer = () => { rejects.delete(reject); resolve(answers[method]!(params)); };
         if (method === "project_show" && held.has(method)) shows.push(answer);
@@ -39,7 +44,7 @@ function fakeZeta() {
     };
     return client;
   };
-  return { held, connect, release: () => shows.splice(0).forEach((answer) => answer()) };
+  return { held, busy, asked: (method: string) => asked.filter((name) => name === method).length, connect, release: () => shows.splice(0).forEach((answer) => answer()) };
 }
 
 /** The page as SurfaceRouter wires it: a borrow swaps in a controller client, closes the observer, reads, and swaps back. */
@@ -47,16 +52,14 @@ function mount(zeta: ReturnType<typeof fakeZeta>, path: string) {
   history.replaceState(null, "", path);
   let client = zeta.connect();
   let observer = true;
-  let borrows = 0;
   const element = () => createElement(ProjectsModule, { client: client as unknown as ZetaClient, control: { observer, dropped: new Set(), withControl } });
   const view = render(element());
   const swap = (next: typeof client, role: boolean) => { const old = client; client = next; observer = role; act(() => view.rerender(element())); old.close(); };
   async function withControl<T>(read: (reader: ZetaClient) => Promise<T>) {
-    borrows++;
     swap(zeta.connect(), false);
     try { return { value: await read(client as unknown as ZetaClient) }; } finally { swap(zeta.connect(), true); }
   }
-  return { view, borrows: () => borrows };
+  return { view };
 }
 
 test.each([
@@ -70,6 +73,15 @@ test.each([
     await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / target"));
     expect(view.getByText("/fixture/target")).toBeTruthy();
   }],
+  ["lookup fails on a live socket -> nothing stored, the name resolves on the next client", async (zeta: ReturnType<typeof fakeZeta>) => {
+    zeta.busy.add("state_projects p2");
+    const { view } = mount(zeta, "/projects/p_target/memory");
+    const reveal = await view.findByRole("button", { name: "take control and show decision text" });
+    await waitFor(() => expect(zeta.asked("state_projects")).toBe(3)); // list page 1, lookup page 1, lookup page 2 (busy)
+    expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / …");
+    await act(async () => { fireEvent.click(reveal); });
+    await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / target"));
+  }],
   ["load more interrupted by a borrow -> the next page loads after the borrow", async (zeta: ReturnType<typeof fakeZeta>) => {
     const { view } = mount(zeta, "/projects/p_target/memory");
     zeta.held.add("state_memory");
@@ -81,14 +93,16 @@ test.each([
   }],
   ["overlapping reveals -> one borrow at a time, observer labels kept", async (zeta: ReturnType<typeof fakeZeta>) => {
     zeta.held.add("project_show");
-    const { view, borrows } = mount(zeta, "/projects/p_target/memory");
+    const { view } = mount(zeta, "/projects/p_target/memory");
     const first = await view.findByRole("button", { name: "take control and show brief text" });
+    const other = view.getByRole("button", { name: "take control and show decision text" });
     await act(async () => { fireEvent.click(first); });
-    const other = view.getByRole("button", { name: "reading…" });
+    await act(async () => { fireEvent.click(other); });
+    // the hazard: a second read while the first borrow holds the controller socket.
+    expect(zeta.asked("project_show")).toBe(1);
+    expect(other.textContent).toBe("reading…");
     expect(other.getAttribute("aria-disabled")).toBe("true");
     expect(view.getByText(/zeta lets only the tab in control read full text/)).toBeTruthy();
-    await act(async () => { fireEvent.click(other); });
-    expect(borrows()).toBe(1);
     await act(async () => zeta.release());
     expect(await view.findByRole("button", { name: "take control and show decision text" })).toBeTruthy();
     expect(view.getByRole("region", { name: "brief text" }).textContent).toContain("brief text body");
