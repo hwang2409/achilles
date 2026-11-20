@@ -17,7 +17,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 
 from .mcp_server import build_mcp
-from .pages import PageStore
+from .pages import CHAT_PURPOSES, PageStore
 from .records import VersionConflict, call_record
 from .validation import ValidationError, error_document
 
@@ -284,9 +284,12 @@ def create_app() -> Starlette:
         session_id = body.get("session_id") if isinstance(body, dict) else None
         if not isinstance(session_id, str) or not session_id:
             raise HTTPException(400, "session_id must be a non-empty string")
+        purpose = body.get("purpose", "chat")
+        if purpose not in CHAT_PURPOSES:
+            raise HTTPException(400, "purpose must be chat or page_build")
         try:
             row = await anyio.to_thread.run_sync(
-                store.register_chat, request.path_params["id"], session_id
+                store.register_chat, request.path_params["id"], session_id, purpose
             )
         except KeyError as exc:
             raise HTTPException(404, "page not found") from exc
