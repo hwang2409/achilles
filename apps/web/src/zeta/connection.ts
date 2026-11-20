@@ -274,7 +274,9 @@ export function createConnection({
       void attempt();
     },
     async takeControl() {
-      if (readOnly || stopped || takingControl || state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return null;
+      if (readOnly || stopped || takingControl) return null;
+      // the banner can show while the observer socket reconnects: a click then says so instead of doing nothing
+      if (state.phase !== "connected" || state.authority !== "observer" || !client || !liveDiscovery) return transitionRole(roleState, "takeover_failed").reason;
       const observer = client;
       const discovery = liveDiscovery;
       takingControl = true;
@@ -284,7 +286,8 @@ export function createConnection({
       takingControl = false;
       if (stopped || client !== observer) {
         if (opened.kind === "connected") opened.client.close();
-        return null;
+        // the observer socket was replaced during the attempt: still say the click did not take control
+        return stopped ? null : transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed").reason;
       }
       if (opened.kind !== "connected") {
         roleState = transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed");
