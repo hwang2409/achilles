@@ -67,7 +67,9 @@
   .surface-actions kbd, .surface-actions small { display: none; }
   .surface-search :is(.chat-search, .palette-button, .search-skeleton), .place-nav .place-link, .sidebar :is(.list-head, .chat-row, .chat-row-rename, .load-older, .page-list-error button) { min-height: 44px; }
   .sidebar .chat-row-rename { min-width: 44px; top: 0; }
+  /* the whole drawer scrolls here, so it keeps rows below the two sticky heads (see .chat-list in shell.css) */
   .sidebar-scroll > .chat-list { max-height: none; overflow: visible; }
+  .sidebar-scroll { scroll-padding-top: 72px; }
   .shell-header { min-height: 56px; }
   .shell-header:has(+ .module-frame) { min-height: 0; }
   .shell-header + .module-frame > header { padding-left: 64px; }
