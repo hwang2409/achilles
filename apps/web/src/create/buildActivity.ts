@@ -8,7 +8,8 @@ import { supportsFeature } from "../zeta/connection";
 export type BuildState = "building" | "needs you" | "done" | "unfinished" | "failed";
 export type BuildReason = "zeta offline" | "not the current session" | "checking zeta";
 // `turn` is the turn end that made a build done; `done` orders completions in this tab: a counter taken when this tab first saw that turn end.
-type Observation = { state: BuildState; routes: string[]; turn?: string; done?: number };
+// `at`: the chat's updated_at when a terminal state was proven; the state holds until a new turn moves updated_at.
+type Observation = { state: BuildState; routes: string[]; turn?: string; done?: number; at?: string };
 // `unproven`: the turn ended with no route in view, but the page does not hold the whole history (Q2: no evidence, no claim).
 type Seen = Observation & { tools: string[]; unproven?: boolean };
 type Live = { current: string | null; observed?: Seen; reason: BuildReason | null };
@@ -103,7 +104,8 @@ function buildMemory(storage: () => Store) {
       const routes = array(value?.routes);
       const done = typeof value?.done === "number" ? value.done : undefined;
       const turn = typeof value?.turn === "string" ? value.turn : undefined;
-      if (states.includes(value?.state as BuildState) && routes.every(isRoute)) return { state: value!.state as BuildState, routes: routes as string[], turn, done };
+      const at = typeof value?.at === "string" ? value.at : undefined;
+      if (states.includes(value?.state as BuildState) && routes.every(isRoute)) return { state: value!.state as BuildState, routes: routes as string[], turn, done, at };
     } catch { /* an unknown row is no observation */ }
     return undefined;
   };
@@ -120,7 +122,7 @@ function buildMemory(storage: () => Store) {
     // A live observation merged with what this tab remembers: a confirmed route is never downgraded (Q2).
     // Each turn end that leaves the build done is one completion, numbered when this tab first sees it.
     // `quiet`: a completion this tab never saw run is stored as done 0, which is always seen, so it never shows a receipt.
-    observe(id: string, live: Observation & { unproven?: boolean }, quiet = false): Observation | undefined {
+    observe(id: string, live: Observation & { unproven?: boolean }, quiet: boolean, at: string | undefined): Observation | undefined {
       const before = observed(id);
       const routes = [...new Set([...before?.routes ?? [], ...live.routes])];
       if (live.unproven && !routes.length) {
@@ -130,7 +132,7 @@ function buildMemory(storage: () => Store) {
       const state = live.state === "unfinished" && routes.length ? "done" : live.state;
       const turn = state === "done" ? live.turn : undefined;
       const done = state !== "done" ? undefined : before?.state === "done" && before.turn === turn && before.done !== undefined ? before.done : quiet ? 0 : nextDone();
-      const next = { state, routes, turn, done };
+      const next = { state, routes, turn, done, at: active(state) ? undefined : at };
       write(observationKey(id), JSON.stringify(next));
       return next;
     },
@@ -158,6 +160,8 @@ const POLL_MS = 2000;
 const RETRY_MS = [2000, 5000, 10000];
 const READ_FEATURE = "session_history_read_v1";
 const BUSY_TRIES = 3;
+// The builds the chat list shows are read, at most this many.
+const READ_BUILDS = 8;
 const errorCode = (error: unknown) => object(error)?.code;
 const errorData = (error: unknown) => object(object(error)?.data);
 // A run-end read of a build that status says is not current: its rows (null: no turn end in view), or no reply.
@@ -210,26 +214,44 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   let busyTimer: ReturnType<typeof setTimeout> | undefined;
   const readKeys = new Map<string, string | undefined>();
   const busyTries = new Map<string, number>();
+  // A manual refresh reads settled builds again; a new reader (a page load, a reconnect) trusts what this tab proved.
+  let refreshed = false;
+  // Builds whose run end this tab got.
+  const ranHere = new Set<string>();
   const updatedAt = (id: string) => latest.chats.find((chat) => chat.session_id === id)?.updated_at;
 
-  // Rows prove only a turn end. 4.5: a completion this tab never saw run is quiet (no receipt).
+  // The one receipt rule: a completion shows a receipt only when this tab saw the build active (building, needs you,
+  // or its run end). A build first seen already done, on any path, is quiet.
+  const observe = (id: string, seen: Seen) => {
+    const merged = memory.observe(id, seen, !ranHere.has(id) && !active(memory.observed(id)?.state ?? "done"), updatedAt(id));
+    if (merged && !active(merged.state)) ranHere.delete(id);
+    return merged;
+  };
+  // Rows prove only a turn end.
   const prove = (id: string, seen: Seen | null) => {
     if (!seen) return;
-    const merged = memory.observe(id, seen, !active(memory.observed(id)?.state ?? "done"));
+    const merged = observe(id, seen);
     changed();
     if (merged?.routes.length) reloadPages(merged.routes);
+  };
+  // A terminal state this tab proved for this updated_at needs no read until a new turn starts.
+  const settled = (chat: Chat) => {
+    const known = memory.observed(chat.session_id);
+    return !refreshed && known !== undefined && !active(known.state) && known.at !== undefined && known.at === chat.updated_at;
   };
   const enqueue = (forced: readonly string[]) => {
     const { chats, client } = latest;
     if (!client || !reads || !supportsFeature(client, READ_FEATURE)) return;
     const builds = chats.filter(isBuild);
-    // The same four builds /create shows, and any build this tab last knew as active.
-    const shown = new Set(builds.slice(0, 4).map((chat) => chat.session_id));
+    // The builds the chat list shows, and any build this tab last knew as active.
+    const shown = new Set(builds.slice(0, READ_BUILDS).map((chat) => chat.session_id));
     for (const chat of builds) {
       const id = chat.session_id;
       if (id === current || queue.includes(id)) continue;
       const wanted = shown.has(id) || active(memory.observed(id)?.state ?? "done");
-      if (forced.includes(id) || (wanted && readKeys.get(id) !== chat.updated_at)) queue.push(id);
+      if (!forced.includes(id) && !(wanted && readKeys.get(id) !== chat.updated_at && !settled(chat))) continue;
+      busyTries.delete(id); // each demand gets its own tries
+      queue.push(id);
     }
     pump();
   };
@@ -268,8 +290,9 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
         pump();
       }, wait);
     } else if (code === -32601) { reads = false; queue = []; }
-    // The build became zeta's attached session: the live pass reads it now.
-    else if (code === -32602 && errorData(error)?.code !== "session_not_found") run();
+    // The build became zeta's attached session (plain invalid_params): the live pass reads it now. Every other -32602
+    // (session_not_found: absent, another project, project versus none, a child id) is no claim, like -32005.
+    else if (code === -32602 && errorData(error)?.code === "invalid_params") run();
     pump();
   };
 
@@ -286,7 +309,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     current = read.current;
     if (read.current) liveSeen.set(read.current, ++stamps);
     if (read.current && !read.observed) memory.forgetActive(read.current);
-    const merged = read.current && read.observed ? memory.observe(read.current, read.observed) : undefined;
+    const merged = read.current && read.observed ? observe(read.current, read.observed) : undefined;
     const live = { current: read.current, reason: read.reason, observed: merged && { ...read.observed!, ...merged } };
     publish(live);
     if (live.observed?.routes.length) reloadPages(live.observed.routes);
@@ -315,6 +338,8 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     epoch++;
     running = again = false;
     ended.clear();
+    ranHere.clear();
+    refreshed = false;
     clearTimeout(timer);
     clearTimeout(busyTimer);
     busyTimer = undefined;
@@ -329,12 +354,12 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   return {
     refresh(chats: readonly Chat[], client: ZetaClient | null, endedId?: string) {
       latest = { chats, client };
-      if (endedId !== undefined) ended.add(endedId);
+      if (endedId !== undefined) { ended.add(endedId); ranHere.add(endedId); }
       run();
     },
     stop,
     // A manual refresh: every wanted build is read again (one at a time).
-    forget: () => { epoch++; readKeys.clear(); busyTries.clear(); },
+    forget: () => { epoch++; refreshed = true; readKeys.clear(); busyTries.clear(); },
   };
 }
 
