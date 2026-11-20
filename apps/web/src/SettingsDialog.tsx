@@ -79,10 +79,12 @@ function Row({ title, description, children }: { title: string; description: str
 function AutoApprove({ open, on, canWrite, serverForcesAsk }: { open: boolean; on: boolean; canWrite: boolean; serverForcesAsk: boolean }) {
   const toggle = useRef<HTMLButtonElement>(null);
   const allow = useRef<HTMLButtonElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
   const [asking, setAsking] = useState(false);
   const effectId = useId();
-  useLayoutEffect(() => { if (!open) setAsking(false); }, [open]);
-  useLayoutEffect(() => { if (asking) allow.current?.focus(); }, [asking]);
+  useLayoutEffect(() => { if (!open || on) setAsking(false); }, [open, on]);
+  // at 390 px the bar opens below the fold; bring "keep asking" into view too
+  useLayoutEffect(() => { if (asking) { allow.current?.focus(); bar.current?.scrollIntoView({ block: "nearest" }); } }, [asking]);
   const close = (allowTools: boolean) => {
     if (allowTools && canWrite) updateSettings({ autoApproveDefault: true });
     setAsking(false);
@@ -92,7 +94,7 @@ function AutoApprove({ open, on, canWrite, serverForcesAsk }: { open: boolean; o
   const effect = serverForcesAsk ? "new chats allow tool calls without asking once the server stops forcing ask mode." : "new chats allow tool calls without asking.";
   return <div className="settings-auto-approve">
     <div className="setting-explanation"><Toggle ref={toggle} label="auto-approve default" checked={on} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(next) => { if (!canWrite) return; if (next) setAsking(true); else updateSettings({ autoApproveDefault: false }); }} /><span>{explanation}</span></div>
-    {asking && !on && canWrite && <div className="confirmation-inline"><div role="group" className="confirmation-bar" aria-labelledby={effectId}
+    {asking && !on && canWrite && <div ref={bar} className="confirmation-inline"><div role="group" className="confirmation-bar" aria-labelledby={effectId}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(false); } }}>
       <p id={effectId}>{effect}</p>
       <div className="confirmation-actions">
@@ -131,7 +133,7 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
         <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} surface={WRITE_SURFACE.settingsVim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
       </div>
       <section aria-label="new chat defaults and reset" aria-describedby={!canWrite ? "settings-lock-note" : undefined} className="settings-session">
-        {!canWrite && <p id="settings-lock-note">locked while another tab controls zeta</p>}
+        {!canWrite && <p id="settings-lock-note">only a tab that controls zeta can change auto-approve or reset.</p>}
         <div className="settings-content">
           <Row title="auto-approve" description="default for new chats."><AutoApprove open={open} on={settings.autoApproveDefault} canWrite={canWrite} serverForcesAsk={serverForcesAsk} /></Row>
         </div>

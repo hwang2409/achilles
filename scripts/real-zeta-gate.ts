@@ -3244,7 +3244,7 @@ with _database() as db:
   await observerPage.setViewportSize({ width: 1440, height: 900 });
   await observerPage.keyboard.press(appShortcut("Comma"));
   const observerSettings = observerPage.getByRole("dialog", { name: "settings", exact: true });
-  await gateWait.playwright(observerSettings.getByText("locked while another tab controls zeta", { exact: true }), "waitFor", { state: "visible" });
+  await gateWait.playwright(observerSettings.getByText("only a tab that controls zeta can change auto-approve or reset.", { exact: true }), "waitFor", { state: "visible" });
   for (const control of [observerSettings.getByRole("switch", { name: "auto-approve default", exact: true }), observerSettings.getByRole("button", { name: "reset to defaults", exact: true })]) {
     if (!await control.isDisabled()) throw new Error("observer could edit new-chat defaults or reset them");
   }
