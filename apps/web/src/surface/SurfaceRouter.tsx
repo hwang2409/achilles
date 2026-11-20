@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { AppShell } from "../AppShell";
+import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, type Connection } from "../zeta";
@@ -47,7 +48,7 @@ function CatalogShell({ route, connectionStatus, banner, children }: { route: Su
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
   return <AppShell current={route} nav={nav} banner={banner} connectionStatus={connectionStatus}
     newChat={{ available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) }}>
-    {route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages()}</ModuleFrame> : children}
+    {route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} /> : children}
   </AppShell>;
 }
 

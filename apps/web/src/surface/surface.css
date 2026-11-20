@@ -44,10 +44,6 @@
 .module-skeleton i { display: block; width: min(48ch, 100%); height: 10px; margin-top: 14px; background: var(--fulcrum-surface); }
 .module-skeleton i:nth-child(2) { width: min(36ch, 75%); }
 .module-skeleton i:nth-child(3) { width: min(24ch, 55%); }
-.page-list { width: min(100%, 56rem); margin: 0; padding: 16px; border: 0; }
-.page-list .load-older { min-height: 44px; }
-.page-list a { min-height: 44px; align-items: center; border-bottom: 1px solid var(--fulcrum-border); }
-.page-list a:hover { background: var(--fulcrum-surface); }
 
 @media (min-width: 761px) and (min-height: 501px) {
   .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
