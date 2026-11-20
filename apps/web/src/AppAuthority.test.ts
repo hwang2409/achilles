@@ -494,6 +494,23 @@ test("a library take-control refusal still shows after the observer socket is re
   });
 });
 
+test("a typed create draft comes back after the socket drops and reconnects", async () => {
+  const sockets: (EventTarget & { close(): void })[] = [];
+  await withApp("controller", { ...library(true), sockets: sockets as EventTarget[] }, async (app, writes) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
+    await change(select(app, ".library-editor textarea"), "---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(app.container.querySelector(".library-editor")).toBeNull(); // the module unmounts while zeta is away
+    await app.findByText("no skills found", {}, { timeout: 3_000 }).catch(() => undefined);
+    const text = await app.findByDisplayValue(/unsaved text/, {}, { timeout: 3_000 });
+    expect((text as HTMLTextAreaElement).value).toBe("---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
+    expect((select(app, '.library-editor input[aria-describedby$="-rules"]') as HTMLInputElement).value).toBe("fixture-draft");
+    expect(writes.filter((write) => write.endsWith("_write"))).toEqual([]);
+  });
+});
+
 const requestApprovalChange = async (app: RenderResult) => {
   await click(select(app, '[aria-label="page chat options"]'));
   await click(select(app, tag("page-chat.auto-approve")));

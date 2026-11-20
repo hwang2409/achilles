@@ -58,7 +58,7 @@ test("a page with no rows still lists the files zeta skipped", async () => {
 test("a draft stays visible and read-only when zeta stops allowing the save, and nothing is sent", async () => {
   const calls: string[] = [];
   const client = { request: (method: string) => { calls.push(method); return Promise.resolve({ revision: "r", data: { items: [] } }); } } as unknown as ZetaClient;
-  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null };
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map() };
   const props = { client, kind: "skills" as const, reads: { catalog: true, read: true } };
   const view = render(createElement(LibraryModule, { ...props, write }));
   await view.findByText("no skills found");

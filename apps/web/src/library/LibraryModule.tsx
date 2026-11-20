@@ -3,7 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
-import { LibraryEditor } from "./LibraryEditor";
+import { LibraryEditor, type CreateDraft } from "./LibraryEditor";
 import { createLibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, SAVED_NOTICE } from "./libraryWrites";
 import "./library.css";
 
@@ -29,7 +29,11 @@ type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "f
 export type LibraryReads = { catalog: boolean; read: boolean };
 /** Present only when this zeta grants library_write_v1. `allowed: false`: this tab controls zeta, but zeta did not list
  * this kind's write method. `feedback`: the last take-control refusal, held by the router so it survives a remount. */
-export type LibraryWrite = { controller: boolean; allowed: boolean; takeControl: () => Promise<string | null>; feedback: string | null };
+export type LibraryWrite = {
+  controller: boolean; allowed: boolean; takeControl: () => Promise<string | null>; feedback: string | null;
+  /** In-memory drafts held by the router, keyed `<kind>/new`, so a remount after a socket drop restores the form. */
+  drafts: Map<string, CreateDraft>;
+};
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
 const unreadable: Problem = { message: "zeta sent data this view cannot read", retry: true };
@@ -59,7 +63,8 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const returnToList = useRef(false);
   const focusCreated = useRef(false);
   const [writer] = useState(() => createLibraryWriter());
-  const [creating, setCreating] = useState(false);
+  const draftKey = `${kind}/new`;
+  const [creating, setCreating] = useState(() => Boolean(write?.drafts.has(draftKey)));
   const [taking, setTaking] = useState(false);
   const controlFeedback = write?.feedback ?? null;
   const [saved, setSaved] = useState<{ redacted: boolean } | null>(null);
@@ -149,8 +154,13 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     setCreating(true);
   }
 
-  function showCreated(name: string) {
+  function closeEditor() {
+    write?.drafts.delete(draftKey);
     setCreating(false);
+  }
+
+  function showCreated(name: string) {
+    closeEditor();
     focusCreated.current = true;
     setSelection(name);
     refresh();
@@ -230,8 +240,9 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         <p>{SAVED_NOTICE}</p>
         {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
       </div>}
-      {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows} catalogMethod={reads.catalog ? methods.catalog : null}
-        takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onClose={() => setCreating(false)} onOpen={showCreated}
+      {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows}
+        draft={write.drafts.get(draftKey)} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
+        takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEditor} onOpen={showCreated}
         onCreated={(name, redacted) => { setSaved({ redacted }); showCreated(name); }} /> : content}
     </div>
   </ModuleFrame>;

@@ -5,8 +5,13 @@ import { createProblems, nameProblem, type createLibraryWriter, type WriteOutcom
 
 type Writer = ReturnType<typeof createLibraryWriter>;
 type Failure = Exclude<WriteOutcome, { status: "saved" }>;
+/** What the user typed in the create form. Kept in memory only, never in storage or the URL: a draft can hold a secret. */
+export type CreateDraft = { name: string; description: string; scope: WriteScope; edited: string | null };
 type Props = {
   client: ZetaClient; kind: LibraryKind; writer: Writer; rows: CatalogRow[];
+  /** Starts the form from this draft; every change is reported back, so the owner can restore it after a remount. */
+  draft: CreateDraft | undefined;
+  onDraft: (draft: CreateDraft) => void;
   /** The catalog method used to probe project scope; null when this zeta has no live catalog. */
   catalogMethod: string | null;
   takeControl: () => Promise<string | null>;
@@ -23,15 +28,14 @@ const header = (kind: LibraryKind, name: string, description: string) =>
   `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n${kind === "skills" ? "keywords: []\n" : ""}---\n` +
   (kind === "skills" ? "describe when and how to use this skill.\n" : "describe how this agent works.\n");
 
-/** The create form. Its text lives only in this component's memory (a draft can hold a secret), and the component
- * keeps its place when take control swaps the client, so the draft survives. */
-export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeControl, feedback, blocked, onCreated, onOpen, onClose }: Props) {
+/** The create form. The draft is mirrored to `onDraft`, so a socket drop that unmounts the form does not lose it. */
+export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, catalogMethod, takeControl, feedback, blocked, onCreated, onOpen, onClose }: Props) {
   const noun = kind === "skills" ? "skill" : "profile";
   const id = useId();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [scope, setScope] = useState<WriteScope>("home");
-  const [edited, setEdited] = useState<string | null>(null);
+  const [name, setName] = useState(draft?.name ?? "");
+  const [description, setDescription] = useState(draft?.description ?? "");
+  const [scope, setScope] = useState<WriteScope>(draft?.scope ?? "home");
+  const [edited, setEdited] = useState<string | null>(draft?.edited ?? null);
   const [project, setProject] = useState<"checking" | "available" | string>(catalogMethod ? "checking" : "needs a newer zeta");
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -47,6 +51,7 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     nameField.current?.focus();
     return () => abort.current?.abort();
   }, []);
+  useEffect(() => { onDraft({ name, description, scope, edited }); }, [name, description, scope, edited]);
   // Project scope needs an open chat in a project; ask zeta once with a one-row read.
   useEffect(() => {
     if (!catalogMethod) return;
