@@ -39,4 +39,6 @@ test("a skill body loads only on click, and a late read for an older selection n
   await act(async () => reads.get("beta")?.("<b>BETA</b> BODY"));
   expect(view.container.querySelector("pre.library-body")?.textContent).toBe("<b>BETA</b> BODY");
   expect(view.container.querySelector("pre.library-body b")).toBeNull();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("beta skill text");
+  expect(view.container.querySelector(".library-text [role=status]")?.textContent).toBe("skill text loaded");
 });
