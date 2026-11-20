@@ -42,3 +42,13 @@ test("a skill body loads only on click, and a late read for an older selection n
   expect(document.activeElement?.getAttribute("aria-label")).toBe("beta skill text");
   expect(view.container.querySelector(".library-text [role=status]")?.textContent).toBe("skill text loaded");
 });
+
+test("a page with no rows still lists the files zeta skipped", async () => {
+  const diagnostics = [{ source: "home", file: "broken/SKILL.md", reason: "invalid YAML frontmatter" }];
+  const client = { request: () => Promise.resolve({ revision: "r", data: { items: [], diagnostics } }) } as unknown as ZetaClient;
+  const view = render(createElement(LibraryModule, { client, kind: "skills", reads: { catalog: true, read: true } }));
+
+  expect(await view.findByText("no skills found")).toBeTruthy();
+  expect(view.container.querySelector(".library-skipped summary")?.textContent).toBe("1 file skipped or shadowed");
+  expect(view.container.querySelector(".library-skipped li")?.textContent).toBe("home · broken/SKILL.md invalid YAML frontmatter");
+});
