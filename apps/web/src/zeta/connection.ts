@@ -58,7 +58,11 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
 type RoleState = { role: ZetaRole; reason: string | null };
 type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "control_released" | "retry";
 
-export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
+// zeta sends observers no "slot free" signal, so the refusal is a past result with its time: true for as long as it shows.
+export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} another tab had control. try again after it closes or finishes editing.`;
+
+// `at`: when a takeover was refused (epoch ms).
+export function transitionRole(state: RoleState, event: RoleEvent, at = Date.now()): RoleState {
   switch (event) {
     case "connect_writable":
     case "controller_granted":
@@ -72,7 +76,7 @@ export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
     case "observer_busy":
       return { role: "observer", reason: null };
     case "takeover_refused":
-      return { role: state.role, reason: "another tab has control. try again after it closes or finishes editing." };
+      return { role: state.role, reason: refusedReason(at) };
     case "takeover_failed":
       return { role: state.role, reason: "could not take control. try again." };
     case "retry":
@@ -293,10 +297,10 @@ export function createConnection({
       if (stopped || client !== observer) {
         if (opened.kind === "connected") opened.client.close();
         // the observer socket was replaced during the attempt: still say the click did not take control
-        return stopped ? null : transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed").reason;
+        return stopped ? null : transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed", now()).reason;
       }
       if (opened.kind !== "connected") {
-        roleState = transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed");
+        roleState = transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed", now());
         return roleState.reason;
       }
       holding = true;

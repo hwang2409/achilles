@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ZetaError, type ZetaDiscovery } from "@fulcrum/zeta";
-import { createConnection, FEATURES, isObserverPresentation, transitionRole, type ConnectionState } from "./connection";
+import { createConnection, FEATURES, isObserverPresentation, refusedReason, transitionRole, type ConnectionState } from "./connection";
 
 const discovery: ZetaDiscovery = { url: "ws://127.0.0.1:8765", controller_token: "c", observer_token: "o", origins: [] };
 
@@ -41,7 +41,10 @@ test("startup and offline failures never retain observer presentation", async ()
 
 const controllerRole = { role: "controller", reason: null } as const;
 const observerRole = { role: "observer", reason: null } as const;
-const refusedRole = { ...observerRole, reason: "another tab has control. try again after it closes or finishes editing." };
+const refusedAt = new Date(2030, 0, 1, 10, 31).getTime();
+const refusedRole = { ...observerRole, reason: refusedReason(refusedAt) };
+const refused = /^at \d{1,2}:\d{2}( [ap]m)? another tab had control\. try again after it closes or finishes editing\.$/;
+test("a refused takeover says when it was refused", () => expect(refusedRole.reason).toMatch(/^at 10:31/));
 test.each([
   ["connect on a read-only route", controllerRole, ["connect_read_only", "observer_busy", "retry"], observerRole],
   ["connect on a writable route", observerRole, ["connect_writable", "retry"], controllerRole],
@@ -56,7 +59,7 @@ test.each([
   ["closed controller retries as controller", controllerRole, ["controller_closed", "retry"], controllerRole],
 ] as const)("role transition: %s", (_name, initial, events, expected) => {
   let state: Parameters<typeof transitionRole>[0] = initial;
-  for (const event of events) state = transitionRole(state, event);
+  for (const event of events) state = transitionRole(state, event, refusedAt);
   expect(state).toEqual(expected);
 });
 
@@ -85,7 +88,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
       const result = await connection.takeControl();
       unsubscribe();
       expect(states.filter((state) => state.phase !== "connected" || state.authority !== "observer")).toEqual([]);
-      expect(result).toBe(refusedRole.reason);
+      expect(result).toMatch(refused);
       expect(connection.client).toBe(observer);
       expect(observerCloses).toBe(0);
       released = true;
@@ -143,7 +146,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
     try {
       await flush();
       expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
-      expect(await connection.takeControl()).toBe(refusedRole.reason);
+      expect(await connection.takeControl()).toMatch(refused);
       expect(connection.client).toBe(observer);
       expect(observerCloses).toBe(0);
       slotFree = true;
