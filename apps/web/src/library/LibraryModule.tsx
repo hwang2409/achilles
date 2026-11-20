@@ -3,6 +3,8 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
+import { LibraryEditor } from "./LibraryEditor";
+import { createLibraryWriter, REDACTED_NOTICE, SAVED_NOTICE } from "./libraryWrites";
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
@@ -25,6 +27,8 @@ type More = "idle" | "loading" | Problem;
 type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "failed"; problem: Problem };
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
+/** Present only when this zeta grants library_write_v1 and this kind's write method. */
+export type LibraryWrite = { controller: boolean; takeControl: () => Promise<string | null> };
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
 const unreadable: Problem = { message: "zeta sent data this view cannot read", retry: true };
@@ -36,7 +40,7 @@ function problemOf(error: unknown): Problem {
   return { message: "zeta could not read it", retry: true };
 }
 
-export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kind: LibraryKind; reads: LibraryReads }) {
+export function LibraryModule({ client, kind, reads, write = null }: { client: ZetaClient; kind: LibraryKind; reads: LibraryReads; write?: LibraryWrite | null }) {
   const title = kind === "skills" ? "skills" : "agent profiles";
   const noun = kind === "skills" ? "skill" : "profile";
   const methods = libraryMethods(kind);
@@ -52,6 +56,12 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   const lastRow = useRef<HTMLButtonElement | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const returnToList = useRef(false);
+  const focusCreated = useRef(false);
+  const [writer] = useState(() => createLibraryWriter());
+  const [creating, setCreating] = useState(false);
+  const [taking, setTaking] = useState(false);
+  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ redacted: boolean } | null>(null);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -81,8 +91,9 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   const selected = rows.find(({ name }) => name === selection);
   useEffect(() => {
     // narrow layouts swap to the detail; on desktop only a keyboard pick moves focus there (a mouse click keeps it).
-    if (selected && (keyboardPick.current || matchMedia(narrow).matches)) detailHeading.current?.focus();
+    if (selected && (keyboardPick.current || focusCreated.current || matchMedia(narrow).matches)) detailHeading.current?.focus();
     keyboardPick.current = false;
+    if (selected) focusCreated.current = false;
     if (!selected && returnToList.current) {
       returnToList.current = false;
       (lastRow.current?.isConnected ? lastRow.current : search.current)?.focus();
@@ -122,6 +133,27 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     }
     keyboardPick.current = keyboard;
     setSelection(row.name);
+  }
+
+  // Library tabs stay observers; pressing new takes the controller slot only if it is free.
+  async function startCreate() {
+    if (!write || taking) return;
+    setSaved(null);
+    setControlFeedback(null);
+    if (!write.controller) {
+      setTaking(true);
+      const reason = await write.takeControl();
+      setTaking(false);
+      if (reason) return setControlFeedback(reason);
+    }
+    setCreating(true);
+  }
+
+  function showCreated(name: string) {
+    setCreating(false);
+    focusCreated.current = true;
+    setSelection(name);
+    refresh();
   }
 
   function backToList() {
@@ -189,9 +221,18 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         <div className="library-snapshot">
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "live catalog · effective scope" : "active session snapshot · may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
+          {write && !creating && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking}
+            aria-describedby={controlFeedback ? "library-control-feedback" : undefined} onClick={() => void startCreate()}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
+        {controlFeedback && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback}</p>}
       </div>
-      {content}
+      {saved && <div role="status" className="library-saved">
+        <p>{SAVED_NOTICE}</p>
+        {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
+      </div>}
+      {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows} catalogMethod={reads.catalog ? methods.catalog : null}
+        takeControl={write.takeControl} onClose={() => setCreating(false)} onOpen={showCreated}
+        onCreated={(name, redacted) => { setSaved({ redacted }); showCreated(name); }} /> : content}
     </div>
   </ModuleFrame>;
 }

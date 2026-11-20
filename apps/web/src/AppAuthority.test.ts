@@ -12,10 +12,11 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
-type Options = { browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+// `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
+type Options = { path?: string; observerBanner?: false; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   const writes: string[] = [];
@@ -75,13 +76,15 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
         : path.endsWith("/tools") ? { tools: options.tool ? [options.tool] : [] }
         : path.includes("/records/") ? [] : { ...page, ...options.page });
     }) as typeof fetch;
-    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid/${options.attached ? "?chat=session" : ""}`);
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid${options.path ?? "/"}${options.attached ? "?chat=session" : ""}`);
     updateSettings({ vim: false, size: 15 });
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
     const banner = app.container.querySelector(".observer-banner");
-    if (authority === "observer") {
+    if (options.observerBanner === false) {
+      expect(banner).toBeNull();
+    } else if (authority === "observer") {
       expect(banner?.textContent).toContain("live and read-only");
       expect(banner?.getAttribute("hidden")).toBeNull();
     } else {
@@ -188,6 +191,16 @@ const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row =
 } });
 const userMessage = { id: "message", role: "user", content: [{ type: "text", text: "Fixture history title" }] };
 const pendingKey = "achilles-pending-chats";
+const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+// The skills route with library_read_v1, and library_write_v1 + skill_write when `writes` (each part can be withheld).
+const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", observerBanner: false, rpc: {
+  hello: (params) => ({ result: { protocol_version: "1.2", capabilities: {
+    features: (params.features as string[]).filter((name) => name !== "library_write_v1" || feature),
+    requests: ["skill_catalog", "skill_read", ...(method ? ["skill_write"] : [])],
+  } } }),
+  skill_catalog: () => ({ result: { revision: "r", data: { items: [] } } }),
+  skill_write: async (params) => ({ result: { revision: await sha256((params.mutation as { document: string }).document), data: { name: params.name, scope: params.scope, redacted: false } } }),
+} });
 const blockedCreation = (path: string, method: string) => path === "/api/pages/page/chats" && method === "POST" ? new Response(null, { status: 503 }) : undefined;
 const creationAction = (action: "retry" | "discard"): Row => ({ kind: action === "retry" ? "visible" : "local-only", absent: true, options: { pending: true, http: blockedCreation }, check: async (app, authority, writes, requests) => {
   const id = `create.${action}` as const;
@@ -371,6 +384,20 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(document.activeElement === field).toBe(authority === "controller");
     expect(writes).toEqual([]);
   } },
+  "library.create": { kind: "visible", options: library(true), check: async (app, authority, writes) => {
+    // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
+    await click(select(app, tag("library.create")));
+    if (authority === "observer") {
+      expect(app.getByText("another tab had control. try again after it closes.")).toBeTruthy();
+      expect(app.container.querySelector(".library-editor")).toBeNull();
+      return;
+    }
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
+    await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    didWrite(writes, "skill_write");
+    expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
     const form = select(app, '.record-form form');
     const submit = select(app, '.record-form button[type="submit"]');
@@ -424,6 +451,18 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
   for (const authority of ["observer", "controller"] as const) {
     await withApp(authority, row.options ?? {}, (app, writes, requests) => row.check(app, authority, writes, requests));
   }
+});
+
+test.each([
+  ["no library_write_v1", library(true, false, true), false],
+  ["no skill_write method", library(true, true, false), false],
+  ["neither", library(false), false],
+  ["both", library(true), true],
+] as const)("library create control renders only with the write capability: %s", async (_name, options, shown) => {
+  await withApp("controller", options, async (app) => {
+    await app.findByText("no skills found");
+    expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(shown);
+  });
 });
 
 const requestApprovalChange = async (app: RenderResult) => {
