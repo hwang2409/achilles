@@ -98,6 +98,7 @@ function CatalogShell({ renderShell, route, connectionStatus, banner, children }
 function ObserverBanner({ connection, readOnly }: { connection: Connection; readOnly: boolean }) {
   const [working, setWorking] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  // aria-disabled, not disabled: a disabled button drops focus to <body> during the attempt.
   const takeControl = async () => {
     setWorking(true); setFeedback(null);
     const reason = await connection.takeControl();
@@ -109,6 +110,6 @@ function ObserverBanner({ connection, readOnly }: { connection: Connection; read
       <strong>{readOnly ? "this page is read-only" : "another tab controls zeta"}</strong>
       <span>{readOnly ? "open a chat to control zeta." : "this tab is live and read-only. you can browse chats and pages, but sending, approvals, and changes are disabled."}</span>
     </div>
-    {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => void takeControl()} disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div>}
+    {!readOnly && <div className="observer-action"><button type="button" aria-describedby={feedback ? "take-control-feedback" : undefined} onClick={() => { if (!working) void takeControl(); }} aria-disabled={working}>{working ? "taking control…" : "take control"}</button><span id="take-control-feedback" role="status">{feedback}</span></div>}
   </aside>;
 }

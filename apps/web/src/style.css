@@ -20,7 +20,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .observer-action { justify-items: end; flex: none; }
 #take-control-feedback:empty { position: absolute; }
 .observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
-.observer-banner button:disabled { cursor: wait; opacity: .65; }
+.observer-banner button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 @media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; gap: 8px; } .observer-action { width: 100%; justify-items: start; } .observer-banner button { min-height: 44px; width: 100%; } }
 .sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
