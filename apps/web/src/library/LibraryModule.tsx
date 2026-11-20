@@ -44,6 +44,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
   const detailHeading = useRef<HTMLHeadingElement>(null);
+  const keyboardPick = useRef(false);
   const lastRow = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const returnToList = useRef(false);
@@ -83,7 +84,9 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     (rowButtons.find((button) => added.has(button.dataset.row ?? "")) ?? search.current)?.focus();
   }, [catalog]);
   useEffect(() => {
-    if (selected && matchMedia(narrow).matches) detailHeading.current?.focus();
+    // narrow layouts swap to the detail; on desktop only a keyboard pick moves focus there (a mouse click keeps it).
+    if (selected && (keyboardPick.current || matchMedia(narrow).matches)) detailHeading.current?.focus();
+    keyboardPick.current = false;
     if (!selected && returnToList.current) {
       returnToList.current = false;
       (lastRow.current?.isConnected ? lastRow.current : search.current)?.focus();
@@ -139,6 +142,8 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
           value={query} onChange={(event) => setQuery(event.target.value)} />
         <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
       </div>
+      {reads.catalog && !rows.some(({ source }) => source === "project") &&
+        <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
       {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
       {sourceTiers.map((source) => {
         const group = matches.filter((row) => row.source === source);
@@ -148,6 +153,9 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
             {group.map((row) => <li key={row.name}>
               <button type="button" data-row={row.name} aria-current={row === selected || undefined} onClick={(event) => {
                 lastRow.current = event.currentTarget;
+                // detail 0: activated by Enter or Space, not a pointer.
+                if (event.detail === 0 && row === selected) detailHeading.current?.focus();
+                keyboardPick.current = event.detail === 0;
                 setSelection(row.name);
               }}>
                 <strong>{row.name}</strong>
@@ -163,10 +171,8 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         <button type="button" aria-disabled={more === "loading"} onClick={() => void loadMore()}>{more === "loading" ? "loading more…" : "load more"}</button>
         {typeof more === "object" && <span role="alert">could not load more: {more.message}</span>}
       </div>}
-      {reads.catalog && !rows.some(({ source }) => source === "project") &&
-        <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
       {catalog.skipped && catalog.skipped.items.length > 0 && <details className="library-skipped">
-        <summary>{catalog.skipped.items.length + catalog.skipped.more} files skipped or shadowed</summary>
+        <summary>{catalog.skipped.items.length + catalog.skipped.more} {catalog.skipped.items.length + catalog.skipped.more === 1 ? "file" : "files"} skipped or shadowed</summary>
         <ul>
           {catalog.skipped.items.map(({ source, file, reason }, i) => <li key={i}><span>{source} · {file}</span> {reason}</li>)}
           {catalog.skipped.more > 0 && <li>{catalog.skipped.more} more</li>}
@@ -248,8 +254,11 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
     }
     if (abort.signal.aborted) return;
     setReveal(next);
-    if (next.state === "data") setAnnouncement([`${noun} text loaded`, next.body.redacted && "some secret-like text was removed",
-      next.body.truncated && "truncated at 128 KiB"].filter(Boolean).join(". "));
+    // clear first and set on the next frame, so a second show of the same text is announced again.
+    setAnnouncement("");
+    if (next.state !== "data") return;
+    const message = [`${noun} text loaded`, next.body.redacted && "some secret-like text was removed", next.body.truncated && "truncated at 128 KiB"];
+    requestAnimationFrame(() => setAnnouncement(message.filter(Boolean).join(". ")));
   }
 
   const gone = reveal?.state === "failed" && reveal.problem.message === "no longer exists";
@@ -265,7 +274,7 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
           </button>}
       {gone && <button type="button" onClick={onGone}>refresh list</button>}
     </div>
-    {reveal?.state === "failed" && <div ref={region} tabIndex={-1}>
+    {reveal?.state === "failed" && <div ref={region} tabIndex={-1} className="library-text-region">
       <p role="alert" className="library-error">could not show the text: {reveal.problem.message}</p>
     </div>}
     {reveal?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="library-text-region">
