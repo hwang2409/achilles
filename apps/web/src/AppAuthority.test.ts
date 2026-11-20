@@ -12,10 +12,13 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
-type Options = { browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+// `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
+// `slot`: like zeta, one controller at a time across every socket (a second controller hello gets -32001); `roles`
+// records each hello role.
+type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   const writes: string[] = [];
@@ -38,15 +41,20 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   if (options.extraChat) chats.push(options.extraChat);
   let app: RenderResult | undefined;
   let socket: Socket;
-  const emit = (event: object) => socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));
+  const reply = (target: EventTarget, event: object) => target.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));
+  const emit = (event: object) => reply(socket, event);
+  const controllers = new Set<Socket>();
   class Socket extends EventTarget {
-    constructor() { super(); socket = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
-    close() { this.dispatchEvent(new Event("close")); }
+    constructor() { super(); socket = this; options.sockets?.push(this); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    close() { controllers.delete(this); this.dispatchEvent(new Event("close")); }
     send(raw: string) {
       const { id, method, params } = JSON.parse(raw);
       requests.push(method);
       if (!reads.has(method)) writes.push(method);
-      const custom = options.rpc?.[method]?.(params, requests);
+      if (method === "hello") options.roles?.push(params.role);
+      const taken = options.slot && method === "hello" && params.role === "controller" && [...controllers].some((other) => other !== this);
+      if (options.slot && method === "hello" && params.role === "controller" && !taken) controllers.add(this);
+      const custom = taken ? { error: { code: -32001, message: "controller occupied" } } : options.rpc?.[method]?.(params, requests);
       const response = method === "hello" && authority === "observer" && params.role === "controller"
         ? { error: { code: -32001, message: "controller occupied" } }
         : custom ?? { result: ({
@@ -57,7 +65,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
           send: { accepted: true }, steer: { accepted: true }, delivery_status: { status: "delivered" },
           session_history_and_subscribe: { messages: [], next_before: null, status, ...options.joined },
         } as Record<string, unknown>)[method] ?? {} };
-      void Promise.resolve(response).then((reply) => emit({ jsonrpc: "2.0", id, ...reply }));
+      void Promise.resolve(response).then((result) => reply(this, { jsonrpc: "2.0", id, ...result }));
     }
   }
   try {
@@ -75,13 +83,15 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
         : path.endsWith("/tools") ? { tools: options.tool ? [options.tool] : [] }
         : path.includes("/records/") ? [] : { ...page, ...options.page });
     }) as typeof fetch;
-    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid/${options.attached ? "?chat=session" : ""}`);
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid${options.path ?? "/"}${options.attached ? "?chat=session" : ""}`);
     updateSettings({ vim: false, size: 15 });
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
     const banner = app.container.querySelector(".observer-banner");
-    if (authority === "observer") {
+    if (options.observerBanner === false) {
+      expect(banner).toBeNull();
+    } else if (authority === "observer") {
       expect(banner?.textContent).toContain("live and read-only");
       expect(banner?.getAttribute("hidden")).toBeNull();
     } else {
@@ -188,6 +198,22 @@ const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row =
 } });
 const userMessage = { id: "message", role: "user", content: [{ type: "text", text: "Fixture history title" }] };
 const pendingKey = "achilles-pending-chats";
+const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+// The skills route with library_read_v1, and library_write_v1 + skill_write when `writes` (each part can be withheld).
+// Like zeta, hello lists a controller-write method only to a controller.
+const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", observerBanner: false, rpc: {
+  hello: (params) => ({ result: { protocol_version: "1.2", capabilities: {
+    features: (params.features as string[]).filter((name) => name !== "library_write_v1" || feature),
+    requests: ["skill_catalog", "skill_read", ...(method && params.role === "controller" ? ["skill_write"] : [])],
+  } } }),
+  skill_catalog: () => ({ result: { revision: "r", data: { items: [] } } }),
+  skill_write: async (params) => ({ result: { revision: await sha256((params.mutation as { document: string }).document), data: { name: params.name, scope: params.scope, redacted: false } } }),
+} });
+const fixtureFile = "---\nname: fixture-skill\ndescription: synthetic skill\n---\nbody\n";
+const libraryFile: Options = { ...library(true), rpc: { ...library(true).rpc,
+  skill_catalog: () => ({ result: { revision: "r", data: { items: [{ name: "fixture-skill", description: "synthetic skill", keywords: [], source: "home", scope: "home", editable: true, diagnostics: [] }] } } }),
+  skill_read: async () => ({ result: { revision: await sha256(fixtureFile), data: { name: "fixture-skill", frontmatter: {}, body: "body\n", source: "home", editable: true, redacted: false, document: fixtureFile } } }),
+} };
 const blockedCreation = (path: string, method: string) => path === "/api/pages/page/chats" && method === "POST" ? new Response(null, { status: 503 }) : undefined;
 const creationAction = (action: "retry" | "discard"): Row => ({ kind: action === "retry" ? "visible" : "local-only", absent: true, options: { pending: true, http: blockedCreation }, check: async (app, authority, writes, requests) => {
   const id = `create.${action}` as const;
@@ -371,6 +397,35 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(document.activeElement === field).toBe(authority === "controller");
     expect(writes).toEqual([]);
   } },
+  "library.create": { kind: "visible", options: library(true), check: async (app, authority, writes) => {
+    // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
+    await click(select(app, tag("library.create")));
+    if (authority === "observer") {
+      expect(app.getByText("another tab has control. try again after it closes or finishes editing.")).toBeTruthy();
+      expect(app.container.querySelector(".library-editor")).toBeNull();
+      return;
+    }
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
+    await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    expect(await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+    didWrite(writes, "skill_write");
+  } },
+  "library.edit": { kind: "visible", options: libraryFile, check: async (app, authority, writes) => {
+    // the edit control appears on a revealed file that zeta sent as a raw document; it takes control like "+ new".
+    await click(await app.findByRole("button", { name: /fixture-skill/ }));
+    await click(app.getByText("show skill text", { selector: "button", exact: true }));
+    await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
+    if (authority === "observer") {
+      expect(app.getByText("another tab has control. try again after it closes or finishes editing.")).toBeTruthy();
+      expect(app.container.querySelector(".library-editor")).toBeNull();
+      return;
+    }
+    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+    didWrite(writes, "skill_write");
+  } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
     const form = select(app, '.record-form form');
     const submit = select(app, '.record-form button[type="submit"]');
@@ -424,6 +479,121 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
   for (const authority of ["observer", "controller"] as const) {
     await withApp(authority, row.options ?? {}, (app, writes, requests) => row.check(app, authority, writes, requests));
   }
+});
+
+test.each([
+  ["no library_write_v1", library(true, false, true), false, false],
+  ["the controller lacks skill_write", library(true, true, false), true, false],
+  ["neither", library(false), false, false],
+  ["both", library(true), true, true],
+] as const)("library create control renders only with the write capability: %s", async (_name, options, observer, controller) => {
+  await withApp("controller", options, async (app, writes) => {
+    await app.findByText("no skills found");
+    // an observer hello never lists write methods, so the observer view depends on the feature alone.
+    expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(observer);
+    if (observer) await click(select(app, tag("library.create")));
+    // after take control the form opens; without the write method it is read-only, says why, and has no save.
+    expect(Boolean(app.container.querySelector(".library-editor"))).toBe(observer);
+    if (observer) {
+      expect(Boolean(app.queryByText(/^save/, { selector: "button" }))).toBe(controller);
+      expect(Boolean(app.queryByText("this zeta does not allow saving here. your text is kept; nothing was sent."))).toBe(!controller);
+      expect((select(app, ".library-editor textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
+    }
+    expect(writes).toEqual([]);
+  });
+});
+
+test("a library take-control refusal still shows after the observer socket is replaced during the attempt", async () => {
+  const sockets: (EventTarget & { close(): void })[] = [];
+  const base = library(true);
+  const hello = base.rpc!.hello!;
+  const options: Options = { ...base, sockets: sockets as EventTarget[], rpc: { ...base.rpc, hello: async (params, requests) => {
+    if (params.role !== "controller") return hello(params, requests);
+    sockets[0]!.close(); // the observer drops while the controller handshake is in flight
+    return { error: { code: -32001, message: "controller occupied" } };
+  } } };
+  await withApp("observer", options, async (app) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    expect(await app.findByText("another tab has control. try again after it closes or finishes editing.", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(app.getByText("another tab has control. try again after it closes or finishes editing.")).toBeTruthy();
+  });
+});
+
+test("a typed create draft comes back after the socket drops and reconnects", async () => {
+  const sockets: (EventTarget & { close(): void })[] = [];
+  await withApp("controller", { ...library(true), sockets: sockets as EventTarget[] }, async (app, writes) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
+    await change(select(app, ".library-editor textarea"), "---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(app.container.querySelector(".library-editor")).toBeNull(); // the module unmounts while zeta is away
+    await app.findByText("no skills found", {}, { timeout: 3_000 }).catch(() => undefined);
+    const text = await app.findByDisplayValue(/unsaved text/, {}, { timeout: 3_000 });
+    expect((text as HTMLTextAreaElement).value).toBe("---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
+    expect((select(app, '.library-editor input[aria-describedby$="-rules"]') as HTMLInputElement).value).toBe("fixture-draft");
+    expect(writes.filter((write) => write.endsWith("_write"))).toEqual([]);
+  });
+});
+
+// A second tab asking zeta for the controller slot: the hello reply says whether it got it.
+const chatTabHello = () => new Promise<{ result?: object; error?: { code: number } }>((resolve) => {
+  const tab = new WebSocket("ws://fixture.invalid");
+  tab.addEventListener("message", (event) => { resolve(JSON.parse((event as MessageEvent).data)); tab.close(); });
+  tab.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hello", params: { role: "controller", features: [] } }));
+});
+
+test.each([
+  ["create + save", library(true), async (app: RenderResult) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    expect((await chatTabHello()).error?.code).toBe(-32001); // the library tab holds the slot while its editor is open
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
+    await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions/);
+  }],
+  ["edit + save + close", libraryFile, async (app: RenderResult) => {
+    await click(await app.findByRole("button", { name: /fixture-skill/ }));
+    await click(app.getByText("show skill text", { selector: "button", exact: true }));
+    await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
+    expect((await chatTabHello()).error?.code).toBe(-32001);
+    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    await app.findByText(/^saved fixture-skill/);
+    await click(app.getByText("close", { selector: ".library-editor button", exact: true }));
+  }],
+] as const)("a library tab gives control back after %s, so a chat tab can then take control", async (_name, options, write) => {
+  const roles: string[] = [];
+  await withApp("controller", { ...options, slot: true, roles }, async (app, writes) => {
+    await write(app);
+    didWrite(writes, "skill_write");
+    await act(async () => {});
+    expect((await chatTabHello()).result, `hello roles ${JSON.stringify(roles)}`).toBeTruthy();
+    expect(roles).toEqual(["observer", "controller", "controller", "observer", "controller"]);
+  });
+});
+
+test("a library tab reconnects as observer once its editor closed, and as controller while one is open", async () => {
+  const roles: string[] = [];
+  const sockets: (EventTarget & { close(): void })[] = [];
+  await withApp("controller", { ...library(true), slot: true, roles, sockets: sockets as EventTarget[] }, async (app) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(await app.findByDisplayValue("fixture-draft", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(roles.at(-1)).toBe("controller");
+    await click(app.getByText("discard", { selector: "button", exact: true }));
+    await click(app.getByText("discard changes", { selector: "button", exact: true }));
+    await act(async () => {});
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
+    await act(async () => {});
+    expect(roles).toEqual(["observer", "controller", "controller", "observer", "observer"]);
+  });
 });
 
 const requestApprovalChange = async (app: RenderResult) => {

@@ -34,6 +34,7 @@ const adapters = {
     key: "skill_catalog",
     catalog: "skill_catalog",
     read: "skill_read",
+    write: "skill_write",
     fields: (row: Record<string, unknown>, summary: Summary): Skill | null =>
       strings(row.keywords) ? { ...summary, keywords: [...row.keywords] } : null,
   },
@@ -41,6 +42,7 @@ const adapters = {
     key: "agent_catalog",
     catalog: "agent_profile_catalog",
     read: "agent_profile_read",
+    write: "agent_profile_write",
     fields: (row: Record<string, unknown>, summary: Summary): Profile | null => {
       const { tools, model, allow_delegation, accepts_follow_ups, explicit_finish, max_turns } = row;
       if (!(tools === null || strings(tools)) || !(model === null || typeof model === "string") ||
@@ -56,7 +58,7 @@ export type LibraryKind = keyof typeof adapters;
 export type Catalog = { state: "data"; rows: CatalogRow[] } | { state: "empty" | "no-session" | "invalid" };
 // `skipped`: files the loader skipped or a higher tier shadowed (zeta repeats the full list on every page).
 export type CatalogPage = { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Bounded<FileProblem> } | { state: "invalid" };
-export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read });
+export const libraryMethods = (kind: LibraryKind) => ({ catalog: adapters[kind].catalog, read: adapters[kind].read, write: adapters[kind].write });
 
 const offset = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const bySource = (rows: CatalogRow[]) => rows.sort((a, b) => sourceTiers.indexOf(a.source) - sourceTiers.indexOf(b.source));
@@ -107,13 +109,18 @@ export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogP
 export const appendPage = (rows: CatalogRow[], page: CatalogRow[]) =>
   bySource([...rows, ...page.filter((row) => !rows.some(({ name }) => name === row.name))]);
 
-export type Body = { text: string; redacted: boolean; truncated: boolean };
-// The body is untrusted user text: keep only the text and its two flags, never the frontmatter.
+// `editable`: zeta's raw file text and the sha256 revision of its bytes; zeta sends `document` only for an unredacted
+// file of at most 128 KiB with no secret-like text (zeta adba2fae9), so null means "edit it outside achilles".
+export type Body = { text: string; redacted: boolean; truncated: boolean; editable: { revision: string; document: string } | null };
+// The body is untrusted user text: keep only the text, its two flags and the editable copy, never the frontmatter.
 export function projectBody(result: unknown, name: string): Body | null {
   const data = record(result) ? result.data : undefined;
   if (!record(data) || data.name !== name || typeof data.body !== "string" || typeof data.redacted !== "boolean" ||
-      !(data.truncated === undefined || typeof data.truncated === "boolean")) return null;
-  return { text: data.body, redacted: data.redacted, truncated: data.truncated === true };
+      !(data.truncated === undefined || typeof data.truncated === "boolean") || !(data.document === undefined || typeof data.document === "string")) return null;
+  const revision = record(result) ? result.revision : undefined;
+  const editable = typeof data.document === "string" && typeof revision === "string" && /^[0-9a-f]{64}$/.test(revision)
+    ? { revision, document: data.document } : null;
+  return { text: data.body, redacted: data.redacted, truncated: data.truncated === true, editable };
 }
 
 // Keep only display metadata; never retain the status envelope or raw rows.

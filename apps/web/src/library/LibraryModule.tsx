@@ -3,6 +3,8 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
+import { LibraryEdit, LibraryEditor, uneditable, whereText, type CreateDraft, type EditDraft } from "./LibraryEditor";
+import { type LibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from "./libraryWrites";
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
@@ -25,6 +27,19 @@ type More = "idle" | "loading" | Problem;
 type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "failed"; problem: Problem };
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
+/** Present only when this zeta grants library_write_v1. `allowed: false`: this tab controls zeta, but zeta did not list
+ * this kind's write method. `feedback`: the last take-control refusal, held by the router so it survives a remount. */
+export type LibraryWrite = {
+  controller: boolean; allowed: boolean; takeControl: () => Promise<string | null>; feedback: string | null;
+  /** In-memory drafts held by the router, keyed `<kind>/new`, so a remount after a socket drop restores the form. */
+  drafts: Map<string, CreateDraft>;
+  /** The open edit per kind, held by the router for the same reason. */
+  edits: Map<LibraryKind, EditDraft>;
+  /** The one library writer, held by the router so a save survives a remount. */
+  writer: LibraryWriter;
+  /** Gives back the controller slot taken for an editor, once that editor closes. */
+  releaseControl: () => void;
+};
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
 const unreadable: Problem = { message: "zeta sent data this view cannot read", retry: true };
@@ -36,7 +51,7 @@ function problemOf(error: unknown): Problem {
   return { message: "zeta could not read it", retry: true };
 }
 
-export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kind: LibraryKind; reads: LibraryReads }) {
+export function LibraryModule({ client, kind, reads, write = null }: { client: ZetaClient; kind: LibraryKind; reads: LibraryReads; write?: LibraryWrite | null }) {
   const title = kind === "skills" ? "skills" : "agent profiles";
   const noun = kind === "skills" ? "skill" : "profile";
   const methods = libraryMethods(kind);
@@ -52,6 +67,22 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   const lastRow = useRef<HTMLButtonElement | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const returnToList = useRef(false);
+  const focusCreated = useRef(false);
+  const draftKey = `${kind}/new`;
+  const [creating, setCreating] = useState(() => Boolean(write?.drafts.has(draftKey)));
+  const [taking, setTaking] = useState(false);
+  const controlFeedback = write?.feedback ?? null;
+  // The last save, named; it clears when another item is selected or it is dismissed.
+  const [saved, setSaved] = useState<{ name: string; redacted: boolean; where?: string } | null>(null);
+  const newButton = useRef<HTMLButtonElement>(null);
+  const focusNewButton = useRef(false);
+  const [editing, setEditing] = useState<EditDraft | null>(() => write?.edits.get(kind) ?? null);
+  const wasEditing = useRef(false);
+  // A save that lands after its form closed only shows the notice and reloads the list.
+  useEffect(() => write?.writer.onLanded((target, redacted) => {
+    setSaved({ name: target.name, redacted });
+    reload();
+  }), [write?.writer]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -81,16 +112,36 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   const selected = rows.find(({ name }) => name === selection);
   useEffect(() => {
     // narrow layouts swap to the detail; on desktop only a keyboard pick moves focus there (a mouse click keeps it).
-    if (selected && (keyboardPick.current || matchMedia(narrow).matches)) detailHeading.current?.focus();
+    if (selected && (keyboardPick.current || focusCreated.current || matchMedia(narrow).matches)) detailHeading.current?.focus();
     keyboardPick.current = false;
+    if (selected) focusCreated.current = false;
     if (!selected && returnToList.current) {
       returnToList.current = false;
       (lastRow.current?.isConnected ? lastRow.current : search.current)?.focus();
     }
   }, [selected]);
 
+  // discarding a new item returns focus to "+ new".
+  useEffect(() => {
+    if (creating || !focusNewButton.current) return;
+    focusNewButton.current = false;
+    newButton.current?.focus();
+  }, [creating]);
+
+  // leaving the editor returns focus to the item's detail.
+  useEffect(() => {
+    if (!editing && wasEditing.current) {
+      focusCreated.current = true;
+      detailHeading.current?.focus();
+    }
+    wasEditing.current = Boolean(editing);
+  }, [editing]);
+
   function refresh() {
-    if (!catalog) return;
+    if (catalog) reload();
+  }
+
+  function reload() {
     setCatalog(null);
     attemptRef.current++;
     setAttempt((n) => n + 1);
@@ -122,6 +173,60 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     }
     keyboardPick.current = keyboard;
     setSelection(row.name);
+    if (saved && saved.name !== row.name) setSaved(null);
+  }
+
+  // Library tabs stay observers; pressing new or edit takes the controller slot only if it is free.
+  function withControl(then: () => void) {
+    if (!write || taking || !write.allowed) return;
+    setSaved(null);
+    if (write.controller) return then();
+    setTaking(true);
+    void write.takeControl().then((reason) => {
+      setTaking(false);
+      if (!reason) then();
+    });
+  }
+
+  function openCreate() {
+    if (!write) return;
+    write.drafts.set(draftKey, { name: "", description: "", scope: "home", edited: null, form: write.writer.open() });
+    setCreating(true);
+  }
+
+  function closeEditor() {
+    const draft = write?.drafts.get(draftKey);
+    if (draft) write?.writer.close(draft.form);
+    write?.drafts.delete(draftKey);
+    setCreating(false);
+    write?.releaseControl();
+  }
+
+  function startEdit(row: CatalogRow, opened: EditDraft["base"]) {
+    const scope = row.scope;
+    if (scope === "effective") return;
+    withControl(() => {
+      if (!write) return;
+      // the catalog row has no file name, so an edit's notice names the folder.
+      const draft = { target: { kind, name: row.name, scope }, where: whereText(kind, scope, "project"), base: opened, text: opened.document, mine: null, form: write.writer.open() };
+      write.edits.set(kind, draft);
+      setEditing(draft);
+    });
+  }
+
+  function closeEdit() {
+    const draft = write?.edits.get(kind);
+    if (draft) write?.writer.close(draft.form);
+    write?.edits.delete(kind);
+    setEditing(null);
+    write?.releaseControl();
+  }
+
+  function showCreated(name: string) {
+    closeEditor();
+    focusCreated.current = true;
+    setSelection(name);
+    refresh();
   }
 
   function backToList() {
@@ -129,6 +234,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     setSelection(null);
   }
 
+  const createDraft = write?.drafts.get(draftKey);
   let content: ReactNode;
   if (!catalog) content = <ModuleState kind="loading" title={reads.catalog ? "reading catalog…" : "reading session snapshot…"} />;
   else if (catalog.state === "failed") content = <ModuleState kind="failed" title={`could not read ${title}: ${catalog.problem.message}`}
@@ -167,6 +273,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
           </ul></Field> : null}
         </dl>
         {reads.catalog && reads.read ? <LibraryText key={rowKey(selected)} client={client} method={methods.read} row={selected} noun={noun}
+          edit={write && { allowed: write.allowed, taking, feedback: controlFeedback, start: (opened) => startEdit(selected, opened) }}
           onGone={() => {
             focusNew.current = new Set();
             setSelection(null);
@@ -189,9 +296,40 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         <div className="library-snapshot">
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "live catalog · effective scope" : "active session snapshot · may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
+          {write && !creating && !editing && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+            ref={newButton}
+            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
+        {!creating && !editing && (controlFeedback || (write && !write.allowed)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
       </div>
-      {content}
+      {saved && <div role="status" className="library-saved">
+        <p>{savedNotice(saved.name, saved.where)}</p>
+        {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
+        <button type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => {
+          setSaved(null);
+          (newButton.current ?? detailHeading.current ?? search.current)?.focus();
+        }}>dismiss</button>
+      </div>}
+      {creating && write && createDraft ? <LibraryEditor client={client} kind={kind} writer={write.writer} rows={rows}
+        draft={createDraft} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
+        controller={write.controller} takeControl={write.takeControl} blocked={write.allowed ? null : REFUSED_NOTICE} onOpen={showCreated}
+        onClose={() => { focusNewButton.current = true; closeEditor(); }}
+        onCreated={(name, redacted, where) => {
+          setSaved({ name, redacted, where });
+          showCreated(name);
+        }} />
+      : editing && write ? <LibraryEdit key={editing.form} client={client} writer={write.writer} draft={write.edits.get(kind) ?? editing}
+        onDraft={(draft) => write.edits.set(kind, draft)} controller={write.controller} takeControl={write.takeControl}
+        blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEdit}
+        onSaved={(redacted, where) => {
+          // a redacted file has no editable copy any more: leave the editor and say why; the masked read view stays.
+          if (redacted) {
+            setSaved({ name: editing.target.name, redacted, where });
+            closeEdit();
+          }
+          refresh();
+        }} />
+      : content}
     </div>
   </ModuleFrame>;
 }
@@ -231,7 +369,7 @@ function LibraryList({ view, kind, title, live, selected, query, onQuery, more, 
       <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
     </div>
     {live && !rows.some(({ source }) => source === "project") &&
-      <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
+      <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} found · zeta loads them from .zeta/{kind === "skills" ? "skills" : "agents"} in the open chat's project</p>}
     {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
     {sourceTiers.map((source) => {
       const group = matches.filter((row) => row.source === source);
@@ -273,7 +411,8 @@ function SkippedFiles({ skipped }: { skipped: Skipped }) {
  * The selected row's untrusted text. Rendered with `key={rowKey(row)}`, so a new selection is a new instance:
  * a late read for the old row lands on an unmounted instance and never shows. Unmounting also aborts the request.
  */
-function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient; method: string; row: CatalogRow; noun: string; onGone: () => void }) {
+type EditControl = { allowed: boolean; taking: boolean; feedback: string | null; start: (opened: { revision: string; document: string }) => void };
+function LibraryText({ client, method, row, noun, edit, onGone }: { client: ZetaClient; method: string; row: CatalogRow; noun: string; edit: EditControl | null; onGone: () => void }) {
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const pending = useRef<AbortController | null>(null);
@@ -326,7 +465,21 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
       <pre className="library-body">{reveal.body.text}</pre>
       {reveal.body.truncated && <p className="library-flag">text truncated at 128 KiB</p>}
     </div>}
+    {edit && reveal?.state === "data" && <EditEntry edit={edit} row={row} body={reveal.body} />}
   </section>;
+}
+
+/** The edit control for a revealed item, or why it cannot be edited here. Only zeta's raw `document` can be edited. */
+function EditEntry({ edit, row, body }: { edit: EditControl; row: CatalogRow; body: Body }) {
+  // the read view already says the text looks like a secret and is shown masked: say only what to do.
+  const why = !row.editable ? "built-in items are read-only."
+    : body.redacted ? "edit it in your own editor; saving here would replace the secret with the mask." : uneditable(body);
+  if (why || !body.editable) return <p className="library-edit-why">{why}</p>;
+  const opened = body.editable;
+  return <div className="library-text-actions">
+    <button type="button" data-write-surface="library.edit" aria-disabled={edit.taking || !edit.allowed}
+      aria-describedby={edit.feedback || !edit.allowed ? "library-control-feedback" : undefined} onClick={() => edit.start(opened)}>{edit.taking ? "taking control…" : "edit"}</button>
+  </div>;
 }
 
 function problemCount(rows: CatalogRow[]) {
