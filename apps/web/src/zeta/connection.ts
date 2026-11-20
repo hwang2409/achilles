@@ -59,7 +59,7 @@ type RoleState = { role: ZetaRole; reason: string | null };
 type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "control_released" | "retry";
 
 // zeta sends observers no "slot free" signal, so the refusal is a past result with its time: true for as long as it shows.
-export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} another tab had control. try again after it closes or finishes editing.`;
+export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} another tab had control. try again when it is done.`;
 
 // `at`: when a takeover was refused (epoch ms).
 export function transitionRole(state: RoleState, event: RoleEvent, at = Date.now()): RoleState {

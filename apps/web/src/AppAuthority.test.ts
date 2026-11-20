@@ -401,7 +401,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
-      expect(app.getByText(/another tab had control\. try again after it closes or finishes editing\.$/)).toBeTruthy();
+      expect(app.getByText(/another tab had control\. try again when it is done\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -417,7 +417,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
-      expect(app.getByText(/another tab had control\. try again after it closes or finishes editing\.$/)).toBeTruthy();
+      expect(app.getByText(/another tab had control\. try again when it is done\.$/)).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
@@ -515,9 +515,9 @@ test("a library take-control refusal still shows after the observer socket is re
   await withApp("observer", options, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    expect(await app.findByText(/another tab had control\. try again after it closes or finishes editing\.$/, {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText(/another tab had control\. try again when it is done\.$/, {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(app.getByText(/another tab had control\. try again after it closes or finishes editing\.$/)).toBeTruthy();
+    expect(app.getByText(/another tab had control\. try again when it is done\.$/)).toBeTruthy();
   });
 });
 

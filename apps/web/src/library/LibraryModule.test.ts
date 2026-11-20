@@ -295,11 +295,11 @@ test("save on a tab that lost control takes control first, and sends nothing whe
   const write = { ...writable(), writer: createLibraryWriter(undefined, () => live) };
   const view = await openEditor(zeta, write);
   view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true },
-    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "at 10:31 am another tab had control. try again after it closes or finishes editing." } }));
+    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "at 10:31 am another tab had control. try again when it is done." } }));
   expect(view.getByText("this tab is read-only now. save takes control first, if no other tab has it.")).toBeTruthy();
   await type(view, fileText.replace("original", "edited"));
   await press(view, "save skill");
-  expect(await view.findByText("at 10:31 am another tab had control. try again after it closes or finishes editing.", { selector: ".library-error" })).toBeTruthy();
+  expect(await view.findByText("at 10:31 am another tab had control. try again when it is done.", { selector: ".library-error" })).toBeTruthy();
   expect(zeta.writes()).toEqual([]);
   slotFree = true;
   await press(view, "save skill");
