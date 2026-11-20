@@ -1,0 +1,42 @@
+.sp {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 760px);
+  gap: 32px;
+  padding: 24px;
+  overflow-wrap: anywhere;
+}
+.sp-subnav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; align-self: start; }
+.sp-subnav a { padding: 8px 10px; color: var(--fulcrum-fg); text-decoration: none; border: 1px solid transparent; }
+.sp-subnav a:hover { border-color: var(--fulcrum-border); }
+.sp-content { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
+.sp-content section { display: flex; flex-direction: column; gap: 12px; scroll-margin-top: 16px; }
+.sp-content section > button { align-self: flex-start; }
+.sp h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.sp h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.sp p { margin: 0; }
+.sp-dim { color: var(--fulcrum-muted); }
+.sp-note { color: var(--fulcrum-warn); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sp-row { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--fulcrum-border); scroll-margin-top: 16px; }
+.sp-row-text { display: flex; flex-direction: column; gap: 4px; }
+.sp-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--fulcrum-border); padding: 4px 10px; }
+.sp-switch > .sp-value { margin-inline-start: auto; }
+.sp-switch > .sp-note { flex-basis: 100%; }
+.sp-value { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
+.sp-activity:empty { display: none; }
+.sp-receipt { display: flex; flex-direction: column; gap: 4px; }
+.sp-receipt p:focus { outline: none; }
+.sp-defaults { margin: 0; border: 1px solid var(--fulcrum-border); }
+.sp-defaults > div { display: grid; grid-template-columns: 12em minmax(0, 1fr); gap: 2px 12px; padding: 10px 16px; }
+.sp-defaults > div + div { border-top: 1px solid var(--fulcrum-border); }
+.sp-defaults dd { margin: 0; grid-column: 2; }
+.sp-defaults dd.sp-value { color: var(--fulcrum-fg); }
+
+@media (max-width: 720px) {
+  .sp { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 16px; }
+  .sp-subnav { position: static; border: 1px solid var(--fulcrum-border); }
+  .sp-subnav a { min-height: 44px; display: flex; align-items: center; }
+  .sp-subnav a + a { border-top-color: var(--fulcrum-border); }
+  .sp-defaults > div { grid-template-columns: minmax(0, 1fr); }
+  .sp-defaults dd { grid-column: 1; }
+  .sp-switch button, .sp .confirmation-row button { min-height: 44px; }
+}

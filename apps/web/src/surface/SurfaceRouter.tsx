@@ -6,6 +6,8 @@ import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { ProjectsModule } from "../projects/ProjectsModule";
+import { SettingsModule } from "../settings/SettingsModule";
+import { HOME_SETTINGS_FEATURE } from "../settings/homeSettings";
 import { createConnection, isObserverPresentation, supportsFeature, supportsRequest, type Connection } from "../zeta";
 import { libraryMethods, type LibraryKind } from "../library/catalog";
 import { createLibraryWriter, writeAccess, type LibraryWriter } from "../library/libraryWrites";
@@ -22,8 +24,8 @@ export function SurfaceRouter() {
     const pathname = location.pathname;
     const route = matchSurfaceRoute(pathname);
     const readOnly = route !== undefined && route !== chatsRoute && route !== createRoute;
-    // library and project tabs browse as observers and take control only when the user asks for it.
-    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" ? "upgradable" : "locked";
+    // library, project and settings tabs browse as observers and take control only when the user asks for it.
+    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "settings" ? "upgradable" : "locked";
     return { route, pathname, connection: createConnection({ origin: location.origin, readOnly: mode }), readOnly };
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -57,14 +59,17 @@ export function SurfaceRouter() {
   const connecting = phase === "connected" || (phase === "connecting" && connectionState.attempt === 0);
   let content: ReactNode;
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles" || route.id === "projects") {
-    content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
+    content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname}
+      openTelemetrySettings={supportsFeature(client, HOME_SETTINGS_FEATURE) ? () => location.assign(surfaceHref("/settings") + "#telemetry") : undefined} />
       : route.id === "projects" ? <ProjectsModule client={client} control={{ observer: !controller, withControl: (read) => connection.withControl(read), dropped: projectsDropped }} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
         write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
-  } else if (route.id !== "pages" && route.id !== "settings") {
+  } else if (route.id === "settings") {
+    content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={() => connection.client} />;
+  } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
   return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;

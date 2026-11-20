@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -213,6 +213,12 @@ const fixtureFile = "---\nname: fixture-skill\ndescription: synthetic skill\n---
 const libraryFile: Options = { ...library(true), rpc: { ...library(true).rpc,
   skill_catalog: () => ({ result: { revision: "r", data: { items: [{ name: "fixture-skill", description: "synthetic skill", keywords: [], source: "home", scope: "home", editable: true, diagnostics: [] }] } } }),
   skill_read: async () => ({ result: { revision: await sha256(fixtureFile), data: { name: "fixture-skill", frontmatter: {}, body: "body\n", source: "home", editable: true, redacted: false, document: fixtureFile } } }),
+} };
+const homeSettings: Options = { path: "/settings", observerBanner: false, rpc: {
+  hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: params.role === "controller" ? ["home_settings_get", "home_settings_update"] : ["home_settings_get"] } } }),
+  // a read after the update sees it: the borrow reconnects, and each new socket reads again
+  home_settings_get: (_params, requests) => ({ result: { revision: `sha256:${(requests.includes("home_settings_update") ? "b" : "a").repeat(64)}`, settings: { telemetry: requests.includes("home_settings_update") ? { enabled: true, source: "builtin", editable: true } : { enabled: false, source: "off", editable: true } }, settings_malformed: false } }),
+  home_settings_update: () => ({ result: { revision: `sha256:${"b".repeat(64)}`, settings: { telemetry: { enabled: true, source: "builtin", editable: true } }, restart: { serve: true, sessions: [], complete: true } } }),
 } };
 const blockedCreation = (path: string, method: string) => path === "/api/pages/page/chats" && method === "POST" ? new Response(null, { status: 503 }) : undefined;
 const creationAction = (action: "retry" | "discard"): Row => ({ kind: action === "retry" ? "visible" : "local-only", absent: true, options: { pending: true, http: blockedCreation }, check: async (app, authority, writes, requests) => {
@@ -425,6 +431,20 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("save skill", { selector: "button", exact: true }));
     expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
+  } },
+  "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
+    // the settings place browses as an observer; confirming the change borrows control for the one update.
+    await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
+    const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
+    await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
+    await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
+    if (authority === "observer") {
+      expect((await app.findByRole("alert")).textContent).toBe("not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.");
+      return;
+    }
+    expect(await app.findByText(/^telemetry is on\. restart zeta to start recording\. at/)).toBeTruthy();
+    expect(app.getByText("restart zeta serve.")).toBeTruthy();
+    didWrite(writes, "home_settings_update");
   } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
     const form = select(app, '.record-form form');

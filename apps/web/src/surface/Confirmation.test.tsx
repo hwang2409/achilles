@@ -144,3 +144,16 @@ test("scope proof gates submit; a known failure leaves a recoverable dialog open
   expect(submit.hasAttribute("disabled")).toBe(false);
   expect(activity.queryByRole("button")).toBeNull();
 });
+
+test("a refused failure says another tab has control, keeps the dialog open, and a message replaces the fixed copy", async () => {
+  const results = [{ status: "failed" as const, reason: "refused" as const }, { status: "failed" as const, reason: "not-applied" as const, message: text("not changed. zeta refused this change: fixture") }];
+  const execute = mock(async () => results.shift()!);
+  const { modal, dialog } = review(execute, { proof: { kind: "scope", label: text("i understand the scope") } });
+  fireEvent.click(dialog.getByRole("checkbox", { name: "i understand the scope" }));
+  await click(dialog.getByRole("button", { name: "cancel run" }));
+  expect(modal.isConnected).toBe(true);
+  expect(dialog.getByRole("alert").textContent).toBe("not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.");
+  await click(dialog.getByRole("button", { name: "cancel run" }));
+  expect(dialog.getByRole("alert").textContent).toBe("not changed. zeta refused this change: fixture");
+  expect(execute).toHaveBeenCalledTimes(2);
+});
