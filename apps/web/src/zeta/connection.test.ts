@@ -304,3 +304,43 @@ describe("connection role and terminal matrix", () => {
     } finally { connection.stop(); }
   });
 });
+
+describe("withControl borrows control for one read and always gives it back", () => {
+  type Row = { name: string; slotFree: boolean; read: "ok" | "fails" | "drops"; result: "value" | "error" | "refused"; reads: number };
+  test.each<Row>([
+    { name: "read succeeds -> released", slotFree: true, read: "ok", result: "value", reads: 1 },
+    { name: "read fails -> released", slotFree: true, read: "fails", result: "error", reads: 1 },
+    { name: "take refused -> no read sent, nothing to release", slotFree: false, read: "ok", result: "refused", reads: 0 },
+    { name: "drop during read -> observer after reconnect, never holding", slotFree: true, read: "drops", result: "error", reads: 1 },
+  ])("$name", async ({ slotFree, read, result, reads }) => {
+    const sockets: { role: string; open: boolean; drop: () => void }[] = [];
+    const connection = createConnection({
+      readOnly: "upgradable",
+      origin: "http://localhost",
+      discover: async () => discovery,
+      connect: async (_discovery, role) => {
+        if (role === "controller" && !slotFree) throw new ZetaError("busy", -32001);
+        let closed = () => {};
+        const socket = { role, open: true, drop: () => { socket.open = false; closed(); } };
+        sockets.push(socket);
+        return { onClose(callback: () => void) { closed = callback; }, close() { socket.drop(); } } as never;
+      },
+    });
+    try {
+      await flush();
+      const sent: string[] = [];
+      const outcome = await connection.withControl(async (client) => {
+        sent.push((client as unknown as { authority: string }).authority);
+        if (read === "fails") throw new Error("read failed");
+        if (read === "drops") { sockets.find((socket) => socket.role === "controller" && socket.open)!.drop(); throw new Error("closed"); }
+        return "text";
+      }).then((value) => "refused" in value ? "refused" : "value", () => "error");
+      connection.retryNow();
+      await flush();
+      expect(outcome).toBe(result);
+      expect(sent).toEqual(Array(reads).fill("controller"));
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
+      expect(sockets.filter((socket) => socket.role === "controller" && socket.open)).toEqual([]);
+    } finally { connection.stop(); }
+  });
+});

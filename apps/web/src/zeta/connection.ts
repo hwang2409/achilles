@@ -110,6 +110,9 @@ export type Connection = {
   /** `upgradable` only: gives the controller slot back taken by `takeControl` (reopens as observer), and reconnects
    * as observer from then on, so a chat tab can take control. */
   releaseControl(): Promise<void>;
+  /** `upgradable` only: borrows control for one read. Takes control (never without the caller's user click), runs
+   * `read` on the controller client, and gives control back on success, error and drop alike. A refusal sends no read. */
+  withControl<T>(read: (client: ZetaClient) => Promise<T>): Promise<{ value: T } | { refused: string }>;
   /** Whether the last established authority was an observer. */
   readonly observerPresentation: boolean;
   stop(): void;
@@ -268,7 +271,7 @@ export function createConnection({
     adopt(opened.client, discovery, authority);
   };
   void attempt();
-  return {
+  const connection: Connection = {
     get state() { return state; },
     get client() { return client; },
     get startCommand() { return start ?? `zeta serve --ws ${port} --ws-origin ${origin}`; },
@@ -278,6 +281,15 @@ export function createConnection({
       if (state.phase === "connected" || state.phase === "connecting" || stopped) return;
       if (timer !== null) { clearTimer(timer); timer = null; }
       void attempt();
+    },
+    async withControl(read) {
+      if (takingControl) return { refused: transitionRole(roleState, "takeover_failed").reason! };
+      const reason = await connection.takeControl();
+      const controller = client;
+      if (reason !== null || !controller || state.phase !== "connected" || state.authority !== "controller")
+        return { refused: reason ?? transitionRole(roleState, "takeover_failed").reason! };
+      holding = false; // a borrow, not a hold: a drop during the read reconnects as observer
+      try { return { value: await read(controller) }; } finally { await connection.releaseControl(); }
     },
     async takeControl() {
       if (readOnly === "locked" || stopped || takingControl) return null;
@@ -328,4 +340,5 @@ export function createConnection({
       open?.close();
     },
   };
+  return connection;
 }

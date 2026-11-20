@@ -195,6 +195,7 @@ function connectionFailure(state: ConnectionState): string | null {
 export function AgentSurface({ connection, client, connectionState, observerBanner, current, homeAlias, connectionStatus, renderShell }: { renderShell: RenderShell; connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode; current: SurfaceRoute; homeAlias?: string; connectionStatus: { label: string; connected: boolean } }) {
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
+  const observerConnected = connectionState.phase === "connected" && connectionState.authority === "observer";
   const readOnlyReason = READ_ONLY_REASON;
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias, createRoute.path);
   const landing = location.pathname === createRoute.path;
@@ -351,7 +352,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const recovery = authErrorId && ready && client ? { id: authErrorId, client, sessionId: ready.sessionId, canWrite, onNewChat: active.newChat } : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <Approval id={id} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => observerConnected ? <ObserverApproval id={id} takeControl={() => connection.takeControl()} /> : <Approval id={id} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "ask about this page, or tell it what to change" : "message zeta";
@@ -449,6 +450,26 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     header: !landing && activePage && createMode && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} stateLabel={stateLabel} createMode={createMode} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
     children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
   });
+}
+
+/** A pending approval in a tab that is not in control: it says so, and one click (never an automatic one) takes control. */
+function ObserverApproval({ id, takeControl }: { id: string; takeControl: () => Promise<string | null> }) {
+  const item = useItem(id);
+  const [working, setWorking] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const pending = item?.type === "approval" && !item.ended;
+  return <>
+    <Approval id={id} disabledReason="this tab is not in control · take control to answer" />
+    {pending && <div className="approval-control">
+      <button type="button" aria-disabled={working || undefined} onClick={async () => {
+        if (working) return;
+        setWorking(true); setRefusal(null);
+        setRefusal(await takeControl());
+        setWorking(false);
+      }}>{working ? "taking control…" : "take control"}</button>
+      {refusal && <span role="status">{refusal}</span>}
+    </div>}
+  </>;
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {

@@ -37,6 +37,8 @@ export function SurfaceRouter() {
   const [libraryControl, setLibraryControl] = useState<string | null>(null);
   const [libraryDrafts] = useState(() => new Map<string, CreateDraft>());
   const [libraryEdits] = useState(() => new Map<LibraryKind, EditDraft>());
+  // reveals a dropped socket cut short: the drop unmounts the projects module, and the reveal says why on remount.
+  const [projectsDropped] = useState(() => new Set<string>());
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
   const takeLibraryControl = async () => {
@@ -56,7 +58,7 @@ export function SurfaceRouter() {
   let content: ReactNode;
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles" || route.id === "projects") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
-      : route.id === "projects" ? <ProjectsModule client={client} takeControl={() => connection.takeControl()} />
+      : route.id === "projects" ? <ProjectsModule client={client} control={{ observer: !controller, withControl: (read) => connection.withControl(read), dropped: projectsDropped }} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
         write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
