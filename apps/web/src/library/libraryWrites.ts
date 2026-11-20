@@ -92,7 +92,7 @@ function invalidMessage(reason: unknown, detail: unknown, target: WriteTarget) {
 }
 
 /** Another form's save of the same item is in flight; this one sends nothing. */
-export const IN_PROGRESS: WriteOutcome = { status: "busy", message: "another save of this item is in progress. nothing was sent; try again in a moment." };
+const IN_PROGRESS: WriteOutcome = { status: "busy", message: "another save of this item is in progress. nothing was sent; try again in a moment." };
 
 /** One writer per library view, and the only owner of "which form owns this save". `form`: the open form's abort
  * signal, its identity and its cancel. A call joins an in-flight save only when form and request are identical (a

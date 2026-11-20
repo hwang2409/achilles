@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { createLibraryWriter, createProblems, IN_PROGRESS, REDACTION_MARKER, type WriteOutcome, type WriteTarget } from "./libraryWrites";
+import { createLibraryWriter, createProblems, REDACTION_MARKER, type WriteOutcome, type WriteTarget } from "./libraryWrites";
 
 const target: WriteTarget = { kind: "skills", name: "fixture-skill", scope: "home" };
 const document = "---\nname: fixture-skill\ndescription: synthetic\n---\nbody\n";
@@ -112,6 +112,7 @@ describe("which form owns a save", () => {
   const texts = { A: opened.replace("opened", "text A"), B: opened.replace("opened", "text B") };
   const busy = () => error(-32004, { reason: "operation_busy" });
   const dropped = () => new Error("socket closed");
+  const inProgress = { status: "busy", message: "another save of this item is in progress. nothing was sent; try again in a moment." } as const;
   type Write = "apply" | "hold" | "apply, then drop" | Error;
   type Row = {
     op?: "create"; writes: Write[]; second?: { form: "A" | "B"; text: "A" | "B" }; cancel?: "before send" | "in flight" | "wait"; drop?: boolean;
@@ -120,9 +121,9 @@ describe("which form owns a save", () => {
   test.each<[string, Row]>([
     ["success", { writes: ["apply"], first: { status: "saved" }, requests: 1, file: "A", waits: [] }],
     ["a true double submit joins the save: one request", { writes: ["hold"], second: { form: "A", text: "A" }, first: { status: "saved" }, secondOutcome: { status: "saved" }, requests: 1, file: "A", waits: [] }],
-    ["another form's other text while in flight never gets A's outcome", { writes: ["hold"], second: { form: "B", text: "B" }, first: { status: "saved" }, secondOutcome: IN_PROGRESS, requests: 1, file: "A", waits: [] }],
-    ["another form's same text while in flight is refused too", { writes: ["hold"], second: { form: "B", text: "A" }, first: { status: "saved" }, secondOutcome: IN_PROGRESS, requests: 1, file: "A", waits: [] }],
-    ["the form's own other text while in flight is refused", { writes: ["hold"], second: { form: "A", text: "B" }, first: { status: "saved" }, secondOutcome: IN_PROGRESS, requests: 1, file: "A", waits: [] }],
+    ["another form's other text while in flight never gets A's outcome", { writes: ["hold"], second: { form: "B", text: "B" }, first: { status: "saved" }, secondOutcome: inProgress, requests: 1, file: "A", waits: [] }],
+    ["another form's same text while in flight is refused too", { writes: ["hold"], second: { form: "B", text: "A" }, first: { status: "saved" }, secondOutcome: inProgress, requests: 1, file: "A", waits: [] }],
+    ["the form's own other text while in flight is refused", { writes: ["hold"], second: { form: "A", text: "B" }, first: { status: "saved" }, secondOutcome: inProgress, requests: 1, file: "A", waits: [] }],
     ["closed before send: no write, no result", { writes: [], cancel: "before send", first: null, requests: 0, file: "opened", waits: [] }],
     ["closed during the busy backoff: no retry, no result", { writes: [busy()], cancel: "wait", first: null, requests: 1, file: "opened", waits: [500] }],
     ["closed during the settle wait: no read, no result", { writes: [dropped()], drop: true, cancel: "wait", first: null, requests: 2, file: "opened", waits: [500] }],
@@ -182,7 +183,7 @@ describe("which form owns a save", () => {
     }
     const outcomes = [await a, await b];
 
-    expect(outcomes[0] === null ? null : outcomes[0]).toEqual(row.first === null ? null : expect.objectContaining(row.first));
+    expect(outcomes[0]).toEqual(row.first === null ? null : expect.objectContaining(row.first));
     if (row.second) expect(outcomes[1]).toEqual(row.secondOutcome ? expect.objectContaining(row.secondOutcome) : null);
     // a reported save is always the text that call sent, and the file holds it.
     for (const [i, outcome] of outcomes.entries()) {
