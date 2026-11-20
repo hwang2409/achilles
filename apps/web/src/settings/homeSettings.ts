@@ -76,9 +76,9 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
   const message = typeof rpc?.message === "string" ? rpc.message : "";
   switch (rpc?.code) {
     case -32602: {
-      // the field that names this refusal is not fixed yet in zeta: accept `reason` or `code`
-      if (data.reason === "telemetry_unavailable" || data.code === "telemetry_unavailable") {
-        const reason = [data.message, data.detail, message].find((text): text is string => typeof text === "string" && text.trim() !== "") ?? "";
+      // zeta cannot start with telemetry on here (for example `zeta[otel]` is missing); `detail` is its start error
+      if (data.code === "telemetry_unavailable") {
+        const reason = typeof data.detail === "string" && data.detail.trim() !== "" ? data.detail : message;
         return { result: failed("not-applied", plain(`not changed. zeta cannot record telemetry on this computer: ${reason}`)), reread: false };
       }
       if (data.code === "custom_home_setting") return { result: failed("not-applied", CUSTOM), reread: true };

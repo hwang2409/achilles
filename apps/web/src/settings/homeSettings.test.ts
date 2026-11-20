@@ -71,10 +71,11 @@ describe("write", () => {
     ["custom_home_setting", error(-32602, "the setting has a custom value", { code: "custom_home_setting" }), { reason: "not-applied", message: "not changed. telemetry uses a custom endpoint from settings.toml. change it there." }, 1],
     ["observer_read_only", error(-32008, "observer", { code: "observer_read_only" }), { reason: "refused" }, 0],
     ["settings_malformed", error(-32000, "settings.toml does not parse or validate", { code: "settings_malformed" }), { reason: "not-applied", message: "not changed. settings.toml has an error. zeta will not start until it is fixed." }, 1],
-    ["telemetry_unavailable", error(-32602, "invalid params", { reason: "telemetry_unavailable", message: "zeta[otel] is\nnot installed" }),
+    ["telemetry_unavailable", error(-32602, "invalid params", { code: "telemetry_unavailable", detail: "zeta[otel] is\nnot installed" }),
       { reason: "not-applied", message: "not changed. zeta cannot record telemetry on this computer: zeta[otel] is not installed" }, 0],
-    ["telemetry_unavailable without text", error(-32602, "telemetry is unavailable", { reason: "telemetry_unavailable" }),
+    ["telemetry_unavailable without text", error(-32602, "telemetry is unavailable", { code: "telemetry_unavailable" }),
       { reason: "not-applied", message: "not changed. zeta cannot record telemetry on this computer: telemetry is unavailable" }, 0],
+    ["a telemetry_unavailable reason (not code)", error(-32602, "invalid params", { reason: "telemetry_unavailable", detail: "x" }), { reason: "not-applied", message: "not changed. zeta refused this change: invalid params" }, 0],
     ["an unknown -32602 reason", error(-32602, "invalid params", { code: "invalid_params" }), { reason: "not-applied", message: "not changed. zeta refused this change: invalid params" }, 0],
     ["a -32602 with no data", error(-32602, "x".repeat(400)), { reason: "not-applied", message: `not changed. zeta refused this change: ${"x".repeat(261)}` }, 0],
   ])("%s is a known failure, with no retry", async (_name, reply, failure, rereads) => {
