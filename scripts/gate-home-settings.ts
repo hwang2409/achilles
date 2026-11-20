@@ -24,7 +24,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
       return dialog;
     };
     const dialog = await confirmOn();
-    const receipt = row.getByText(/^telemetry is on\. if zeta\[otel\] is not installed, turn it off here before you restart zeta\. at /);
+    const receipt = row.getByText(/^at .+: telemetry is on\. if zeta\[otel\] is not installed, turn it off here before you restart zeta\.$/);
     const refusal = dialog.getByRole("alert");
     await waitFor(async () => await receipt.isVisible() || /^not changed\./.test(await refusal.textContent().catch(() => "") ?? ""), "telemetry on outcome");
     if (await receipt.isVisible()) {
@@ -34,7 +34,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
       if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-on.png") });
       await row.getByRole("button", { name: "turn off", exact: true }).click();
       await row.getByRole("group").getByRole("button", { name: "turn off", exact: true }).click();
-      await waitFor(() => row.getByText(/^telemetry is off\. restart zeta to stop recording\. at /).isVisible(), "telemetry off receipt");
+      await waitFor(() => row.getByText(/^at .+: telemetry is off\. restart zeta to stop recording\.$/).isVisible(), "telemetry off receipt");
       // a missing file hashes as empty bytes; on then off leaves an empty file
       if ((await bytes()) !== (original ?? "")) throw new Error("telemetry off did not restore the exact original bytes");
       console.log("settings telemetry: on wrote the built-in line and listed zeta serve; off restored the exact bytes");
