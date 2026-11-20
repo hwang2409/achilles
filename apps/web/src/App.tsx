@@ -1,5 +1,6 @@
 import { PageChatHeader } from "./PageChatHeader";
-import { createContext, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { createRunStore } from "@fulcrum/core";
 import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
@@ -352,7 +353,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const recovery = authErrorId && ready && client ? { id: authErrorId, client, sessionId: ready.sessionId, canWrite, onNewChat: active.newChat } : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => observerConnected ? <ObserverApproval id={id} takeControl={() => connection.takeControl()} /> : <Approval id={id} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "ask about this page, or tell it what to change" : "message zeta";
@@ -452,23 +453,33 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   });
 }
 
-/** A pending approval in a tab that is not in control: it says so, and one click (never an automatic one) takes control. */
-function ObserverApproval({ id, takeControl }: { id: string; takeControl: () => Promise<string | null> }) {
+/**
+ * A pending approval. In a tab that is not in control it says so, and one click (never an automatic one) takes control:
+ * the button sits in the card's action row under that line. After the take, focus moves to approve and a line says so.
+ */
+function ChatApproval({ id, observer, takeControl, ...decision }: { observer: boolean; takeControl: () => Promise<string | null> } & ComponentProps<typeof Approval>) {
   const item = useItem(id);
   const [working, setWorking] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [took, setTook] = useState(false);
+  // fulcrum's Approval has no slot for an extra action: render into its action row.
+  const [row, setRow] = useState<Element | null>(null);
+  const card = () => document.querySelector(`[data-part="approval"][data-id="${CSS.escape(id)}"]`);
+  useLayoutEffect(() => setRow(card()?.querySelector('[data-part="approval-actions"]') ?? null));
+  useLayoutEffect(() => { if (took && !observer) card()?.querySelector<HTMLElement>('button[data-action="approve"]')?.focus(); }, [took, observer]);
   const pending = item?.type === "approval" && !item.ended;
+  const control = !pending ? null : observer ? <>
+    <button type="button" aria-label="take control to answer" aria-disabled={working || undefined} onClick={async () => {
+      if (working) return;
+      setWorking(true); setRefusal(null); setTook(false);
+      const reason = await takeControl();
+      setRefusal(reason); setTook(reason === null); setWorking(false);
+    }}>{working ? "taking control…" : "take control"}</button>
+    {refusal && <span role="status">{refusal}</span>}
+  </> : took ? <span role="status">this tab is now in control</span> : null;
   return <>
-    <Approval id={id} disabledReason="this tab is not in control · take control to answer" />
-    {pending && <div className="approval-control">
-      <button type="button" aria-disabled={working || undefined} onClick={async () => {
-        if (working) return;
-        setWorking(true); setRefusal(null);
-        setRefusal(await takeControl());
-        setWorking(false);
-      }}>{working ? "taking control…" : "take control"}</button>
-      {refusal && <span role="status">{refusal}</span>}
-    </div>}
+    <Approval id={id} {...(observer ? { disabledReason: "this tab is not in control · take control to answer" } : decision)} />
+    {row && control && createPortal(<div className="approval-control">{control}</div>, row)}
   </>;
 }
 

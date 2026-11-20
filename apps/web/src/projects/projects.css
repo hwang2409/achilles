@@ -27,6 +27,7 @@
 .projects-inbox [data-trusted] { color: var(--fulcrum-warn); }
 .projects-reveal { display: grid; gap: 8px; margin-top: 8px; justify-items: start; }
 .projects-region, .projects-notice { width: 100%; box-sizing: border-box; }
+.projects-region > button { margin-top: 8px; }
 .projects-notice { padding: 12px 14px; border: 1px dashed var(--fulcrum-border); }
 .projects-notice p { margin: 6px 0 0; color: var(--fulcrum-muted); text-wrap: pretty; }
 .projects-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }

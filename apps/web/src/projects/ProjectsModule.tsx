@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
+import { NoAnswer } from "../zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import { hasKindText, memoryKinds, projectReads, readInbox, readKindText, readMemory, readMessage, readProjects, Unreadable,
@@ -13,6 +14,8 @@ const tabs: Tab[] = ["memory", "inbox"];
 export type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
 /** What a reveal needs from the page: the current role, the borrow, and the reveals a dropped socket cut short. */
 export type Control = { observer: boolean; withControl: WithControl; dropped: Set<string> };
+// `borrowing`: one borrow at a time. While it runs, every reveal keeps its observer presentation and waits.
+type Borrow = Control & { borrowing: boolean };
 // the selected project's name is looked up by paging the list; past this many pages it shows as unknown.
 const NAME_PAGES = 20;
 const dropped: Problem = { message: "connection dropped; show again", retry: true };
@@ -26,6 +29,7 @@ function parse(path: string): { id: string; tab: Tab; known: boolean } | null {
 const hrefOf = (id?: string, tab?: Tab) => id ? `/projects/${encodeURIComponent(id)}${tab ? `/${tab}` : ""}` : "/projects";
 
 function problemOf(error: unknown): Problem | "observer" {
+  if (error instanceof NoAnswer) return { message: "zeta did not answer; show again", retry: true };
   if (error instanceof Unreadable) return { message: "zeta sent data this view cannot read", retry: true };
   const code = (error as { code?: unknown } | null)?.code;
   if (error instanceof ZetaError && error.kind === "closed") return dropped;
@@ -51,7 +55,12 @@ export function ProjectsModule({ client, control }: { client: ZetaClient; contro
     if (href !== location.pathname) history.pushState(null, "", surfaceHref(href));
     setPath(href);
   };
-  const projects = usePages((cursor, signal) => readProjects(client, cursor, { signal }), [], projectReads(client));
+  const projects = usePages(client, (reader, cursor, signal) => readProjects(reader, cursor, { signal }), [], projectReads(client));
+  const [borrowing, setBorrowing] = useState(false);
+  const borrow: Borrow = { ...control, observer: control.observer || borrowing, borrowing, withControl: async (read) => {
+    setBorrowing(true);
+    try { return await control.withControl(read); } finally { setBorrowing(false); }
+  } };
   const route = parse(path);
   // an unknown view segment shows memory: say so in the address too.
   useEffect(() => { if (route && !route.known) { const href = hrefOf(route.id, "memory"); history.replaceState(null, "", surfaceHref(href)); setPath(href); } }, [route?.id, route?.known]);
@@ -93,10 +102,9 @@ export function ProjectsModule({ client, control }: { client: ZetaClient; contro
         </nav>
       </div>
       {project?.path && <p className="projects-note projects-path" title={project.path}>{project.path}</p>}
-      {control.observer && <p id={CONTROL_NOTE} className="projects-note">zeta lets only the tab in control read full text. taking control pauses sending and approvals in other tabs for this read.</p>}
       {route.tab === "memory"
-        ? <MemoryTab key={route.id} client={client} projectId={route.id} control={control} />
-        : <InboxTab key={route.id} client={client} projectId={route.id} control={control} names={lookup.names} />}
+        ? <MemoryTab key={route.id} client={client} projectId={route.id} control={borrow} />
+        : <InboxTab key={route.id} client={client} projectId={route.id} control={borrow} names={lookup.names} />}
     </div>
   </ModuleFrame>;
 }
@@ -122,12 +130,12 @@ function useProjectLookup(client: ZetaClient, id: string | null, listed: Project
           cursor = page.nextCursor;
           if (cursor === null || page.rows.some((row) => row.id === id)) break;
         }
-      } catch { cursor = ""; } // a failed lookup only costs the name; the tabs still read by id
+      } catch { return; } // failed or cut short by a borrow: it stays "reading" and runs again on the next client
       if (abort.signal.aborted) return;
       setSearched({ id, rows, state: rows.some((row) => row.id === id) ? "found" : cursor === null ? "missing" : "unknown" });
     })();
     return () => abort.abort();
-  }, [id, known]);
+  }, [id, known, client]);
   return { names, state: known ? "found" : id !== null && searched?.id === id ? searched.state : "reading" };
 }
 
@@ -135,20 +143,36 @@ type Pages<T> = { state: "loading" } | { state: "failed"; problem: Problem; retr
   | { state: "data"; rows: T[]; more: (() => void) | null; loadingMore: boolean; moreProblem: Problem | null; oldFormat: boolean };
 
 /** The first page on mount and "load more" by cursor; a new `deps` value starts over. Only visible pages are read. */
-function usePages<T extends { id: string }>(load: (cursor: string | null, signal: AbortSignal) => Promise<Page<T> & Partial<Pick<MemoryPage, "oldFormat">>>, deps: unknown[], enabled = true): Pages<T> {
+function usePages<T extends { id: string }>(client: ZetaClient, load: (client: ZetaClient, cursor: string | null, signal: AbortSignal) => Promise<Page<T> & Partial<Pick<MemoryPage, "oldFormat">>>, deps: unknown[], enabled = true): Pages<T> {
   const [attempt, setAttempt] = useState(0);
   const [view, setView] = useState<{ rows: T[]; cursor: string | null; oldFormat: boolean } | Problem | null>(null);
   const [more, setMore] = useState<"idle" | "loading" | Problem>("idle");
   const live = useRef<AbortController | null>(null);
-  // `client` is not a dependency: a borrow of control swaps the socket, and the same rows stay valid.
+  // `client` is not a dependency: a borrow of control swaps the socket, and the same rows stay valid. The swap closes
+  // the old socket, so a read it cut short stays loading and runs again on the next client.
+  const current = useRef(client);
+  const resume = useRef<(() => void) | null>(null);
+  useEffect(() => { current.current = client; const run = resume.current; resume.current = null; run?.(); }, [client]);
+  const read = (cursor: string | null, abort: AbortController, done: (page: Awaited<ReturnType<typeof load>>) => void, failed: (problem: Problem) => void) => {
+    const reader = current.current;
+    load(reader, cursor, abort.signal).then((page) => { if (!abort.signal.aborted) done(page); }, (error) => {
+      if (abort.signal.aborted) return;
+      if (error instanceof ZetaError && error.kind === "closed") {
+        const again = () => { if (!abort.signal.aborted) read(cursor, abort, done, failed); };
+        if (current.current !== reader) again(); else resume.current = again;
+        return;
+      }
+      const problem = problemOf(error);
+      failed(problem === "observer" ? { message: "zeta refused this read", retry: false } : problem);
+    });
+  };
   useEffect(() => {
     if (!enabled) return;
     const abort = new AbortController();
     live.current = abort;
     setView(null);
     setMore("idle");
-    load(null, abort.signal).then((page) => !abort.signal.aborted && setView({ rows: page.rows, cursor: page.nextCursor, oldFormat: page.oldFormat === true }),
-      (error) => { if (!abort.signal.aborted) { const problem = problemOf(error); setView(problem === "observer" ? { message: "zeta refused this read", retry: false } : problem); } });
+    read(null, abort, (page) => setView({ rows: page.rows, cursor: page.nextCursor, oldFormat: page.oldFormat === true }), setView);
     return () => abort.abort();
   }, [...deps, attempt, enabled]);
   if (!view) return { state: "loading" };
@@ -158,12 +182,11 @@ function usePages<T extends { id: string }>(load: (cursor: string | null, signal
     const abort = live.current;
     if (!abort || more === "loading") return;
     setMore("loading");
-    load(cursor, abort.signal).then((page) => {
-      if (abort.signal.aborted) return;
+    read(cursor, abort, (page) => {
       // live pages can shift between requests: keep the first row seen for each key.
       setView((current) => current && "rows" in current ? { rows: [...current.rows, ...page.rows.filter((row) => !current.rows.some(({ id }) => id === row.id))], cursor: page.nextCursor, oldFormat: current.oldFormat || page.oldFormat === true } : current);
       setMore("idle");
-    }, (error) => { if (!abort.signal.aborted) { const problem = problemOf(error); setMore(problem === "observer" ? { message: "zeta refused this read", retry: false } : problem); } });
+    }, setMore);
   };
   return { state: "data", rows: view.rows, more: loadMore, loadingMore: more === "loading", moreProblem: typeof more === "object" ? more : null, oldFormat: view.oldFormat };
 }
@@ -194,12 +217,17 @@ function Paged<T extends { id: string }>({ view, noun, empty, children }: { view
 
 const kindLabel = (kind: MemoryKind) => kind === "legacy" ? "documents" : kind;
 
-function MemoryTab({ client, projectId, control }: { client: ZetaClient; projectId: string; control: Control }) {
-  const view = usePages((cursor, signal) => readMemory(client, projectId, cursor, { signal }), [projectId]);
+/** Shown only where a reveal button is: there is no control to take elsewhere. */
+const ControlNote = ({ control, shown }: { control: Borrow; shown: boolean }) => control.observer && shown
+  ? <p id={CONTROL_NOTE} className="projects-note">zeta lets only the tab in control read full text. taking control pauses sending and approvals in other tabs for this read.</p> : null;
+
+function MemoryTab({ client, projectId, control }: { client: ZetaClient; projectId: string; control: Borrow }) {
+  const view = usePages(client, (reader, cursor, signal) => readMemory(reader, projectId, cursor, { signal }), [projectId]);
   const oldFormat = view.state === "data" && view.oldFormat;
   // format 1 summaries are the files' first lines, usually a markdown heading: show the heading text.
   const summary = (text: string) => (oldFormat ? text.replace(/^#+\s*/, "") : text) || "(empty)";
   return <section className="projects-tab" aria-label="memory">
+    <ControlNote control={control} shown={view.state === "data" && !oldFormat && view.rows.some((row) => hasKindText(row.kind))} />
     {view.state === "data" && view.rows.length > 0 && !oldFormat && <p className="projects-note">summaries only · full text loads when you open it, is not cached, and never goes in the address</p>}
     {oldFormat && <aside className="projects-notice" role="status">
       <strong>this project uses the old memory format</strong>
@@ -221,9 +249,10 @@ function MemoryTab({ client, projectId, control }: { client: ZetaClient; project
   </section>;
 }
 
-function InboxTab({ client, projectId, control, names }: { client: ZetaClient; projectId: string; control: Control; names: ReadonlyMap<string, ProjectRow> }) {
-  const view = usePages((cursor, signal) => readInbox(client, projectId, cursor, { signal }), [projectId]);
+function InboxTab({ client, projectId, control, names }: { client: ZetaClient; projectId: string; control: Borrow; names: ReadonlyMap<string, ProjectRow> }) {
+  const view = usePages(client, (reader, cursor, signal) => readInbox(reader, projectId, cursor, { signal }), [projectId]);
   return <section className="projects-tab" aria-label="inbox">
+    <ControlNote control={control} shown={view.state === "data" && view.rows.some((row) => row.hasBody)} />
     {view.state === "data" && view.rows.length > 0 && <p className="projects-note">newest first · titles and senders only · a message loads when you open it, is not cached, and never goes in the address</p>}
     <Paged view={view} noun="inbox messages" empty="no messages were sent to this project.">
       {(rows: InboxRow[]) => <ul className="projects-inbox">
@@ -251,16 +280,24 @@ const longBody = (text: string) => text.length > 2000 || text.split("\n").length
  * One explicit read per click. As an observer, the click borrows control for this one read and gives it back. The
  * text lives only in this instance's state: hiding it or leaving drops it.
  */
-function Reveal({ id, noun, context, client, control, load }: { id: string; noun: string; context?: string; client: ZetaClient; control: Control; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {
+function Reveal({ id, noun, context, client, control, load }: { id: string; noun: string; context?: string; client: ZetaClient; control: Borrow; load: (client: ZetaClient, signal: AbortSignal) => Promise<Body> }) {
   // a drop remounts this view: say why the text closed instead of resetting silently.
   const [shown, setShown] = useState<Shown>(() => control.dropped.delete(id) ? { state: "failed", problem: dropped } : null);
   const pending = useRef<AbortController | null>(null);
   const region = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const hidden = useRef(false);
   useEffect(() => () => pending.current?.abort(), []);
-  useEffect(() => { if (shown && shown.state !== "loading") region.current?.focus(); }, [shown]);
+  useEffect(() => {
+    if (shown && shown.state !== "loading") region.current?.focus();
+    else if (!shown && hidden.current) button.current?.focus(); // "hide" unmounts itself: focus the button that shows it again
+    hidden.current = false;
+  }, [shown]);
+  // another reveal's borrow is live: one borrow at a time, so this one waits.
+  const waiting = control.borrowing && shown?.state !== "loading";
 
   async function show() {
-    if (shown?.state === "loading") return;
+    if (shown?.state === "loading" || waiting) return;
     const abort = new AbortController();
     pending.current = abort;
     setShown({ state: "loading" });
@@ -278,12 +315,12 @@ function Reveal({ id, noun, context, client, control, load }: { id: string; noun
     if (!abort.signal.aborted) { control.dropped.delete(id); setShown(next); }
   }
 
-  const label = shown?.state === "loading" ? `reading ${noun}…` : control.observer ? `take control and show ${noun}` : `show ${noun}`;
-  const hide = <button type="button" aria-label={context ? `hide ${noun}: ${context}` : undefined} onClick={() => setShown(null)}>hide {noun}</button>;
+  const label = shown?.state === "loading" ? `reading ${noun}…` : waiting ? "reading…" : control.observer ? `take control and show ${noun}` : `show ${noun}`;
+  const hide = <button type="button" aria-label={context ? `hide ${noun}: ${context}` : undefined} onClick={() => { hidden.current = true; setShown(null); }}>hide {noun}</button>;
   return <div className="projects-reveal">
     {shown?.state === "data" ? hide
       : (shown?.state !== "failed" || shown.problem.retry) &&
-        <button type="button" aria-disabled={shown?.state === "loading"} aria-label={context ? `${label}: ${context}` : undefined}
+        <button ref={button} type="button" aria-disabled={shown?.state === "loading" || waiting} aria-label={context && !waiting ? `${label}: ${context}` : undefined}
           aria-describedby={control.observer ? CONTROL_NOTE : undefined} onClick={() => void show()}>{label}</button>}
     {shown?.state === "failed" && <div ref={region} tabIndex={-1} className="projects-region">
       <p role="alert" className="projects-error">could not load the {noun}: {shown.problem.message}</p>
@@ -291,7 +328,7 @@ function Reveal({ id, noun, context, client, control, load }: { id: string; noun
     {shown?.state === "refused" && <div ref={region} tabIndex={-1} className="projects-region">
       <p role="alert" className="projects-error">{shown.reason}</p>
     </div>}
-    {shown?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={noun} className="projects-region">
+    {shown?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={context ? `${noun}: ${context}` : noun} className="projects-region">
       <p className="projects-note">plain text · never sent to a model</p>
       <pre className="projects-body" tabIndex={0}>{shown.body.text}</pre>
       {shown.body.truncated && <p className="projects-flag">cut short · the rest stays in zeta</p>}

@@ -24,7 +24,7 @@ mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-
 .observer-banner button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
 .observer-banner button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
-.approval-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+.approval-control { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .approval-control button { min-height: 40px; padding: 0 12px; border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
 .approval-control button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 .approval-control span { color: var(--fulcrum-muted); text-wrap: pretty; }

@@ -7,7 +7,7 @@ export const ShellDockSlot = () => <>{useContext(ShellDock)}</>;
 
 export function ModuleFrame({ title, children }: { title: string; children: ReactNode }) {
   return <section className="module-frame">
-    <header><h1>{title}</h1></header>
+    <header><h1 title={title}>{title}</h1></header>
     <ShellDockSlot />
     <div className="module-body">{children}</div>
   </section>;
