@@ -27,8 +27,8 @@ type More = "idle" | "loading" | Problem;
 type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "failed"; problem: Problem };
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
-/** Present only when this zeta grants library_write_v1 and this kind's write method. */
-/** `allowed: false`: this tab controls zeta, but zeta did not list the write method. */
+/** Present only when this zeta grants library_write_v1. `allowed: false`: this tab controls zeta, but zeta did not list
+ * this kind's write method. */
 export type LibraryWrite = { controller: boolean; allowed: boolean; takeControl: () => Promise<string | null> };
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;

@@ -71,10 +71,11 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     setControl(null);
     abort.current = new AbortController();
     const outcome = await writer.create(client, { kind, name, scope }, text, abort.current.signal);
+    // a sent write cannot be recalled: a save that landed after discard is still shown.
+    if (outcome.status === "saved") return onCreated(name, outcome.redacted);
     if (abort.current.signal.aborted) return;
     setPending(false);
-    if (outcome.status === "saved") onCreated(name, outcome.redacted);
-    else setFailure(outcome);
+    setFailure(outcome);
   }
 
   return <section className="library-editor" aria-label={`new ${noun}`} onKeyDown={(event) => {
