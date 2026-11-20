@@ -176,7 +176,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
     </div>}
     {change && <div className="sp-receipt">
       <p ref={status} tabIndex={-1} role="status">at <time dateTime={change.at.toISOString()}>
-        {change.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}</time>: {receipt(change.enabled)}</p>
+        {change.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</time>: {receipt(change.enabled)}</p>
       <p>{restartText(change.restart)} this list goes away when you leave this page.</p>
     </div>}
   </Row>;
