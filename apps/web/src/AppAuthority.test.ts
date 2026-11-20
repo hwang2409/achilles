@@ -151,7 +151,7 @@ const setting = (id: WriteSurfaceId, key: keyof ReturnType<typeof getSettings>, 
   if (locked) {
     expect(getSettings()[key]).toBe(before);
     expect(localStorage.getItem(SETTINGS_KEY)).toBe(storageBefore);
-    expect(app.getByText("locked while another tab controls zeta")).toBeTruthy();
+    expect(app.getByText("only a tab that controls zeta can change auto-approve or reset.")).toBeTruthy();
   } else {
     expect(getSettings()[key]).not.toBe(before);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)[key]).toBe(getSettings()[key]);
