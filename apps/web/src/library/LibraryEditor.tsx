@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { libraryMethods, projectBody, sourceTiers, type Body, type CatalogRow, type LibraryKind } from "./catalog";
-import { createProblems, nameProblem, type createLibraryWriter, type WriteOutcome, type WriteScope, type WriteTarget } from "./libraryWrites";
+import { createProblems, nameProblem, SAVED_NOTICE, type createLibraryWriter, type WriteOutcome, type WriteScope, type WriteTarget } from "./libraryWrites";
 
 type Writer = ReturnType<typeof createLibraryWriter>;
 type Failure = Exclude<WriteOutcome, { status: "saved" }>;
@@ -137,7 +137,8 @@ export function uneditable(body: Body) {
 
 type EditProps = {
   client: ZetaClient; writer: Writer; target: WriteTarget & { scope: WriteScope };
-  /** The read the user opened: its revision is the only base a save may send. */
+  /** The read the user opened: its revision is the only base a save may send. `onSaved` runs after each save; the
+   * editor shows the saved notice itself while the text is unchanged. */
   opened: { revision: string; document: string };
   takeControl: () => Promise<string | null>; feedback: string | null; blocked: string | null;
   onSaved: (redacted: boolean) => void; onClose: () => void;
@@ -156,6 +157,7 @@ export function LibraryEdit({ client, writer, target, opened, takeControl, feedb
   const [tried, setTried] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const alert = useRef<HTMLDivElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
@@ -187,6 +189,7 @@ export function LibraryEdit({ client, writer, target, opened, takeControl, feedb
     // zeta wrote exactly these bytes (the writer checked the sha256), so they are the new baseline.
     setBase({ revision: outcome.revision, document: sent });
     setTried(false);
+    setSaved(true);
     onSaved(outcome.redacted);
   }
 
@@ -227,6 +230,7 @@ export function LibraryEdit({ client, writer, target, opened, takeControl, feedb
       <textarea id={`${id}-mine`} className="library-mine" readOnly value={mine} spellCheck={false} rows={8} />
       <button type="button" className="library-dismiss" onClick={() => setMine(null)}>dismiss your text</button>
     </div>}
+    <p role="status" className="library-editor-saved">{saved && !dirty ? SAVED_NOTICE : ""}</p>
     <div ref={alert} tabIndex={-1} className="library-editor-status">
       {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
       {tried && problems.length > 0 && <ul role="alert" className="library-error">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}

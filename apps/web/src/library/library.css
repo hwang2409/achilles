@@ -106,7 +106,8 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor input:disabled { color: var(--fulcrum-muted); }
 .library-editor textarea { min-height: 16lh; resize: vertical; font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); font-size: 13px; font-variant-ligatures: none; }
 .library-editor :is(input, textarea, button):focus-visible, .library-editor-status:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
-.library-editor-status:empty { display: none; }
+.library-editor-status:empty, .library-editor-saved:empty { display: none; }
+.library-editor-saved { margin: 0; font-size: 13px; }
 .library-editor-status ul { margin: 0; padding-left: 18px; }
 .library-editor-status button, .library-editor-actions button { min-height: 36px; padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
 .library-editor-status div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

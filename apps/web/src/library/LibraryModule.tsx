@@ -248,9 +248,11 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         target={{ kind, name: editing.row.name, scope: editing.row.scope }} opened={editing.opened} takeControl={write.takeControl} feedback={write.feedback}
         blocked={write.allowed ? null : REFUSED_NOTICE} onClose={() => setEditing(null)}
         onSaved={(redacted) => {
-          setSaved({ redacted });
-          // a redacted file has no editable copy any more: leave the editor, the masked read view stays.
-          if (redacted) setEditing(null);
+          // a redacted file has no editable copy any more: leave the editor and say why; the masked read view stays.
+          if (redacted) {
+            setSaved({ redacted });
+            setEditing(null);
+          }
           refresh();
         }} />
       : content}
