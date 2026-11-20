@@ -31,7 +31,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await link.evaluate((anchor) => anchor.setAttribute("target", "_blank"));
     const [settingsPage] = await Promise.all([page.context().waitForEvent("page", { timeout: 10_000 }), link.click()]);
     try {
-      await gateWait.playwright(settingsPage.getByText("display settings are here for now. more settings come later.", { exact: true }), "waitFor");
+      await gateWait.playwright(settingsPage.getByText("theme, fonts, text size, density and vim mode. they apply to this browser only.", { exact: true }), "waitFor");
       const displaySettings = settingsPage.getByRole("button", { name: "display settings", exact: true });
       if (process.env.SCREENSHOT_DIR) await settingsPage.screenshot({ path: join(process.env.SCREENSHOT_DIR, "v5-settings-entry.png") });
       await displaySettings.click();

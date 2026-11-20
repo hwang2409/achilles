@@ -235,13 +235,13 @@ function TelemetryOff({ openSettings }: { openSettings?: () => void }) {
             <p className="tm-dim">built-in receiver on 127.0.0.1:4323 · keeps 14 days raw, 90 days hourly, at most 1 GiB</p>
           </div>
           {openSettings
-            ? <button type="button" className="tm-button tm-primary" onClick={openSettings}>open settings <span aria-hidden="true">↗</span></button>
+            ? <button type="button" className="tm-button tm-primary" onClick={openSettings}>open settings</button>
             : <>
                 <p>add this to <code>settings.toml</code> in your zeta home, then restart running sessions:</p>
                 <pre>{SETTING}</pre>
               </>}
         </div>
-        {openSettings && <p className="tm-dim tm-after">after you save it, new sessions send telemetry; zeta tells you which running sessions need a restart.</p>}
+        {openSettings && <p className="tm-dim tm-after">after you turn it on, new sessions send telemetry; zeta tells you which running sessions need a restart.</p>}
       </section>
     </Frame>
   );

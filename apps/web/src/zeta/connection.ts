@@ -61,6 +61,9 @@ type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted"
 // zeta sends observers no "slot free" signal, so the refusal is a past result with its time: true for as long as it shows.
 export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} another tab had control. a chat tab keeps it while it is open; try again after it finishes or closes.`;
 
+/** The reason when a takeover failed for any cause other than an occupied controller slot. */
+export const TAKEOVER_FAILED = "could not take control. try again.";
+
 // `at`: when a takeover was refused (epoch ms).
 export function transitionRole(state: RoleState, event: RoleEvent, at = Date.now()): RoleState {
   switch (event) {
@@ -78,7 +81,7 @@ export function transitionRole(state: RoleState, event: RoleEvent, at = Date.now
     case "takeover_refused":
       return { role: state.role, reason: refusedReason(at) };
     case "takeover_failed":
-      return { role: state.role, reason: "could not take control. try again." };
+      return { role: state.role, reason: TAKEOVER_FAILED };
     case "retry":
       return { role: state.role, reason: null };
   }
@@ -130,7 +133,7 @@ export class NoAnswer extends Error {}
 
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "projects", "projects-memory-v2", "state_read_v1"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "projects", "projects-memory-v2", "state_read_v1", "home_settings_v1"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 

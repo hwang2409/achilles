@@ -9,14 +9,16 @@ export type ReviewText = string & { readonly [safeText]: true };
 export function reviewText<const T extends string>(text: string extends T ? never : T): ReviewText;
 export function reviewText(text: string): ReviewText { return text as ReviewText; }
 
-type Failure = "changed" | "denied" | "not-applied";
+type Failure = "changed" | "denied" | "not-applied" | "refused";
 const failureCopy: Record<Failure, string> = {
   changed: "not changed. the state changed elsewhere; keep the current state and refresh before trying again.",
   denied: "not changed. check your access before trying again.",
   "not-applied": "not changed. the request did not apply; you can try again.",
+  refused: "not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.",
 };
 
-type Result<C> = C | { status: "unknown" } | { status: "failed"; reason: Failure };
+// `message` replaces the fixed copy; build it with a display-safe projection in the adapter.
+export type Result<C> = C | { status: "unknown" } | { status: "failed"; reason: Failure; message?: ReviewText };
 type Operation<C> = {
   // Return failed only when the write is known not to have applied. Rejections are unknown.
   execute(): Promise<Result<C>>;
@@ -24,7 +26,8 @@ type Operation<C> = {
   checkResult(): Promise<Result<C>>;
 };
 type Committed = { status: "committed"; receipt: ReviewText };
-type Common = { action: ReviewText; keep: ReviewText; effect: ReviewText };
+// `surface`: the trigger's `data-write-surface` id.
+type Common = { action: ReviewText; keep: ReviewText; effect: ReviewText; surface?: string };
 type Inline = Common & Operation<Committed & { value: ReviewText }> & {
   level: 1;
   label: ReviewText;
@@ -40,7 +43,7 @@ type Review = Common & Operation<Committed> & {
   after: ReviewText;
   undo: ReviewText;
   fields?: readonly { label: ReviewText; value: ReviewText | { provided: boolean } }[];
-  proof: { kind: "name"; name: ReviewText } | { kind: "scope"; name?: never };
+  proof: { kind: "name"; name: ReviewText } | { kind: "scope"; name?: never; label?: ReviewText };
   // Keep the confirmation mounted through completion, along with its focus return target.
   activity: HTMLElement;
 };
@@ -56,7 +59,7 @@ export function Confirmation(props: ConfirmationProps) {
   const transition = (next: Phase) => { phaseRef.current = next; setPhase(next); };
   const [attempt, setAttempt] = useState<ConfirmationProps>(props);
   const [proof, setProof] = useState("");
-  const [failure, setFailure] = useState<Failure | null>(null);
+  const [failure, setFailure] = useState<{ reason: Failure; message?: ReviewText } | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -78,7 +81,8 @@ export function Confirmation(props: ConfirmationProps) {
     }
     const node = dialog.current;
     node?.showModal();
-    initial.current?.focus();
+    // a review keeps its body at the top, so the warning shows before the proof field
+    initial.current?.focus({ preventScroll: attempt.level === 2 });
     return () => { node?.close(); };
   }, [open]);
 
@@ -113,7 +117,7 @@ export function Confirmation(props: ConfirmationProps) {
     if (result.status === "unknown") {
       transition("unknown");
     } else if (result.status === "failed") {
-      setFailure(result.reason);
+      setFailure({ reason: result.reason, message: result.message });
       transition(attempt.level === 1 ? "idle" : "review");
     } else {
       setReceipt({ text: result.receipt, at: new Date() });
@@ -125,7 +129,7 @@ export function Confirmation(props: ConfirmationProps) {
       {phase === "pending" ? (attempt.level === 1 ? "saving…" : "finishing…")
         : phase === "checking" ? "checking result…"
         : phase === "unknown" ? "result unknown. check what happened before trying again. the request will not be sent twice."
-        : failure ? failureCopy[failure] : null}
+        : failure ? failure.message ?? failureCopy[failure.reason] : null}
     </p>;
   const checkButton = phase === "unknown" && <button ref={retryCheck} type="button" onClick={() => void run(true)}>check now</button>;
   const confirmButton = <button ref={node => { if (attempt.level === 1) initial.current = node; }} type={attempt.level === 1 ? "button" : "submit"} onClick={attempt.level === 1 ? () => void run(false) : undefined}
@@ -140,7 +144,7 @@ export function Confirmation(props: ConfirmationProps) {
     <div className="confirmation-row">
       <span id={`${id}-label`}>{props.label}</span>
       <span className="confirmation-current">{props.value}</span>
-      <button ref={opener} type="button" disabled={open} onClick={start}>{props.action}</button>
+      <button ref={opener} type="button" data-write-surface={props.surface} disabled={open} onClick={start}>{props.action}</button>
     </div>
     {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep(); } }}>
@@ -160,7 +164,7 @@ export function Confirmation(props: ConfirmationProps) {
   const step = phase === "pending" ? "confirming…" : phase === "checking" ? "checking…"
     : phase === "unknown" ? "result unknown" : failure ? "not changed" : "review";
   return <>
-    <button ref={opener} className="confirmation-trigger" type="button" onClick={start}>{props.action}</button>
+    <button ref={opener} className="confirmation-trigger" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</button>
     {open && createPortal(<dialog ref={dialog} className="confirmation-dialog" data-proof={attempt.proof.kind}
       aria-labelledby={`${id}-title`} aria-describedby={`${id}-effect ${id}-undo`}
       onCancel={event => { event.preventDefault(); event.stopPropagation(); keep(); }}
@@ -194,7 +198,7 @@ export function Confirmation(props: ConfirmationProps) {
           </label> : <label className="confirmation-scope">
             <input ref={node => { initial.current = node; }} type="checkbox" checked={proof === "checked"}
               onChange={event => setProof(event.currentTarget.checked ? "checked" : "")} disabled={locked} />
-            i reviewed the scope
+            {attempt.proof.label ?? "i reviewed the scope"}
           </label>}
           {feedback}
         </div>

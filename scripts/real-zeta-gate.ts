@@ -10,6 +10,7 @@ import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-trans
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
+import { gateHomeSettings } from "./gate-home-settings";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
@@ -401,6 +402,8 @@ with _database() as db:
     }
   }
   console.log("metric strips fit at 320px, 360px, 390px, 1440px and effective 200% zoom");
+  // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
+  await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];

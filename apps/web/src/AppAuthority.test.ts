@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -213,6 +213,12 @@ const fixtureFile = "---\nname: fixture-skill\ndescription: synthetic skill\n---
 const libraryFile: Options = { ...library(true), rpc: { ...library(true).rpc,
   skill_catalog: () => ({ result: { revision: "r", data: { items: [{ name: "fixture-skill", description: "synthetic skill", keywords: [], source: "home", scope: "home", editable: true, diagnostics: [] }] } } }),
   skill_read: async () => ({ result: { revision: await sha256(fixtureFile), data: { name: "fixture-skill", frontmatter: {}, body: "body\n", source: "home", editable: true, redacted: false, document: fixtureFile } } }),
+} };
+const homeSettings: Options = { path: "/settings", observerBanner: false, rpc: {
+  hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features, requests: params.role === "controller" ? ["home_settings_get", "home_settings_update"] : ["home_settings_get"] } } }),
+  // a read after the update sees it: the borrow reconnects, and each new socket reads again
+  home_settings_get: (_params, requests) => ({ result: { revision: `sha256:${(requests.includes("home_settings_update") ? "b" : "a").repeat(64)}`, settings: { telemetry: requests.includes("home_settings_update") ? { enabled: true, source: "builtin", editable: true } : { enabled: false, source: "off", editable: true } }, settings_malformed: false } }),
+  home_settings_update: () => ({ result: { revision: `sha256:${"b".repeat(64)}`, settings: { telemetry: { enabled: true, source: "builtin", editable: true } }, restart: { serve: true, sessions: [], complete: true } } }),
 } };
 const blockedCreation = (path: string, method: string) => path === "/api/pages/page/chats" && method === "POST" ? new Response(null, { status: 503 }) : undefined;
 const creationAction = (action: "retry" | "discard"): Row => ({ kind: action === "retry" ? "visible" : "local-only", absent: true, options: { pending: true, http: blockedCreation }, check: async (app, authority, writes, requests) => {
@@ -426,6 +432,20 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
   } },
+  "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
+    // the settings place browses as an observer; confirming the change borrows control for the one update.
+    await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
+    const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
+    await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
+    await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
+    if (authority === "observer") {
+      expect((await app.findByRole("alert")).textContent).toBe("not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.");
+      return;
+    }
+    expect(await app.findByText(/^telemetry is on\. if zeta\[otel\] is not installed, turn it off here before you restart zeta\. at/)).toBeTruthy();
+    expect(app.getByText("restart zeta serve. this list goes away when you leave this page.")).toBeTruthy();
+    didWrite(writes, "home_settings_update");
+  } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
     const form = select(app, '.record-form form');
     const submit = select(app, '.record-form button[type="submit"]');
@@ -601,6 +621,27 @@ const requestApprovalChange = async (app: RenderResult) => {
   await click(select(app, tag("page-chat.auto-approve")));
   await click(app.getByRole("button", { name: "confirm", exact: true }));
 };
+
+test("a stale telemetry change whose reread shows it on elsewhere keeps the reason and focuses the row control", async () => {
+  // the file was turned on elsewhere: the update is stale, and the reread finds telemetry on at a new revision
+  const turnedOn = { result: { revision: `sha256:${"c".repeat(64)}`, settings: { telemetry: { enabled: true, source: "builtin", editable: true } }, settings_malformed: false } };
+  const options: Options = { ...homeSettings, rpc: { ...homeSettings.rpc,
+    home_settings_get: (params, requests) => requests.includes("home_settings_update") ? turnedOn : homeSettings.rpc!.home_settings_get!(params, requests),
+    home_settings_update: () => ({ error: { code: -32009, message: "settings.toml changed since the given revision", data: { code: "stale_revision" } } }),
+  } };
+  await withApp("controller", options, async (app, writes) => {
+    await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
+    const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
+    await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
+    await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
+    const turnOff = await app.findByText("turn off", { selector: tag("settings.telemetry") });
+    // compare markup: a failing element diff crashes bun
+    expect(document.activeElement?.outerHTML).toBe(turnOff.outerHTML);
+    expect(app.getByText("not changed. the state changed elsewhere; the row now shows the current state.")).toBeTruthy();
+    expect(app.queryByRole("dialog")).toBeNull();
+    expect(writes.filter((write) => write === "home_settings_update")).toHaveLength(1);
+  });
+});
 
 test("tool approval waits for the turn end and reports the authoritative result", async () => {
   let busy = true;

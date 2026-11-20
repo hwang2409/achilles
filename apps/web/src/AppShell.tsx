@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPalette";
 import { SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
@@ -6,11 +6,14 @@ import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFoc
 import { PageChatCatalog, titleOf, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
-import { ModuleFrame, ModuleState, ShellDock } from "./surface/ModuleState";
+import { ShellDock } from "./surface/ModuleState";
 import type { BuildActivity } from "./create/buildActivity";
 import { BuildStatus, SurfaceNav } from "./surface/SurfaceNav";
 import type { CreateModeOwner } from "./create/createMode";
 import { surfaceHref, type SurfaceRoute } from "./surface/routes";
+
+/** Opens the browser display settings dialog; the settings place provides it. */
+export const DisplaySettings = createContext<() => void>(() => {});
 
 type WorkspaceActions = {
   canWrite: boolean;
@@ -209,9 +212,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
         {header}
       </div>
       {workspace && dock}
-      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows, onScreen: activity.onScreen }}>{settingsPlace ? <ModuleFrame title={current.label}>
-        <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
-      </ModuleFrame> : children}</PageChatCatalog.Provider></ShellDock.Provider>
+      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows, onScreen: activity.onScreen }}>{settingsPlace ? <DisplaySettings.Provider value={() => openSettings(activeElement())}>{children}</DisplaySettings.Provider> : children}</PageChatCatalog.Provider></ShellDock.Provider>
     </main>
     {/* outside main and the drawer, so it is never inert or aria-hidden */}
     <span ref={liveRegion} className="visually-hidden" role="status">{spoken}</span>
