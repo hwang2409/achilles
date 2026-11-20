@@ -24,7 +24,15 @@ function fakeZeta(writes: Reply[], reads: Reply[] = []) {
   } as unknown as ZetaClient;
   return { client, calls };
 }
-const open = () => new AbortController().signal;
+type Writer = ReturnType<typeof createLibraryWriter>;
+/** Opens a form, runs one save from it, and returns what was delivered to it (null: nothing). */
+async function outcomeOf(writer: Writer, start: (form: string) => Promise<void>) {
+  const form = writer.open();
+  let got: WriteOutcome | null = null;
+  writer.attach(form, (outcome) => { got = outcome; });
+  await start(form);
+  return got as WriteOutcome | null;
+}
 const fakeClock = () => {
   const waits: number[] = [];
   return { waits, sleep: async (ms: number, signal?: AbortSignal) => { if (signal?.aborted) throw new Error("aborted"); waits.push(ms); } };
@@ -51,7 +59,8 @@ describe("library create outcomes", () => {
   ])("%s", async (_name, writes, reads, text, expected, requests, waits) => {
     const zeta = fakeZeta(writes, reads);
     const clock = fakeClock();
-    const outcome = await createLibraryWriter(clock.sleep).create(zeta.client, target, text, open());
+    const writer = createLibraryWriter(clock.sleep);
+    const outcome = await outcomeOf(writer, (form) => writer.create(zeta.client, target, text, form));
     expect(outcome).toMatchObject(expected);
     expect(zeta.calls).toHaveLength(requests);
     expect(zeta.calls.filter(([method]) => method === "skill_write").every(([, params]) =>
@@ -93,7 +102,8 @@ describe("library edit outcomes", () => {
     const readCount = reads.length;
     const zeta = fakeZeta(writes, reads);
     const clock = fakeClock();
-    const outcome = await createLibraryWriter(clock.sleep).save(zeta.client, target, opened, text, open());
+    const writer = createLibraryWriter(clock.sleep);
+    const outcome = await outcomeOf(writer, (form) => writer.save(zeta.client, target, opened, text, form));
     expect(outcome).toMatchObject(expected.status === "saved" ? { ...expected, revision: rev } : expected);
     expect(zeta.calls).toHaveLength(requests);
     // every write carries the revision the user opened; a read never turns into a second write.
@@ -103,16 +113,18 @@ describe("library edit outcomes", () => {
   });
 });
 
-// One table for "which form owns this save", through the public save API on a synthetic zeta that compares revisions
-// like zeta does. Form A saves text A from the opened file. `second`: while A's write is held in flight, a second save of
-// the same item from A's form (a double submit) or another form (discard, reopen, save). `cancel`: when form A closes.
-// `drop`: the socket drops; the write may have landed, the old client is dead, and the first wait reconnects.
+// One table for "which form owns this save", through the public writer API on a synthetic zeta that compares revisions
+// like zeta does. Form A saves text A. `second`: while A's write is held in flight, a second save of the same item from
+// A's form (a double submit) or another form (discard, reopen, save). `cancel`: when form A closes. `drop`: the socket
+// drops, which unmounts the editor (it detaches) and remounts it after the reconnect (it attaches again); the old client
+// is dead and the first wait reconnects. "apply, then drop": zeta wrote the file but the reply was lost.
 describe("which form owns a save", () => {
   const opened = "---\nname: fixture-skill\ndescription: synthetic\n---\nopened\n";
   const texts = { A: opened.replace("opened", "text A"), B: opened.replace("opened", "text B") };
   const busy = () => error(-32004, { reason: "operation_busy" });
   const dropped = () => new Error("socket closed");
   const inProgress = { status: "busy", message: "another save of this item is in progress. nothing was sent; try again in a moment." } as const;
+  const notSaved = { status: "unknown", message: "zeta did not save it. try again." } as const;
   type Write = "apply" | "hold" | "apply, then drop" | Error;
   type Row = {
     op?: "create"; writes: Write[]; second?: { form: "A" | "B"; text: "A" | "B" }; cancel?: "before send" | "in flight" | "wait"; drop?: boolean;
@@ -120,7 +132,7 @@ describe("which form owns a save", () => {
   };
   test.each<[string, Row]>([
     ["success", { writes: ["apply"], first: { status: "saved" }, requests: 1, file: "A", waits: [] }],
-    ["a true double submit joins the save: one request", { writes: ["hold"], second: { form: "A", text: "A" }, first: { status: "saved" }, secondOutcome: { status: "saved" }, requests: 1, file: "A", waits: [] }],
+    ["a true double submit joins the save: one request", { writes: ["hold"], second: { form: "A", text: "A" }, first: { status: "saved" }, requests: 1, file: "A", waits: [] }],
     ["another form's other text while in flight never gets A's outcome", { writes: ["hold"], second: { form: "B", text: "B" }, first: { status: "saved" }, secondOutcome: inProgress, requests: 1, file: "A", waits: [] }],
     ["another form's same text while in flight is refused too", { writes: ["hold"], second: { form: "B", text: "A" }, first: { status: "saved" }, secondOutcome: inProgress, requests: 1, file: "A", waits: [] }],
     ["the form's own other text while in flight is refused", { writes: ["hold"], second: { form: "A", text: "B" }, first: { status: "saved" }, secondOutcome: inProgress, requests: 1, file: "A", waits: [] }],
@@ -129,10 +141,12 @@ describe("which form owns a save", () => {
     ["closed during the settle wait: no read, no result", { writes: [dropped()], drop: true, cancel: "wait", first: null, requests: 2, file: "opened", waits: [500] }],
     ["closed while the edit is in flight: no result; the landed save is reported once", { writes: ["hold"], cancel: "in flight", first: null, requests: 1, file: "A", waits: [], landed: 1 }],
     ["closed while the create is in flight: no result; the landed save is reported once", { op: "create", writes: ["hold"], cancel: "in flight", first: null, requests: 1, file: "A", waits: [], landed: 1 }],
-    ["send error, the read shows the opened file", { writes: [error(-32000)], first: { status: "unknown", message: "zeta did not save it. try again." }, requests: 2, file: "opened", waits: [] }],
+    ["send error, the read shows the opened file", { writes: [error(-32000)], first: notSaved, requests: 2, file: "opened", waits: [] }],
     ["busy until the retries run out", { writes: [busy(), busy(), busy(), busy()], first: { status: "busy" }, requests: 4, file: "opened", waits: [500, 1_000, 2_000] }],
-    ["unknown result, settled by a read on the live client after the reconnect", { writes: ["apply, then drop"], drop: true, first: { status: "saved" }, requests: 3, file: "A", waits: [500] }],
-    ["reconnect mid-save, the write never landed", { writes: [dropped()], drop: true, first: { status: "unknown", message: "zeta did not save it. try again." }, requests: 3, file: "opened", waits: [500] }],
+    ["edit: drop after zeta wrote, the remounted form gets saved", { writes: ["apply, then drop"], drop: true, first: { status: "saved" }, requests: 3, file: "A", waits: [500] }],
+    ["edit: drop before the write arrived, the remounted form gets not saved", { writes: [dropped()], drop: true, first: notSaved, requests: 3, file: "opened", waits: [500] }],
+    ["create: drop after zeta wrote, the remounted form gets saved", { op: "create", writes: ["apply, then drop"], drop: true, first: { status: "saved" }, requests: 3, file: "A", waits: [500] }],
+    ["create: drop before the write arrived, the remounted form gets not saved", { op: "create", writes: [dropped()], drop: true, first: notSaved, requests: 3, file: null, waits: [500] }],
   ])("%s", async (_name, row) => {
     let file: string | null = row.op === "create" ? null : opened;
     const calls: string[] = [];
@@ -140,11 +154,15 @@ describe("which form owns a save", () => {
     let sent!: () => void;
     const held = new Promise<void>((resolve) => { sent = resolve; });
     const writes = [...row.writes];
+    let gone = false;
     const zeta = (dead: () => boolean) => ({
       request: async (method: string, params: { revision?: string; mutation?: { document: string } }) => {
         calls.push(method);
         if (dead()) throw dropped();
-        if (method === "skill_read") return { revision: file === null ? null : await sha(file), data: { redacted: false } };
+        if (method === "skill_read") {
+          if (file === null) throw error(-32602, { reason: "resource_not_found" });
+          return { revision: await sha(file), data: { redacted: false } };
+        }
         const reply = writes.shift();
         if (reply instanceof Error) throw reply;
         if (reply === "hold") { sent(); await new Promise<void>((resolve) => { release = resolve; }); }
@@ -154,43 +172,47 @@ describe("which form owns a save", () => {
         return { revision: await sha(file), data: { name: target.name, scope: target.scope, redacted: false } };
       },
     }) as unknown as ZetaClient;
-    let gone = false;
     let live: ZetaClient | null = null;
     const first = zeta(() => gone);
     const fresh = zeta(() => false);
-    const forms = { A: new AbortController(), B: new AbortController() };
-    const waits: number[] = [];
-    const sleep = async (ms: number, signal?: AbortSignal) => {
+    const writer: Writer = createLibraryWriter(async (ms, signal) => {
       waits.push(ms);
-      if (row.cancel === "wait") forms.A.abort();
+      if (row.drop) detach(); // the socket dropped: the library view unmounts
+      if (row.cancel === "wait") writer.close(forms.A);
       if (signal?.aborted) throw new Error("aborted");
       if (row.drop) live = fresh;
-    };
+    }, () => live);
+    const waits: number[] = [];
+    const forms = { A: writer.open(), B: writer.open() };
+    const got: Record<"A" | "B", WriteOutcome[]> = { A: [], B: [] };
+    let detach = writer.attach(forms.A, (outcome) => got.A.push(outcome));
+    writer.attach(forms.B, (outcome) => got.B.push(outcome));
     const landed: string[] = [];
-    const writer = createLibraryWriter(sleep, () => live, (item) => landed.push(item.name));
+    writer.onLanded((item) => landed.push(item.name));
     const base = await sha(opened);
     const save = (form: "A" | "B", text: "A" | "B") => row.op === "create"
-      ? writer.create(first, target, texts[text], forms[form].signal) : writer.save(first, target, base, texts[text], forms[form].signal);
+      ? writer.create(first, target, texts[text], forms[form]) : writer.save(first, target, base, texts[text], forms[form]);
     if (row.writes[0] instanceof Error && row.drop) gone = true; // the socket is already gone when the write goes out
     const a = save("A", "A");
-    if (row.cancel === "before send") forms.A.abort();
-    let b: Promise<WriteOutcome | null> | undefined;
+    if (row.cancel === "before send") writer.close(forms.A);
+    let b: Promise<void> | undefined;
     if (row.writes[0] === "hold") {
       await held;
-      if (row.cancel === "in flight") forms.A.abort();
+      if (row.cancel === "in flight") writer.close(forms.A);
       if (row.second) b = save(row.second.form, row.second.text);
       release();
     }
-    const outcomes = [await a, await b];
+    await Promise.all([a, b]);
+    if (row.drop) detach = writer.attach(forms.A, (outcome) => got.A.push(outcome)); // remounted after the reconnect
 
-    expect(outcomes[0]).toEqual(row.first === null ? null : expect.objectContaining(row.first));
-    if (row.second) expect(outcomes[1]).toEqual(row.secondOutcome ? expect.objectContaining(row.secondOutcome) : null);
-    // a reported save is always the text that call sent, and the file holds it.
-    for (const [i, outcome] of outcomes.entries()) {
-      if (outcome?.status !== "saved") continue;
-      const sentText = i === 0 ? texts.A : texts[row.second!.text];
-      expect([outcome.revision, file]).toEqual([await sha(sentText), sentText]);
-    }
+    // each form gets at most one outcome, and only its own.
+    // a refusal reaches the second call at once; A's own save arrives when it settles.
+    const own = row.second?.form === "A" && row.secondOutcome ? [row.secondOutcome] : [];
+    expect(got.A).toEqual([...own, ...row.first === null ? [] : [row.first]].map((outcome) => expect.objectContaining(outcome)));
+    expect(got.B).toEqual(row.second?.form === "B" && row.secondOutcome ? [expect.objectContaining(row.secondOutcome)] : []);
+    // a reported save is always the text the form sent, and the file holds it.
+    const savedA = got.A.find((outcome) => outcome.status === "saved");
+    if (savedA?.status === "saved") expect([savedA.revision, file]).toEqual([await sha(texts.A), texts.A]);
     expect(calls).toHaveLength(row.requests);
     expect(file).toBe(row.file === "A" ? texts.A : row.file === "opened" ? opened : null);
     expect(waits).toEqual(row.waits);

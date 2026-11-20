@@ -1,14 +1,12 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { libraryMethods, projectBody, sourceTiers, type Body, type CatalogRow, type LibraryKind } from "./catalog";
-import { createProblems, nameProblem, savedNotice, type createLibraryWriter, type WriteOutcome, type WriteScope, type WriteTarget } from "./libraryWrites";
+import { createProblems, nameProblem, savedNotice, type LibraryWriter as Writer, type Sent, type WriteOutcome, type WriteScope, type WriteTarget } from "./libraryWrites";
 
-type Writer = ReturnType<typeof createLibraryWriter>;
-// The writer threw before sending (for example `crypto.subtle` is missing outside a secure context).
-const notSent: WriteOutcome = { status: "unknown", message: "this page could not send the save. nothing was sent." };
 type Failure = Exclude<WriteOutcome, { status: "saved" }>;
 /** What the user typed in the create form. Kept in memory only, never in storage or the URL: a draft can hold a secret. */
-export type CreateDraft = { name: string; description: string; scope: WriteScope; edited: string | null };
+/** `form`: the writer's identity for this form (`writer.open()`); it outlives a remount, so a save still reaches it. */
+export type CreateDraft = { name: string; description: string; scope: WriteScope; edited: string | null; form: string };
 /** Shared by both editors: who may save and how to get control. */
 type Control = {
   /** Whether this tab controls zeta now. When it does not, save first takes control (only if the slot is free). */
@@ -22,7 +20,7 @@ type Control = {
 type Props = Control & {
   client: ZetaClient; kind: LibraryKind; writer: Writer; rows: CatalogRow[];
   /** Starts the form from this draft; every change is reported back, so the owner can restore it after a remount. */
-  draft: CreateDraft | undefined;
+  draft: CreateDraft;
   onDraft: (draft: CreateDraft) => void;
   /** The catalog method used to probe project scope; null when this zeta has no live catalog. */
   catalogMethod: string | null;
@@ -68,12 +66,14 @@ function EditorActions({ dirty, what, onDiscard, save }: { dirty: boolean; what:
 const Demoted = ({ show }: { show: boolean }) => show
   ? <p role="status" className="library-flag">this tab is read-only now. save takes control first, if no other tab has it.</p> : null;
 
-/** One per open form: the writer's identity for it. Closing the form aborts it, so the writer stops its retries and
- * never hands it a reply. */
-function useForm() {
-  const [form] = useState(() => new AbortController());
-  useEffect(() => () => form.abort(), [form]);
-  return form.signal;
+/** The form's save outcomes from the writer, also one that settled while the form was unmounted by a socket drop.
+ * Returns whether a save of this form is in flight now. */
+function useOutcome(writer: Writer, form: string, apply: (outcome: WriteOutcome, sent: Sent) => void) {
+  const [pending, setPending] = useState(() => writer.pending(form));
+  const latest = useRef(apply);
+  latest.current = apply;
+  useEffect(() => writer.attach(form, (outcome, sent) => { setPending(false); latest.current(outcome, sent); }), [writer, form]);
+  return [pending, setPending] as const;
 }
 
 /** Take control for a save on an observer tab; on refusal the failure shows the reason. Returns whether to send. */
@@ -89,16 +89,17 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const { takeControl, feedback, blocked, controller } = control;
   const noun = kind === "skills" ? "skill" : "profile";
   const id = useId();
-  const [name, setName] = useState(draft?.name ?? "");
-  const [description, setDescription] = useState(draft?.description ?? "");
-  const [scope, setScope] = useState<WriteScope>(draft?.scope ?? "home");
-  const [edited, setEdited] = useState<string | null>(draft?.edited ?? null);
+  const { form } = draft;
+  const [name, setName] = useState(draft.name);
+  const [description, setDescription] = useState(draft.description);
+  const [scope, setScope] = useState<WriteScope>(draft.scope);
+  const [edited, setEdited] = useState<string | null>(draft.edited);
   const [project, setProject] = useState<{ state: "checking" | "unavailable"; why: string } | { state: "available"; label: string }>(
     catalogMethod ? { state: "checking", why: "checking project items…" } : { state: "unavailable", why: "needs a newer zeta" });
-  const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
-  const form = useForm();
+  const [pending, setPending] = useOutcome(writer, form, (outcome, sent) => outcome.status === "saved"
+    ? onCreated(sent.target.name, outcome.redacted, whereFor(sent.target)) : setFailure(outcome));
   const alert = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const text = edited ?? header(kind, name, description);
@@ -109,7 +110,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const dirty = Boolean(name || description || edited !== null);
 
   useEffect(() => { nameField.current?.focus(); }, []);
-  useEffect(() => { onDraft({ name, description, scope, edited }); }, [name, description, scope, edited]);
+  useEffect(() => { onDraft({ name, description, scope, edited, form }); }, [name, description, scope, edited]);
   useLeaveGuard(dirty || pending);
   // Project scope needs an open chat in a project: a one-row read says whether zeta has one, and the session's
   // working directory names it.
@@ -130,7 +131,8 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const shadow = existing && existing.source !== scope && (sourceTiers.indexOf(existing.source) < sourceTiers.indexOf(scope)
     ? `a ${existing.source} ${noun} named ${name} wins over this one.` : `this will win over the ${existing.source} ${name}.`);
   const file = `.zeta/${folder(kind)}/${name || "<name>"}.md`;
-  const where = scope === "project" && project.state === "available" ? `${project.label} · ${file}` : `home · ${folder(kind)}/${name}.md`;
+  const whereFor = (target: WriteTarget) => target.scope === "project" && project.state === "available"
+    ? `${project.label} · .zeta/${folder(kind)}/${target.name}.md` : `home · ${folder(kind)}/${target.name}.md`;
 
   async function save() {
     if (pending || blocked) return;
@@ -138,13 +140,8 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     if (problems.length) return alert.current?.focus();
     setPending(true);
     setFailure(null);
-    const outcome = await controlForSave(control, setFailure)
-      ? await writer.create(client, { kind, name, scope }, text, form).catch(() => notSent) : undefined;
-    // null: the form closed (the writer reports a save that still landed).
-    if (outcome === null) return;
-    if (outcome?.status === "saved") return onCreated(name, outcome.redacted, where);
-    setPending(false);
-    if (outcome) setFailure(outcome);
+    if (await controlForSave(control, setFailure)) void writer.create(client, { kind, name, scope }, text, form);
+    else setPending(false);
   }
   const onEnter = (event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") { event.preventDefault(); void save(); } };
 
@@ -209,7 +206,7 @@ export function uneditable(body: Body) {
 
 /** An open edit, kept in memory only (it can hold a secret). `base`: the read the user opened or last saved; its
  * revision is the only one a save may send. `mine`: the user's text kept beside the latest version after a conflict. */
-export type EditDraft = { target: WriteTarget; base: { revision: string; document: string }; text: string; mine: string | null };
+export type EditDraft = { target: WriteTarget; base: { revision: string; document: string }; text: string; mine: string | null; form: string };
 type EditProps = Control & {
   client: ZetaClient; writer: Writer;
   /** Starts the editor from this draft; every change is reported back, so a socket drop that unmounts it loses nothing.
@@ -228,19 +225,25 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
   const [text, setText] = useState(draft.text);
   // after "load the latest version": the user's text, kept read-only beside zeta's for a manual merge.
   const [mine, setMine] = useState(draft.mine);
-  const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [pending, setPending] = useOutcome(writer, draft.form, (outcome, sent) => {
+    if (outcome.status !== "saved") return setFailure(outcome);
+    // zeta wrote exactly these bytes (the writer checked the sha256), so they are the new baseline.
+    setBase({ revision: outcome.revision, document: sent.document });
+    setTried(false);
+    setSaved(true);
+    onSaved(outcome.redacted);
+  });
   const field = useRef<HTMLTextAreaElement>(null);
   const alert = useRef<HTMLDivElement>(null);
-  const form = useForm();
   const dirty = text !== base.document;
   const problems = createProblems(target.name, text);
 
   useEffect(() => { field.current?.focus(); }, []);
-  useEffect(() => { onDraft({ target, base, text, mine }); }, [base, text, mine]);
+  useEffect(() => { onDraft({ target, base, text, mine, form: draft.form }); }, [base, text, mine]);
   useEffect(() => { if (failure || (tried && problems.length)) alert.current?.focus(); }, [failure, tried]);
   useLeaveGuard(dirty || pending);
 
@@ -251,18 +254,8 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
     if (problems.length) return alert.current?.focus();
     setPending(true);
     setFailure(null);
-    const sent = text;
-    const outcome = await controlForSave(control, setFailure)
-      ? await writer.save(client, target, base.revision, sent, form).catch(() => notSent) : undefined;
-    if (outcome === null) return;
-    setPending(false);
-    if (!outcome) return;
-    if (outcome.status !== "saved") return setFailure(outcome);
-    // zeta wrote exactly these bytes (the writer checked the sha256), so they are the new baseline.
-    setBase({ revision: outcome.revision, document: sent });
-    setTried(false);
-    setSaved(true);
-    onSaved(outcome.redacted);
+    if (await controlForSave(control, setFailure)) void writer.save(client, target, base.revision, text, draft.form);
+    else setPending(false);
   }
 
   async function loadLatest() {

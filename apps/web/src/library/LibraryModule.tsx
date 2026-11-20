@@ -4,7 +4,7 @@ import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
 import { LibraryEdit, LibraryEditor, uneditable, type CreateDraft, type EditDraft } from "./LibraryEditor";
-import { createLibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from "./libraryWrites";
+import { type LibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from "./libraryWrites";
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
@@ -35,8 +35,8 @@ export type LibraryWrite = {
   drafts: Map<string, CreateDraft>;
   /** The open edit per kind, held by the router for the same reason. */
   edits: Map<LibraryKind, EditDraft>;
-  /** The connection's current client (null while reconnecting), for reads after a socket drop. */
-  liveClient: () => ZetaClient | null;
+  /** The one library writer, held by the router so a save survives a remount. */
+  writer: LibraryWriter;
   /** Gives back the controller slot taken for an editor, once that editor closes. */
   releaseControl: () => void;
 };
@@ -78,12 +78,11 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const focusNewButton = useRef(false);
   const [editing, setEditing] = useState<EditDraft | null>(() => write?.edits.get(kind) ?? null);
   const wasEditing = useRef(false);
-  // A save that lands after its form closed only shows the notice and reloads the list (stable setters only: the writer
-  // keeps this first-render closure).
-  const [writer] = useState(() => createLibraryWriter(undefined, write?.liveClient, (target, redacted) => {
+  // A save that lands after its form closed only shows the notice and reloads the list.
+  useEffect(() => write?.writer.onLanded((target, redacted) => {
     setSaved({ name: target.name, redacted });
     reload();
-  }));
+  }), [write?.writer]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -189,22 +188,34 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     });
   }
 
+  function openCreate() {
+    if (!write) return;
+    write.drafts.set(draftKey, { name: "", description: "", scope: "home", edited: null, form: write.writer.open() });
+    setCreating(true);
+  }
+
   function closeEditor() {
+    const draft = write?.drafts.get(draftKey);
+    if (draft) write?.writer.close(draft.form);
     write?.drafts.delete(draftKey);
     setCreating(false);
     write?.releaseControl();
   }
 
   function startEdit(row: CatalogRow, opened: EditDraft["base"]) {
-    if (row.scope === "effective") return;
-    const draft = { target: { kind, name: row.name, scope: row.scope }, base: opened, text: opened.document, mine: null };
+    const scope = row.scope;
+    if (scope === "effective") return;
     withControl(() => {
-      write?.edits.set(kind, draft);
+      if (!write) return;
+      const draft = { target: { kind, name: row.name, scope }, base: opened, text: opened.document, mine: null, form: write.writer.open() };
+      write.edits.set(kind, draft);
       setEditing(draft);
     });
   }
 
   function closeEdit() {
+    const draft = write?.edits.get(kind);
+    if (draft) write?.writer.close(draft.form);
     write?.edits.delete(kind);
     setEditing(null);
     write?.releaseControl();
@@ -222,6 +233,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     setSelection(null);
   }
 
+  const createDraft = write?.drafts.get(draftKey);
   let content: ReactNode;
   if (!catalog) content = <ModuleState kind="loading" title={reads.catalog ? "reading catalog…" : "reading session snapshot…"} />;
   else if (catalog.state === "failed") content = <ModuleState kind="failed" title={`could not read ${title}: ${catalog.problem.message}`}
@@ -285,7 +297,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
           {write && !creating && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
             ref={newButton}
-            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(() => setCreating(true))}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
+            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
         {(controlFeedback || (write && !write.allowed && !creating)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
       </div>
@@ -294,15 +306,15 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
         <button type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => setSaved(null)}>dismiss</button>
       </div>}
-      {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows}
-        draft={write.drafts.get(draftKey)} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
+      {creating && write && createDraft ? <LibraryEditor client={client} kind={kind} writer={write.writer} rows={rows}
+        draft={createDraft} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
         controller={write.controller} takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onOpen={showCreated}
         onClose={() => { focusNewButton.current = true; closeEditor(); }}
         onCreated={(name, redacted, where) => {
           setSaved({ name, redacted, where });
           showCreated(name);
         }} />
-      : editing && write ? <LibraryEdit key={`${editing.target.scope}/${editing.target.name}`} client={client} writer={writer} draft={editing}
+      : editing && write ? <LibraryEdit key={editing.form} client={client} writer={write.writer} draft={write.edits.get(kind) ?? editing}
         onDraft={(draft) => write.edits.set(kind, draft)} controller={write.controller} takeControl={write.takeControl} feedback={write.feedback}
         blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEdit}
         onSaved={(redacted) => {

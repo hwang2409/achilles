@@ -25,6 +25,7 @@ export type WriteOutcome =
   | { status: "saved"; revision: string; redacted: boolean }
   | { status: "stale" | "busy" | "observer" | "invalid" | "unavailable" | "unknown"; message: string };
 export type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
+export type LibraryWriter = ReturnType<typeof createLibraryWriter>;
 
 /** `none`: no write control (no `library_write_v1`). zeta lists methods per role, so an observer hello never names a
  * write: an observer shows the control on the feature alone, and a controller also needs this kind's write method. */
@@ -94,14 +95,29 @@ function invalidMessage(reason: unknown, detail: unknown, target: WriteTarget) {
 /** Another form's save of the same item is in flight; this one sends nothing. */
 const IN_PROGRESS: WriteOutcome = { status: "busy", message: "another save of this item is in progress. nothing was sent; try again in a moment." };
 
-/** One writer per library view, and the only owner of "which form owns this save". `form`: the open form's abort
- * signal, its identity and its cancel. A call joins an in-flight save only when form and request are identical (a
- * double submit); any other save of that item while one is in flight is refused with IN_PROGRESS. A closed form gets
- * null and sends nothing more; a save it sent that lands after it closed goes to `landed` instead. `live`: the
- * connection's current client, so the read that settles an unknown result after a socket drop uses the reconnected one. */
-export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => ZetaClient | null = () => null,
-  landed: (target: WriteTarget, redacted: boolean) => void = () => {}) {
-  const inFlight = new Map<string, { form: AbortSignal; base: string | null; document: string; run: Promise<WriteOutcome | null> }>();
+// The page threw before sending (for example `crypto.subtle` is missing outside a secure context).
+const NOT_SENT: WriteOutcome = { status: "unknown", message: "this page could not send the save. nothing was sent." };
+
+/** What a form sent, delivered with its outcome, so a form that remounted applies the save it actually sent. */
+export type Sent = { target: WriteTarget; document: string };
+type Deliver = (outcome: WriteOutcome, sent: Sent) => void;
+type Form = { abort: AbortController; deliver?: Deliver; held?: [WriteOutcome, Sent] };
+
+/** The only owner of library writes and of "which form owns this save". It lives above the library view, so a socket
+ * drop that remounts the view keeps every form and its save.
+ * - `open()` gives a form its identity; `close(form)` ends it: its retries and settle reads stop, and it gets nothing.
+ *   A save it sent that still lands goes to the `onLanded` listeners.
+ * - a call joins an in-flight save only when form and request are identical (a double submit); any other save of that
+ *   item while one is in flight is refused with IN_PROGRESS.
+ * - each outcome goes once to the form that sent it, through `attach`; one that settles while the form is not mounted
+ *   waits for the remounted form.
+ * `live`: the connection's current client, so the read that settles an unknown result after a socket drop uses the
+ * reconnected one. */
+export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => ZetaClient | null = () => null) {
+  const forms = new Map<string, Form>();
+  const inFlight = new Map<string, { form: string; base: string | null; document: string; run: Promise<void> }>();
+  const landed = new Set<(target: WriteTarget, redacted: boolean) => void>();
+  let opened = 0;
 
   // A reply that is not a definite answer: read the item; never send the write again. Stops when the form closes.
   async function settle(client: ZetaClient, target: WriteTarget, base: string | null, expected: string, form: AbortSignal): Promise<WriteOutcome | null> {
@@ -152,28 +168,57 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
     return null;
   }
 
-  async function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: AbortSignal) {
+  function deliver(state: Form, outcome: WriteOutcome, sent: Sent) {
+    if (state.deliver) state.deliver(outcome, sent);
+    else state.held = [outcome, sent];
+  }
+
+  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: string): Promise<void> {
+    const state = forms.get(form);
+    if (!state) return Promise.resolve();
     const key = `${target.kind}/${target.scope}/${target.name}`;
-    let flight = inFlight.get(key);
-    if (flight && (flight.form !== form || flight.base !== base || flight.document !== document)) return form.aborted ? null : IN_PROGRESS;
-    if (!flight) {
-      const run = send(client, target, base, document, form).then((outcome) => {
-        // a sent write cannot be recalled: one that lands after its form closed is reported once, here.
-        if (form.aborted && outcome?.status === "saved") landed(target, outcome.redacted);
-        return outcome;
-      }).finally(() => inFlight.delete(key));
-      inFlight.set(key, flight = { form, base, document, run });
-    }
-    const outcome = await flight.run;
-    return form.aborted ? null : outcome;
+    const flight = inFlight.get(key);
+    if (flight?.form === form && flight.base === base && flight.document === document) return flight.run;
+    if (flight) return Promise.resolve(deliver(state, IN_PROGRESS, { target, document }));
+    const signal = state.abort.signal;
+    const run = send(client, target, base, document, signal).catch(() => NOT_SENT).then((outcome) => {
+      inFlight.delete(key);
+      // a sent write cannot be recalled: one that lands after its form closed is reported once, here.
+      if (signal.aborted) { if (outcome?.status === "saved") for (const listener of landed) listener(target, outcome.redacted); }
+      else if (outcome) deliver(state, outcome, { target, document });
+    });
+    inFlight.set(key, { form, base, document, run });
+    return run;
   }
 
   return {
-    /** Create `target` (no revision). null: `form` closed first. */
-    create: (client: ZetaClient, target: WriteTarget, document: string, form: AbortSignal): Promise<WriteOutcome | null> =>
-      once(client, target, null, document, form),
-    /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. null: `form` closed first. */
-    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, form: AbortSignal): Promise<WriteOutcome | null> =>
-      once(client, target, base, document, form),
+    open: () => {
+      const form = `form-${++opened}`;
+      forms.set(form, { abort: new AbortController() });
+      return form;
+    },
+    close: (form: string) => {
+      forms.get(form)?.abort.abort();
+      forms.delete(form);
+    },
+    /** The form's outcomes, each once. One that settled while no one listened comes at once. Returns detach. */
+    attach: (form: string, listener: Deliver) => {
+      const state = forms.get(form);
+      if (!state) return () => {};
+      state.deliver = listener;
+      const held = state.held;
+      state.held = undefined;
+      if (held) listener(...held);
+      return () => { if (state.deliver === listener) state.deliver = undefined; };
+    },
+    pending: (form: string) => [...inFlight.values()].some((flight) => flight.form === form),
+    onLanded: (listener: (target: WriteTarget, redacted: boolean) => void) => {
+      landed.add(listener);
+      return () => { landed.delete(listener); };
+    },
+    /** Create `target` (no revision). Resolves when the save is done; the outcome goes to `attach`. */
+    create: (client: ZetaClient, target: WriteTarget, document: string, form: string) => once(client, target, null, document, form),
+    /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. */
+    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, form: string) => once(client, target, base, document, form),
   };
 }

@@ -6,6 +6,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 // after test-dom: React must see the registered DOM, or input events never reach onChange.
 const { act, cleanup, fireEvent, render } = await import("@testing-library/react");
 const { LibraryModule } = await import("./LibraryModule");
+const { createLibraryWriter } = await import("./libraryWrites");
 
 afterEach(cleanup);
 
@@ -63,7 +64,7 @@ test("a create save that lands after discard does not close or clear a form open
     if (method !== "skill_write") return Promise.resolve({ revision: "r", data: { items: [] } });
     return new Promise((resolve) => { land = async () => resolve({ revision: await sha(params.mutation!.document), data: { name: params.name, scope: "home", redacted: false } }); });
   } } as unknown as ZetaClient;
-  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => client, releaseControl: () => {} };
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), writer: createLibraryWriter(undefined, () => client), releaseControl: () => {} };
   const view = render(createElement(LibraryModule, { client, kind: "skills", reads: { catalog: true, read: true }, write }));
   await view.findByText("no skills found");
   const fill = async (name: string) => {
@@ -84,6 +85,39 @@ test("a create save that lands after discard does not close or clear a form open
   expect(write.drafts.get("skills/new")?.name).toBe("fixture-second");
   expect(await view.findByText("saved fixture-first. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
   expect(calls.filter((method) => method === "skill_write")).toHaveLength(1);
+});
+
+test("a create whose reply was lost in a socket drop shows saved after the remount, not a name collision", async () => {
+  let file: string | null = null;
+  const writes: unknown[] = [];
+  const client = { request: async (method: string, params: { name?: string; mutation?: { document: string } }) => {
+    if (method === "skill_catalog") return { revision: "r", data: { items: file === null ? [] : [row("fixture-new")] } };
+    if (method === "skill_read") {
+      if (file === null) throw Object.assign(new Error("gone"), { code: -32602, data: { reason: "resource_not_found" } });
+      return { revision: await sha(file), data: { name: "fixture-new", redacted: false } };
+    }
+    if (method !== "skill_write") throw Object.assign(new Error("no project"), { code: -32005 });
+    writes.push(params);
+    file = params.mutation!.document;
+    throw new Error("socket closed"); // zeta wrote the file; its reply died with the socket
+  } } as unknown as ZetaClient;
+  // `liveClient` is the older shape of the same seam; `writer` is the router's writer, with a clock that does not wait.
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(),
+    liveClient: () => client, writer: createLibraryWriter(async () => {}, () => client), releaseControl: () => {} };
+  const props = { client, kind: "skills", reads: { catalog: true, read: true }, write } as const;
+  const view = render(createElement(LibraryModule, props));
+  await view.findByText("no skills found");
+  fireEvent.click(view.getByRole("button", { name: "+ new skill" }));
+  for (const [label, value] of [["name", "fixture-new"], ["description", "synthetic draft"]] as const)
+    await act(async () => { fireEvent.change(view.getByLabelText(label), { target: { value } }); });
+  fireEvent.click(view.getByRole("button", { name: "save skill" }));
+  view.unmount(); // the socket drops before the outcome: the library view unmounts
+  const again = render(createElement(LibraryModule, props));
+
+  expect(await again.findByText("saved fixture-new to home · skills/fixture-new.md. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  expect(again.container.querySelector(".library-editor")).toBeNull();
+  expect(again.queryByText(/already exists/)).toBeNull();
+  expect(writes).toHaveLength(1);
 });
 
 // A synthetic zeta with one home skill file. Writes check the revision like zeta's compare-and-swap.
@@ -115,7 +149,7 @@ function editZeta(fixture: Fixture) {
   };
   return zeta;
 }
-const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => null, releaseControl: () => {} });
+const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), writer: createLibraryWriter(), releaseControl: () => {} });
 const textarea = (view: ReturnType<typeof render>, label: RegExp) => view.getByLabelText(label) as HTMLTextAreaElement;
 async function openEditor(zeta: ReturnType<typeof editZeta>, write: ReturnType<typeof writable> = writable()) {
   const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
@@ -242,7 +276,7 @@ test("save on a tab that lost control takes control first, and sends nothing whe
   const zeta = editZeta({ document: fileText });
   const live = zeta.client();
   let slotFree = false;
-  const write = { ...writable(), liveClient: () => live };
+  const write = { ...writable(), writer: createLibraryWriter(undefined, () => live) };
   const view = await openEditor(zeta, write);
   view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true },
     write: { ...write, controller: false, takeControl: async () => slotFree ? null : "another tab has control. try again after it closes." } }));
