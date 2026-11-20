@@ -59,7 +59,7 @@ type RoleState = { role: ZetaRole; reason: string | null };
 type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "control_released" | "retry";
 
 // zeta sends observers no "slot free" signal, so the refusal is a past result with its time: true for as long as it shows.
-export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} another tab had control. try again when it is done.`;
+export const refusedReason = (at: number) => `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()} another tab had control. a chat tab keeps it while it is open; try again after it finishes or closes.`;
 
 // `at`: when a takeover was refused (epoch ms).
 export function transitionRole(state: RoleState, event: RoleEvent, at = Date.now()): RoleState {
@@ -114,14 +114,23 @@ export type Connection = {
   /** `upgradable` only: gives the controller slot back taken by `takeControl` (reopens as observer), and reconnects
    * as observer from then on, so a chat tab can take control. */
   releaseControl(): Promise<void>;
+  /** `upgradable` only: borrows control for one read. Takes control (never without the caller's user click), runs
+   * `read` on the controller client, and gives control back on success, error and drop alike. A refusal sends no read.
+   * A read with no answer in `BORROW_LIMIT_MS` gives control back and rejects with `NoAnswer`. */
+  withControl<T>(read: (client: ZetaClient) => Promise<T>): Promise<{ value: T } | { refused: string }>;
   /** Whether the last established authority was an observer. */
   readonly observerPresentation: boolean;
   stop(): void;
 };
 
+/** A borrowed read holds the controller slot: past this, control goes back even without an answer. */
+const BORROW_LIMIT_MS = 20_000;
+/** A borrowed read that zeta did not answer in time. */
+export class NoAnswer extends Error {}
+
 export const TELEMETRY_FEATURE = "telemetry_read_v1";
 
-export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1"];
+export const FEATURES = ["approval_history", "approval_reconnect", "delivery_id", "delivery_session_guard", "mcp_refresh_tools", "session_history_fidelity", "session_replay_seq", "in_flight_replay", "served_turn_end", "user_message_event", "user_message_delivery_id", "session_cwd", "session_mcp_bindings", "resume_attach", "turn_reconnect", "tool_approval_origin", "serve_observers", TELEMETRY_FEATURE, "library_read_v1", "library_write_v1", "session_history_read_v1", "projects", "projects-memory-v2", "state_read_v1"];
 
 const negotiatedRequests = new WeakMap<ZetaClient, ReadonlySet<string>>();
 
@@ -272,7 +281,7 @@ export function createConnection({
     adopt(opened.client, discovery, authority);
   };
   void attempt();
-  return {
+  const connection: Connection = {
     get state() { return state; },
     get client() { return client; },
     get startCommand() { return start ?? `zeta serve --ws ${port} --ws-origin ${origin}`; },
@@ -282,6 +291,18 @@ export function createConnection({
       if (state.phase === "connected" || state.phase === "connecting" || stopped) return;
       if (timer !== null) { clearTimer(timer); timer = null; }
       void attempt();
+    },
+    async withControl(read) {
+      if (takingControl) return { refused: transitionRole(roleState, "takeover_failed").reason! };
+      const reason = await connection.takeControl();
+      const controller = client;
+      if (reason !== null || !controller || state.phase !== "connected" || state.authority !== "controller")
+        return { refused: reason ?? transitionRole(roleState, "takeover_failed").reason! };
+      holding = false; // a borrow, not a hold: a drop during the read reconnects as observer
+      let limit: unknown = null;
+      try {
+        return { value: await Promise.race([read(controller), new Promise<never>((_, reject) => { limit = setTimer(() => reject(new NoAnswer("zeta did not answer")), BORROW_LIMIT_MS); })]) };
+      } finally { if (limit !== null) clearTimer(limit); await connection.releaseControl(); }
     },
     async takeControl() {
       if (readOnly === "locked" || stopped || takingControl) return null;
@@ -332,4 +353,5 @@ export function createConnection({
       open?.close();
     },
   };
+  return connection;
 }
