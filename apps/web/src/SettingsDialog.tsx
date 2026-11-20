@@ -131,7 +131,7 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
         <div className="settings-content">
           <Row title="auto-approve" description="default for new chats."><AutoApprove open={open} on={settings.autoApproveDefault} canWrite={canWrite} serverForcesAsk={serverForcesAsk} /></Row>
         </div>
-        <footer><span><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(resetTarget(settings))}>reset to defaults</button> auto-approve is not reset.</span><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+        <footer><span><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(resetTarget(settings))}>reset to defaults</button> <span className="settings-reset-note">auto-approve is not reset.</span></span><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
       </section>
     </div>
   </dialog>;

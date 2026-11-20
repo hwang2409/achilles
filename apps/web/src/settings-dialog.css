@@ -33,7 +33,8 @@
 .settings-toggle span { display: block; width: 14px; height: 14px; background: var(--fulcrum-muted); transition: transform 100ms ease; }
 .settings-toggle[aria-checked="true"] { background: var(--fulcrum-accent); }
 .settings-toggle[aria-checked="true"] span { background: var(--fulcrum-bg); transform: translateX(14px); }
-.settings-session > footer { border-top: 1px solid var(--fulcrum-border); border-bottom: 0; }
+.settings-session > footer { flex-wrap: wrap; gap: 4px 16px; padding-block: 10px; border-top: 1px solid var(--fulcrum-border); border-bottom: 0; }
+.settings-reset-note { white-space: nowrap; }
 .settings-link { padding: 0; color: var(--fulcrum-fg); font: inherit; text-decoration: underline; background: transparent; border: 0; }
 .settings-link:disabled { color: var(--fulcrum-muted); }
 @media (max-width: 680px) {
