@@ -1,6 +1,5 @@
 import "../test-dom";
 import { afterEach, expect, jest, test } from "bun:test";
-import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { createElement, useState } from "react";
 import { flushSync } from "react-dom";
 import { AppShell } from "../AppShell";
@@ -11,6 +10,9 @@ import type { Transport, ZetaClient } from "@fulcrum/zeta";
 import { teeRunEnds } from "../zeta/turnEnd";
 import type { Chat, PageLink } from "../surface/AgentNavAdapter";
 import { buildLabel, useBuildActivity } from "./buildActivity";
+// react-dom/client reads `window` once when it loads; a static import here loads it before the DOM above exists, and
+// later test files in the same run (Confirmation.test) then get no onChange from text inputs.
+const { act, cleanup, render, renderHook } = await import("@testing-library/react");
 
 afterEach(() => { cleanup(); sessionStorage.clear(); });
 
@@ -585,6 +587,7 @@ const READ_ROWS: ReadRow[] = [
   { name: "remembered needing you off screen: a busy wait, then read", remember: approval, shown: [], replies: ["busy"], steps: ["wait"], reads: 2, label: "done" },
   { name: "dropped after three busy replies: stale, no read on a timer", replies: dropped, steps: ["wait", "wait", "wait", "wait", "wait"], reads: 3, label: null, stale: true },
   { name: "a new turn during the last busy wait with the queue full: dropped, not checking", shown: ["t", "full"], replies: dropped, steps: ["wait", "wait", "turn", "wait"], reads: 3, label: null, stale: true },
+  { name: "a refresh during the third busy wait: read, and no refresh beside done", replies: dropped, steps: ["wait", "wait", "refresh", "wait"], reads: 4, label: "done" },
   { name: "dropped, then refresh reads it", replies: dropped, steps: ["wait", "wait", "wait", "refresh"], reads: 4, label: "done" },
   { name: "dropped, then a focus reads it", replies: dropped, steps: ["wait", "wait", "wait", "focus"], reads: 4, label: "done" },
   { name: "dropped, then a scroll reads it", replies: dropped, steps: ["wait", "wait", "wait", "hide", "show"], reads: 4, label: "done" },

@@ -46,17 +46,30 @@ export const PageChatCatalog = createContext<{
 } | null>(null);
 
 // The views tell the build owner which build rows are on screen; the owner decides what to read. Returns a callback ref.
+// On screen: inside the nearest scroll box, below its sticky heads (the box's scroll-padding-top), and not inert (a
+// page behind the open 390 drawer). Only those rows are read first. A row needs a real slice on screen: a quarter of it,
+// or a quarter of the box for a row taller than four boxes, so a 0.5 px edge under the heads does not count.
 export function useOnScreen(id: string | undefined, report: ((id: string, shown: boolean) => void) | undefined) {
   const [node, setNode] = useState<Element | null>(null);
   useEffect(() => {
     if (!node || id === undefined || !report) return;
+    let root = node.parentElement;
+    while (root && !/auto|scroll/.test(getComputedStyle(root).overflowY)) root = root.parentElement;
+    const heads = parseFloat(getComputedStyle(root ?? document.documentElement).scrollPaddingTop) || 0;
+    // shortcut: box and row heights are read once per mount; re-measure on resize if rows start to change height.
+    const box = (root?.clientHeight ?? innerHeight) - heads;
+    const slice = Math.min(0.25, Math.max(0, box) / 4 / (node.getBoundingClientRect().height || 1));
+    let intersecting = false;
     let shown = false;
-    const observer = new IntersectionObserver((entries) => {
-      const next = entries.at(-1)!.isIntersecting;
+    const update = () => {
+      const next = intersecting && !node.closest("[inert]");
       if (next !== shown) report(id, shown = next);
-    });
+    };
+    const observer = new IntersectionObserver((entries) => { const entry = entries.at(-1)!; intersecting = entry.isIntersecting && entry.intersectionRatio >= slice; update(); }, { root, rootMargin: `-${heads}px 0px 0px 0px`, threshold: [0, slice] });
+    const inert = new MutationObserver(update);
     observer.observe(node);
-    return () => { observer.disconnect(); if (shown) report(id, false); };
+    inert.observe(document.body, { attributes: true, attributeFilter: ["inert"], subtree: true });
+    return () => { observer.disconnect(); inert.disconnect(); if (shown) report(id, false); };
   }, [node, id, report]);
   return setNode;
 }

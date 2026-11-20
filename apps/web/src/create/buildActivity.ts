@@ -295,6 +295,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       if (id === current || liveSeen.get(id) !== sent.stamp) readKeys.delete(id);
       else {
         busyTries.delete(id);
+        dropped.delete(id); // a refresh during the last busy wait can leave it dropped
         try { prove(id, fromHistory(null, page, "next_cursor"), sent.at); } catch { /* an unknown reply is no claim */ }
       }
     } else if (code === -32004) {
