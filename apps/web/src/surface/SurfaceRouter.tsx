@@ -5,6 +5,7 @@ import { AppShell, type AppShellProps } from "../AppShell";
 import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
+import { ProjectsModule } from "../projects/ProjectsModule";
 import { createConnection, isObserverPresentation, supportsFeature, supportsRequest, type Connection } from "../zeta";
 import { libraryMethods, type LibraryKind } from "../library/catalog";
 import { createLibraryWriter, writeAccess, type LibraryWriter } from "../library/libraryWrites";
@@ -21,8 +22,8 @@ export function SurfaceRouter() {
     const pathname = location.pathname;
     const route = matchSurfaceRoute(pathname);
     const readOnly = route !== undefined && route !== chatsRoute && route !== createRoute;
-    // library tabs browse as observers and take control only when the user starts a write.
-    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" ? "upgradable" : "locked";
+    // library and project tabs browse as observers and take control only when the user asks for it.
+    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" ? "upgradable" : "locked";
     return { route, pathname, connection: createConnection({ origin: location.origin, readOnly: mode }), readOnly };
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -53,8 +54,9 @@ export function SurfaceRouter() {
   if (!route) return null;
   const connecting = phase === "connected" || (phase === "connecting" && connectionState.attempt === 0);
   let content: ReactNode;
-  if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
+  if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles" || route.id === "projects") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
+      : route.id === "projects" ? <ProjectsModule client={client} takeControl={() => connection.takeControl()} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
         write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
