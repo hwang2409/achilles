@@ -36,7 +36,7 @@
 .settings-toggle[aria-checked="true"] { background: var(--fulcrum-accent); }
 .settings-toggle[aria-checked="true"] span { background: var(--fulcrum-bg); transform: translateX(14px); }
 .settings-session > footer { flex-wrap: wrap; gap: 4px 16px; padding-block: 10px; border-top: 1px solid var(--fulcrum-border); border-bottom: 0; }
-.settings-link { padding: 0; color: var(--fulcrum-fg); font: inherit; text-decoration: underline; background: transparent; border: 0; }
+.settings-link { padding: 0; color: var(--fulcrum-fg); font: inherit; text-align: start; text-decoration: underline; background: transparent; border: 0; }
 .settings-link:is(:disabled, [aria-disabled="true"]) { color: var(--fulcrum-muted); text-decoration: none; cursor: default; }
 /* a 44px-tall hit area around the link, whatever its own height */
 .settings-link { position: relative; }
