@@ -1,6 +1,12 @@
 import "../test-dom";
 import { afterEach, expect, jest, test } from "bun:test";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { createElement, useState } from "react";
+import { flushSync } from "react-dom";
+import { AppShell } from "../AppShell";
+import { useAgentNavAdapter } from "../surface/AgentNavAdapter";
+import { ShellDockSlot } from "../surface/ModuleState";
+import { chatsRoute } from "../surface/routes";
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { Chat, PageLink } from "../surface/AgentNavAdapter";
 import { useBuildActivity } from "./buildActivity";
@@ -9,6 +15,7 @@ afterEach(() => { cleanup(); sessionStorage.clear(); });
 
 const chat: Chat = { session_id: "reading-build", purpose: "page_build", page_id: "home", page_route: "/", page_title: "home", title: "a synthetic reading list", last_state: "running", created_at: "2030-01-01", updated_at: "2030-01-01" };
 const habit: Chat = { ...chat, session_id: "habit-build", title: "a synthetic habit log" };
+const third: Chat = { ...chat, session_id: "third-build", title: "a synthetic expense log" };
 const ordinary: Chat = { ...chat, session_id: "ordinary", purpose: "chat", title: "an ordinary chat" };
 // Observed from a scripted create_page call on the pinned real Zeta server.
 const resultContent = '{"detail_filter_matches": [], "digest": "feada5cd77e082c59d63adb88e51218f0c87d61ea66f1b5b28fc3d31d5e01982", "existing": false, "page_id": "06b6531f0662009cf9c8e086", "route": "/reading-list"}';
@@ -30,11 +37,12 @@ const approval = { ...idle(), state: "tool", pending_approvals: [{ tool_call: { 
 const offline = Error("socket closed");
 const inactive = Object.assign(Error("session is not active"), { code: -32003 });
 const done = [call(), result, end];
+const madeExpenses = [call("expenses-call"), resultOf("expenses-call", '{"route":"/expenses"}'), end];
 
 /** One page load: zeta's status reply, and the history reply when the status names a build. */
 type Load = { status: object | Error; history?: unknown[] | Error; superseded?: unknown[] };
 type Shown = { state: string | null; reason?: string | null; results?: string[]; tools?: string[] };
-type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: boolean; cold?: boolean };
+type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: number; cold?: boolean; at?: string };
 
 // Each load is a fresh page load in the same tab (same sessionStorage); the last one is asserted.
 const ROWS: Row[] = [
@@ -49,7 +57,7 @@ const ROWS: Row[] = [
   { name: "duplicate history rows", loads: [{ status: idle(), history: [call(), call(), result, result, end, end] }], shown: { state: "done", results: ["/reading-list"] } },
   { name: "b1: remembered done, then another session is current", loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: "/reading-list" },
   { name: "remembered done, then zeta offline", loads: [{ status: idle(), history: done }, { status: offline }], shown: { state: "done", reason: null, results: ["/reading-list"] }, building: 0 },
-  { name: "acknowledged receipt stays gone after reload", dismiss: true, loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
+  { name: "acknowledged receipt stays gone after reload", dismiss: 0, loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
   { name: "m1: remembered building, then zeta offline", loads: [{ status: running, history: [call()] }, { status: offline }], shown: { state: "building", reason: "zeta offline", tools: [] }, building: 0 },
   { name: "remembered building, then -32003 between status and history", loads: [{ status: running, history: [call()] }, { status: running, history: inactive }], shown: { state: "building", reason: "not the current session" }, building: 0 },
   { name: "b1: nothing remembered and not current", loads: [{ status: idle("newer") }], shown: { state: null, results: [] }, building: 0 },
@@ -59,6 +67,12 @@ const ROWS: Row[] = [
   { name: "receipt names the first result the catalog confirms (Q3)", pages: [expenses], loads: [{ status: idle(), history: [call(), result, call("existing"), resultOf("existing", '{"route":"/expenses","existing":true}'), end] }], shown: { state: "done", results: ["/expenses"] }, receipt: "/expenses" },
   { name: "an outage during a build, then recovery, is live again", loads: [{ status: running, history: [call()] }, { status: offline }], recover: { status: running, history: [call()] }, shown: { state: "building", reason: null }, building: 1 },
   { name: "a reload shows the kept receipt on the first render, before any catalog or zeta read", cold: true, loads: [{ status: idle(), history: done }, { status: offline }], shown: { state: "absent" }, receipt: "/reading-list" },
+  { name: "acknowledging the newest receipt acknowledges older completions (Q1)", chats: [habit, chat], pages: [reading, expenses], dismiss: 1, loads: [{ status: idle(), history: done }, { status: idle(habit.session_id), history: madeExpenses }, { status: idle("newer") }], shown: { state: "done", results: ["/reading-list"] }, receipt: null },
+  { name: "a build that finishes after an acknowledgement shows a new receipt", chats: [third, chat], pages: [reading, expenses], dismiss: 0, loads: [{ status: idle(), history: done }, { status: idle(third.session_id), history: madeExpenses }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/expenses" },
+  { name: "a remembered confirmed route survives a later tail without the result", loads: [{ status: idle(), history: done }, { status: idle(), history: [call("later", "achilles__update_page"), end] }], shown: { state: "done", reason: null, results: ["/reading-list"] } },
+  { name: "a denied create_page approval is unfinished, not failed", loads: [{ status: idle(), history: [call("deny"), resultOf("deny", "tool execution denied", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
+  { name: "the tab saw the build idle with no turn end: no last known building later", loads: [{ status: running, history: [call()] }, { status: idle(), history: [call()] }, { status: idle("newer") }], shown: { state: null }, building: 0 },
+  { name: "a receipt for the page this tab is on is acknowledged", at: "/reading-list", loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
   { name: "a stale response arriving after a newer one", loads: [{ status: idle(), history: done, superseded: [call()] }], shown: { state: "done", tools: [] }, building: 0 },
 ];
 
@@ -71,7 +85,7 @@ function fakeZeta(first: Load, hold = false) {
       calls.push(method);
       if (method === "status") { if (load.status instanceof Error) throw load.status; return load.status; }
       expect(method).toBe("session_history");
-      expect(params).toEqual({ session_id: chat.session_id, before: null });
+      expect(params).toEqual({ session_id: (load.status as { session: { session_id: string } }).session.session_id, before: null });
       if (hold) return held.promise;
       if (load.history instanceof Error) throw load.history;
       return { messages: load.history };
@@ -90,6 +104,7 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
   const id = row.id ?? chat.session_id;
   let hook: ReturnType<typeof renderHook<ReturnType<typeof useBuildActivity>, { client: ZetaClient }>> | undefined;
   const late: ReturnType<typeof fakeZeta>[] = [];
+  if (row.at) history.replaceState(null, "", row.at);
   try {
     for (const load of row.loads) {
       hook?.unmount();
@@ -102,14 +117,14 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
       if (cold) expect(hook.result.current.latestReceipt?.page.route).toBe(row.receipt!);
       if (load.superseded) {
         late.push(first);
-        while (first.calls.length < 2) await flush();
+        for (let i = 0; i < 50 && first.calls.length < 2; i++) await flush();
         hook.rerender({ client: zeta.client });
       }
       const expected = cold ? 0 : load.history === undefined || load.status instanceof Error ? 1 : 2;
       for (let i = 0; i < 50 && zeta.calls.length < expected; i++) await flush();
       await flush();
       if (load.superseded) { first.release(load.superseded); await flush(); }
-      if (row.dismiss && load === row.loads[0]) act(() => hook!.result.current.dismissReceipt());
+      if (row.dismiss !== undefined && load === row.loads[row.dismiss]) act(() => hook!.result.current.dismissReceipt());
       if (row.recover && load === row.loads.at(-1)) {
         // the retry timer was set by the outage read; the fake clock fires it without waiting
         expect(hook.result.current.rows[0]).toMatchObject({ state: "building", reason: "zeta offline" });
@@ -130,5 +145,29 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
     jest.useRealTimers();
     fakeClock = false;
     late.forEach((zeta) => zeta.release([]));
+    history.replaceState(null, "", "/");
+  }
+});
+
+test("open page goes to the shown receipt's page, not the next unseen one", async () => {
+  // flushSync: a browser re-renders before it follows the link, as React flushes a discrete event's update first
+  const receipts = [{ chat: habit, page: expenses, done: 2 }, { chat, page: reading, done: 1 }];
+  function Shell() {
+    const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
+    const [shown, setShown] = useState(0);
+    const activity = { rows: [], latestReceipt: receipts[shown] ?? null, building: 0, needsYou: 0, announcement: "", refresh: () => {}, dismissReceipt: () => flushSync(() => setShown((value) => value + 1)) };
+    return createElement(AppShell, { activity, current: chatsRoute, nav, newChat: { available: false, run: () => {} }, connectionStatus: { label: "zeta connected", connected: true } }, createElement(ShellDockSlot));
+  }
+  // the link navigates the test window: answer its page request locally
+  const settings = (window as unknown as { happyDOM: { settings: { fetch: { interceptor: unknown } } } }).happyDOM.settings.fetch;
+  settings.interceptor = { beforeAsyncRequest: async () => new Response("") };
+  try {
+    const view = render(createElement(Shell));
+    const open = view.getByText("open page");
+    act(() => { open.click(); });
+    expect(location.pathname).toBe("/expenses");
+  } finally {
+    settings.interceptor = null;
+    history.replaceState(null, "", "/");
   }
 });

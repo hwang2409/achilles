@@ -162,6 +162,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     ] : [],
   ];
   const receipt = activity.latestReceipt;
+  const receiptHref = receipt ? surfaceHref(receipt.page.route) : "";
   const showNavActivity = narrow ? drawer : !collapsed;
   // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
   const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
@@ -169,7 +170,13 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     {status}
     {receipt && <aside className="build-receipt" aria-label="build receipt">
       <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
-      <a className="build-open" href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>
+      <a className="build-open" href={receiptHref} onClick={(event) => {
+        if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        // Go to this receipt's page before the acknowledgement re-renders the link with the next receipt.
+        event.preventDefault();
+        location.assign(receiptHref);
+        activity.dismissReceipt();
+      }}>open page</a>
       <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
     </aside>}
   </div> : null;
