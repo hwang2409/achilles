@@ -36,7 +36,8 @@ export function teeRunEnds(transport: Transport, client: () => object | null): T
   };
 }
 
-function onRunEnd(client: object, listener: RunEndListener): () => void {
+/** Calls `listener` with the session id of every `agent_end` frame, in arrival order, until the returned function runs. */
+export function onRunEnd(client: object, listener: RunEndListener): () => void {
   const listeners = listenersOf(client);
   listeners.add(listener);
   return () => { listeners.delete(listener); };

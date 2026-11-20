@@ -3,13 +3,14 @@ import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPale
 import { SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
 import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFocus, useFocusAfterCommit, useModalFocus } from "./keyboard";
-import { PageChatCatalog, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
+import { PageChatCatalog, titleOf, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
-import { ModuleFrame, ModuleState } from "./surface/ModuleState";
-import { SurfaceNav } from "./surface/SurfaceNav";
+import { ModuleFrame, ModuleState, ShellDock } from "./surface/ModuleState";
+import type { BuildActivity } from "./create/buildActivity";
+import { BuildStatus, SurfaceNav } from "./surface/SurfaceNav";
 import type { CreateModeOwner } from "./create/createMode";
-import type { SurfaceRoute } from "./surface/routes";
+import { surfaceHref, type SurfaceRoute } from "./surface/routes";
 
 type WorkspaceActions = {
   canWrite: boolean;
@@ -17,7 +18,8 @@ type WorkspaceActions = {
   createMode?: CreateModeOwner;
 };
 
-type Props = {
+export type AppShellProps = {
+  activity: BuildActivity;
   current: SurfaceRoute;
   nav: ReturnType<typeof useAgentNavAdapter>;
   workspace?: WorkspaceActions;
@@ -32,12 +34,14 @@ type Props = {
 // Short screens use a drawer too. Keep this breakpoint in sync with shell.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ current, nav, workspace, newChat, connectionStatus, hasComposer, banner, header, children }: Props) {
+export function AppShell({ activity, current, nav, workspace, newChat, connectionStatus, hasComposer, banner, header, children }: AppShellProps) {
   const { canWrite = false, serverForcesAsk = false, createMode } = workspace ?? {};
   const settingsPlace = current.id === "settings";
   const displaySettings = Boolean(workspace) || settingsPlace;
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const liveRegion = useRef<HTMLSpanElement>(null);
+  const [spoken, setSpoken] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -159,22 +163,58 @@ export function AppShell({ current, nav, workspace, newChat, connectionStatus, h
       { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
     ] : [],
   ];
+  const receipt = activity.latestReceipt;
+  const receiptHref = receipt ? surfaceHref(receipt.route) : "";
+  // Go to this receipt's page before the acknowledgement re-renders the link with the next receipt.
+  const openReceipt = () => { location.assign(receiptHref); activity.dismissReceipt(); };
+  const showNavActivity = narrow ? drawer : !collapsed;
+  const pending = activity.announcement;
+  useEffect(() => {
+    if (!pending) return;
+    // The text is set, and the completion marked announced, only while a screen reader can reach the region.
+    const speak = () => {
+      if ((narrow && drawer) || !liveRegion.current || liveRegion.current.closest("[inert], [aria-hidden='true']") || document.querySelector("dialog[open]:modal")) return;
+      setSpoken(pending);
+      activity.markAnnounced();
+    };
+    speak();
+    document.addEventListener("close", speak, true);
+    return () => document.removeEventListener("close", speak, true);
+  }, [pending, narrow, drawer]);
+  // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
+  const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
+  const dock = (status || receipt) ? <div className="build-dock">
+    {status}
+    {receipt && <aside className="build-receipt" aria-label="build receipt">
+      <span><strong title={titleOf(receipt.chat)}>{titleOf(receipt.chat)}</strong> finished{" ·\u00a0"}{receipt.route} is ready</span>
+      <a className="build-open" href={receiptHref} onClick={(event) => {
+        // a new-tab or new-window click is the browser's: no acknowledgement
+        if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        openReceipt();
+      }} onKeyDown={(event) => { if (event.key === " ") { event.preventDefault(); openReceipt(); } }}>open page</a>
+      <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
+    </aside>}
+  </div> : null;
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode}
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
       action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "starting…" : "new chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
-      search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer)} />
+      search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className="shell-header">
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
-      <PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
+      {workspace && dock}
+      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows }}>{settingsPlace ? <ModuleFrame title={current.label}>
         <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
-      </ModuleFrame> : children}</PageChatCatalog.Provider>
+      </ModuleFrame> : children}</PageChatCatalog.Provider></ShellDock.Provider>
     </main>
+    {/* outside main and the drawer, so it is never inert or aria-hidden */}
+    <span ref={liveRegion} className="visually-hidden" role="status">{spoken}</span>
     {displaySettings && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
     {paletteOpen && <CommandPalette commands={commands} pages={pageEntries} searchChats={nav.searchChats(dismissDrawer)} onClose={closePalette} />}

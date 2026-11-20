@@ -1,4 +1,6 @@
 import type { ReactNode, Ref } from "react";
+import type { BuildActivity } from "../create/buildActivity";
+import { chatHref } from "./AgentNavAdapter";
 import type { CreateModeOwner } from "../create/createMode";
 import { isMac, modKey } from "../keyboard";
 import { createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./routes";
@@ -17,7 +19,19 @@ function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: Su
   </a>;
 }
 
-export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus }: {
+export function BuildStatus({ activity, current, className = "" }: { activity: BuildActivity; current: SurfaceRoute; className?: string }) {
+  const { rows, building, needsYou } = activity;
+  if (!building && !needsYou) return null;
+  const attention = rows.filter((row) => row.state === "needs you" && !row.reason);
+  const create = surfaceHref(createRoute.path);
+  return <span className={`build-status ${className}`} aria-label="page build progress">
+    {building > 0 && (current === createRoute ? <span className="build-building" aria-current="page">{building} building</span> : <a className="build-building" href={create}>{building} building</a>)}
+    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) : create}>{needsYou} needs you</a>}
+  </span>;
+}
+
+export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus, activity }: {
+  activity?: BuildActivity;
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
   narrow: boolean;
@@ -44,6 +58,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
         {action}
         <div className="create-split" data-mode={createMode?.enabled ? "on" : undefined}>
           <PlaceLink route={createRoute} current={current} />
+          {activity && <BuildStatus activity={activity} current={current} className="build-status-nav" />}
           {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
             aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
             title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>

@@ -7,6 +7,7 @@ import { Overview, OverviewSkeleton } from "./Overview";
 import { browserEnv, RANGES, useTelemetryReads, type Loaded, type Range, type Tab } from "./reads";
 import { DetailLoading, DetailNotice, SESSION_LIST, SessionBackLink, SessionDetail } from "./SessionDetail";
 import { Sessions } from "./Sessions";
+import { ShellDockSlot } from "../surface/ModuleState";
 import { supportsFeature, TELEMETRY_FEATURE } from "../zeta/connection";
 import { telemetryProblem, type TelemetryProblem } from "./telemetry-client";
 import type { TelemetryStatus } from "./telemetry-types";
@@ -52,7 +53,7 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
   if (!supportsFeature(client, TELEMETRY_FEATURE)) {
     const stateFeature = "state_read_v1";
     return (
-      <div className="telemetry-placeholder">
+      <><ShellDockSlot /><div className="telemetry-placeholder">
         <section className="telemetry-notice">
           <p className="telemetry-eyebrow" role="status">telemetry · needs a newer zeta</p>
           <h1>this zeta can't show telemetry yet</h1>
@@ -73,7 +74,7 @@ export function TelemetryModule({ client, pathname, openTelemetrySettings }: {
             <a href="/">back to chats</a>
           </div>
         </section>
-      </div>
+      </div></>
     );
   }
   const detail = sessionOf(path);
@@ -164,6 +165,7 @@ function Frame({ tools, tabs, children, detail }: { tools?: ReactNode; tabs?: Re
   return (
     <div className={detail ? "telemetry-module tm-detail-frame" : "telemetry-module"} data-fulcrum-theme="gruvbox-dark">
       {tabs && <div className="tm-tabs-row">{tabs}{tools}</div>}
+      <ShellDockSlot />
       <main className="tm-main">{children}</main>
     </div>
   );

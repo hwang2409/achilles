@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
-import { AppShell } from "../AppShell";
+import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
+import { AppShell, type AppShellProps } from "../AppShell";
 import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
@@ -27,8 +28,9 @@ export function SurfaceRouter() {
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
+  const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
-    return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner}
+    return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
       current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} />;
   }
   if (!route) return null;
@@ -43,7 +45,7 @@ export function SurfaceRouter() {
   } else if (route.id !== "pages" && route.id !== "settings") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
-  return <CatalogShell route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
+  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
@@ -53,12 +55,29 @@ function libraryReads(client: ZetaClient, kind: LibraryKind) {
   return { catalog: granted && supportsRequest(client, methods.catalog), read: granted && supportsRequest(client, methods.read) };
 }
 
-function CatalogShell({ route, connectionStatus, banner, children }: { route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
-  const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
-  return <AppShell current={route} nav={nav} banner={banner} connectionStatus={connectionStatus}
-    newChat={{ available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) }}>
-    {route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} /> : children}
-  </AppShell>;
+type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children: (activity: BuildActivity) => ReactNode };
+export type RenderShell = (props: BuildShellProps) => ReactNode;
+
+function BuildShell({ client, children, ...props }: BuildShellProps & { client: ZetaClient | null }) {
+  const { recentChats, pageCatalog, reloadPages } = props.nav;
+  const activity = useBuildActivity({ client, chats: recentChats, pages: pageCatalog.error ? null : pageCatalog.items, reloadPages });
+  return <AppShell {...props} activity={activity}>{children(activity)}</AppShell>;
+}
+
+function CatalogShell({ renderShell, route, connectionStatus, banner, children }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
+  // Q4: a build started in another tab appears when this tab comes back, with one chat-list read and no polling.
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible") setRefreshKey((value) => value + 1); };
+    addEventListener("focus", back);
+    document.addEventListener("visibilitychange", back);
+    return () => { removeEventListener("focus", back); document.removeEventListener("visibilitychange", back); };
+  }, []);
+  const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey, pageRefreshKey: 0 });
+  return renderShell({ current: route, nav, banner, connectionStatus,
+    newChat: { available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) },
+    children: () => route.id === "pages" ? <PagesLanding catalog={nav.pageCatalog} reload={nav.reloadPages} more={nav.morePages} /> : children,
+  });
 }
 
 function ObserverBanner({ connection, readOnly }: { connection: Connection; readOnly: boolean }) {

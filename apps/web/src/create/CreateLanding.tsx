@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { chatHref, timeLabel, titleOf, type useAgentNavAdapter } from "../surface/AgentNavAdapter";
 import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
+import { buildLabel, type BuildActivity } from "./buildActivity";
+import { ShellDockSlot } from "../surface/ModuleState";
 import "./create.css";
 
 const starters = [
@@ -11,21 +13,21 @@ const starters = [
   "a weekly habit tracker",
 ];
 
-export function CreateLanding({ build, nav }: { build: ReturnType<typeof useActiveChat>["build"]; nav: ReturnType<typeof useAgentNavAdapter> }) {
+export function CreateLanding({ build, nav, activity }: { activity: BuildActivity; build: ReturnType<typeof useActiveChat>["build"]; nav: ReturnType<typeof useAgentNavAdapter> }) {
   const prompt = useRef<HTMLTextAreaElement>(null);
   const submit = useRef<HTMLButtonElement>(null);
   const { catalog, pageCatalog } = nav;
-  const open = catalog.chats.filter((chat) => chat.last_state === "running" || chat.last_state === "approval" || chat.last_state === "failed").slice(0, 4);
   const made = pageCatalog.items?.filter((page) => page.created_by_route != null).slice(0, 3);
   useEffect(() => {
     if (build.error && (document.activeElement === submit.current || document.activeElement === document.body)) prompt.current?.focus();
   }, [build.error]);
   return <>
     <header className="create-heading"><strong>create</strong><a href={surfaceHref("/pages")}>all pages</a></header>
+    <ShellDockSlot />
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>
-        <p>describe a page in plain words. achilles opens a new chat in create mode and keeps the result in pages.</p>
+        <p>describe a page in plain words. achilles opens a new chat in create mode and keeps the result in pages. navigation does not hide progress.</p>
         <form onSubmit={(event) => { event.preventDefault(); void build.start(); }} aria-busy={build.pending}>
           <textarea ref={prompt} aria-label="describe your page" aria-describedby="create-build-status" value={build.draft}
             readOnly={build.pending || build.locked} placeholder="a page to track…" onChange={(event) => build.setDraft(event.target.value)} />
@@ -41,15 +43,18 @@ export function CreateLanding({ build, nav }: { build: ReturnType<typeof useActi
           {starters.map((starter) => <button type="button" key={starter} disabled={build.pending || build.locked} onClick={() => { build.setDraft(starter); prompt.current?.focus(); }}>{starter}</button>)}
         </div>
         <section aria-labelledby="create-open">
-          <header><h2 id="create-open">still open</h2><span>recent chats that may need attention</span></header>
-          {catalog.error ? <p>could not load chats. <button type="button" onClick={catalog.reload}>retry</button></p>
-            : catalog.loading ? <p role="status">reading recent chats…</p>
-            : !open.length ? <p>no recent chats running or waiting for attention.</p>
-            : <ul>{open.map((chat) => {
-              const status = chat.last_state === "approval" ? "needs you" : chat.last_state;
-              return <li key={chat.session_id} data-state={chat.last_state}>
-                <a href={chatHref(chat)}><span><strong>{titleOf(chat)}</strong> <small>{chat.page_title}</small></span>
-                  <span><small>{status} · {timeLabel(chat.updated_at)}</small><b>{chat.last_state === "approval" ? "answer" : "open chat"}</b></span></a>
+          <header><h2 id="create-open">recent builds</h2>{activity.rows.some((row) => row.reason) && <button type="button" onClick={activity.refresh}>refresh</button>}</header>
+          {!activity.rows.length ? catalog.error ? <p>could not load builds. <button type="button" onClick={catalog.reload}>retry</button></p>
+            : catalog.loading ? <p role="status">reading recent builds…</p> : <p>no recent page builds.</p>
+            : <ul>{activity.rows.slice(0, 4).map((row) => {
+              const { chat, state, reason, tools, results } = row;
+              const label = buildLabel(row);
+              return <li key={chat.session_id} data-state={state ?? undefined} data-last-known={reason ? "" : undefined}>
+                <a href={chatHref(chat)}><span><strong>{titleOf(chat)}</strong>
+                  <small className="build-meta">{label && <em title={label}>{label.replaceAll(" · ", " ·\u00a0")}</em>}<time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></small></span>
+                  <b>{state === "needs you" && !reason ? "answer" : "open chat"}</b></a>
+                {tools.length > 0 && <small className="build-tools">{tools.map((tool) => tool.replace(/^achilles__/, "")).join(" ·\u00a0")}</small>}
+                {results.length > 0 && <ul className="build-results" aria-label="result pages">{results.map((route) => <li key={route}><a href={surfaceHref(route)}>{route}</a></li>)}</ul>}
               </li>;
             })}</ul>}
         </section>
