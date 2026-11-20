@@ -56,8 +56,10 @@
 .build-status :is(a, span)::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: currentColor; }
 .build-status .build-needs-you, .create-landing li[data-state="needs you"]:not([data-last-known]) > a { color: var(--fulcrum-warn); }
 .create-split .build-status-nav { padding-inline: 8px; border-left: 1px solid var(--fulcrum-border); }
-.create-split:has(button) { flex-wrap: wrap; }
-.create-split:has(button) .build-status-nav { order: 3; flex-basis: 100%; min-height: 28px; border-left: 0; border-top: 1px solid var(--fulcrum-border); }
+/* with the page toggle, the summary takes its own row inside the control, so it never overlaps the search field */
+.create-split:has(button):has(.build-status-nav) { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.create-split:has(button) > .place-link { min-height: 36px; }
+.create-split:has(button) .build-status-nav { order: 3; grid-column: 1 / -1; min-width: 0; min-height: 28px; border-left: 0; border-top: 1px solid var(--fulcrum-border); }
 /* status strip and receipt sit in flow under the route's bar */
 .build-dock { flex: none; display: grid; border-bottom: 1px solid var(--fulcrum-border); }
 .build-dock > * + * { border-top: 1px solid var(--fulcrum-border); }
@@ -78,4 +80,5 @@
 @media (max-width: 760px), (max-height: 500px) {
   .build-receipt .build-open, .build-receipt button, .build-status a { min-height: 40px; }
   .build-status a { display: inline-flex; align-items: center; }
+  .create-split:has(button) > .place-link { min-height: 44px; }
 }
