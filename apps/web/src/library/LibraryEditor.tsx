@@ -106,7 +106,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
   const [pending, setPending] = useOutcome(writer, form, (outcome, sent) => outcome.status === "saved"
-    ? onCreated(sent.target.name, outcome.redacted, whereFor(sent.target)) : setFailure(outcome));
+    ? onCreated(sent.target.name, outcome.redacted, sent.where!) : setFailure(outcome));
   const alert = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const text = edited ?? header(kind, name, description);
@@ -144,8 +144,9 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const shadow = existing && existing.source !== scope && (sourceTiers.indexOf(existing.source) < sourceTiers.indexOf(scope)
     ? `a ${existing.source} ${noun} named ${name} wins over this one.` : `this will win over the ${existing.source} ${name}.`);
   const file = `.zeta/${folder(kind)}/${name || "<name>"}.md`;
-  const whereFor = (target: WriteTarget) => target.scope === "project" && project.state === "available"
-    ? `${project.label} · .zeta/${folder(kind)}/${target.name}.md` : `home · ${folder(kind)}/${target.name}.md`;
+  // fixed when the save starts and carried with its outcome: a remount may not know the project label yet.
+  const where = scope === "project"
+    ? `${project.state === "available" ? project.label : "project"} · .zeta/${folder(kind)}/${name}.md` : `home · ${folder(kind)}/${name}.md`;
 
   async function save() {
     if (pending || blocked) return;
@@ -153,7 +154,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     if (problems.length) return alert.current?.focus();
     setPending(true);
     setFailure(null);
-    if (await controlForSave(control, setFailure)) void writer.create(client, { kind, name, scope }, text, form);
+    if (await controlForSave(control, setFailure)) void writer.create(client, { kind, name, scope }, text, form, where);
     else setPending(false);
   }
   const onEnter = (event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") { event.preventDefault(); void save(); } };

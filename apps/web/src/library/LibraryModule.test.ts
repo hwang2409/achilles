@@ -87,11 +87,19 @@ test("a create save that lands after discard does not close or clear a form open
   expect(calls.filter((method) => method === "skill_write")).toHaveLength(1);
 });
 
-test("a create whose reply was lost in a socket drop shows saved after the remount, not a name collision", async () => {
+// project: the remounted form's project check has not answered when the outcome arrives, so the notice must use the
+// target fixed when the save started.
+test.each([
+  ["home", "home · skills/fixture-new.md"],
+  ["project", "fixture-project · .zeta/skills/fixture-new.md"],
+] as const)("a %s create whose reply was lost in a socket drop shows saved after the remount, not a name collision", async (scope, where) => {
   let file: string | null = null;
+  let probes = 0;
   const writes: unknown[] = [];
-  const client = { request: async (method: string, params: { name?: string; mutation?: { document: string } }) => {
-    if (method === "skill_catalog") return { revision: "r", data: { items: file === null ? [] : [row("fixture-new")] } };
+  const client = { request: async (method: string, params: { name?: string; scope?: string; mutation?: { document: string } }) => {
+    if (method === "skill_catalog" && params.scope === "project" && ++probes > 1) return new Promise(() => {}); // the remounted check hangs
+    if (method === "skill_catalog") return { revision: "r", data: { items: file === null ? [] : [{ ...row("fixture-new"), source: scope, scope }] } };
+    if (method === "status") return { session: { cwd: "/synthetic/fixture-project" } };
     if (method === "skill_read") {
       if (file === null) throw Object.assign(new Error("gone"), { code: -32602, data: { reason: "resource_not_found" } });
       return { revision: await sha(file), data: { name: "fixture-new", redacted: false } };
@@ -108,16 +116,17 @@ test("a create whose reply was lost in a socket drop shows saved after the remou
   const view = render(createElement(LibraryModule, props));
   await view.findByText("no skills found");
   fireEvent.click(view.getByRole("button", { name: "+ new skill" }));
+  if (scope === "project") fireEvent.click(await view.findByRole("radio", { name: "project · fixture-project" }));
   for (const [label, value] of [["name", "fixture-new"], ["description", "synthetic draft"]] as const)
     await act(async () => { fireEvent.change(view.getByLabelText(label), { target: { value } }); });
   fireEvent.click(view.getByRole("button", { name: "save skill" }));
   view.unmount(); // the socket drops before the outcome: the library view unmounts
   const again = render(createElement(LibraryModule, props));
 
-  expect(await again.findByText("saved fixture-new to home · skills/fixture-new.md. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  expect(await again.findByText(`saved fixture-new to ${where}. running sessions pick up the change at their next catalog refresh.`)).toBeTruthy();
   expect(again.container.querySelector(".library-editor")).toBeNull();
   expect(again.queryByText(/already exists/)).toBeNull();
-  expect(writes).toHaveLength(1);
+  expect(writes).toEqual([expect.objectContaining({ scope })]);
 });
 
 // A synthetic zeta with one home skill file. Writes check the revision like zeta's compare-and-swap.

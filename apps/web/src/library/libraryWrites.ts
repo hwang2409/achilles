@@ -98,8 +98,9 @@ const IN_PROGRESS: WriteOutcome = { status: "busy", message: "another save of th
 // The page threw before sending (for example `crypto.subtle` is missing outside a secure context).
 const NOT_SENT: WriteOutcome = { status: "unknown", message: "this page could not send the save. nothing was sent." };
 
-/** What a form sent, delivered with its outcome, so a form that remounted applies the save it actually sent. */
-export type Sent = { target: WriteTarget; document: string };
+/** What a form sent, delivered with its outcome, so a form that remounted applies the save it actually sent.
+ * `where`: create only, the saved file's location as the form named it when the save started. */
+export type Sent = { target: WriteTarget; document: string; where?: string };
 type Deliver = (outcome: WriteOutcome, sent: Sent) => void;
 type Form = { abort: AbortController; deliver?: Deliver; held?: [WriteOutcome, Sent] };
 
@@ -173,19 +174,20 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
     else state.held = [outcome, sent];
   }
 
-  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: string): Promise<void> {
+  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: string, where?: string): Promise<void> {
     const state = forms.get(form);
     if (!state) return Promise.resolve();
     const key = `${target.kind}/${target.scope}/${target.name}`;
     const flight = inFlight.get(key);
     if (flight?.form === form && flight.base === base && flight.document === document) return flight.run;
-    if (flight) return Promise.resolve(deliver(state, IN_PROGRESS, { target, document }));
+    const sent = { target, document, where };
+    if (flight) return Promise.resolve(deliver(state, IN_PROGRESS, sent));
     const signal = state.abort.signal;
     const run = send(client, target, base, document, signal).catch(() => NOT_SENT).then((outcome) => {
       inFlight.delete(key);
       // a sent write cannot be recalled: one that lands after its form closed is reported once, here.
       if (signal.aborted) { if (outcome?.status === "saved") for (const listener of landed) listener(target, outcome.redacted); }
-      else if (outcome) deliver(state, outcome, { target, document });
+      else if (outcome) deliver(state, outcome, sent);
     });
     inFlight.set(key, { form, base, document, run });
     return run;
@@ -216,8 +218,8 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
       landed.add(listener);
       return () => { landed.delete(listener); };
     },
-    /** Create `target` (no revision). Resolves when the save is done; the outcome goes to `attach`. */
-    create: (client: ZetaClient, target: WriteTarget, document: string, form: string) => once(client, target, null, document, form),
+    /** Create `target` (no revision). Resolves when the save is done; the outcome goes to `attach` with `where`. */
+    create: (client: ZetaClient, target: WriteTarget, document: string, form: string, where: string) => once(client, target, null, document, form, where),
     /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. */
     save: (client: ZetaClient, target: WriteTarget, base: string, document: string, form: string) => once(client, target, base, document, form),
   };

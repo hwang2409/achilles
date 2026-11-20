@@ -60,7 +60,7 @@ describe("library create outcomes", () => {
     const zeta = fakeZeta(writes, reads);
     const clock = fakeClock();
     const writer = createLibraryWriter(clock.sleep);
-    const outcome = await outcomeOf(writer, (form) => writer.create(zeta.client, target, text, form));
+    const outcome = await outcomeOf(writer, (form) => writer.create(zeta.client, target, text, form, "home · skills/fixture-skill.md"));
     expect(outcome).toMatchObject(expected);
     expect(zeta.calls).toHaveLength(requests);
     expect(zeta.calls.filter(([method]) => method === "skill_write").every(([, params]) =>
@@ -191,7 +191,7 @@ describe("which form owns a save", () => {
     writer.onLanded((item) => landed.push(item.name));
     const base = await sha(opened);
     const save = (form: "A" | "B", text: "A" | "B") => row.op === "create"
-      ? writer.create(first, target, texts[text], forms[form]) : writer.save(first, target, base, texts[text], forms[form]);
+      ? writer.create(first, target, texts[text], forms[form], "home · skills/fixture-skill.md") : writer.save(first, target, base, texts[text], forms[form]);
     if (row.writes[0] instanceof Error && row.drop) gone = true; // the socket is already gone when the write goes out
     const a = save("A", "A");
     if (row.cancel === "before send") writer.close(forms.A);
