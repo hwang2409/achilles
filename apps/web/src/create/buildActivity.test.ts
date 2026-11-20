@@ -33,12 +33,15 @@ const page = (id: string, route: string, title: string): PageLink => ({ id, rout
 const reading = page("06b6531f0662009cf9c8e086", "/reading-list", "reading list");
 const expenses = page("expenses", "/expenses", "expenses");
 const idle = (id = chat.session_id) => ({ session: { session_id: id }, state: "idle", pending_approvals: [], last_turn_outcome: end.data });
-const running = { ...idle(), state: "running" };
+const runningOf = (id = chat.session_id) => ({ ...idle(id), state: "running" });
+const running = runningOf();
 const approval = { ...idle(), state: "tool", pending_approvals: [{ tool_call: { name: "achilles__create_page" } }] };
 const offline = Error("socket closed");
 const inactive = Object.assign(Error("session is not active"), { code: -32003 });
 const done = [call(), result, end];
 const madeExpenses = [call("expenses-call"), resultOf("expenses-call", '{"route":"/expenses"}'), end];
+// This tab watched the build run: a live pass saw it running before it finished.
+const ran = (id = chat.session_id): Load => ({ status: runningOf(id), history: [call(id === chat.session_id ? undefined : "expenses-call")] });
 
 /** One page load: zeta's status reply, and the history reply when the status names a build. */
 type Load = { status: object | Error; history?: unknown[] | Error; superseded?: unknown[]; older?: boolean };
@@ -49,16 +52,17 @@ type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?
 const ROWS: Row[] = [
   { name: "active running", loads: [{ status: running, history: [call()] }], shown: { state: "building", reason: null, tools: ["achilles__create_page"] }, building: 1, receipt: null },
   { name: "active needs you", loads: [{ status: approval, history: [call()] }], shown: { state: "needs you", reason: null, tools: ["achilles__create_page"] }, needsYou: 1 },
-  { name: "active idle with a confirmed route", loads: [{ status: idle(), history: done }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: "/reading-list" },
-  { name: "L1: a confirmed route outside the loaded catalog is done", pages: [], loads: [{ status: idle(), history: done }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/reading-list" },
+  { name: "seen running, then idle with a confirmed route", loads: [ran(), { status: idle(), history: done }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: "/reading-list" },
+  { name: "first seen already done on the current session: done, with no receipt", loads: [{ status: idle(), history: done }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: null },
+  { name: "L1: a confirmed route outside the loaded catalog is done", pages: [], loads: [ran(), { status: idle(), history: done }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/reading-list" },
   { name: "active idle with no result", loads: [{ status: idle(), history: [call(), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "unknown result shapes are not pages", loads: [{ status: idle(), history: [call(undefined, "another__create_page"), result, resultOf("orphan", '{"route":"/expenses"}'), call("bad"), resultOf("bad", "not JSON"), call("bare"), resultOf("bare", '{"existing":true}'), end] }], shown: { state: "unfinished", results: [] } },
   { name: "is_error result", loads: [{ status: idle(), history: [call("error"), resultOf("error", "boom", true), end] }], shown: { state: "failed", reason: null, results: [] } },
-  { name: "two results, a failure between them (Q3)", pages: [reading, expenses], loads: [{ status: idle(), history: [call(), result, call("error"), resultOf("error", "boom", true), call("existing"), resultOf("existing", '{"route":"/expenses","existing":true}'), end] }], shown: { state: "done", results: ["/reading-list", "/expenses"] }, receipt: "/reading-list" },
+  { name: "two results, a failure between them (Q3)", pages: [reading, expenses], loads: [ran(), { status: idle(), history: [call(), result, call("error"), resultOf("error", "boom", true), call("existing"), resultOf("existing", '{"route":"/expenses","existing":true}'), end] }], shown: { state: "done", results: ["/reading-list", "/expenses"] }, receipt: "/reading-list" },
   { name: "duplicate history rows", loads: [{ status: idle(), history: [call(), call(), result, result, end, end] }], shown: { state: "done", results: ["/reading-list"] } },
-  { name: "b1: remembered done, then another session is current", loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: "/reading-list" },
+  { name: "b1: remembered done, then another session is current", loads: [ran(), { status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done", reason: null, results: ["/reading-list"] }, receipt: "/reading-list" },
   { name: "remembered done, then zeta offline", loads: [{ status: idle(), history: done }, { status: offline }], shown: { state: "done", reason: null, results: ["/reading-list"] }, building: 0 },
-  { name: "acknowledged receipt stays gone after reload", dismiss: 0, loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
+  { name: "acknowledged receipt stays gone after reload", dismiss: 1, loads: [ran(), { status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
   { name: "m1: remembered building, then zeta offline", loads: [{ status: running, history: [call()] }, { status: offline }], shown: { state: "building", reason: "zeta offline", tools: [] }, building: 0 },
   { name: "remembered building, then -32003 between status and history", loads: [{ status: running, history: [call()] }, { status: running, history: inactive }], shown: { state: "building", reason: "not the current session" }, building: 0 },
   { name: "b1: nothing remembered and not current", loads: [{ status: idle("newer") }], shown: { state: null, results: [] }, building: 0 },
@@ -66,19 +70,19 @@ const ROWS: Row[] = [
   { name: "m2: a sixth page build with persisted running", chats: [chat, habit, ...[1, 2, 3, 4].map((n) => ({ ...chat, session_id: `build-${n}` }))].reverse(), loads: [{ status: idle("newer") }], shown: { state: null }, building: 0 },
   { name: "an ordinary running chat never appears", chats: [ordinary], id: ordinary.session_id, loads: [{ status: running }], shown: { state: "absent" }, building: 0 },
   { name: "an outage during a build, then recovery, is live again", loads: [{ status: running, history: [call()] }, { status: offline }], recover: { status: running, history: [call()] }, shown: { state: "building", reason: null }, building: 1 },
-  { name: "a reload shows the kept receipt on the first render, before any catalog or zeta read", cold: true, loads: [{ status: idle(), history: done }, { status: offline }], shown: { state: "absent" }, receipt: "/reading-list" },
-  { name: "acknowledging the newest receipt acknowledges older completions (Q1)", chats: [habit, chat], pages: [reading, expenses], dismiss: 1, loads: [{ status: idle(), history: done }, { status: idle(habit.session_id), history: madeExpenses }, { status: idle("newer") }], shown: { state: "done", results: ["/reading-list"] }, receipt: null },
-  { name: "a build that finishes after an acknowledgement shows a new receipt", chats: [third, chat], pages: [reading, expenses], dismiss: 0, loads: [{ status: idle(), history: done }, { status: idle(third.session_id), history: madeExpenses }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/expenses" },
+  { name: "a reload shows the kept receipt on the first render, before any catalog or zeta read", cold: true, loads: [ran(), { status: idle(), history: done }, { status: offline }], shown: { state: "absent" }, receipt: "/reading-list" },
+  { name: "acknowledging the newest receipt acknowledges older completions (Q1)", chats: [habit, chat], pages: [reading, expenses], dismiss: 3, loads: [ran(), { status: idle(), history: done }, ran(habit.session_id), { status: idle(habit.session_id), history: madeExpenses }, { status: idle("newer") }], shown: { state: "done", results: ["/reading-list"] }, receipt: null },
+  { name: "a build that finishes after an acknowledgement shows a new receipt", chats: [third, chat], pages: [reading, expenses], dismiss: 1, loads: [ran(), { status: idle(), history: done }, ran(third.session_id), { status: idle(third.session_id), history: madeExpenses }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/expenses" },
   { name: "a remembered confirmed route survives a later tail without the result", loads: [{ status: idle(), history: done }, { status: idle(), history: [call("later", "achilles__update_page"), end] }], shown: { state: "done", reason: null, results: ["/reading-list"] } },
   { name: "a create_page approval zeta asks again for after a restart is unfinished", loads: [{ status: idle(), history: [call("again"), resultOf("again", "tool changed after approval: achilles__create_page; request a new approval", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "a canceled create_page call is unfinished, not failed", loads: [{ status: idle(), history: [call("cancel"), resultOf("cancel", "tool execution canceled", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "L7: a tail without the create_page call and nothing remembered is no claim", loads: [{ status: idle(), history: [end], older: true }], shown: { state: null } },
-  { name: "L6: a follow-up turn that ends on a build is a new completion", dismiss: 0, loads: [{ status: idle(), history: done }, { status: { ...idle(), last_turn_outcome: { turn_id: "follow-turn" } }, history: [{ role: "user", content: [] }, { ...end, data: { turn_id: "follow-turn", reason: "completed" } }], older: true }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/reading-list" },
-  { name: "L6: a build that finished later is the receipt, whatever the chat list order", chats: [chat, habit], pages: [reading, expenses], loads: [{ status: idle(), history: done }, { status: idle(habit.session_id), history: madeExpenses }], shown: { state: "done" }, receipt: "/expenses" },
+  { name: "L6: a follow-up turn that ends on a build is a new completion", dismiss: 1, loads: [ran(), { status: idle(), history: done }, ran(), { status: { ...idle(), last_turn_outcome: { turn_id: "follow-turn" } }, history: [{ role: "user", content: [] }, { ...end, data: { turn_id: "follow-turn", reason: "completed" } }], older: true }], shown: { state: "done", results: ["/reading-list"] }, receipt: "/reading-list" },
+  { name: "L6: a build that finished later is the receipt, whatever the chat list order", chats: [chat, habit], pages: [reading, expenses], loads: [ran(), { status: idle(), history: done }, ran(habit.session_id), { status: idle(habit.session_id), history: madeExpenses }], shown: { state: "done" }, receipt: "/expenses" },
   { name: "a denied create_page approval is unfinished, not failed", loads: [{ status: idle(), history: [call("deny"), resultOf("deny", "tool execution denied", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "a denial with a reason is unfinished, not failed", loads: [{ status: idle(), history: [call("deny"), resultOf("deny", "tool execution denied: not now", true), end] }], shown: { state: "unfinished", reason: null, results: [] } },
   { name: "the tab saw the build idle with no turn end: no last known building later", loads: [{ status: running, history: [call()] }, { status: idle(), history: [call()] }, { status: idle("newer") }], shown: { state: null }, building: 0 },
-  { name: "a receipt for the page this tab is on is acknowledged", at: "/reading-list", loads: [{ status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
+  { name: "a receipt for the page this tab is on is acknowledged", at: "/reading-list", loads: [ran(), { status: idle(), history: done }, { status: idle("newer") }], shown: { state: "done" }, receipt: null },
   { name: "a stale response arriving after a newer one", loads: [{ status: idle(), history: done, superseded: [call()] }], shown: { state: "done", tools: [] }, building: 0 },
 ];
 
@@ -325,6 +329,33 @@ test("-32004 three times: three reads, then no claim until a new demand", async 
   expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 3, label: "last known building · not the current session", receipt: null });
 });
 
+test("-32004 three times: the wait after the third holds the queue, and a new demand gets three tries again", async () => {
+  jest.useFakeTimers(); fakeClock = true;
+  const at: [string, number][] = [];
+  const zeta = serveZeta({ status: () => idle("newer"), read: ({ session_id }) => { at.push([session_id, Date.now()]); if (session_id === "b1") throw busy; return rows(done); } });
+  const hook = await mount(zeta, builds("b1", "b2"));
+  for (let i = 0; i < 4; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
+  expect(at.map(([id]) => id)).toEqual(["b1", "b1", "b1", "b2"]);
+  // bun's fake clock follows real time across ticks: compare the times the fake read saw
+  expect(at[3]![1] - at[2]![1]).toBeGreaterThanOrEqual(2000);
+  hook.rerender({ client: zeta.client, chats: [{ ...builds("b1")[0]!, updated_at: "2030-01-02" }, builds("b2")[0]!] });
+  for (let i = 0; i < 4; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
+  expect(at.map(([id]) => id)).toEqual(["b1", "b1", "b1", "b2", "b1", "b1", "b1"]);
+});
+
+test("a page load does not read builds this tab already proved settled; a new turn or a manual refresh reads", async () => {
+  (await mount(serveZeta({ status: () => idle("newer"), read: () => rows(done) }), builds("b1", "b2"))).unmount();
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(done) });
+  const hook = await mount(zeta, builds("b1", "b2"));
+  expect(zeta.reads()).toEqual([]);
+  hook.rerender({ client: zeta.client, chats: [{ ...builds("b1")[0]!, updated_at: "2030-01-02" }, builds("b2")[0]!] });
+  await settle();
+  expect(zeta.reads()).toEqual(["b1"]);
+  act(() => hook.result.current.refresh());
+  await settle();
+  expect(zeta.reads().sort()).toEqual(["b1", "b1", "b2"]);
+});
+
 test("a read sent before the live pass saw the build current is dropped", async () => {
   let current: unknown = idle("newer");
   const held = Promise.withResolvers<unknown>();
@@ -343,13 +374,13 @@ test("a read sent before the live pass saw the build current is dropped", async 
   expect(rowOf(hook)).toEqual({ label: "last known building · not the current session", receipt: null });
 });
 
-test("one read in flight, and only the four builds /create shows", async () => {
+test("one read in flight, and only the eight builds the chat list shows", async () => {
   const waiting: ((value: unknown) => void)[] = [];
-  const ids = ["b1", "b2", "b3", "b4", "b5", "b6"];
+  const ids = Array.from({ length: 10 }, (_, n) => `b${n + 1}`);
   const zeta = serveZeta({ status: () => idle("newer"), read: () => new Promise((resolve) => waiting.push(resolve)) });
   await mount(zeta, builds(...ids));
-  for (let i = 0; i < 10 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
-  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ids.slice(0, 4) });
+  for (let i = 0; i < 12 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
+  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ids.slice(0, 8) });
 });
 
 test("a chat-list reload with the same updated_at reads nothing; a new turn reads once", async () => {
@@ -363,8 +394,12 @@ test("a chat-list reload with the same updated_at reads nothing; a new turn read
   expect(zeta.reads().length).toBe(2);
 });
 
+// zeta gives the same session_not_found for an absent id, another project, project versus no project, and a child id.
+const notFound = (data?: object) => Object.assign(Error("the requested session does not exist"), { code: -32602, data });
 test.each([
-  ["session_not_found", Object.assign(Error("unknown session"), { code: -32602, data: { code: "session_not_found" } })],
+  ["session_not_found", notFound({ code: "session_not_found", reason: "session_not_found" })],
+  ["session_not_found with only data.code", notFound({ code: "session_not_found" })],
+  ["-32602 with no data", notFound()],
   ["-32007", Object.assign(Error("refused"), { code: -32007 })],
   ["-32005", Object.assign(Error("state unavailable"), { code: -32005 })],
 ])("%s: no claim and no retry", async (_name, error) => {
@@ -376,7 +411,7 @@ test.each([
 });
 
 test("-32602 for the attached session asks for one more live pass", async () => {
-  const zeta = serveZeta({ status: () => idle("newer"), read: () => { throw Object.assign(Error("page it with session_history"), { code: -32602 }); } });
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { throw Object.assign(Error("invalid params"), { code: -32602, data: { code: "invalid_params" } }); } });
   await mount(zeta);
   expect({ reads: zeta.reads().length, status: zeta.count("status") }).toEqual({ reads: 1, status: 2 });
 });
@@ -403,6 +438,17 @@ test("run end: the build's history goes out with status, not after it", async ()
   // status is still unanswered here
   expect(zeta.calls.slice(before).map((one) => `${one.method} ${one.params.session_id ?? ""}`.trim()).sort()).toEqual([`session_history ${chat.session_id}`, "status"]);
   held.resolve(idle());
+  await settle();
+  expect(rowOf(hook)).toEqual({ label: "done", receipt: "/reading-list" });
+});
+
+test("run end: a build this tab never polled running gets its receipt from the run end it saw", async () => {
+  let status: unknown = idle("newer");
+  const zeta = serveZeta({ features: [], status: () => status, history: () => ({ messages: done, next_before: null }) });
+  const end = runEnds(zeta.client);
+  const hook = await mount(zeta);
+  status = idle();
+  end();
   await settle();
   expect(rowOf(hook)).toEqual({ label: "done", receipt: "/reading-list" });
 });
@@ -481,5 +527,7 @@ test("a second tab on a workspace route sees another tab's build when it comes b
     act(() => { dispatchEvent(new Event("focus")); });
     for (let i = 0; i < 5; i++) await settle();
     expect(view.result.current.rows.map((row) => [row.chat.session_id, buildLabel(row)])).toEqual([[chat.session_id, "done"]]);
+    // it never saw that build run, so no receipt
+    expect(view.result.current.latestReceipt).toBeNull();
   } finally { view.unmount(); settings.interceptor = null; }
 });
