@@ -122,7 +122,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor-row .library-dismiss { justify-self: start; min-height: 36px; padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
 /* the prompt wraps inside its own box, so both buttons stay on one row */
 .library-editor-actions { flex-wrap: wrap; }
-.library-editor-actions[role="group"] { align-items: center; }
+.library-editor-actions[role="group"] { align-items: center; flex-wrap: nowrap; }
 .library-editor-actions[role="group"] > span { flex: 1 1 auto; min-width: 0; }
 .library-nowrap { white-space: nowrap; }
 /* the save outcome takes its own row in the sticky bar, above the buttons */
@@ -139,5 +139,6 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
   .library-editor textarea { min-height: 50dvh; font-size: 16px; }
   .library-editor textarea.library-mine { min-height: 30dvh; }
   .library-editor button, .library-editor-row > label:has(input[type="radio"]) { min-height: 44px; }
+  .library-editor-actions[role="group"] { flex-wrap: wrap; }
   .library-editor-actions[role="group"] > span { flex-basis: 100%; }
 }
