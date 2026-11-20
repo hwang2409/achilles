@@ -15,8 +15,11 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
   const file = join(zetaHome, "settings.toml");
   const bytes = () => readFile(file).then((data) => data.toString("utf8"), () => null);
   const original = await bytes();
+  // non-empty bytes, so "not written" compares real content
+  const seeded = `${original ?? ""}# synthetic gate settings\n`;
   const tab = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   try {
+    await writeFile(file, seeded, { mode: 0o600 });
     await tab.goto(`${origin}/settings#telemetry`);
     const row = tab.locator("#telemetry");
     const turnOn = row.getByRole("button", { name: "turn on telemetry", exact: true });
@@ -32,15 +35,20 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const refusal = dialog.getByRole("alert");
     const refused = `not changed. zeta cannot record telemetry on this computer: ${MISSING_OTEL}`;
     await waitFor(async () => await refusal.textContent().catch(() => "") === refused, "telemetry on refused with zeta's start error");
-    if ((await bytes()) !== original) throw new Error("a refused telemetry change wrote settings.toml");
-    if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused.png") });
+    if ((await bytes()) !== seeded) throw new Error("a refused telemetry change wrote settings.toml");
+    if (screenshotDir) {
+      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-1440x900.png") });
+      await tab.setViewportSize({ width: 390, height: 844 });
+      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
+      await tab.setViewportSize({ width: 1440, height: 900 });
+    }
     await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
     if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
-    const sha = createHash("sha256").update(original ?? "").digest("hex");
+    const sha = createHash("sha256").update(seeded).digest("hex");
     console.log(`settings telemetry: zeta refused turning it on; the row showed zeta's reason; settings.toml sha256 ${sha} unchanged`);
     // off on a file that has the built-in line, written outside zeta. zeta checks that telemetry can start before
     // the revision, so the stale case runs on off.
-    await writeFile(file, BUILT_IN + (original ?? ""), { mode: 0o600 });
+    await writeFile(file, BUILT_IN + seeded, { mode: 0o600 });
     await tab.reload();
     const turnOff = row.getByRole("button", { name: "turn off", exact: true });
     const confirmOff = async () => {
@@ -51,7 +59,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     };
     await waitFor(() => turnOff.isVisible(), "settings telemetry row (on)");
     // an edit outside zeta after the page read the file: the change is refused as stale
-    const edited = `${BUILT_IN}${original ?? ""}# synthetic gate edit\n`;
+    const edited = `${BUILT_IN}${seeded}# synthetic gate edit\n`;
     await writeFile(file, edited, { mode: 0o600 });
     const stale = await confirmOff();
     const changed = row.getByText("not changed. the state changed elsewhere; the row now shows the current state.", { exact: true });
@@ -62,7 +70,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     console.log("settings telemetry: an outside edit made the change stale; nothing was written; the row kept the reason and the focus");
     await confirmOff();
     await waitFor(() => row.getByText(/^at .+: telemetry is off\. restart zeta to stop recording\.$/).isVisible(), "telemetry off receipt");
-    if ((await bytes()) !== `${original ?? ""}# synthetic gate edit\n`) throw new Error("telemetry off did not remove exactly the built-in line");
+    if ((await bytes()) !== `${seeded}# synthetic gate edit\n`) throw new Error("telemetry off did not remove exactly the built-in line");
     console.log("settings telemetry: off removed exactly the built-in line");
   } finally {
     await tab.close();
