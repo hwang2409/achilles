@@ -10,6 +10,8 @@ type Props = {
   /** The catalog method used to probe project scope; null when this zeta has no live catalog. */
   catalogMethod: string | null;
   takeControl: () => Promise<string | null>;
+  /** The last take-control refusal (held above this component, so it survives a socket replace). */
+  feedback: string | null;
   /** Why this tab cannot save here; the draft stays visible, read-only, and nothing is sent. */
   blocked: string | null;
   onCreated: (name: string, redacted: boolean) => void;
@@ -23,7 +25,7 @@ const header = (kind: LibraryKind, name: string, description: string) =>
 
 /** The create form. Its text lives only in this component's memory (a draft can hold a secret), and the component
  * keeps its place when take control swaps the client, so the draft survives. */
-export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeControl, blocked, onCreated, onOpen, onClose }: Props) {
+export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeControl, feedback, blocked, onCreated, onOpen, onClose }: Props) {
   const noun = kind === "skills" ? "skill" : "profile";
   const id = useId();
   const [name, setName] = useState("");
@@ -33,7 +35,6 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
   const [project, setProject] = useState<"checking" | "available" | string>(catalogMethod ? "checking" : "needs a newer zeta");
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [control, setControl] = useState<string | null>(null);
   const [tried, setTried] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const alert = useRef<HTMLDivElement>(null);
@@ -68,7 +69,6 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     if (problems.length) return alert.current?.focus();
     setPending(true);
     setFailure(null);
-    setControl(null);
     abort.current = new AbortController();
     const outcome = await writer.create(client, { kind, name, scope }, text, abort.current.signal);
     // a sent write cannot be recalled: a save that landed after discard is still shown.
@@ -113,8 +113,8 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
         <p className="library-error">{failure.message}</p>
         {failure.status === "stale" && <button type="button" onClick={() => onOpen(name)}>open it</button>}
         {failure.status === "observer" && <>
-          <button type="button" onClick={() => void takeControl().then((reason) => { setControl(reason); if (!reason) setFailure(null); })}>take control</button>
-          {control && <span role="status">{control}</span>}
+          <button type="button" onClick={() => void takeControl().then((reason) => { if (!reason) setFailure(null); })}>take control</button>
+          {feedback && <span role="status">{feedback}</span>}
         </>}
       </div>}
     </div>

@@ -31,6 +31,14 @@ export function SurfaceRouter() {
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const controller = connectionState.phase === "connected" && connectionState.authority === "controller";
+  // The library's take-control reason lives here: a socket replace unmounts the library module, not the router.
+  const [libraryControl, setLibraryControl] = useState<string | null>(null);
+  const takeLibraryControl = async () => {
+    setLibraryControl(null);
+    const reason = await connection.takeControl();
+    setLibraryControl(reason);
+    return reason;
+  };
   const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
@@ -43,7 +51,7 @@ export function SurfaceRouter() {
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
-        write={libraryWrite(client, route.id, controller, connection)} />) : <ModuleFrame title={route.label}>
+        write={libraryWrite(client, route.id, controller, takeLibraryControl, libraryControl)} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
@@ -60,9 +68,9 @@ function libraryReads(client: ZetaClient, kind: LibraryKind) {
   return { catalog: granted && supportsRequest(client, methods.catalog), read: granted && supportsRequest(client, methods.read) };
 }
 
-function libraryWrite(client: ZetaClient, kind: LibraryKind, controller: boolean, connection: Connection) {
+function libraryWrite(client: ZetaClient, kind: LibraryKind, controller: boolean, takeControl: () => Promise<string | null>, feedback: string | null) {
   const access = writeAccess(client, kind, controller);
-  return access === "none" ? null : { controller, allowed: access === "allowed", takeControl: () => connection.takeControl() };
+  return access === "none" ? null : { controller, allowed: access === "allowed", takeControl, feedback };
 }
 
 type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children: (activity: BuildActivity) => ReactNode };

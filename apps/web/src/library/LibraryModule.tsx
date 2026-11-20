@@ -28,8 +28,8 @@ type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "f
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
 /** Present only when this zeta grants library_write_v1. `allowed: false`: this tab controls zeta, but zeta did not list
- * this kind's write method. */
-export type LibraryWrite = { controller: boolean; allowed: boolean; takeControl: () => Promise<string | null> };
+ * this kind's write method. `feedback`: the last take-control refusal, held by the router so it survives a remount. */
+export type LibraryWrite = { controller: boolean; allowed: boolean; takeControl: () => Promise<string | null>; feedback: string | null };
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
 const unreadable: Problem = { message: "zeta sent data this view cannot read", retry: true };
@@ -61,7 +61,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const [writer] = useState(() => createLibraryWriter());
   const [creating, setCreating] = useState(false);
   const [taking, setTaking] = useState(false);
-  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  const controlFeedback = write?.feedback ?? null;
   const [saved, setSaved] = useState<{ redacted: boolean } | null>(null);
 
   useEffect(() => {
@@ -140,12 +140,11 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   async function startCreate() {
     if (!write || taking || !write.allowed) return;
     setSaved(null);
-    setControlFeedback(null);
     if (!write.controller) {
       setTaking(true);
       const reason = await write.takeControl();
       setTaking(false);
-      if (reason) return setControlFeedback(reason);
+      if (reason) return;
     }
     setCreating(true);
   }
@@ -232,7 +231,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
       </div>}
       {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows} catalogMethod={reads.catalog ? methods.catalog : null}
-        takeControl={write.takeControl} blocked={write.allowed ? null : REFUSED_NOTICE} onClose={() => setCreating(false)} onOpen={showCreated}
+        takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onClose={() => setCreating(false)} onOpen={showCreated}
         onCreated={(name, redacted) => { setSaved({ redacted }); showCreated(name); }} /> : content}
     </div>
   </ModuleFrame>;

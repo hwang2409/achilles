@@ -16,7 +16,7 @@ const reads = new Set(["hello", "status", "session_settings", "session_history_a
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
-type Options = { path?: string; observerBanner?: false; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   const writes: string[] = [];
@@ -41,7 +41,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   let socket: Socket;
   const emit = (event: object) => socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));
   class Socket extends EventTarget {
-    constructor() { super(); socket = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    constructor() { super(); socket = this; options.sockets?.push(this); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
     close() { this.dispatchEvent(new Event("close")); }
     send(raw: string) {
       const { id, method, params } = JSON.parse(raw);
@@ -473,6 +473,24 @@ test.each([
       expect((select(app, ".library-editor textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
     }
     expect(writes).toEqual([]);
+  });
+});
+
+test("a library take-control refusal still shows after the observer socket is replaced during the attempt", async () => {
+  const sockets: (EventTarget & { close(): void })[] = [];
+  const base = library(true);
+  const hello = base.rpc!.hello!;
+  const options: Options = { ...base, sockets: sockets as EventTarget[], rpc: { ...base.rpc, hello: async (params, requests) => {
+    if (params.role !== "controller") return hello(params, requests);
+    sockets[0]!.close(); // the observer drops while the controller handshake is in flight
+    return { error: { code: -32001, message: "controller occupied" } };
+  } } };
+  await withApp("observer", options, async (app) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    expect(await app.findByText("another tab had control. try again after it closes.", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(app.getByText("another tab had control. try again after it closes.")).toBeTruthy();
   });
 });
 
