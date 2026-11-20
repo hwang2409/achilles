@@ -1,4 +1,3 @@
-import type { ZetaClient } from "@fulcrum/zeta";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
@@ -6,7 +5,9 @@ import { AppShell, type AppShellProps } from "../AppShell";
 import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
-import { createConnection, isObserverPresentation, type Connection } from "../zeta";
+import { createConnection, isObserverPresentation, supportsFeature, supportsRequest, type Connection } from "../zeta";
+import { libraryMethods, type LibraryKind } from "../library/catalog";
+import type { ZetaClient } from "@fulcrum/zeta";
 import { useAgentNavAdapter } from "./AgentNavAdapter";
 import { ModuleFrame, ModuleState } from "./ModuleState";
 import { chatsRoute, createRoute, matchSurfaceRoute, newChatIntent, surfaceHref, type SurfaceRoute } from "./routes";
@@ -37,7 +38,7 @@ export function SurfaceRouter() {
   let content: ReactNode;
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
-      : <LibraryModule key={route.id} client={client} kind={route.id} />) : <ModuleFrame title={route.label}>
+      : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
@@ -45,6 +46,13 @@ export function SurfaceRouter() {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
   return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
+}
+
+// library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
+function libraryReads(client: ZetaClient, kind: LibraryKind) {
+  const methods = libraryMethods(kind);
+  const granted = supportsFeature(client, "library_read_v1");
+  return { catalog: granted && supportsRequest(client, methods.catalog), read: granted && supportsRequest(client, methods.read) };
 }
 
 type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children: (activity: BuildActivity) => ReactNode };
