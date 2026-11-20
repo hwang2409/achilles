@@ -1,7 +1,6 @@
-import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import {
   AUTO_THEME,
-  getSettings,
   resetSettings,
   resetTarget,
   updateSettings,
@@ -13,7 +12,7 @@ import {
   type UiFont,
 } from "./settings";
 import { wrapTab } from "./keyboard";
-import { Confirmation, reviewText } from "./surface/Confirmation";
+import "./surface/confirmation.css";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
 
@@ -75,35 +74,40 @@ function Row({ title, description, children }: { title: string; description: str
   return <section className="settings-row"><div className="settings-row-label"><h3>{title}</h3><p>{description}</p></div><div>{children}</div></section>;
 }
 
-// turning the default on lets new chats run tools without asking, so it goes through a confirm; turning it off does not
+// turning the default on lets new chats run tools without asking, so it goes through a confirm; turning it off does not.
+// the switch stays mounted in both states, so focus stays on it; the confirm bar opens below it.
 function AutoApprove({ open, on, canWrite, serverForcesAsk }: { open: boolean; on: boolean; canWrite: boolean; serverForcesAsk: boolean }) {
   const toggle = useRef<HTMLButtonElement>(null);
-  const confirmed = useRef(false);
-  useLayoutEffect(() => {
-    // the confirm row goes away once the default is on: keep focus on the row's control
-    if (on && confirmed.current) toggle.current?.focus();
-    confirmed.current = false;
-  }, [on]);
-  const explanation = <span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : on ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span>;
-  if (on || !canWrite) return <div className="setting-explanation"><Toggle ref={toggle} label="auto-approve default" checked={on} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(autoApproveDefault) => { if (canWrite) updateSettings({ autoApproveDefault }); }} />{explanation}</div>;
+  const allow = useRef<HTMLButtonElement>(null);
+  const [asking, setAsking] = useState(false);
+  const effectId = useId();
+  useLayoutEffect(() => { if (!open) setAsking(false); }, [open]);
+  useLayoutEffect(() => { if (asking) allow.current?.focus(); }, [asking]);
+  const close = (allowTools: boolean) => {
+    if (allowTools && canWrite) updateSettings({ autoApproveDefault: true });
+    setAsking(false);
+    toggle.current?.focus();
+  };
+  const explanation = serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : on ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls.";
+  const effect = serverForcesAsk ? "new chats allow tool calls without asking once the server stops forcing ask mode." : "new chats allow tool calls without asking.";
   return <div className="settings-auto-approve">
-    {/* closing the settings dialog drops an open confirm */}
-    <Confirmation key={String(open)} level={1} surface={WRITE_SURFACE.settingsAutoApprove} label={reviewText("auto-approve default")} value={reviewText("off")}
-      action={reviewText("allow without asking")} keep={reviewText("keep asking")} effect={reviewText("new chats allow tool calls without asking.")}
-      execute={async () => {
-        if (!canWrite) return { status: "failed", reason: "refused" };
-        confirmed.current = true;
-        updateSettings({ autoApproveDefault: true });
-        return { status: "committed", receipt: reviewText("auto-approve on"), value: reviewText("on") };
-      }}
-      checkResult={async () => getSettings().autoApproveDefault ? { status: "committed", receipt: reviewText("auto-approve on"), value: reviewText("on") } : { status: "failed", reason: "not-applied" }} onCommitted={() => {}} />
-    {explanation}
+    <div className="setting-explanation"><Toggle ref={toggle} label="auto-approve default" checked={on} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(next) => { if (!canWrite) return; if (next) setAsking(true); else updateSettings({ autoApproveDefault: false }); }} /><span>{explanation}</span></div>
+    {asking && !on && canWrite && <div className="confirmation-inline"><div role="group" className="confirmation-bar" aria-labelledby={effectId}
+      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(false); } }}>
+      <p id={effectId}>{effect}</p>
+      <div className="confirmation-actions">
+        <button ref={allow} type="button" className="confirmation-primary" onClick={() => close(true)}>allow without asking</button>
+        <button type="button" onClick={() => close(false)}>keep asking</button>
+      </div>
+    </div></div>}
   </div>;
 }
 
 export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const settings = useSettings();
+  // aria-disabled, not disabled, once reset is done: a disabled button would drop focus to the page
+  const resetDone = JSON.stringify(settings) === JSON.stringify(resetTarget(settings));
   useLayoutEffect(() => {
     const node = dialog.current;
     if (!node) return;
@@ -131,7 +135,7 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
         <div className="settings-content">
           <Row title="auto-approve" description="default for new chats."><AutoApprove open={open} on={settings.autoApproveDefault} canWrite={canWrite} serverForcesAsk={serverForcesAsk} /></Row>
         </div>
-        <footer><span><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(resetTarget(settings))}>reset to defaults</button> <span className="settings-reset-note">auto-approve is not reset.</span></span><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
+        <footer><span><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite && !resetDone) resetSettings(); }} disabled={!canWrite} aria-disabled={resetDone || undefined}>reset to defaults</button> <span className="settings-reset-note">auto-approve is not reset.</span></span><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
       </section>
     </div>
   </dialog>;

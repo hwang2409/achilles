@@ -42,15 +42,18 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   // reset keeps auto-approve as it is: off stays off, on stays on
   const settingsDialog = page.getByRole("dialog", { name: "settings" });
   await gateWait.playwright(settingsDialog.getByText("auto-approve is not reset."), "waitFor");
+  const focused = () => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent ?? document.activeElement?.tagName);
   const resetKeeps = async (autoApproveDefault: boolean) => {
     await page.getByRole("button", { name: "reset to defaults" }).click();
     if (await theme(page) !== null) throw new Error("reset did not restore the automatic theme");
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
     if (saved?.theme !== "auto" || saved?.autoApproveDefault !== autoApproveDefault) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
+    if (await focused() !== "reset to defaults") throw new Error(`reset dropped focus to ${await focused()}`);
   };
   await page.getByRole("switch", { name: "auto-approve default" }).click();
+  if (await focused() !== "auto-approve default") throw new Error(`turning auto-approve off dropped focus to ${await focused()}`);
   await resetKeeps(false);
-  await settingsDialog.getByRole("button", { name: "allow without asking" }).click();
+  await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
   await page.getByRole("option", { name: /gruvbox-light/ }).click();
   await resetKeeps(true);
@@ -226,9 +229,9 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   await openSettings(page, gateWait);
   // turning the default on goes through a confirm
   const settingsDialog = page.getByRole("dialog", { name: "settings" });
-  await settingsDialog.getByRole("button", { name: "allow without asking" }).click();
+  await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
-  await gateWait.playwright(page.getByRole("switch", { name: "auto-approve default" }), "waitFor");
+  await gateWait.playwright(page.locator('[role="switch"][aria-label="auto-approve default"][aria-checked="true"]'), "waitFor");
   await page.getByRole("button", { name: "esc" }).click();
   const writesBeforeReopen = settingsWrites(frames(), askId);
   await page.reload();
