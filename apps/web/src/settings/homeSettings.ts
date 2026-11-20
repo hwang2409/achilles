@@ -80,7 +80,8 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
       // zeta checks that telemetry can start before it writes (for example `zeta[otel]` is missing); `detail` is its start error
       if (data.code === "telemetry_unavailable") {
         const reason = typeof data.detail === "string" && data.detail.trim() !== "" ? data.detail : message;
-        return { result: failed("not-applied", plain(`not changed. zeta cannot record telemetry on this computer: ${reason}`)), reread: false };
+        // the same request cannot succeed until the install changes; the reread shows a state another tab may have changed
+        return { result: { ...failed("not-applied", plain(`not changed. zeta cannot record telemetry on this computer: ${reason}`)), final: true }, reread: true };
       }
       if (data.code === "custom_home_setting") return { result: failed("not-applied", CUSTOM), reread: true };
       return { result: failed("not-applied", plain(`not changed. zeta refused this change: ${message}`)), reread: false };
@@ -99,6 +100,8 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
   }
 }
 
+/** True whenever telemetry is on, whoever turned it on: only this zeta checked that it can start. */
+export const NEEDS_OTEL = reviewText("a zeta without zeta[otel] does not start; turn it off here.");
 export const receipt = (enabled: boolean) => enabled
   ? reviewText("telemetry is on. restart zeta to start recording. a zeta without zeta[otel] does not start; turn it off here.")
   : reviewText("telemetry is off. restart zeta to stop recording.");

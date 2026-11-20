@@ -18,7 +18,8 @@ const failureCopy: Record<Failure, string> = {
 };
 
 // `message` replaces the fixed copy; build it with a display-safe projection in the adapter.
-export type Result<C> = C | { status: "unknown" } | { status: "failed"; reason: Failure; message?: ReviewText };
+// `final`: the same request cannot succeed again, so the review disables its action until it is opened again.
+export type Result<C> = C | { status: "unknown" } | { status: "failed"; reason: Failure; message?: ReviewText; final?: true };
 type Operation<C> = {
   // Return failed only when the write is known not to have applied. Rejections are unknown.
   execute(): Promise<Result<C>>;
@@ -59,7 +60,7 @@ export function Confirmation(props: ConfirmationProps) {
   const transition = (next: Phase) => { phaseRef.current = next; setPhase(next); };
   const [attempt, setAttempt] = useState<ConfirmationProps>(props);
   const [proof, setProof] = useState("");
-  const [failure, setFailure] = useState<{ reason: Failure; message?: ReviewText } | null>(null);
+  const [failure, setFailure] = useState<{ reason: Failure; message?: ReviewText; final?: true } | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -89,7 +90,11 @@ export function Confirmation(props: ConfirmationProps) {
   useLayoutEffect(() => {
     if (phase === "pending" || phase === "checking") status.current?.focus();
     if (phase === "unknown") retryCheck.current?.focus();
-    if (phase === "review" && failure) status.current?.focus();
+    if (phase === "review" && failure) {
+      status.current?.focus({ preventScroll: true });
+      // the whole reason, not only its first lines, when the dialog body scrolls (200% zoom)
+      status.current?.scrollIntoView({ block: "nearest" });
+    }
   }, [phase, failure]);
 
   const start = () => {
@@ -104,7 +109,7 @@ export function Confirmation(props: ConfirmationProps) {
     if (phaseRef.current === "review") transition("idle");
   };
   const run = async (check: boolean) => {
-    if (check ? phaseRef.current !== "unknown" : phaseRef.current !== "review" || !proved) return;
+    if (check ? phaseRef.current !== "unknown" : phaseRef.current !== "review" || !proved || failure?.final) return;
     transition(check ? "checking" : "pending");
     setFailure(null);
     const resolve = <C extends Committed>(op: Operation<C>) =>
@@ -117,7 +122,7 @@ export function Confirmation(props: ConfirmationProps) {
     if (result.status === "unknown") {
       transition("unknown");
     } else if (result.status === "failed") {
-      setFailure({ reason: result.reason, message: result.message });
+      setFailure({ reason: result.reason, message: result.message, final: result.final });
       transition(attempt.level === 1 ? "idle" : "review");
     } else {
       setReceipt({ text: result.receipt, at: new Date() });
@@ -133,7 +138,7 @@ export function Confirmation(props: ConfirmationProps) {
     </p>;
   const checkButton = phase === "unknown" && <button ref={retryCheck} type="button" onClick={() => void run(true)}>check now</button>;
   const confirmButton = <button ref={node => { if (attempt.level === 1) initial.current = node; }} type={attempt.level === 1 ? "button" : "submit"} onClick={attempt.level === 1 ? () => void run(false) : undefined}
-    className="confirmation-primary" disabled={locked || !proved}>{attempt.action}</button>;
+    className="confirmation-primary" disabled={locked || !proved || failure?.final}>{attempt.action}</button>;
   const notice = <div className="confirmation-activity">
     <div role="status">{receipt && <p>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
       {receipt.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></p>}</div>

@@ -6,7 +6,7 @@ import { ModuleFrame } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta";
-import { HOME_SETTINGS_FEATURE, readHomeSettings, receipt, telemetryChange, type HomeSettings, type Restart } from "./homeSettings";
+import { HOME_SETTINGS_FEATURE, NEEDS_OTEL, plain, readHomeSettings, receipt, STALE, telemetryChange, type HomeSettings, type Restart, type TelemetryState } from "./homeSettings";
 import "./settings-place.css";
 
 type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;
@@ -83,6 +83,8 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   const noteRef = useRef<HTMLParagraphElement>(null);
   const generation = useRef(0);
   const scrolled = useRef(false);
+  // a write that asked for a reread: the state it saw, to tell when another tab changed it meanwhile
+  const landing = useRef<TelemetryState | null>(null);
   const reread = useCallback(() => {
     const mine = ++generation.current;
     // the live client: a reread asked for by a borrowed write runs after control went back
@@ -110,6 +112,16 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
     status.current?.parentElement?.scrollIntoView({ block: "nearest" });
   }, [change]);
   useLayoutEffect(() => {
+    if (load.kind !== "ready" || landing.current === null) return;
+    const changed = load.settings.telemetry !== landing.current;
+    landing.current = null;
+    if (!changed) return;
+    // the review closed with the old state: say the state changed, keep zeta's reason, and focus the row's control
+    setStale(true);
+    setNote((note) => note === null || note === STALE ? STALE : plain(`${STALE} ${note.replace(/^not changed\. /, "")}`));
+    (document.getElementById("telemetry")?.querySelector("button") ?? noteRef.current)?.focus();
+  }, [load]);
+  useLayoutEffect(() => {
     if (!refocus.current) return;
     (document.getElementById("telemetry")?.querySelector("button") ?? noteRef.current)?.focus();
     refocus.current = refocus.current === "now" ? "read" : null;
@@ -125,7 +137,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   else {
     const { settings } = load;
     const op = (enabled: boolean) => {
-      const attempt = telemetryChange({ before: settings, enabled, withControl, live, reread,
+      const attempt = telemetryChange({ before: settings, enabled, withControl, live, reread: () => { landing.current = settings.telemetry; reread(); },
         committed: (next, restart) => { generation.current++; setNote(null); setLoad({ kind: "ready", settings: next }); setChange({ enabled, restart, at: new Date() }); } });
       const settle = (result: Attempt) => {
         const failed = result.status === "failed" ? result : null;
@@ -170,10 +182,8 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
     {control}
     <div ref={setActivity} className="sp-activity" />
     {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role="status">{note}</p>}
-    {/* another tab turned it on: the same guidance as this tab's own on receipt */}
-    {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <div className="sp-receipt sp-result">
-      <p>{receipt(true)}</p><p>{restartText(null)}</p>
-    </div>}
+    {/* another tab turned it on: no receipt, this tab wrote nothing and no zeta checked this install */}
+    {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <p className="sp-note sp-result">{NEEDS_OTEL}</p>}
     {change && <div className="sp-receipt">
       <p ref={status} tabIndex={-1} role="status">at <time dateTime={change.at.toISOString()}>
         {change.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</time>: {receipt(change.enabled)}</p>
