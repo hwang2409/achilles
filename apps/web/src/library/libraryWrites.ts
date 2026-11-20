@@ -23,9 +23,12 @@ export type WriteOutcome =
   | { status: "stale" | "busy" | "observer" | "invalid" | "unavailable" | "unknown"; message: string };
 export type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
 
-/** Create needs the feature and this kind's exact write method in hello. */
-export const canCreate = (client: ZetaClient, kind: LibraryKind) =>
-  supportsFeature(client, WRITE_FEATURE) && supportsRequest(client, libraryMethods(kind).write);
+/** `none`: no write control (no `library_write_v1`). zeta lists methods per role, so an observer hello never names a
+ * write: an observer shows the control on the feature alone, and a controller also needs this kind's write method. */
+export const writeAccess = (client: ZetaClient, kind: LibraryKind, controller: boolean): "none" | "allowed" | "refused" =>
+  !supportsFeature(client, WRITE_FEATURE) ? "none" : !controller || supportsRequest(client, libraryMethods(kind).write) ? "allowed" : "refused";
+/** Shown when take control succeeded but this zeta does not list the write method. */
+export const REFUSED_NOTICE = "this zeta does not allow saving here";
 
 /** zeta's name rule (library.py `valid_name`) as copy; null when the name is usable. */
 export function nameProblem(name: string): string | null {

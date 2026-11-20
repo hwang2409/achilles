@@ -10,6 +10,8 @@ type Props = {
   /** The catalog method used to probe project scope; null when this zeta has no live catalog. */
   catalogMethod: string | null;
   takeControl: () => Promise<string | null>;
+  /** Why this tab cannot save here; the draft stays visible, read-only, and nothing is sent. */
+  blocked: string | null;
   onCreated: (name: string, redacted: boolean) => void;
   onOpen: (name: string) => void;
   onClose: () => void;
@@ -21,7 +23,7 @@ const header = (kind: LibraryKind, name: string, description: string) =>
 
 /** The create form. Its text lives only in this component's memory (a draft can hold a secret), and the component
  * keeps its place when take control swaps the client, so the draft survives. */
-export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeControl, onCreated, onOpen, onClose }: Props) {
+export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeControl, blocked, onCreated, onOpen, onClose }: Props) {
   const noun = kind === "skills" ? "skill" : "profile";
   const id = useId();
   const [name, setName] = useState("");
@@ -61,7 +63,7 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     : existing.source !== scope ? `this will win over the ${existing.source} ${name}.` : null);
 
   async function save() {
-    if (pending) return;
+    if (pending || blocked) return;
     setTried(true);
     if (problems.length) return alert.current?.focus();
     setPending(true);
@@ -81,29 +83,30 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     <h2>new {noun}</h2>
     <div className="library-editor-row">
       <label htmlFor={`${id}-name`}>name</label>
-      <input id={`${id}-name`} ref={nameField} value={name} autoComplete="off" spellCheck={false} aria-describedby={`${id}-rules`} aria-invalid={Boolean(name && nameProblem(name))}
+      <input id={`${id}-name`} ref={nameField} readOnly={Boolean(blocked)} value={name} autoComplete="off" spellCheck={false} aria-describedby={`${id}-rules`} aria-invalid={Boolean(name && nameProblem(name))}
         onChange={(event) => setName(event.target.value)} />
       <small id={`${id}-rules`} data-invalid={Boolean(name && nameProblem(name)) || undefined}>one word: no spaces, no / or \, not . or ..</small>
     </div>
     <fieldset className="library-editor-row">
       <legend>scope</legend>
-      <label><input type="radio" name={`${id}-scope`} checked={scope === "home"} onChange={() => setScope("home")} /> home · every project</label>
-      <label><input type="radio" name={`${id}-scope`} checked={scope === "project"} disabled={project !== "available"} aria-describedby={`${id}-project`}
+      <label><input type="radio" name={`${id}-scope`} checked={scope === "home"} disabled={Boolean(blocked) && scope !== "home"} onChange={() => setScope("home")} /> home · every project</label>
+      <label><input type="radio" name={`${id}-scope`} checked={scope === "project"} disabled={project !== "available" || (Boolean(blocked) && scope !== "project")} aria-describedby={`${id}-project`}
         onChange={() => setScope("project")} /> project · this project only</label>
       {project !== "available" && <small id={`${id}-project`}>{project === "checking" ? "checking project items…" : project}</small>}
     </fieldset>
     <div className="library-editor-row">
       <label htmlFor={`${id}-description`}>description</label>
-      <input id={`${id}-description`} value={description} autoComplete="off" disabled={edited !== null} onChange={(event) => setDescription(event.target.value)} />
+      <input id={`${id}-description`} readOnly={Boolean(blocked)} value={description} autoComplete="off" disabled={edited !== null} onChange={(event) => setDescription(event.target.value)} />
       {edited !== null && <small>edit the description in the file text.</small>}
     </div>
     <div className="library-editor-row">
       <label htmlFor={`${id}-text`}>{name || "<name>"}.md · file text</label>
-      <textarea id={`${id}-text`} value={text} spellCheck={false} rows={12} onChange={(event) => setEdited(event.target.value)} />
+      <textarea id={`${id}-text`} readOnly={Boolean(blocked)} value={text} spellCheck={false} rows={12} onChange={(event) => setEdited(event.target.value)} />
       <small>the name and description fill the header until you edit the file text. sessions pick up the change at their next catalog refresh.</small>
     </div>
     {shadow && <p className="library-flag">{shadow}</p>}
     <div ref={alert} tabIndex={-1} className="library-editor-status">
+      {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
       {tried && problems.length > 0 && <ul role="alert" className="library-error">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
       {failure && <div role="alert">
         <p className="library-error">{failure.message}</p>
@@ -116,9 +119,9 @@ export function LibraryEditor({ client, kind, writer, rows, catalogMethod, takeC
     </div>
     <div className="library-editor-actions">
       <button type="button" onClick={() => { abort.current?.abort(); onClose(); }}>discard</button>
-      <button type="button" className="library-primary" aria-disabled={pending || (tried && problems.length > 0)} onClick={() => void save()}>
+      {!blocked && <button type="button" className="library-primary" aria-disabled={pending || (tried && problems.length > 0)} onClick={() => void save()}>
         {pending ? "saving…" : tried && problems.length ? `save · fix ${problems.length} ${problems.length === 1 ? "problem" : "problems"} first` : `save ${noun}`}
-      </button>
+      </button>}
     </div>
   </section>;
 }

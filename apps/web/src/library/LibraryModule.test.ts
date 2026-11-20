@@ -1,9 +1,11 @@
 import "../test-dom";
 import { afterEach, expect, test } from "bun:test";
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { LibraryModule } from "./LibraryModule";
+
+// after test-dom: React must see the registered DOM, or input events never reach onChange.
+const { act, cleanup, fireEvent, render } = await import("@testing-library/react");
+const { LibraryModule } = await import("./LibraryModule");
 
 afterEach(cleanup);
 
@@ -51,4 +53,26 @@ test("a page with no rows still lists the files zeta skipped", async () => {
   expect(await view.findByText("no skills found")).toBeTruthy();
   expect(view.container.querySelector(".library-skipped summary")?.textContent).toBe("1 file skipped or shadowed");
   expect(view.container.querySelector(".library-skipped li")?.textContent).toBe("home · broken/SKILL.md invalid YAML frontmatter");
+});
+
+test("a draft stays visible and read-only when zeta stops allowing the save, and nothing is sent", async () => {
+  const calls: string[] = [];
+  const client = { request: (method: string) => { calls.push(method); return Promise.resolve({ revision: "r", data: { items: [] } }); } } as unknown as ZetaClient;
+  const write = { controller: true, allowed: true, takeControl: async () => null };
+  const props = { client, kind: "skills" as const, reads: { catalog: true, read: true } };
+  const view = render(createElement(LibraryModule, { ...props, write }));
+  await view.findByText("no skills found");
+  fireEvent.click(view.getByRole("button", { name: "+ new skill" }));
+  for (const [label, value] of [["name", "fixture-draft"], ["description", "synthetic draft"]] as const) {
+    const field = view.getByLabelText(label);
+    await act(async () => { fireEvent.change(field, { target: { value } }); });
+  }
+  view.rerender(createElement(LibraryModule, { ...props, write: { ...write, allowed: false } }));
+
+  const text = view.container.querySelector<HTMLTextAreaElement>(".library-editor textarea")!;
+  expect(text.value).toContain('name: "fixture-draft"');
+  expect(text.readOnly).toBe(true);
+  expect(view.getByRole("alert").textContent).toBe("this zeta does not allow saving here. your text is kept; nothing was sent.");
+  expect(view.queryByRole("button", { name: /^save/ })).toBeNull();
+  expect(calls.filter((method) => method.endsWith("_write"))).toEqual([]);
 });

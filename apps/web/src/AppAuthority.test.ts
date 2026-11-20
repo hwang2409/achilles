@@ -193,10 +193,11 @@ const userMessage = { id: "message", role: "user", content: [{ type: "text", tex
 const pendingKey = "achilles-pending-chats";
 const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 // The skills route with library_read_v1, and library_write_v1 + skill_write when `writes` (each part can be withheld).
+// Like zeta, hello lists a controller-write method only to a controller.
 const library = (writes: boolean, feature = writes, method = writes): Options => ({ path: "/skills", observerBanner: false, rpc: {
   hello: (params) => ({ result: { protocol_version: "1.2", capabilities: {
     features: (params.features as string[]).filter((name) => name !== "library_write_v1" || feature),
-    requests: ["skill_catalog", "skill_read", ...(method ? ["skill_write"] : [])],
+    requests: ["skill_catalog", "skill_read", ...(method && params.role === "controller" ? ["skill_write"] : [])],
   } } }),
   skill_catalog: () => ({ result: { revision: "r", data: { items: [] } } }),
   skill_write: async (params) => ({ result: { revision: await sha256((params.mutation as { document: string }).document), data: { name: params.name, scope: params.scope, redacted: false } } }),
@@ -454,14 +455,24 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
 });
 
 test.each([
-  ["no library_write_v1", library(true, false, true), false],
-  ["no skill_write method", library(true, true, false), false],
-  ["neither", library(false), false],
-  ["both", library(true), true],
-] as const)("library create control renders only with the write capability: %s", async (_name, options, shown) => {
-  await withApp("controller", options, async (app) => {
+  ["no library_write_v1", library(true, false, true), false, false],
+  ["the controller lacks skill_write", library(true, true, false), true, false],
+  ["neither", library(false), false, false],
+  ["both", library(true), true, true],
+] as const)("library create control renders only with the write capability: %s", async (_name, options, observer, controller) => {
+  await withApp("controller", options, async (app, writes) => {
     await app.findByText("no skills found");
-    expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(shown);
+    // an observer hello never lists write methods, so the observer view depends on the feature alone.
+    expect(Boolean(app.container.querySelector(tag("library.create")))).toBe(observer);
+    if (observer) await click(select(app, tag("library.create")));
+    // after take control the form opens; without the write method it is read-only, says why, and has no save.
+    expect(Boolean(app.container.querySelector(".library-editor"))).toBe(observer);
+    if (observer) {
+      expect(Boolean(app.queryByText(/^save skill$/))).toBe(controller);
+      expect(Boolean(app.queryByText("this zeta does not allow saving here. your text is kept; nothing was sent."))).toBe(!controller);
+      expect((select(app, ".library-editor textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
+    }
+    expect(writes).toEqual([]);
   });
 });
 

@@ -7,7 +7,7 @@ import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, supportsFeature, supportsRequest, type Connection } from "../zeta";
 import { libraryMethods, type LibraryKind } from "../library/catalog";
-import { canCreate } from "../library/libraryWrites";
+import { writeAccess } from "../library/libraryWrites";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { useAgentNavAdapter } from "./AgentNavAdapter";
 import { ModuleFrame, ModuleState } from "./ModuleState";
@@ -30,6 +30,7 @@ export function SurfaceRouter() {
   const phase = connectionState.phase;
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
+  const controller = connectionState.phase === "connected" && connectionState.authority === "controller";
   const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
@@ -42,7 +43,7 @@ export function SurfaceRouter() {
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
-        write={canCreate(client, route.id) ? { controller: connectionState.phase === "connected" && connectionState.authority === "controller", takeControl: () => connection.takeControl() } : null} />) : <ModuleFrame title={route.label}>
+        write={libraryWrite(client, route.id, controller, connection)} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
@@ -57,6 +58,11 @@ function libraryReads(client: ZetaClient, kind: LibraryKind) {
   const methods = libraryMethods(kind);
   const granted = supportsFeature(client, "library_read_v1");
   return { catalog: granted && supportsRequest(client, methods.catalog), read: granted && supportsRequest(client, methods.read) };
+}
+
+function libraryWrite(client: ZetaClient, kind: LibraryKind, controller: boolean, connection: Connection) {
+  const access = writeAccess(client, kind, controller);
+  return access === "none" ? null : { controller, allowed: access === "allowed", takeControl: () => connection.takeControl() };
 }
 
 type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children: (activity: BuildActivity) => ReactNode };
