@@ -73,6 +73,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [change, setChange] = useState<Change | null>(null);
   const [note, setNote] = useState<ReviewText | null>(null);
+  const [stale, setStale] = useState(false);
   const [activity, setActivity] = useState<HTMLElement | null>(null);
   // a stale change remounts the confirmation, so the next attempt sends the reread revision
   const [attempts, setAttempts] = useState(0);
@@ -99,11 +100,15 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
     if (load.kind === "loading" || scrolled.current) return;
     scrolled.current = true;
     if (location.hash !== "#telemetry") return;
-    const heading = document.querySelector<HTMLElement>("#telemetry h3");
-    heading?.focus({ preventScroll: true });
-    heading?.scrollIntoView({ block: "center" });
+    document.querySelector<HTMLElement>("#telemetry h3")?.focus({ preventScroll: true });
+    // the whole row, so the control under the heading is in view too
+    document.getElementById("telemetry")?.scrollIntoView({ block: "start" });
   }, [load.kind]);
-  useEffect(() => { if (change) status.current?.focus(); }, [change]);
+  useEffect(() => {
+    if (!change) return;
+    status.current?.focus({ preventScroll: true });
+    status.current?.parentElement?.scrollIntoView({ block: "nearest" });
+  }, [change]);
   useLayoutEffect(() => {
     if (!refocus.current) return;
     (document.getElementById("telemetry")?.querySelector("button") ?? noteRef.current)?.focus();
@@ -126,6 +131,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
         const failed = result.status === "failed" ? result : null;
         // a refusal with zeta's own reason, and a stale change, stay in the row after the confirmation closes
         setNote(failed?.message && (enabled || failed.reason === "changed") ? failed.message : null);
+        setStale(failed?.reason === "changed");
         if (failed?.reason === "changed") { refocus.current = "now"; setAttempts((count) => count + 1); }
         return result;
       };
@@ -146,7 +152,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
           scope={reviewText("every zeta on this computer (settings.toml in your zeta home)")}
           current={reviewText("off")} after={reviewText("on. zeta sends traces to the built-in receiver on 127.0.0.1:4323")}
           effect={reviewText("records timings, model, tokens, tool names and error types on this computer. never prompts, replies, or tool arguments. it starts after zeta serve and running sessions restart. zeta needs zeta[otel] installed. zeta checks this before it writes; if telemetry cannot start, zeta refuses and says why here.")}
-          undo={reviewText("turn it off here. settings.toml goes back to the exact bytes it had.")}
+          undo={reviewText("turn it off here. zeta removes its telemetry lines; the rest of settings.toml stays as it was.")}
           proof={{ kind: "scope", label: reviewText("i understand this applies to every zeta on this computer") }}
           action={reviewText("turn on telemetry")} keep={reviewText("keep it off")} {...op(true)} />}
       </div>;
@@ -164,9 +170,13 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
     {control}
     <div ref={setActivity} className="sp-activity" />
     {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role="status">{note}</p>}
+    {/* another tab turned it on: the same guidance as this tab's own on receipt */}
+    {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <div className="sp-receipt sp-result">
+      <p>{receipt(true)}</p><p>{restartText(null)}</p>
+    </div>}
     {change && <div className="sp-receipt">
-      <p ref={status} tabIndex={-1} role="status">{receipt(change.enabled)} at <time dateTime={change.at.toISOString()}>
-        {change.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}</time></p>
+      <p ref={status} tabIndex={-1} role="status">at <time dateTime={change.at.toISOString()}>
+        {change.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</time>: {receipt(change.enabled)}</p>
       <p>{restartText(change.restart)} this list goes away when you leave this page.</p>
     </div>}
   </Row>;
@@ -212,9 +222,9 @@ function Defaults({ client }: { client: ZetaClient }) {
   if (defaults === "loading") return <p className="sp-dim" role="status">reading zeta defaults…</p>;
   if ("failed" in defaults) return <p className="sp-note">{defaults.failed}</p>;
   const rows: [string, string, string][] = [
-    ["model", defaults.model ?? "not set", "change it in the terminal (model in settings.toml). a chat can change its own model."],
-    ["provider", defaults.provider ?? "not set", "change it in the terminal (provider in settings.toml)."],
-    ["approval mode", defaults.approval === "allow" ? "allow without asking" : defaults.approval ?? "not set", "change it in the terminal (yolo in settings.toml). a chat can change its own approvals."],
+    ["model", defaults.model ?? "not set in settings.toml", "change it in the terminal (model in settings.toml). a chat can change its own model."],
+    ["provider", defaults.provider ?? "not set in settings.toml", "change it in the terminal (provider in settings.toml)."],
+    ["approval mode", defaults.approval === "allow" ? "allow without asking" : defaults.approval ?? "not set in settings.toml", "change it in the terminal (yolo in settings.toml). a chat can change its own approvals."],
     ["agent nesting depth", String(defaults.depth), "change it in the terminal (max_depth under [agents] in settings.toml)."],
   ];
   return <dl className="sp-defaults">

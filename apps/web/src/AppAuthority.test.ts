@@ -442,7 +442,8 @@ const rows: Record<WriteSurfaceId, Row> = {
       expect((await app.findByRole("alert")).textContent).toBe("not changed. another tab has control; a chat tab keeps it while it is open. try again after it finishes or closes.");
       return;
     }
-    expect(await app.findByText(/^telemetry is on\. restart zeta to start recording\. at/)).toBeTruthy();
+    // the time is its own element: match the receipt's whole text
+    expect(await app.findByText((_, node) => node?.tagName === "P" && /^at .+: telemetry is on\. restart zeta to start recording\.$/.test(node.textContent ?? ""))).toBeTruthy();
     expect(app.getByText("restart zeta serve. this list goes away when you leave this page.")).toBeTruthy();
     didWrite(writes, "home_settings_update");
   } },

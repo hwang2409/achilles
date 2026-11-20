@@ -61,7 +61,7 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     await waitFor(async () => await tab.evaluate(() => document.activeElement?.textContent) === "turn off", "focus on the row control after a stale change");
     console.log("settings telemetry: an outside edit made the change stale; nothing was written; the row kept the reason and the focus");
     await confirmOff();
-    await waitFor(() => row.getByText(/^telemetry is off\. restart zeta to stop recording\. at /).isVisible(), "telemetry off receipt");
+    await waitFor(() => row.getByText(/^at .+: telemetry is off\. restart zeta to stop recording\.$/).isVisible(), "telemetry off receipt");
     if ((await bytes()) !== `${original ?? ""}# synthetic gate edit\n`) throw new Error("telemetry off did not remove exactly the built-in line");
     console.log("settings telemetry: off removed exactly the built-in line");
   } finally {
