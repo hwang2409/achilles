@@ -256,7 +256,7 @@ function ChatRow({ chat, build, current, active, index, query, onSelect, onRenam
   const state = chat.purpose === "page_build" ? buildTone(build) : chat.last_state;
   const label = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
+  const meta = <span><span className="chat-row-meta" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>

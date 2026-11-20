@@ -71,7 +71,9 @@
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .create-landing .build-meta { display: flex; flex-wrap: wrap; gap: 0 6px; }
 .create-landing .build-meta :is(em, time) { font-style: normal; white-space: nowrap; }
-.create-landing .build-meta em + time::before { content: "· "; }
+/* the separator ends the state, so a wrapped line never starts with it */
+.create-landing .build-meta em::after { content: " ·"; }
+.create-landing li > a > b { white-space: nowrap; }
 .create-landing li[data-last-known] { border-color: var(--fulcrum-border); background: transparent; }
 .create-landing .build-tools { display: block; padding: 0 12px 8px; color: var(--fulcrum-muted); overflow-wrap: anywhere; }
 .create-landing .build-results { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 0 12px 8px; }

@@ -51,7 +51,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
               const label = buildLabel(row);
               return <li key={chat.session_id} data-state={state ?? undefined} data-last-known={reason ? "" : undefined}>
                 <a href={chatHref(chat)}><span><strong>{titleOf(chat)}</strong>
-                  <small className="build-meta">{label && <em>{label}</em>}<time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></small></span>
+                  <small className="build-meta">{label && <em title={label}>{label}</em>}<time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></small></span>
                   <b>{state === "needs you" && !reason ? "answer" : "open chat"}</b></a>
                 {tools.length > 0 && <small className="build-tools">{tools.map((tool) => tool.replace(/^achilles__/, "")).join(" · ")}</small>}
                 {results.length > 0 && <ul className="build-results" aria-label="result pages">{results.map((route) => <li key={route}><a href={surfaceHref(route)}>{route}</a></li>)}</ul>}
