@@ -67,7 +67,7 @@ function deferred<T>() {
 }
 
 const page = { id: "home", route: "/", title: "home", zeta_session_id: "chat", workspace: "/tmp", create_mode: false, approval_mode: "allow", layout: { blocks: [] } };
-const chat = { session_id: "chat", page_id: "home", title: "chat", last_state: "idle" };
+const chat = { purpose: "chat" as const, session_id: "chat", page_id: "home", title: "chat", last_state: "idle" };
 
 function client(firstResume?: Promise<unknown>) {
   let resumes = 0;
@@ -1032,6 +1032,8 @@ test.each([
 
 test.each([
   ["double new chat", "new", "new", false],
+  ["build leaves a failed ordinary chat for its own retry", "build", "new", true],
+  ["build registers purpose before its first send", "build", "new", true],
   ["new chat then build", "new", "build", false],
   ["build then new chat", "build", "new", false],
   ["Enter and click in the same tick", "new", "new", true],
@@ -1040,12 +1042,14 @@ test.each([
   const draft = "  make a reading list\nwith tags  ";
   const location = new URL("http://achilles.test/create");
   const mode: unknown[] = [];
-  const registrations: unknown[] = [];
+  const registrations: { session_id: string; purpose?: Chat["purpose"] }[] = [];
   const deliveries: Array<{ session_id: string; delivery_id: string; text: string }> = [];
   const firstDelivery = deferred<unknown>();
   const registered = deferred<Response>();
   const navigations: string[] = [];
   const refused = name === "refused build permits retry";
+  const failedOrdinary = name === "build leaves a failed ordinary chat for its own retry";
+  let ordinaryAttempts = 0;
   let sessions = 0;
   setGlobals({
     localStorage: new MemoryStorage(), location,
@@ -1055,16 +1059,21 @@ test.each([
       const url = String(input);
       if (url === "/api/pages/home") return Response.json(page);
       if (url === "/api/pages/home/credential") return Response.json({ credential: "synthetic" });
-      if (url === "/api/pages/home/chats") { registrations.push(JSON.parse(String(init?.body))); return registered.promise; }
+      if (url === "/api/pages/home/chats") {
+        const payload = JSON.parse(String(init?.body));
+        registrations.push(payload);
+        if (failedOrdinary && payload.session_id === "ordinary-chat") return Response.json({}, { status: ordinaryAttempts++ === 0 ? 500 : 201 });
+        return registered.promise;
+      }
       if (url === "/api/pages/home/create-mode") { mode.push(JSON.parse(String(init?.body))); return Response.json({ create_mode: true }); }
-      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, session_id: "build-chat" }], next: null });
-      if (url === "/api/chats/build-chat") return new Response(null, { status: 204 });
+      if (url.startsWith("/api/chats?")) return Response.json({ chats: [{ ...chat, session_id: "build-chat", purpose: first === "build" ? "page_build" : "chat" }], next: null });
+      if (url === "/api/chats/build-chat" || (failedOrdinary && url === "/api/chats/ordinary-chat")) return new Response(null, { status: 204 });
       throw new Error(`unexpected fetch ${url}`);
     },
   });
   const underlying = client();
   const zeta = { ...underlying, async request(method: string, params: typeof deliveries[number]) {
-    if (method === "new_session") { sessions++; return { session: { session_id: "build-chat" } }; }
+    if (method === "new_session") { sessions++; return { session: { session_id: failedOrdinary && sessions === 1 ? "ordinary-chat" : "build-chat" } }; }
     if (method === "send") { deliveries.push(params); return refused && deliveries.length === 1 ? firstDelivery.promise : { accepted: true }; }
     return underlying.request(method);
   } };
@@ -1076,11 +1085,20 @@ test.each([
   expect(underlying.resumes).toBe(0);
   await act(async () => { active.build.setDraft(draft); });
   const call = (kind: "new" | "build") => kind === "new" ? active.newChat() : active.build.start();
+  if (failedOrdinary) await act(async () => { await active.newChat(); });
   let start: Promise<void> | undefined;
   let duplicate: Promise<void> | undefined;
   try {
     await act(async () => { start = call(first); if (sameTick) duplicate = call(second); });
-    await flushUntil(() => registrations.length > 0);
+    await flushUntil(() => registrations.length > (failedOrdinary ? 1 : 0));
+    if (failedOrdinary) {
+      expect(registrations.map((row) => row.session_id)).toEqual(["ordinary-chat", "build-chat"]);
+      expect(registrations[1]).toEqual({ session_id: "build-chat", purpose: "page_build" });
+    }
+    if (name === "build registers purpose before its first send") {
+      expect(registrations).toEqual([{ session_id: "build-chat", purpose: "page_build" }]);
+      expect(deliveries).toEqual([]);
+    }
     await act(async () => {
       if (!sameTick) duplicate = call(second);
       await Promise.resolve();
@@ -1098,8 +1116,11 @@ test.each([
     } else {
       await act(async () => { await Promise.all([start, duplicate]); });
     }
-    expect(sessions).toBe(1);
-    expect(registrations).toEqual([{ session_id: "build-chat" }]);
+    expect(sessions).toBe(failedOrdinary ? 2 : 1);
+    expect(registrations).toEqual([
+      ...(failedOrdinary ? [{ session_id: "ordinary-chat" }] : []),
+      { session_id: "build-chat", ...(first === "build" ? { purpose: "page_build" } : {}) },
+    ]);
     expect(navigations).toEqual(["/?chat=build-chat"]);
     expect(location.pathname + location.search).toBe("/?chat=build-chat");
     expect(active.state).toMatchObject({ phase: "ready", sessionId: "build-chat", page: { id: "home", create_mode: first === "build" } });
@@ -1110,6 +1131,11 @@ test.each([
       expect(deliveries).toHaveLength(refused ? 2 : 1);
       expect(active.build.draft).toBe("");
     } else expect(deliveries).toEqual([]);
+    if (failedOrdinary) {
+      await act(async () => { await active.newChat(); });
+      expect(registrations[2]).toEqual({ session_id: "ordinary-chat" });
+      expect(sessions).toBe(2);
+    }
   } finally {
     registered.resolve(Response.json({}, { status: 201 }));
     firstDelivery.resolve({ accepted: false });

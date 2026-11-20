@@ -1,4 +1,5 @@
 import type { ZetaClient } from "@fulcrum/zeta";
+import type { Chat } from "./surface/AgentNavAdapter";
 import { chatQueues } from "./composer/chatQueues";
 import { applyApprovalMode, ChatBusyError, pageBinding, runningSession } from "./zeta/session";
 
@@ -7,8 +8,8 @@ const MODE_STORAGE_KEY = "achilles-pending-create-modes";
 const stages = ["created", "registered", "approvalApplied", "mapped", "attached", "modeApplied"] as const;
 type Stage = typeof stages[number];
 
-export type PendingChat = { sessionId: string; pageId: string; mode: "ask" | "allow"; stage: Stage; expectedSessionId?: string | null; mappedSessionId?: string; lastError?: string };
-export type ChatCreationInput = { client: ZetaClient; pageId: string; credential: string; cwd: string; mode: "ask" | "allow"; mapExpectedSessionId?: string | null };
+export type PendingChat = { sessionId: string; pageId: string; mode: "ask" | "allow"; purpose?: Chat["purpose"]; stage: Stage; expectedSessionId?: string | null; mappedSessionId?: string; lastError?: string };
+export type ChatCreationInput = { client: ZetaClient; pageId: string; credential: string; cwd: string; mode: "ask" | "allow"; purpose?: Chat["purpose"]; mapExpectedSessionId?: string | null };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem"> & Partial<Pick<globalThis.Storage, "removeItem">>;
 type AttachedChat = { sessionId: string };
 /**
@@ -37,6 +38,7 @@ function isPendingChat(value: unknown): value is PendingChat {
   return typeof record.sessionId === "string" && record.sessionId.length > 0
     && typeof record.pageId === "string" && record.pageId.length > 0
     && (record.mode === "ask" || record.mode === "allow")
+    && (!Object.hasOwn(record, "purpose") || record.purpose === "chat" || record.purpose === "page_build")
     && stages.includes(record.stage as Stage)
     && (!Object.hasOwn(record, "expectedSessionId") || hasMapping)
     && (!Object.hasOwn(record, "lastError") || typeof record.lastError === "string")
@@ -73,36 +75,43 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
   const listeners = new Set<() => void>();
   const snapshots = new Map<string, { pending: PendingChat | null; error: string | null; createMode: boolean | undefined }>();
   const volatile = new Map<string, PendingChat>();
-  const pending = (pageId: string) => volatile.get(pageId) ?? readRecords(storage).find((record) => record.pageId === pageId) ?? null;
-  const publish = (pageId: string, record: PendingChat | null) => {
-    snapshots.set(pageId, { pending: record, error: record?.lastError ?? null, createMode: readModes(storage)[pageId] });
+  const keyOf = (pageId: string, purpose: Chat["purpose"] = "chat") => `${purpose}:${pageId}`;
+  const recordKey = (record: PendingChat) => keyOf(record.pageId, record.purpose);
+  const pending = (key: string) => volatile.get(key) ?? readRecords(storage).find((record) => recordKey(record) === key) ?? null;
+  const makeSnapshot = (pageId: string, purpose: Chat["purpose"] | undefined, record: PendingChat | null) =>
+    ({ pending: record, error: record?.lastError ?? null, createMode: purpose === "page_build" ? undefined : readModes(storage)[pageId] });
+  const publish = (pageId: string, purpose: Chat["purpose"] | undefined, record: PendingChat | null) => {
+    snapshots.set(keyOf(pageId, purpose), makeSnapshot(pageId, purpose, record));
     listeners.forEach((listener) => listener());
   };
   const save = (record: PendingChat) => {
-    volatile.set(record.pageId, record);
-    const records = readRecords(storage).filter((item) => item.pageId !== record.pageId);
+    const key = recordKey(record);
+    volatile.set(key, record);
+    const records = readRecords(storage).filter((item) => recordKey(item) !== key);
     records.push(record);
     writeRecords(storage, records);
-    publish(record.pageId, record);
+    publish(record.pageId, record.purpose, record);
   };
-  const clearDurable = (pageId: string) => {
-    writeRecords(storage, readRecords(storage).filter((record) => record.pageId !== pageId));
+  const clearDurable = (key: string) => {
+    writeRecords(storage, readRecords(storage).filter((record) => recordKey(record) !== key));
   };
-  const complete = (pageId: string) => {
-    volatile.delete(pageId);
-    publish(pageId, null);
+  const complete = (pageId: string, purpose?: Chat["purpose"]) => {
+    volatile.delete(keyOf(pageId, purpose));
+    publish(pageId, purpose, null);
   };
   const advance = (record: PendingChat, change: Partial<PendingChat>) => {
     const { lastError: _lastError, ...current } = record;
     return { ...current, ...change } as PendingChat;
   };
 
-  const forget = (pageId: string) => { clearDurable(pageId); complete(pageId); };
+  const forget = (pageId: string, purpose?: Chat["purpose"]) => { clearDurable(keyOf(pageId, purpose)); complete(pageId, purpose); };
 
   const ensure = <T extends AttachedChat>({ input, current, attach, applyCreateMode, publishReady = () => {}, create = true }: CreateRequest<T>): Promise<T> | null => {
-    const active = running.get(input.pageId);
+    const key = keyOf(input.pageId, input.purpose);
+    const ordinary = input.purpose !== "page_build";
+    const active = running.get(key);
     if (active) return active as Promise<T>;
-    const existing = pending(input.pageId);
+    const existing = pending(key);
     if (!create && !existing) return null;
     // an attachment that is already stale starts nothing and keeps the page's pending record
     if (!current()) return Promise.reject(new StaleCreation());
@@ -111,9 +120,9 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       if (current()) return;
       // the home mapping names this create's own chat, so the page opens it now: its new-chat rows go there. a chat
       // another tab mapped (409) was not written for: they stay in the new-chat box
-      const stale = pending(input.pageId);
+      const stale = pending(key);
       if (stale?.mappedSessionId && stale.mappedSessionId === stale.sessionId) chatQueues.created(`new:${input.pageId}`, stale.sessionId);
-      forget(input.pageId);
+      forget(input.pageId, input.purpose);
       throw new StaleCreation();
     };
     const step = <R>(run: () => Promise<R>) => { live(); return run(); };
@@ -128,12 +137,12 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
         const sessionId = result.session?.session_id;
         if (!sessionId) throw new Error("zeta did not return a session id");
         live();
-        record = { sessionId, pageId: input.pageId, mode: input.mode, stage: "created", ...(Object.hasOwn(input, "mapExpectedSessionId") ? { expectedSessionId: input.mapExpectedSessionId } : {}) }; save(record);
+        record = { sessionId, pageId: input.pageId, mode: input.mode, purpose: input.purpose, stage: "created", ...(Object.hasOwn(input, "mapExpectedSessionId") ? { expectedSessionId: input.mapExpectedSessionId } : {}) }; save(record);
       }
       if (record.stage === "created") {
-        const { sessionId } = record;
+        const { sessionId, purpose } = record;
         const response = await step(() => request(`/api/pages/${input.pageId}/chats`, {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: sessionId }),
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: sessionId, purpose }),
         }));
         if (!response.ok) throw new Error(`could not save chat (${response.status})`);
         record = advance(record, { stage: "registered" }); save(record);
@@ -156,7 +165,7 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       const target = record.mappedSessionId ?? record.sessionId;
       let attached = await step(() => attach(target));
       record = advance(record, { stage: "attached" }); save(record);
-      const createMode = readModes(storage)[input.pageId];
+      const createMode = ordinary ? readModes(storage)[input.pageId] : undefined;
       if (createMode !== undefined && applyCreateMode) {
         const shown = attached;
         attached = await step(() => applyCreateMode(shown, createMode));
@@ -165,38 +174,39 @@ export function createChatCreationOwner(storage: Storage = localStorage, request
       if (createMode !== undefined) {
         const modes = readModes(storage); delete modes[input.pageId]; writeModes(storage, modes);
       }
-      clearDurable(input.pageId);
+      clearDurable(key);
       // before the chat renders, so its composer takes the new-chat queue; only into this create's own chat (not a 409 one)
-      if (attached.sessionId === record.sessionId) chatQueues.created(`new:${input.pageId}`, attached.sessionId);
+      if (ordinary && attached.sessionId === record.sessionId) chatQueues.created(`new:${input.pageId}`, attached.sessionId);
       await publishReady(attached);
-      complete(input.pageId);
+      complete(input.pageId, input.purpose);
       return attached;
     })().catch((caught) => {
       if (caught instanceof StaleCreation) throw caught;
       live(); // a failure after the page moved on (a stale attach included) stops this create for good
-      const retained = pending(input.pageId);
+      const retained = pending(key);
       if (retained) save({ ...retained, lastError: caught instanceof Error ? caught.message : String(caught) });
       throw caught;
     });
-    running.set(input.pageId, operation);
-    void operation.finally(() => { if (running.get(input.pageId) === operation) running.delete(input.pageId); }).catch(() => {});
+    running.set(key, operation);
+    void operation.finally(() => { if (running.get(key) === operation) running.delete(key); }).catch(() => {});
     return operation;
   };
 
   return {
-    status(pageId: string) {
-      let snapshot = snapshots.get(pageId);
-      if (!snapshot) { const record = pending(pageId); snapshot = { pending: record, error: record?.lastError ?? null, createMode: readModes(storage)[pageId] }; snapshots.set(pageId, snapshot); }
+    status(pageId: string, purpose?: Chat["purpose"]) {
+      const key = keyOf(pageId, purpose);
+      let snapshot = snapshots.get(key);
+      if (!snapshot) { snapshot = makeSnapshot(pageId, purpose, pending(key)); snapshots.set(key, snapshot); }
       return snapshot;
     },
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
     setCreateMode(pageId: string, enabled: boolean) {
       writeModes(storage, { ...readModes(storage), [pageId]: enabled });
-      publish(pageId, pending(pageId));
+      publish(pageId, undefined, pending(keyOf(pageId)));
     },
     ensure,
     /** Drop the page's failed create, so the page opens on its empty state with the new-chat draft. */
-    discard(pageId: string) { if (!running.has(pageId)) forget(pageId); },
+    discard(pageId: string) { if (!running.has(keyOf(pageId))) forget(pageId); },
   };
 }
 

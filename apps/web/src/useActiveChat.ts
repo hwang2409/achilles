@@ -144,6 +144,7 @@ export async function attachPage(
   publishReady: (ready: ReadyState) => Promise<void> | void = () => {},
   forceNew = false,
   canWrite = false,
+  purpose?: ChatCreationInput["purpose"],
 ): Promise<EmptyState | ReadyState | BusyState> {
   let ownsLease = false;
   try {
@@ -154,7 +155,7 @@ export async function attachPage(
     const credentialResponse = await fetch(`/api/pages/${page.id}/credential`, { cache: "no-store" }); requireCurrent(owner, token);
     if (!credentialResponse.ok) throw new Error(`could not load page credential (${credentialResponse.status})`);
     const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
-    const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
+    const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, purpose, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
     const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
     if (selectedId && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
     const serverApprovalMode = page.approval_mode ?? null;
@@ -188,7 +189,8 @@ export async function attachPage(
     };
     const busy = (busySessionId: string | null): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId });
 
-    const creationStatus = canWrite ? creation.status(page.id) : undefined;
+    // An explicit build attachment must not resume a pending ordinary create.
+    const creationStatus = canWrite && selectedChat?.purpose !== "page_build" ? creation.status(page.id, purpose) : undefined;
     const pending = creationStatus?.pending;
     if (creationStatus?.createMode !== undefined) page.create_mode = creationStatus.createMode;
     // with no chat named, a page opens on its most recent chat (the sidebar's order), then on its home chat (page.zeta_session_id)
@@ -215,9 +217,9 @@ export async function attachPage(
     } catch (caught) {
       // a joined create of an earlier attachment stopped and forgot its record: open this attachment's own choice again.
       // bounded: each re-run follows one stopped create, and a stale attachment can no longer start one
-      if (caught instanceof StaleCreation) { if (!owner.current(token)) throw caught; return attachPage(client, key, selectedId, owner, creation, token, create, applyCreateMode, publishReady, forceNew, canWrite); }
+      if (caught instanceof StaleCreation) { if (!owner.current(token)) throw caught; return attachPage(client, key, selectedId, owner, creation, token, create, applyCreateMode, publishReady, forceNew, canWrite, purpose); }
       if (caught instanceof ChatBusyError) return busy(caught.sessionId);
-      if (errorCode(caught) === TURN_RUNNING && !creation.status(page.id).pending) return busy(await runningSession(client));
+      if (errorCode(caught) === TURN_RUNNING && !creation.status(page.id, purpose).pending) return busy(await runningSession(client));
       throw new PendingCreationError(caught, mappingInput);
     }
   } catch (caught) {
@@ -863,7 +865,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
         const readAt = titleClock.current;
         if (!target || target.token !== token) {
           const sessionId = target?.ready.sessionId ?? null;
-          const attached = await attachPage(client, "home", sessionId, owner.current, creation.current, token, true, undefined, undefined, !sessionId, true);
+          const attached = await attachPage(client, "home", sessionId, owner.current, creation.current, token, true, undefined, undefined, !sessionId, true, "page_build");
           requireCurrent(owner.current, token);
           if (attached.phase === "busy") throw new Error("another chat is running; try again when it finishes");
           if (attached.phase !== "ready" || (sessionId && attached.sessionId !== sessionId)) throw new Error("could not open the build chat");

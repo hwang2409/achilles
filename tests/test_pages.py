@@ -370,6 +370,26 @@ def test_existing_page_session_is_copied_to_chat_once(tmp_path) -> None:
         ).fetchall() == [("session-old", "existing", "created", "updated")]
 
 
+def test_old_chat_table_defaults_to_chat_purpose(tmp_path) -> None:
+    with sqlite3.connect(tmp_path / "achilles.sqlite3") as db:
+        db.execute(
+            "CREATE TABLE chat (session_id TEXT PRIMARY KEY, page_id TEXT NOT NULL, "
+            "title TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_state TEXT, "
+            "titled_by_user INTEGER NOT NULL DEFAULT 0, "
+            "message_sent INTEGER NOT NULL DEFAULT 1, first_title TEXT)"
+        )
+        db.execute(
+            "INSERT INTO chat(session_id,page_id,created_at,updated_at) "
+            "VALUES('old-chat','home','then','then')"
+        )
+        db.execute("PRAGMA user_version = 3")
+    store = PageStore(tmp_path)
+    assert store.chat("old-chat").get("purpose") == "chat"
+    assert store.chats(1)[0]["purpose"] == "chat"
+    with store.transaction() as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
 def test_old_audit_table_gains_actor_and_record_id(tmp_path) -> None:
     with sqlite3.connect(tmp_path / "achilles.sqlite3") as db:
         db.execute(
