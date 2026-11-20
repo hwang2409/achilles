@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
@@ -15,8 +15,13 @@ const narrow = "(max-width: 760px), (max-height: 500px)";
 const yesNo = (value: boolean) => value ? "yes" : "no";
 const PAGE = { scope: "effective", limit: 100 } as const;
 
-type View = { state: "empty" } | { state: "no-session" } | { state: "invalid" } | { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Extract<CatalogPage, { state: "data" }>["skipped"] | null } | { state: "failed"; problem: Problem };
-type Problem = { message: string; retry: boolean };
+type Skipped = Extract<CatalogPage, { state: "data" }>["skipped"];
+type DataView = { state: "data"; rows: CatalogRow[]; nextOffset: number | null; skipped: Skipped | null };
+// `skipped` on empty: a page whose every file was skipped or shadowed still lists them.
+type View = { state: "empty"; skipped?: Skipped } | { state: "no-session" } | { state: "invalid" } | DataView | { state: "failed"; problem: Problem };
+// `gone`: zeta's resource_not_found reason, so "refresh list" never depends on the message copy.
+type Problem = { message: string; retry: boolean; gone?: boolean };
+type More = "idle" | "loading" | Problem;
 type Reveal = { state: "loading" } | { state: "data"; body: Body } | { state: "failed"; problem: Problem };
 /** Which library_read_v1 methods this zeta advertised; both false means the older status snapshot. */
 export type LibraryReads = { catalog: boolean; read: boolean };
@@ -26,7 +31,7 @@ const unreadable: Problem = { message: "zeta sent data this view cannot read", r
 function problemOf(error: unknown): Problem {
   const rpc = error as { code?: unknown; data?: { reason?: unknown } } | null;
   if (rpc?.code === -32005) return { message: "not available without an open project", retry: false };
-  if (rpc?.code === -32602 && rpc.data?.reason === "resource_not_found") return { message: "no longer exists", retry: false };
+  if (rpc?.code === -32602 && rpc.data?.reason === "resource_not_found") return { message: "no longer exists", retry: false, gone: true };
   if (rpc?.code === -32007) return { message: "too large to show", retry: false };
   return { message: "zeta could not read it", retry: true };
 }
@@ -37,15 +42,14 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   const methods = libraryMethods(kind);
   const [catalog, setCatalog] = useState<View | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [more, setMore] = useState<"idle" | "loading" | Problem>("idle");
+  const [more, setMore] = useState<More>("idle");
   const attemptRef = useRef(0);
-  const list = useRef<HTMLElement>(null);
   const focusNew = useRef<Set<string> | null>(null);
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const keyboardPick = useRef(false);
-  const lastRow = useRef<HTMLButtonElement>(null);
+  const lastRow = useRef<HTMLButtonElement | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const returnToList = useRef(false);
 
@@ -57,7 +61,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         if (reads.catalog) {
           const page = projectCatalogPage(await client.request(methods.catalog, PAGE, { signal: abort.signal }), kind);
           view = page.state === "invalid" ? { state: "failed", problem: unreadable }
-            : page.rows.length ? { state: "data", rows: appendPage([], page.rows), nextOffset: page.nextOffset, skipped: page.skipped } : { state: "empty" };
+            : page.rows.length ? { state: "data", rows: appendPage([], page.rows), nextOffset: page.nextOffset, skipped: page.skipped } : { state: "empty", skipped: page.skipped };
         } else {
           const snapshot = projectCatalog(await client.request("status", {}, { signal: abort.signal }), kind);
           view = snapshot.state === "data" ? { ...snapshot, nextOffset: null, skipped: null } : snapshot;
@@ -75,14 +79,6 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
 
   const rows = catalog?.state === "data" ? catalog.rows : [];
   const selected = rows.find(({ name }) => name === selection);
-  // After "load more" or "refresh list", keyboard focus moves to the first new row shown (or the filter when none is visible).
-  useEffect(() => {
-    const added = focusNew.current;
-    if (!added || catalog?.state !== "data") return;
-    focusNew.current = null;
-    const rowButtons = [...(list.current?.querySelectorAll<HTMLButtonElement>("[data-row]") ?? [])];
-    (rowButtons.find((button) => added.has(button.dataset.row ?? "")) ?? search.current)?.focus();
-  }, [catalog]);
   useEffect(() => {
     // narrow layouts swap to the detail; on desktop only a keyboard pick moves focus there (a mouse click keeps it).
     if (selected && (keyboardPick.current || matchMedia(narrow).matches)) detailHeading.current?.focus();
@@ -104,7 +100,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     if (catalog?.state !== "data" || catalog.nextOffset === null || more === "loading") return;
     const started = attemptRef.current;
     setMore("loading");
-    let next: typeof more = "idle";
+    let next: More = "idle";
     try {
       const page = projectCatalogPage(await client.request(methods.catalog, { ...PAGE, offset: catalog.nextOffset }), kind);
       if (page.state === "invalid") next = unreadable;
@@ -118,10 +114,20 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     if (started === attemptRef.current) setMore(next);
   }
 
-  const partial = catalog?.state === "data" && catalog.nextOffset !== null;
-  const term = query.trim().toLowerCase();
-  const matches = rows.filter((row) => [row.name, row.description, ...("keywords" in row ? row.keywords : [])]
-    .some((text) => text.toLowerCase().includes(term)));
+  function pick(row: CatalogRow, button: HTMLButtonElement, keyboard: boolean) {
+    lastRow.current = button;
+    if (keyboard && row === selected) {
+      detailHeading.current?.focus();
+      return;
+    }
+    keyboardPick.current = keyboard;
+    setSelection(row.name);
+  }
+
+  function backToList() {
+    returnToList.current = true;
+    setSelection(null);
+  }
 
   let content: ReactNode;
   if (!catalog) content = <ModuleState kind="loading" title={reads.catalog ? "reading catalog…" : "reading session snapshot…"} />;
@@ -129,62 +135,27 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
     action={catalog.problem.retry ? { label: "retry", run: refresh } : undefined} />;
   else if (catalog.state === "invalid") content = <ModuleState kind="failed" title="could not read the catalog" detail="refresh to try the active session snapshot again." />;
   else if (catalog.state === "empty") content = reads.catalog
-    ? <ModuleState kind="empty" title={`no ${title} found`} detail="zeta reported no entries in the effective scope." />
+    ? <div className="library-empty">
+      <ModuleState kind="empty" title={`no ${title} found`} detail="zeta reported no entries in the effective scope." />
+      {catalog.skipped && <SkippedFiles skipped={catalog.skipped} />}
+    </div>
     : <ModuleState kind="empty" title={`no ${title} in this snapshot`} detail="the active session did not report any entries for this catalog." />;
   else if (catalog.state === "no-session") content = <div className="library-unavailable">
     <ModuleState kind="unsupported" title="no active session" detail="this zeta only reports library catalogs for an active session." />
     <a href={surfaceHref(chatsRoute.path)}>open a chat</a>
   </div>;
   else content = <div className="library-layout" data-detail={Boolean(selected)}>
-    <section ref={list} className="library-list" aria-label={`${title} catalog`}>
-      <div className="library-filter">
-        <input ref={search} type="search" aria-label={`filter ${title}`} placeholder={kind === "skills" ? "filter by name or keyword" : "filter by name or description"}
-          value={query} onChange={(event) => setQuery(event.target.value)} />
-        <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
-      </div>
-      {reads.catalog && !rows.some(({ source }) => source === "project") &&
-        <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
-      {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
-      {sourceTiers.map((source) => {
-        const group = matches.filter((row) => row.source === source);
-        return group.length > 0 && <section className="library-group" key={source} aria-labelledby={`library-${source}`}>
-          <h2 id={`library-${source}`}>{source} <small>{tierRules[source]} · {group.length}{partial && " loaded"}{problemCount(group)}</small></h2>
-          <ul>
-            {group.map((row) => <li key={row.name}>
-              <button type="button" data-row={row.name} aria-current={row === selected || undefined} onClick={(event) => {
-                lastRow.current = event.currentTarget;
-                // detail 0: activated by Enter or Space, not a pointer.
-                if (event.detail === 0 && row === selected) detailHeading.current?.focus();
-                keyboardPick.current = event.detail === 0;
-                setSelection(row.name);
-              }}>
-                <strong>{row.name}</strong>
-                {!row.editable && <small>read-only</small>}
-                <span>{row.description}</span>
-                {row.diagnostics?.items.length ? <span className="library-warning">warning · {row.diagnostics.items[0]}</span> : null}
-              </button>
-            </li>)}
-          </ul>
-        </section>;
-      })}
-      {catalog.nextOffset !== null && <div className="library-more">
-        <button type="button" aria-disabled={more === "loading"} onClick={() => void loadMore()}>{more === "loading" ? "loading more…" : "load more"}</button>
-        {typeof more === "object" && <span role="alert">could not load more: {more.message}</span>}
-      </div>}
-      {catalog.skipped && catalog.skipped.items.length > 0 && <details className="library-skipped">
-        <summary>{catalog.skipped.items.length + catalog.skipped.more} {catalog.skipped.items.length + catalog.skipped.more === 1 ? "file" : "files"} skipped or shadowed</summary>
-        <ul>
-          {catalog.skipped.items.map(({ source, file, reason }, i) => <li key={i}><span>{source} · {file}</span> {reason}</li>)}
-          {catalog.skipped.more > 0 && <li>{catalog.skipped.more} more</li>}
-        </ul>
-      </details>}
-    </section>
-    <section className="library-detail" aria-label="catalog detail">
+    <LibraryList view={catalog} kind={kind} title={title} live={reads.catalog} selected={selected} query={query} onQuery={setQuery}
+      more={more} onLoadMore={() => void loadMore()} onPick={pick} search={search} focusNew={focusNew} />
+    <section className="library-detail" aria-label="catalog detail" onKeyDown={(event) => {
+      // Escape returns to the list: the selected row on desktop, the list view on narrow layouts.
+      if (event.key !== "Escape" || event.defaultPrevented || !selected) return;
+      event.preventDefault();
+      if (matchMedia(narrow).matches) backToList();
+      else (lastRow.current?.isConnected ? lastRow.current : search.current)?.focus();
+    }}>
       {selected ? <>
-        <button type="button" className="library-back" onClick={() => {
-          returnToList.current = true;
-          setSelection(null);
-        }}>‹ back to {title}</button>
+        <button type="button" className="library-back" onClick={backToList}>‹ back to {title}</button>
         <h2 ref={detailHeading} tabIndex={-1}>{selected.name}</h2>
         <p className="library-description">{selected.description}</p>
         <dl className="library-fields">
@@ -225,9 +196,82 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
   </ModuleFrame>;
 }
 
+type ListProps = {
+  view: DataView; kind: LibraryKind; title: string; live: boolean; selected: CatalogRow | undefined;
+  query: string; onQuery: (query: string) => void; more: More; onLoadMore: () => void;
+  onPick: (row: CatalogRow, button: HTMLButtonElement, keyboard: boolean) => void;
+  search: RefObject<HTMLInputElement | null>; focusNew: RefObject<Set<string> | null>;
+};
+
+/** The catalog list: filter, source groups, load more and the skipped files. Selection and detail stay with the module. */
+function LibraryList({ view, kind, title, live, selected, query, onQuery, more, onLoadMore, onPick, search, focusNew }: ListProps) {
+  const list = useRef<HTMLElement>(null);
+  // After "load more" or "refresh list", keyboard focus moves to the first new row below the old ones,
+  // else the first new row shown (it landed in an earlier group), else the filter.
+  useEffect(() => {
+    const added = focusNew.current;
+    if (!added) return;
+    focusNew.current = null;
+    const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>("[data-row]") ?? [])];
+    const isNew = (button: HTMLButtonElement) => added.has(button.dataset.row ?? "");
+    let lastOld = -1;
+    buttons.forEach((button, i) => { if (!isNew(button)) lastOld = i; });
+    (buttons.find((button, i) => i > lastOld && isNew(button)) ?? buttons.find(isNew) ?? search.current)?.focus();
+  }, [view, focusNew, search]);
+
+  const { rows } = view;
+  const partial = view.nextOffset !== null;
+  const term = query.trim().toLowerCase();
+  const matches = rows.filter((row) => [row.name, row.description, ...("keywords" in row ? row.keywords : [])]
+    .some((text) => text.toLowerCase().includes(term)));
+  return <section ref={list} className="library-list" aria-label={`${title} catalog`}>
+    <div className="library-filter">
+      <input ref={search} type="search" aria-label={`filter ${title}`} placeholder={kind === "skills" ? "filter by name or keyword" : "filter by name or description"}
+        value={query} onChange={(event) => onQuery(event.target.value)} />
+      <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
+    </div>
+    {live && !rows.some(({ source }) => source === "project") &&
+      <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
+    {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
+    {sourceTiers.map((source) => {
+      const group = matches.filter((row) => row.source === source);
+      return group.length > 0 && <section className="library-group" key={source} aria-labelledby={`library-${source}`}>
+        <h2 id={`library-${source}`}>{source} <small>{tierRules[source]} · {group.length}{partial && " loaded"}{problemCount(group)}</small></h2>
+        <ul>
+          {group.map((row) => <li key={row.name}>
+            {/* detail 0: activated by Enter or Space, not a pointer. */}
+            <button type="button" data-row={row.name} aria-current={row === selected || undefined} onClick={(event) => onPick(row, event.currentTarget, event.detail === 0)}>
+              <strong>{row.name}</strong>
+              {!row.editable && <small>read-only</small>}
+              <span>{row.description}</span>
+              {row.diagnostics?.items.length ? <span className="library-warning">warning · {row.diagnostics.items[0]}</span> : null}
+            </button>
+          </li>)}
+        </ul>
+      </section>;
+    })}
+    {view.nextOffset !== null && <div className="library-more">
+      <button type="button" aria-disabled={more === "loading"} onClick={onLoadMore}>{more === "loading" ? "loading more…" : "load more"}</button>
+      {typeof more === "object" && <span role="alert">could not load more: {more.message}</span>}
+    </div>}
+    {view.skipped && <SkippedFiles skipped={view.skipped} />}
+  </section>;
+}
+
+function SkippedFiles({ skipped }: { skipped: Skipped }) {
+  const total = skipped.items.length + skipped.more;
+  return skipped.items.length > 0 && <details className="library-skipped">
+    <summary>{total} {total === 1 ? "file" : "files"} skipped or shadowed</summary>
+    <ul>
+      {skipped.items.map(({ source, file, reason }, i) => <li key={i}><span>{source} · {file}</span> {reason}</li>)}
+      {skipped.more > 0 && <li>{skipped.more} more</li>}
+    </ul>
+  </details>;
+}
+
 /**
  * The selected row's untrusted text. Rendered with `key={rowKey(row)}`, so a new selection is a new instance:
- * unmounting aborts the pending read, and an aborted read never publishes.
+ * a late read for the old row lands on an unmounted instance and never shows. Unmounting also aborts the request.
  */
 function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient; method: string; row: CatalogRow; noun: string; onGone: () => void }) {
   const [reveal, setReveal] = useState<Reveal | null>(null);
@@ -252,7 +296,6 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
     } catch (error) {
       next = { state: "failed", problem: problemOf(error) };
     }
-    if (abort.signal.aborted) return;
     setReveal(next);
     // clear first and set on the next frame, so a second show of the same text is announced again.
     setAnnouncement("");
@@ -261,7 +304,7 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
     requestAnimationFrame(() => setAnnouncement(message.filter(Boolean).join(". ")));
   }
 
-  const gone = reveal?.state === "failed" && reveal.problem.message === "no longer exists";
+  const gone = reveal?.state === "failed" && reveal.problem.gone;
   return <section className="library-text" aria-label={`${noun} text`}>
     <p className="library-untrusted">file text is untrusted. it is shown as plain text and never sent to a model.</p>
     <p role="status" className="library-visually-hidden">{announcement}</p>

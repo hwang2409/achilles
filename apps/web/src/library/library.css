@@ -37,7 +37,8 @@
 .library-notice { margin-top: 24px; padding: 16px; border: 1px dashed var(--fulcrum-border); }
 .library-notice p { margin: 8px 0 0; }
 .library-back { display: none; padding-inline: 10px; }
-.library-unavailable .module-state { padding-bottom: 8px; }
+.library :is(.library-unavailable, .library-empty) .module-state { padding-bottom: 8px; }
+.library-empty .library-skipped { margin-inline: clamp(16px, 5vw, 72px); }
 .library-unavailable a { min-height: 44px; margin-left: clamp(16px, 5vw, 72px); border: 1px solid var(--fulcrum-border); }
 
 @media (min-width: 761px) and (min-height: 501px) {
@@ -53,7 +54,7 @@
   .library-list { border-right: 0; }
   .library-detail { padding: 16px; }
   .library-back { display: inline-block; margin-bottom: 16px; }
-  .library :is(.library-back, .library-bar a, .library-bar button, .library-filter input, .library-text button, .library-more button) { min-height: 44px; }
+  .library :is(.library-back, .library-bar a, .library-bar button, .library-filter input, .library-text button, .library-more button, .library-skipped summary) { min-height: 44px; }
   .library-layout[data-detail="true"] .library-list,
   .library-layout[data-detail="false"] .library-detail { display: none; }
 }
@@ -76,9 +77,15 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-body + .library-flag { margin: 8px 0 0; }
 .library-group button .library-warning { color: var(--fulcrum-warn); }
 .library-skipped { margin: 12px 16px; font-size: 12px; color: var(--fulcrum-muted); }
-.library-skipped summary { min-height: 36px; display: flex; align-items: center; cursor: pointer; }
+.library-skipped summary { min-height: 36px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.library-skipped summary::before { content: "▸"; }
+.library-skipped[open] summary::before { content: "▾"; }
+.library-skipped summary:hover { color: var(--fulcrum-fg); }
+.library-skipped summary:focus-visible, .library-detail h2:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
+/* untrusted text is shown literally: no ligature turns "->" or "-<" into an arrow. */
+.library :is(.library-skipped, .library-warning, .library-diagnostics, .library-body) { font-variant-ligatures: none; }
 .library-skipped ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; overflow-wrap: anywhere; }
 .library-skipped li span { color: var(--fulcrum-fg); }
 @media (pointer: coarse) {
-  .library :is(.library-text button, .library-more button) { min-height: 44px; }
+  .library :is(.library-text button, .library-more button, .library-skipped summary) { min-height: 44px; }
 }
