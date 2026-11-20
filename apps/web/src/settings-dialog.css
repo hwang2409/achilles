@@ -57,3 +57,4 @@
   .font-options .settings-segments button { width: 100%; border-right: 1px solid var(--fulcrum-border); border-bottom: 0; }
   .font-options .settings-segments button:last-child { border-bottom: 1px solid var(--fulcrum-border); }
 }
+.settings-auto-approve { display: grid; gap: 8px; }

@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import {
   AUTO_THEME,
   defaultSettings,
+  getSettings,
   resetSettings,
   updateSettings,
   useSettings,
@@ -12,6 +13,7 @@ import {
   type UiFont,
 } from "./settings";
 import { wrapTab } from "./keyboard";
+import { Confirmation, reviewText } from "./surface/Confirmation";
 import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
 
@@ -65,12 +67,38 @@ function Segments<T extends string | number>({ label, value, choices, onChange, 
   </div>;
 }
 
-function Toggle({ label, checked, onChange, disabled, surface }: { label: string; checked: boolean; onChange(value: boolean): void; disabled?: boolean; surface: string }) {
-  return <button className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} data-write-surface={surface} onClick={() => onChange(!checked)}><span /></button>;
+function Toggle({ label, checked, onChange, disabled, surface, ref }: { label: string; checked: boolean; onChange(value: boolean): void; disabled?: boolean; surface: string; ref?: Ref<HTMLButtonElement> }) {
+  return <button ref={ref} className="settings-toggle" type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} data-write-surface={surface} onClick={() => onChange(!checked)}><span /></button>;
 }
 
 function Row({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return <section className="settings-row"><div className="settings-row-label"><h3>{title}</h3><p>{description}</p></div><div>{children}</div></section>;
+}
+
+// turning the default on lets new chats run tools without asking, so it goes through a confirm; turning it off does not
+function AutoApprove({ open, on, canWrite, serverForcesAsk }: { open: boolean; on: boolean; canWrite: boolean; serverForcesAsk: boolean }) {
+  const toggle = useRef<HTMLButtonElement>(null);
+  const confirmed = useRef(false);
+  useLayoutEffect(() => {
+    // the confirm row goes away once the default is on: keep focus on the row's control
+    if (on && confirmed.current) toggle.current?.focus();
+    confirmed.current = false;
+  }, [on]);
+  const explanation = <span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : on ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span>;
+  if (on || !canWrite) return <div className="setting-explanation"><Toggle ref={toggle} label="auto-approve default" checked={on} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(autoApproveDefault) => { if (canWrite) updateSettings({ autoApproveDefault }); }} />{explanation}</div>;
+  return <div className="settings-auto-approve">
+    {/* closing the settings dialog drops an open confirm */}
+    <Confirmation key={String(open)} level={1} surface={WRITE_SURFACE.settingsAutoApprove} label={reviewText("auto-approve default")} value={reviewText("off")}
+      action={reviewText("allow without asking")} keep={reviewText("keep asking")} effect={reviewText("new chats allow tool calls without asking.")}
+      execute={async () => {
+        if (!canWrite) return { status: "failed", reason: "refused" };
+        confirmed.current = true;
+        updateSettings({ autoApproveDefault: true });
+        return { status: "committed", receipt: reviewText("auto-approve on"), value: reviewText("on") };
+      }}
+      checkResult={async () => getSettings().autoApproveDefault ? { status: "committed", receipt: reviewText("auto-approve on"), value: reviewText("on") } : { status: "failed", reason: "not-applied" }} onCommitted={() => {}} />
+    {explanation}
+  </div>;
 }
 
 export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrite }: { open: boolean; onClose(): void; serverForcesAsk?: boolean; canWrite: boolean }) {
@@ -101,7 +129,7 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
       <section aria-label="new chat defaults and reset" aria-describedby={!canWrite ? "settings-lock-note" : undefined} className="settings-session">
         {!canWrite && <p id="settings-lock-note">locked while another tab controls zeta</p>}
         <div className="settings-content">
-          <Row title="auto-approve" description="default for new chats."><div className="setting-explanation"><Toggle label="auto-approve default" checked={settings.autoApproveDefault} disabled={!canWrite} surface={WRITE_SURFACE.settingsAutoApprove} onChange={(autoApproveDefault) => { if (canWrite) updateSettings({ autoApproveDefault }); }} /><span>{serverForcesAsk ? "the server forces ask mode, so new chats still ask for approval." : settings.autoApproveDefault ? "on. new chats allow tool calls by default." : "off. new chats ask before tool calls."}</span></div></Row>
+          <Row title="auto-approve" description="default for new chats."><AutoApprove open={open} on={settings.autoApproveDefault} canWrite={canWrite} serverForcesAsk={serverForcesAsk} /></Row>
         </div>
         <footer><button type="button" className="settings-link" data-write-surface={WRITE_SURFACE.settingsReset} onClick={() => { if (canWrite) resetSettings(); }} disabled={!canWrite || JSON.stringify(settings) === JSON.stringify(defaultSettings)}>reset to defaults</button><span>keyboard shortcuts&nbsp;&nbsp;?</span></footer>
       </section>

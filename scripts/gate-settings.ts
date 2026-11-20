@@ -213,7 +213,11 @@ export async function gateCreationApprovalDefaults(page: Page, frames: () => Fra
   if (await page.getByLabel("auto-approve", { exact: true }).count()) throw new Error("default-off new chat showed the auto-approve marker");
 
   await openSettings(page, gateWait);
-  await page.getByRole("switch", { name: "auto-approve default" }).click();
+  // turning the default on goes through a confirm
+  const settingsDialog = page.getByRole("dialog", { name: "settings" });
+  await settingsDialog.getByRole("button", { name: "allow without asking" }).click();
+  await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
+  await gateWait.playwright(page.getByRole("switch", { name: "auto-approve default" }), "waitFor");
   await page.getByRole("button", { name: "esc" }).click();
   const writesBeforeReopen = settingsWrites(frames(), askId);
   await page.reload();

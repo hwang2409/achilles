@@ -147,7 +147,7 @@ export function Confirmation(props: ConfirmationProps) {
       <button ref={opener} type="button" data-write-surface={props.surface} disabled={open} onClick={start}>{props.action}</button>
     </div>
     {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
-      onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep(); } }}>
+      onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); keep(); } }}>
       <p id={`${id}-effect`}>{attempt.effect}</p>
       <div className="confirmation-actions">
         {!locked && confirmButton}
