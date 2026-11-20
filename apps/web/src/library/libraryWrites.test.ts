@@ -94,3 +94,44 @@ test.each([
 ])("create checks the name %p before save", (name, problems) => {
   expect(createProblems(name, document)).toEqual(problems);
 });
+
+describe("library edit outcomes", () => {
+  const opened = "a".repeat(64);
+  const edited = `${document}more text\n`;
+  test.each<[string, Reply[], Reply[], string, Partial<WriteOutcome>, number, number[]]>([
+    ["saved", [saved(false, "")], [], edited, { status: "saved", redacted: false }, 1, []],
+    ["saved and redacted", [saved(true, "")], [], edited, { status: "saved", redacted: true }, 1, []],
+    ["stale: the file changed since it was opened", [error(-32009, { reason: "stale_library_revision" })], [], edited,
+      { status: "stale", message: "this file changed after you opened it. your text is kept." }, 1, []],
+    ["busy, then saved", [error(-32004), saved(false, "")], [], edited, { status: "saved" }, 2, [500]],
+    ["zeta refuses the redaction marker: no retry", [error(-32602, { reason: "contains_redaction_marker" })], [], edited,
+      { status: "invalid", message: `the text contains zeta's mask ${REDACTION_MARKER}. put the real text back before saving.` }, 1, []],
+    ["unknown, a read settles it as saved", [error(-32000)], [{ revision: "", data: { redacted: false } }], edited, { status: "saved" }, 2, []],
+    ["unknown, the read still has the opened revision", [new Error("socket closed")], [{ revision: opened, data: {} }], edited,
+      { status: "unknown", message: "zeta did not save it. try again." }, 2, []],
+    ["unknown, the read has other text", [new Error("socket closed")], [{ revision: "f".repeat(64), data: {} }], edited,
+      { status: "stale", message: "this file changed after you opened it. your text is kept." }, 2, []],
+  ])("%s", async (_name, writes, reads, text, expected, requests, waits) => {
+    // "" stands for the sha256 of the sent text, which zeta returns as the new revision.
+    const rev = await sha(text);
+    for (const reply of [...writes, ...reads]) if ("revision" in reply && reply.revision === "") reply.revision = rev;
+    const readCount = reads.length;
+    const zeta = fakeZeta(writes, reads);
+    const clock = fakeClock();
+    const outcome = await createLibraryWriter(clock.sleep).save(zeta.client, target, opened, text);
+    expect(outcome).toMatchObject(expected.status === "saved" ? { ...expected, revision: rev } : expected);
+    expect(zeta.calls).toHaveLength(requests);
+    // every write carries the revision the user opened; a read never turns into a second write.
+    expect(zeta.calls.filter(([method]) => method === "skill_write").map(([, params]) => params))
+      .toEqual(Array.from({ length: requests - readCount }, () => ({ name: target.name, scope: "home", revision: opened, mutation: { document: text } })));
+    expect(clock.waits).toEqual(waits);
+  });
+
+  test("a double submit sends one request", async () => {
+    const zeta = fakeZeta([saved(false, await sha(document))]);
+    const writer = createLibraryWriter(fakeClock().sleep);
+    const [first, second] = await Promise.all([writer.save(zeta.client, target, opened, document), writer.save(zeta.client, target, opened, document)]);
+    expect(zeta.calls).toHaveLength(1);
+    expect(first).toEqual(second);
+  });
+});

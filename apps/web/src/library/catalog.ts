@@ -109,13 +109,18 @@ export function projectCatalogPage(result: unknown, kind: LibraryKind): CatalogP
 export const appendPage = (rows: CatalogRow[], page: CatalogRow[]) =>
   bySource([...rows, ...page.filter((row) => !rows.some(({ name }) => name === row.name))]);
 
-export type Body = { text: string; redacted: boolean; truncated: boolean };
-// The body is untrusted user text: keep only the text and its two flags, never the frontmatter.
+// `editable`: zeta's raw file text and the sha256 revision of its bytes; zeta sends `document` only for an unredacted
+// file of at most 128 KiB with no secret-like text (zeta adba2fae9), so null means "edit it outside achilles".
+export type Body = { text: string; redacted: boolean; truncated: boolean; editable: { revision: string; document: string } | null };
+// The body is untrusted user text: keep only the text, its two flags and the editable copy, never the frontmatter.
 export function projectBody(result: unknown, name: string): Body | null {
   const data = record(result) ? result.data : undefined;
   if (!record(data) || data.name !== name || typeof data.body !== "string" || typeof data.redacted !== "boolean" ||
-      !(data.truncated === undefined || typeof data.truncated === "boolean")) return null;
-  return { text: data.body, redacted: data.redacted, truncated: data.truncated === true };
+      !(data.truncated === undefined || typeof data.truncated === "boolean") || !(data.document === undefined || typeof data.document === "string")) return null;
+  const revision = record(result) ? result.revision : undefined;
+  const editable = typeof data.document === "string" && typeof revision === "string" && /^[0-9a-f]{64}$/.test(revision)
+    ? { revision, document: data.document } : null;
+  return { text: data.body, redacted: data.redacted, truncated: data.truncated === true, editable };
 }
 
 // Keep only display metadata; never retain the status envelope or raw rows.

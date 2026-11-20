@@ -114,11 +114,18 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .library-editor .library-primary { border-color: var(--fulcrum-accent); }
 .library-editor button[aria-disabled="true"] { color: var(--fulcrum-muted); cursor: default; }
+.library-editor h2 small { margin-left: 8px; font-size: 13px; font-weight: normal; color: var(--fulcrum-muted); }
+.library-editor-row .library-dismiss { justify-self: start; min-height: 36px; padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
+.library-editor-actions[role="group"] { align-items: center; flex-wrap: wrap; }
+.library-conflict { padding: 10px 12px; border: 1px solid var(--fulcrum-warn); }
+.library-edit-why { margin: 12px 0 0; font-size: 13px; color: var(--fulcrum-muted); }
+.library-text .library-text-actions:last-child { margin-top: 12px; }
 @media (max-width: 760px), (max-height: 500px) {
   .library-editor { padding: 16px; }
   .library-saved { padding-inline: 16px; }
   .library-editor :is(input:not([type="radio"]), textarea) { font-size: 16px; }
   .library-editor textarea { min-height: 50dvh; }
+  .library-editor textarea.library-mine { min-height: 30dvh; }
   .library-editor-actions { position: sticky; bottom: 0; padding-block: 8px; background: var(--fulcrum-bg); }
   .library-editor button, .library-editor-row > label:has(input[type="radio"]) { min-height: 44px; }
 }

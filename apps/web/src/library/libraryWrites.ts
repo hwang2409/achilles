@@ -63,10 +63,10 @@ const defaultSleep: Sleep = (ms, signal) => new Promise((resolve, reject) => {
 type RpcError = { code?: unknown; data?: { reason?: unknown; detail?: unknown } } | null;
 
 /** Error codes with a definite meaning. null: the result is unknown and a read must settle it. */
-function mapError(error: unknown, target: WriteTarget): WriteOutcome | null {
+function mapError(error: unknown, target: WriteTarget, edit: boolean): WriteOutcome | null {
   const rpc = error as RpcError;
   switch (rpc?.code) {
-    case -32009: return { status: "stale", message: `a ${target.scope} ${noun(target.kind)} named ${target.name} already exists.` };
+    case -32009: return { status: "stale", message: edit ? "this file changed after you opened it. your text is kept." : `a ${target.scope} ${noun(target.kind)} named ${target.name} already exists.` };
     case -32004: return { status: "busy", message: "another zeta writer is using the library. nothing was saved; try again in a moment." };
     case -32008: return { status: "observer", message: "this tab is read-only. take control to save. your text is kept." };
     case -32005: return { status: "unavailable", message: "project items need an open chat in that project." };
@@ -92,49 +92,58 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep) {
   const inFlight = new Map<string, Promise<WriteOutcome>>();
 
   // A reply that is not a definite answer: read the item; never send the write again.
-  async function settle(client: ZetaClient, target: WriteTarget, expected: string): Promise<WriteOutcome> {
+  async function settle(client: ZetaClient, target: WriteTarget, base: string | null, expected: string): Promise<WriteOutcome> {
     try {
       const read = await client.request(libraryMethods(target.kind).read, { name: target.name, scope: target.scope }) as { revision?: unknown; data?: { redacted?: unknown } } | null;
       if (read?.revision === expected) return { status: "saved", revision: expected, redacted: read.data?.redacted === true };
-      return { status: "stale", message: `a ${target.scope} ${noun(target.kind)} named ${target.name} exists with other text.` };
+      if (base !== null && read?.revision === base) return { status: "unknown", message: "zeta did not save it. try again." };
+      return { status: "stale", message: base !== null ? "this file changed after you opened it. your text is kept."
+        : `a ${target.scope} ${noun(target.kind)} named ${target.name} exists with other text.` };
     } catch (error) {
       if ((error as RpcError)?.data?.reason === "resource_not_found") return { status: "unknown", message: "zeta did not save it. try again." };
       return { status: "unknown", message: "could not check whether zeta saved it. refresh the list before trying again." };
     }
   }
 
-  async function send(client: ZetaClient, target: WriteTarget, document: string, signal?: AbortSignal): Promise<WriteOutcome> {
+  async function send(client: ZetaClient, target: WriteTarget, base: string | null, document: string, signal?: AbortSignal): Promise<WriteOutcome> {
     const problems = createProblems(target.name, document);
     if (problems.length) return { status: "invalid", message: problems[0]! };
     const expected = await sha256(document);
-    const params = { name: target.name, scope: target.scope, mutation: { document } };
+    // base null: create (zeta refuses if the name exists). Otherwise zeta replaces the file only if it still has `base`.
+    const params = { name: target.name, scope: target.scope, ...(base === null ? {} : { revision: base }), mutation: { document } };
     for (let attempt = 0; ; attempt++) {
       try {
         const result = await client.request(libraryMethods(target.kind).write, params) as { revision?: unknown; data?: { name?: unknown; redacted?: unknown } } | null;
         if (result?.revision === expected && result.data?.name === target.name && typeof result.data.redacted === "boolean")
           return { status: "saved", revision: expected, redacted: result.data.redacted };
-        return settle(client, target, expected);
+        return settle(client, target, base, expected);
       } catch (error) {
-        const outcome = mapError(error, target);
+        const outcome = mapError(error, target, base !== null);
         // busy: zeta refused before any change, so the same request is safe to repeat.
         if (outcome?.status === "busy" && attempt < BUSY_BACKOFF_MS.length && !signal?.aborted) {
           try { await sleep(BUSY_BACKOFF_MS[attempt]!, signal); continue; } catch { return outcome; }
         }
-        return outcome ?? settle(client, target, expected);
+        return outcome ?? settle(client, target, base, expected);
       }
     }
   }
 
+  // A second call while one is pending for the same item returns the same promise.
+  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, signal?: AbortSignal) {
+    const key = `${target.kind}/${target.scope}/${target.name}`;
+    const pending = inFlight.get(key);
+    if (pending) return pending;
+    const run = send(client, target, base, document, signal).finally(() => inFlight.delete(key));
+    inFlight.set(key, run);
+    return run;
+  }
+
   return {
-    /** Create `target` (no revision). A second call while one is pending for the same item returns the same promise.
-     * `signal` stops busy retries only; a sent write cannot be recalled. */
-    create(client: ZetaClient, target: WriteTarget, document: string, signal?: AbortSignal): Promise<WriteOutcome> {
-      const key = `${target.kind}/${target.scope}/${target.name}`;
-      const pending = inFlight.get(key);
-      if (pending) return pending;
-      const run = send(client, target, document, signal).finally(() => inFlight.delete(key));
-      inFlight.set(key, run);
-      return run;
-    },
+    /** Create `target` (no revision). `signal` stops busy retries only; a sent write cannot be recalled. */
+    create: (client: ZetaClient, target: WriteTarget, document: string, signal?: AbortSignal): Promise<WriteOutcome> =>
+      once(client, target, null, document, signal),
+    /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. */
+    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, signal?: AbortSignal): Promise<WriteOutcome> =>
+      once(client, target, base, document, signal),
   };
 }
