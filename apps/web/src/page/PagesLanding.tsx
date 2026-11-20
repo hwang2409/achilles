@@ -24,7 +24,7 @@ export function PagesLanding({ catalog: { items, next, loading, error }, reload,
                 <h2 id={`page-title-${page.id}`}>{page.title}</h2>
                 <span className="pages-route" id={`page-route-${page.id}`}>{page.route}</span>
                 <div className="pages-facts">
-                  <span>changed <time dateTime={page.updated_at} title={new Date(page.updated_at).toLocaleString()}>{timeLabel(page.updated_at)}</time></span>
+                  {!Number.isNaN(Date.parse(page.updated_at)) && <span>changed <time dateTime={page.updated_at} title={new Date(page.updated_at).toLocaleString()}>{timeLabel(page.updated_at)}</time></span>}
                   <span>{page.chat_count} {page.chat_count === 1 ? "chat" : "chats"}</span>
                   <span className="pages-mode" data-on={page.create_mode}>{page.create_mode ? "create on" : "create off"}</span>
                 </div>
