@@ -1,4 +1,5 @@
 import { createContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { BuildActivity } from "../create/buildActivity";
 import { Highlight, type PaletteEntry } from "../CommandPalette";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "../pageList";
 import { useInlineRename } from "../useInlineRename";
@@ -6,6 +7,8 @@ import { useFocusAfterCommit } from "../keyboard";
 import { surfaceHref } from "./routes";
 import { ModuleState } from "./ModuleState";
 import { WRITE_SURFACE } from "../writeSurfaces";
+
+type BuildRow = Pick<BuildActivity["rows"][number], "chat" | "state" | "stale">;
 
 export type PageLink = { id: string; route: string; title: string; created_by_route?: string | null };
 
@@ -227,12 +230,14 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
         {pageList.next && <button className="load-older" onClick={(event) => void loadOlder(event.currentTarget)}>show more pages</button>}
       </section>;
     },
-    recent: (close: () => void) =>
-      <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
+    recent: (close: () => void, builds: readonly BuildRow[]) => {
+      const projectedBuild = (chat: Chat) => chat.purpose === "page_build" ? builds.find((row) => row.chat.session_id === chat.session_id) : undefined;
+      return <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>recent chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
-      </section>,
+      </section>;
+    },
     catalog: {
         chats: search ? [] : chats, loading: Boolean(search) || loading || chatList.loading,
         error: !search && Boolean(chatList.error), next: search ? null : chatList.next,
@@ -242,13 +247,15 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
   };
 }
 
-function ChatRow({ chat, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
+function ChatRow({ chat, build, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; build?: BuildRow; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
   // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
-  const rowClass = `chat-row state-${chat.last_state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{chat.last_state === "approval" && <>needs you · </>}{chat.last_state === "running" && <>running · </>}{chat.last_state === "failed" && <>failed · </>}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
+  const state = build ? build.state === "building" ? "running" : build.state === "needs you" ? "approval" : build.state : chat.last_state;
+  const label = state === "approval" ? "needs you" : state === "idle" ? null : state;
+  const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
+  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{label && `${label} · `}{build?.stale && "stale · "}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>

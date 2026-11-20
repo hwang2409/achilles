@@ -128,3 +128,24 @@ test("a receipt acknowledgement survives reload in one tab only", async () => {
   expect(reload.project().latestReceipt).toBeNull();
   expect(otherTab.project().latestReceipt?.page).toEqual(reading);
 });
+
+test("a runtime switch between status and history is inactive, not a generic outage", async () => {
+  const f = fixture();
+  const entered = Promise.withResolvers<void>();
+  const history = Promise.withResolvers<never>();
+  const pending = f.refresh([chat], async (method) => {
+    if (method === "status") return { ...status, state: "running" };
+    entered.resolve();
+    return history.promise;
+  });
+  try {
+    await entered.promise;
+    history.reject(Object.assign(new Error("session is not active"), { code: -32003 }));
+    await pending;
+    expect(f.project().rows[0]).toMatchObject({ state: "unfinished", stale: true, results: [] });
+  } finally {
+    f.stop();
+    history.reject(new Error("test cleanup"));
+    await pending;
+  }
+}, 2000);

@@ -162,19 +162,20 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     ] : [],
   ];
   const receipt = activity.latestReceipt;
+  const showNavActivity = narrow ? drawer : !collapsed;
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={activity}
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
       action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "starting…" : "new chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
-      search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer)} />
+      search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer, activity.rows)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className="shell-header">
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
-      {current.id !== "create" && <BuildStatus activity={activity} className="build-status-main" />}
+      {!showNavActivity && <BuildStatus activity={activity} className="build-status-main" />}
       {receipt && <aside className="build-receipt" aria-label="build receipt">
         <span role="status"><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
         <a href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>

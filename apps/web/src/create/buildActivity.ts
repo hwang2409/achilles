@@ -92,10 +92,13 @@ export function createBuildReader(publish: (snapshots: Snapshots) => void, reloa
           live = fromHistory(status, history);
           next.set(id, live);
         }
-      } catch {
+      } catch (error) {
         const catalog = builds.find((chat) => chat.session_id === id);
-        for (const row of catalog ? [catalog] : builds) {
-          if (!observed.has(row.session_id)) next.set(row.session_id, { ...fallback(row), stale: true });
+        // A runtime switch between status and history returns NO_ACTIVE_SESSION.
+        if (!catalog || object(error)?.code !== -32003) {
+          for (const row of catalog ? [catalog] : builds) {
+            if (!observed.has(row.session_id)) next.set(row.session_id, { ...fallback(row), stale: true });
+          }
         }
       }
     }

@@ -32,7 +32,7 @@ export function BuildStatus({ activity, className = "" }: { activity: BuildActiv
 }
 
 export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus, activity }: {
-  activity: BuildActivity;
+  activity?: BuildActivity;
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
   narrow: boolean;
@@ -65,7 +65,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
             {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}<span aria-hidden="true"> {createMode.error ? "!" : "· this page"}</span>
           </button>}
         </div>
-        <BuildStatus activity={activity} className="build-status-nav" />
+        {activity && <BuildStatus activity={activity} className="build-status-nav" />}
       </div>
       <div className="surface-search">
         {search}

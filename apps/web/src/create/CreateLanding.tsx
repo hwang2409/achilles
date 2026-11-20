@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { chatHref, timeLabel, titleOf, type useAgentNavAdapter } from "../surface/AgentNavAdapter";
 import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
-import { BuildStatus } from "../surface/SurfaceNav";
 import type { BuildActivity } from "./buildActivity";
 import "./create.css";
 
@@ -22,7 +21,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
     if (build.error && (document.activeElement === submit.current || document.activeElement === document.body)) prompt.current?.focus();
   }, [build.error]);
   return <>
-    <header className="create-heading"><strong>create</strong><BuildStatus activity={activity} /><a href={surfaceHref("/pages")}>all pages</a></header>
+    <header className="create-heading"><strong>create</strong><a href={surfaceHref("/pages")}>all pages</a></header>
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>
