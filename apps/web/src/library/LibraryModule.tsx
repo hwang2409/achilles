@@ -300,7 +300,7 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
     // clear first and set on the next frame, so a second show of the same text is announced again.
     setAnnouncement("");
     if (next.state !== "data") return;
-    const message = [`${noun} text loaded`, next.body.redacted && "some secret-like text was removed", next.body.truncated && "truncated at 128 KiB"];
+    const message = [`${noun} text loaded`, next.body.redacted && "text that looks like a secret is shown masked; it is still in the file", next.body.truncated && "truncated at 128 KiB"];
     requestAnimationFrame(() => setAnnouncement(message.filter(Boolean).join(". ")));
   }
 
@@ -321,7 +321,7 @@ function LibraryText({ client, method, row, noun, onGone }: { client: ZetaClient
       <p role="alert" className="library-error">could not show the text: {reveal.problem.message}</p>
     </div>}
     {reveal?.state === "data" && <div ref={region} tabIndex={-1} role="region" aria-label={`${row.name} ${noun} text`} className="library-text-region">
-      {reveal.body.redacted && <p className="library-flag">redacted: some secret-like text was removed from this file</p>}
+      {reveal.body.redacted && <p className="library-flag">this file has text that looks like a secret; it is shown masked here and is still in the file</p>}
       {reveal.body.truncated && <p className="library-flag">truncated at 128 KiB</p>}
       <pre className="library-body">{reveal.body.text}</pre>
       {reveal.body.truncated && <p className="library-flag">text truncated at 128 KiB</p>}
