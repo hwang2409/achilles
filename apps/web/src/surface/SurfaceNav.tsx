@@ -3,7 +3,7 @@ import type { BuildActivity } from "../create/buildActivity";
 import { chatHref } from "./AgentNavAdapter";
 import type { CreateModeOwner } from "../create/createMode";
 import { isMac, modKey } from "../keyboard";
-import { createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./routes";
+import { approvalIntent, createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./routes";
 
 const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))];
 
@@ -26,7 +26,7 @@ export function BuildStatus({ activity, current, className = "" }: { activity: B
   const create = surfaceHref(createRoute.path);
   return <span className={`build-status ${className}`} aria-label="page build progress">
     {building > 0 && (current === createRoute ? <span className="build-building" aria-current="page">{building} building</span> : <a className="build-building" href={create}>{building} building</a>)}
-    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) : create}>{needsYou} needs you</a>}
+    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) + approvalIntent : create}>{needsYou} needs you</a>}
   </span>;
 }
 
