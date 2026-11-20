@@ -201,7 +201,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={showNavActivity ? activity : undefined}
       action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "starting…" : "new chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
-      search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows)} />
+      search={nav.searchControl(dismissDrawer)} counts={{ ...nav.counts, chats: nav.counts.chats && { ...nav.counts.chats, waiting: (nav.counts.chats.waiting ?? 0) + activity.needsYou } }} recent={nav.recent(dismissDrawer, activity.rows, activity.onScreen)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}
       <div className="shell-header">
@@ -209,7 +209,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
         {header}
       </div>
       {workspace && dock}
-      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows }}>{settingsPlace ? <ModuleFrame title={current.label}>
+      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={{ ...catalog, builds: activity.rows, onScreen: activity.onScreen }}>{settingsPlace ? <ModuleFrame title={current.label}>
         <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
       </ModuleFrame> : children}</PageChatCatalog.Provider></ShellDock.Provider>
     </main>

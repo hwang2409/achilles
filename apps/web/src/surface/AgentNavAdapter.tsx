@@ -42,7 +42,24 @@ export const PageChatCatalog = createContext<{
   more: () => void;
   clearSearch: () => void;
   builds: readonly BuildRow[];
+  onScreen: (id: string, shown: boolean) => void;
 } | null>(null);
+
+// The views tell the build owner which build rows are on screen; the owner decides what to read. Returns a callback ref.
+export function useOnScreen(id: string | undefined, report: ((id: string, shown: boolean) => void) | undefined) {
+  const [node, setNode] = useState<Element | null>(null);
+  useEffect(() => {
+    if (!node || id === undefined || !report) return;
+    let shown = false;
+    const observer = new IntersectionObserver((entries) => {
+      const next = entries.at(-1)!.isIntersecting;
+      if (next !== shown) report(id, shown = next);
+    });
+    observer.observe(node);
+    return () => { observer.disconnect(); if (shown) report(id, false); };
+  }, [node, id, report]);
+  return setNode;
+}
 
 export const chatHref = (chat: Chat) => {
   const url = new URL(surfaceHref(chat.page_route), location.href);
@@ -238,11 +255,11 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
       pages: { total: pageList.items && !pageList.error ? `${pageRows.length}${pageList.next ? "+" : ""}` : undefined },
       chats: { total: !search && chatList.items && !chatList.error ? `${chats.length}${chatList.next ? "+" : ""}` : undefined, waiting: waitingTotal },
     },
-    recent: (close: () => void, builds: readonly BuildRow[]) => {
+    recent: (close: () => void, builds: readonly BuildRow[], onScreen: (id: string, shown: boolean) => void) => {
       const projectedBuild = (chat: Chat) => chat.purpose === "page_build" ? builds.find((row) => row.chat.session_id === chat.session_id) : undefined;
       return <section ref={chatListElement} className="chat-list" id="chat-search-results" tabIndex={0} aria-label="chat list" data-list-state={listStatus(chatList)} data-loaded-count={chats.length} onKeyDown={chatListKey}>
         <div className="list-head"><span>recent chats</span><b>{chatList.items === null ? "" : chats.length}</b></div>
-        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
+        {chatList.error ? <div className="page-list-error"><span>could not load chats</span><button onClick={() => void chatListOwner.current!.reload(search)}>retry</button></div> : chatList.items === null ? <SidebarSkeleton /> : search ? <div className="chat-group"><h2>{chats.length} results</h2>{chats.map((chat, index) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={index === activeResult} index={index} query={search} onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div> : groups.map(([label, rows]) => <div className="chat-group" key={label}><h2>{label}</h2>{rows.map((chat) => <ChatRow key={chat.session_id} chat={chat} build={projectedBuild(chat)} onScreen={onScreen} current={chat.session_id === sessionId} active={false} query="" onSelect={onSelectChat ? (chat) => select(chat, close) : undefined} onRename={canWrite ? onRenameChat : undefined} onRenameStart={startRowRename} onRenameEnd={returnRowFocus} />)}</div>)}
         {chatList.next && <button className="load-older" onClick={(event) => void loadOlderChats(event.currentTarget)}>load 50 older</button>}
       </section>;
     },
@@ -255,8 +272,9 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
   };
 }
 
-function ChatRow({ chat, build, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; build?: BuildRow; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
+function ChatRow({ chat, build, onScreen, current, active, index, query, onSelect, onRename, onRenameStart, onRenameEnd }: { chat: Chat; build?: BuildRow; onScreen?: (id: string, shown: boolean) => void; current: boolean; active: boolean; index?: number; query: string; onSelect?: (chat: Chat) => void; onRename?: (chat: Chat, title: string) => void; onRenameStart: (id: string) => void; onRenameEnd: () => void }) {
   const rename = useInlineRename();
+  const seen = useOnScreen(chat.purpose === "page_build" ? chat.session_id : undefined, onScreen);
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
   // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
@@ -267,7 +285,7 @@ function ChatRow({ chat, build, current, active, index, query, onSelect, onRenam
   const meta = <span><span className="chat-row-meta" title={label ? `${label} · ${chat.page_title}` : chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
-    return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
+    return <div ref={seen} id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>
       <strong aria-hidden="true">{titleOf(chat)}</strong>
       <input className="chat-row-edit" aria-label={`rename ${titleOf(chat)}`} {...rename.bind()} />
       {meta}
@@ -281,7 +299,7 @@ function ChatRow({ chat, build, current, active, index, query, onSelect, onRenam
     onRenameStart(chat.session_id);
     rename.start(chat.title?.trim() || chat.first_title?.trim() || "", (value) => onRename(chat, value));
   };
-  return <a tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={onSelect && ((event) => { event.preventDefault(); onSelect(chat); })} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts={onRename ? "F2" : undefined} aria-current={current ? "page" : undefined}>
+  return <a ref={seen} tabIndex={-1} id={rowId} data-chat-id={chat.session_id} className={rowClass} href={chatHref(chat)} onClick={onSelect && ((event) => { event.preventDefault(); onSelect(chat); })} onKeyDown={(event) => { if (event.key === "F2") startRename(event); }} aria-keyshortcuts={onRename ? "F2" : undefined} aria-current={current ? "page" : undefined}>
     <strong title={titleOf(chat)}><Highlight value={titleOf(chat)} query={query} /></strong>
     {meta}
     {onRename && <button type="button" tabIndex={-1} aria-hidden="true" className="chat-row-rename" data-write-surface={WRITE_SURFACE.sidebarRename} title="rename (F2)" onClick={startRename}>✎</button>}

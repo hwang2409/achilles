@@ -263,9 +263,11 @@ function serveZeta({ features = [READ], status, history = () => ({ messages: [ca
 const settle = async () => { for (let i = 0; i < 20; i++) await flush(); };
 type Mounted = ReturnType<typeof renderHook<ReturnType<typeof useBuildActivity>, { client: ZetaClient; chats: Chat[] }>>;
 const mounted: Mounted[] = [];
-async function mount(zeta: ReturnType<typeof serveZeta>, chats: Chat[] = [chat]) {
+// `shown`: the build rows a view reports on screen (default: every build mounted).
+async function mount(zeta: ReturnType<typeof serveZeta>, chats: Chat[] = [chat], shown = chats.map((one) => one.session_id)) {
   const hook: Mounted = renderHook(({ client, chats }) => useBuildActivity({ client, chats, pages: [reading], reloadPages: () => {} }), { initialProps: { client: zeta.client, chats } });
   mounted.push(hook);
+  act(() => shown.forEach((id) => hook.result.current.onScreen(id, true)));
   await settle();
   return hook;
 }
@@ -275,7 +277,7 @@ const rowOf = (hook: Mounted, id = chat.session_id) => {
 };
 /** This tab watched the build run: a live pass saw it running. */
 async function rememberBuilding() {
-  (await mount(serveZeta({ status: () => running }))).unmount();
+  (await mount(serveZeta({ status: () => running }), [chat], [])).unmount();
 }
 afterEach(() => { mounted.splice(0).forEach((hook) => hook.unmount()); jest.useRealTimers(); fakeClock = false; });
 
@@ -318,15 +320,19 @@ test("-32004: the read waits at least retry_after_ms before it asks again", asyn
   expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(2000);
 });
 
-test("-32004 three times: three reads, then no claim until a new demand", async () => {
+test("-32004 three times: no read on a timer, and the next demand reads the build again", async () => {
   await rememberBuilding();
   jest.useFakeTimers(); fakeClock = true;
-  const zeta = serveZeta({ status: () => idle("newer"), read: () => { throw busy; } });
-  const hook = await mount(zeta);
-  for (let i = 0; i < 4; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
+  let busyReads = 3;
+  const zeta = serveZeta({ status: () => idle("newer"), read: () => { if (busyReads-- > 0) throw busy; return rows(done); } });
+  // remembered as building, so it is read with no row on screen
+  const hook = await mount(zeta, [chat], []);
+  for (let i = 0; i < 20; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
+  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 3, label: "last known building · not the current session", receipt: null });
+  // a focus reloads the chat list: same updated_at, a new demand
   hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
   await settle();
-  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 3, label: "last known building · not the current session", receipt: null });
+  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 4, label: "done", receipt: "/reading-list" });
 });
 
 test("-32004 three times: the wait after the third holds the queue, and a new demand gets three tries again", async () => {
@@ -359,7 +365,8 @@ test("a page load does not read builds this tab already proved settled; a new tu
 test("a read sent before the live pass saw the build current is dropped", async () => {
   let current: unknown = idle("newer");
   const held = Promise.withResolvers<unknown>();
-  const zeta = serveZeta({ status: () => current, read: () => held.promise });
+  // a read sent after the stale one is dropped finds no turn end
+  const zeta = serveZeta({ status: () => current, read: () => zeta.reads().length === 1 ? held.promise : rows([call()]) });
   const hook = await mount(zeta);
   expect(zeta.reads()).toEqual([chat.session_id]);
   // the build attaches and runs, then another session attaches; the old read answers last
@@ -374,13 +381,26 @@ test("a read sent before the live pass saw the build current is dropped", async 
   expect(rowOf(hook)).toEqual({ label: "last known building · not the current session", receipt: null });
 });
 
-test("one read in flight, and only the builds of one chat-list page", async () => {
+// Visible-first reads: the views report rows on screen; the queue holds at most 10 and refills from the rows on screen.
+const many = Array.from({ length: 30 }, (_, n) => `b${n + 1}`);
+test.each([
+  { name: "only builds on screen are read, newest first, at most 10 at once", shown: many.slice(0, 15), later: [], reads: many.slice(0, 15) },
+  { name: "a build is read when its row scrolls into view", shown: ["b1", "b2"], later: ["b17"], reads: ["b1", "b2", "b17"] },
+  { name: "no row on screen and no demand: no read", shown: [], later: [], reads: [] },
+])("$name", async ({ shown, later, reads }) => {
+  jest.useFakeTimers(); fakeClock = true;
   const waiting: ((value: unknown) => void)[] = [];
-  const ids = Array.from({ length: 52 }, (_, n) => `b${n + 1}`);
   const zeta = serveZeta({ status: () => idle("newer"), read: () => new Promise((resolve) => waiting.push(resolve)) });
-  await mount(zeta, builds(...ids));
-  for (let i = 0; i < 60 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
-  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: 1, reads: ids.slice(0, 50) });
+  const hook = await mount(zeta, builds(...many), shown);
+  const checking = hook.result.current.rows.filter((row) => row.checking).map((row) => row.chat.session_id);
+  expect(checking).toEqual(shown.slice(0, 10));
+  for (let i = 0; i < 40 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
+  act(() => later.forEach((id) => hook.result.current.onScreen(id, true)));
+  await settle();
+  for (let i = 0; i < 40 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
+  // timers alone never read
+  for (let i = 0; i < 5; i++) { act(() => { jest.advanceTimersByTime(10000); }); await settle(); }
+  expect({ most: zeta.mostReading(), reads: zeta.reads() }).toEqual({ most: reads.length ? 1 : 0, reads });
 });
 
 test("a new turn during an in-flight read: the next page load reads again", async () => {

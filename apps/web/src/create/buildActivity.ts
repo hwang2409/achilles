@@ -160,8 +160,8 @@ const POLL_MS = 2000;
 const RETRY_MS = [2000, 5000, 10000];
 const READ_FEATURE = "session_history_read_v1";
 const BUSY_TRIES = 3;
-// The builds the chat list shows are read, at most this many: one chat-list page, so every row the nav and switcher show gets a state.
-const READ_BUILDS = 50;
+// At most this many builds wait in the queue: one tab holds zeta's one read slot for about this many reads at a time.
+const QUEUE_MAX = 10;
 const errorCode = (error: unknown) => object(error)?.code;
 const errorData = (error: unknown) => object(object(error)?.data);
 // A run-end read of a build that status says is not current: its rows (null: no turn end in view), or no reply.
@@ -189,7 +189,8 @@ async function readLive(chats: readonly Chat[], request: Request, signal: AbortS
 }
 
 // The live pass (status, the current build) and, when zeta granted session_history_read_v1, a serial queue that reads
-// builds that are not current, on demand only: first sight, a new turn (updated_at moved), its run end, a manual refresh.
+// builds that are not current, on demand only: a row on screen (newest first), a new turn (updated_at moved), its run end,
+// a manual refresh. The views only say which build rows are on screen; this queue decides what to read.
 // A trigger during a pass runs one more pass after it; only a client change or unmount aborts.
 // shortcut: this is the only session_history_read caller; a second caller must move the queue to one per-client owner, so
 // the server's one-read-in-flight budget stays in one place.
@@ -216,6 +217,10 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   let busyTimer: ReturnType<typeof setTimeout> | undefined;
   const readKeys = new Map<string, string | undefined>();
   const busyTries = new Map<string, number>();
+  // Build rows on screen, counted per view (the nav, the switcher, and /create can show one build at once).
+  const shownCount = new Map<string, number>();
+  // Builds the queue gave up on after BUSY_TRIES: unknown until the next demand, never retried on a timer.
+  const dropped = new Set<string>();
   // A manual refresh reads settled builds again; a new reader (a page load, a reconnect) trusts what this tab proved.
   let refreshed = false;
   // Builds whose run end this tab got.
@@ -242,18 +247,18 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     const known = memory.observed(chat.session_id);
     return !refreshed && known !== undefined && !active(known.state) && known.at !== undefined && known.at === chat.updated_at;
   };
-  const enqueue = (forced: readonly string[]) => {
+  // A demand (a chat-list change, a row scrolled into view, a run end, a refresh) asks again for dropped builds.
+  const demand = () => { dropped.forEach((id) => readKeys.delete(id)); dropped.clear(); };
+  const enqueue = (forced: readonly string[] = []) => {
     const { chats, client } = latest;
     if (!client || !reads || !supportsFeature(client, READ_FEATURE)) return;
-    const builds = chats.filter(isBuild);
-    // The builds the chat list shows, and any build this tab last knew as active.
-    const shown = new Set(builds.slice(0, READ_BUILDS).map((chat) => chat.session_id));
     let added = false;
-    for (const chat of builds) {
+    // Chats come newest first. Wanted: a build on screen, or one this tab last knew as active.
+    for (const chat of chats.filter(isBuild)) {
       const id = chat.session_id;
       if (id === current || queue.includes(id)) continue;
-      const wanted = shown.has(id) || active(memory.observed(id)?.state ?? "done");
-      if (!forced.includes(id) && !(wanted && readKeys.get(id) !== chat.updated_at && !settled(chat))) continue;
+      const wanted = shownCount.has(id) || active(memory.observed(id)?.state ?? "done");
+      if (!forced.includes(id) && !(queue.length < QUEUE_MAX && wanted && readKeys.get(id) !== chat.updated_at && !settled(chat))) continue;
       busyTries.delete(id); // each demand gets its own tries
       queue.push(id);
       added = true;
@@ -293,15 +298,17 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       waiting = id;
       busyTimer = setTimeout(() => {
         busyTimer = waiting = undefined;
-        if (tries < BUSY_TRIES && !queue.includes(id)) queue.unshift(id);
-        pump();
+        if (tries < BUSY_TRIES) { if (!queue.includes(id)) queue.unshift(id); }
+        else dropped.add(id);
+        enqueue();
         changed();
       }, wait);
     } else if (code === -32601) { reads = false; queue = []; }
     // The build became zeta's attached session (plain invalid_params): the live pass reads it now. Every other -32602
     // (session_not_found: absent, another project, project versus none, a child id) is no claim, like -32005.
     else if (code === -32602 && errorData(error)?.code === "invalid_params") run();
-    pump();
+    // The queue holds at most QUEUE_MAX: the next builds on screen join as it drains.
+    enqueue();
     changed();
   };
 
@@ -358,19 +365,29 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     inFlight = undefined;
     readKeys.clear();
     busyTries.clear();
+    dropped.clear();
     reads = true;
   };
   return {
     refresh(chats: readonly Chat[], client: ZetaClient | null, endedId?: string) {
       latest = { chats, client };
       if (endedId !== undefined) { ended.add(endedId); ranHere.add(endedId); }
+      demand();
       run();
+    },
+    // A view reports a build row entering or leaving the screen. A pass in progress reads the new set when it ends.
+    onScreen(id: string, shown: boolean) {
+      const count = (shownCount.get(id) ?? 0) + (shown ? 1 : -1);
+      if (count > 0) shownCount.set(id, count); else shownCount.delete(id);
+      if (!shown) return;
+      demand();
+      if (!running) enqueue();
     },
     stop,
     // Builds a read will answer soon: queued, in flight, or waiting out a busy reply.
     pending: (id: string) => queue.includes(id) || inFlight?.id === id || waiting === id,
     // A manual refresh: every wanted build is read again (one at a time).
-    forget: () => { epoch++; refreshed = true; readKeys.clear(); busyTries.clear(); },
+    forget: () => { epoch++; refreshed = true; readKeys.clear(); busyTries.clear(); dropped.clear(); },
   };
 }
 
@@ -449,6 +466,7 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
     // The text the shell's live region should speak once, or null when this completion was already announced.
     announcement: receipt && !memory.announced(receipt) ? `${titleOf(receipt.chat)} finished · ${receipt.route} is ready` : null,
     markAnnounced: () => { if (receipt) memory.markAnnounced(receipt); },
+    onScreen: reader.onScreen,
     refresh: () => { reader.forget(); pageCheck.requested.clear(); pageCheck.reloadPages(); setRetry((value) => value + 1); },
     dismissReceipt: () => {
       if (!receipt) return;
