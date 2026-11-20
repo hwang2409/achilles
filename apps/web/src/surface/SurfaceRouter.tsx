@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { AppShell } from "../AppShell";
+import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, type Connection } from "../zeta";
 import { useAgentNavAdapter } from "./AgentNavAdapter";
@@ -30,8 +31,9 @@ export function SurfaceRouter() {
   if (!route) return null;
   const connecting = phase === "connected" || (phase === "connecting" && connectionState.attempt === 0);
   let content: ReactNode;
-  if (route.id === "telemetry") {
-    content = client ? <TelemetryModule client={client} pathname={pathname} /> : <ModuleFrame title={route.label}>
+  if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
+    content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
+      : <LibraryModule key={route.id} client={client} kind={route.id} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
