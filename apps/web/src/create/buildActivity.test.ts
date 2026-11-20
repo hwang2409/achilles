@@ -585,6 +585,7 @@ const READ_ROWS: ReadRow[] = [
   { name: "remembered needing you off screen: a busy wait, then read", remember: approval, shown: [], replies: ["busy"], steps: ["wait"], reads: 2, label: "done" },
   { name: "dropped after three busy replies: stale, no read on a timer", replies: dropped, steps: ["wait", "wait", "wait", "wait", "wait"], reads: 3, label: null, stale: true },
   { name: "a new turn during the last busy wait with the queue full: dropped, not checking", shown: ["t", "full"], replies: dropped, steps: ["wait", "wait", "turn", "wait"], reads: 3, label: null, stale: true },
+  { name: "a refresh during the third busy wait: read, and no refresh beside done", replies: dropped, steps: ["wait", "wait", "refresh", "wait"], reads: 4, label: "done" },
   { name: "dropped, then refresh reads it", replies: dropped, steps: ["wait", "wait", "wait", "refresh"], reads: 4, label: "done" },
   { name: "dropped, then a focus reads it", replies: dropped, steps: ["wait", "wait", "wait", "focus"], reads: 4, label: "done" },
   { name: "dropped, then a scroll reads it", replies: dropped, steps: ["wait", "wait", "wait", "hide", "show"], reads: 4, label: "done" },
