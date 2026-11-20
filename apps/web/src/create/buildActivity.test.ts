@@ -1,6 +1,5 @@
 import "../test-dom";
 import { afterEach, expect, jest, test } from "bun:test";
-import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { createElement, useState } from "react";
 import { flushSync } from "react-dom";
 import { AppShell } from "../AppShell";
@@ -11,6 +10,9 @@ import type { Transport, ZetaClient } from "@fulcrum/zeta";
 import { teeRunEnds } from "../zeta/turnEnd";
 import type { Chat, PageLink } from "../surface/AgentNavAdapter";
 import { buildLabel, useBuildActivity } from "./buildActivity";
+// react-dom/client reads `window` once when it loads; a static import here loads it before the DOM above exists, and
+// later test files in the same run (Confirmation.test) then get no onChange from text inputs.
+const { act, cleanup, render, renderHook } = await import("@testing-library/react");
 
 afterEach(() => { cleanup(); sessionStorage.clear(); });
 
