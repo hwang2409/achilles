@@ -39,10 +39,21 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
   await openSettings(page, gateWait);
-  await page.getByRole("button", { name: "reset to defaults" }).click();
-  if (await theme(page) !== null) throw new Error("reset did not restore the automatic theme");
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
-  if (saved?.theme !== "auto" || saved?.autoApproveDefault !== true) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
+  // reset keeps auto-approve as it is: off stays off, on stays on
+  const settingsDialog = page.getByRole("dialog", { name: "settings" });
+  await gateWait.playwright(settingsDialog.getByText("auto-approve is not reset."), "waitFor");
+  const resetKeeps = async (autoApproveDefault: boolean) => {
+    await page.getByRole("button", { name: "reset to defaults" }).click();
+    if (await theme(page) !== null) throw new Error("reset did not restore the automatic theme");
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
+    if (saved?.theme !== "auto" || saved?.autoApproveDefault !== autoApproveDefault) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
+  };
+  await page.getByRole("switch", { name: "auto-approve default" }).click();
+  await resetKeeps(false);
+  await settingsDialog.getByRole("button", { name: "allow without asking" }).click();
+  await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
+  await page.getByRole("option", { name: /gruvbox-light/ }).click();
+  await resetKeeps(true);
   await page.getByRole("button", { name: "esc" }).click();
   await page.keyboard.press(appShortcut("Comma"));
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
