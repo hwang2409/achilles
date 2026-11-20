@@ -443,7 +443,7 @@ const rows: Record<WriteSurfaceId, Row> = {
       return;
     }
     // the time is its own element: match the receipt's whole text
-    expect(await app.findByText((_, node) => node?.tagName === "P" && /^at .+: telemetry is on\. if zeta\[otel\] is not installed, turn it off here before you restart zeta\.$/.test(node.textContent ?? ""))).toBeTruthy();
+    expect(await app.findByText((_, node) => node?.tagName === "P" && /^at .+: telemetry is on\. restart zeta to start recording\. a zeta without zeta\[otel\] does not start; turn it off here\.$/.test(node.textContent ?? ""))).toBeTruthy();
     expect(app.getByText("restart zeta serve. this list goes away when you leave this page.")).toBeTruthy();
     didWrite(writes, "home_settings_update");
   } },
@@ -623,22 +623,39 @@ const requestApprovalChange = async (app: RenderResult) => {
   await click(app.getByRole("button", { name: "confirm", exact: true }));
 };
 
-test("a stale telemetry change whose reread shows it on elsewhere keeps the reason and focuses the row control", async () => {
-  // the file was turned on elsewhere: the update is stale, and the reread finds telemetry on at a new revision
-  const turnedOn = { result: { revision: `sha256:${"c".repeat(64)}`, settings: { telemetry: { enabled: true, source: "builtin", editable: true } }, settings_malformed: false } };
+const turnedOn = { result: { revision: `sha256:${"c".repeat(64)}`, settings: { telemetry: { enabled: true, source: "builtin", editable: true } }, settings_malformed: false } };
+const staleRevision = { error: { code: -32009, message: "settings.toml changed since the given revision", data: { code: "stale_revision" } } };
+const otelMissing = { error: { code: -32602, message: "invalid params", data: { code: "telemetry_unavailable", detail: "OpenTelemetry support is not installed; install zeta[otel]" } } };
+test.each([
+  ["a stale on", "off", staleRevision, "not changed. the state changed elsewhere; the row now shows the current state."],
+  ["a stale off", "on", staleRevision, "not changed. the state changed elsewhere; the row now shows the current state."],
+  ["an on refused for zeta[otel]", "off", otelMissing,
+    "not changed. the state changed elsewhere; the row now shows the current state. zeta cannot record telemetry on this computer: OpenTelemetry support is not installed; install zeta[otel]"],
+] as const)("%s whose reread shows it on elsewhere keeps the reason, shows no receipt, and focuses the row control", async (_name, start, reply, reason) => {
+  // the file was turned on elsewhere meanwhile: the update fails, and the reread finds telemetry on at a new revision
+  const off = { result: { revision: `sha256:${"a".repeat(64)}`, settings: { telemetry: { enabled: false, source: "off", editable: true } }, settings_malformed: false } };
+  const before = start === "on" ? { result: { ...turnedOn.result, revision: `sha256:${"a".repeat(64)}` } } : off;
   const options: Options = { ...homeSettings, rpc: { ...homeSettings.rpc,
-    home_settings_get: (params, requests) => requests.includes("home_settings_update") ? turnedOn : homeSettings.rpc!.home_settings_get!(params, requests),
-    home_settings_update: () => ({ error: { code: -32009, message: "settings.toml changed since the given revision", data: { code: "stale_revision" } } }),
+    home_settings_get: (_params, requests) => requests.includes("home_settings_update") ? turnedOn : before,
+    home_settings_update: () => reply,
   } };
   await withApp("controller", options, async (app, writes) => {
-    await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
-    const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
-    await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
-    await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
-    const turnOff = await app.findByText("turn off", { selector: tag("settings.telemetry") });
+    if (start === "off") {
+      await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));
+      const dialog = await app.findByRole("dialog", { name: "turn on telemetry" });
+      await click(app.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }));
+      await click(dialog.querySelector<HTMLElement>(".confirmation-primary")!);
+    } else {
+      await click(await app.findByText("turn off", { selector: tag("settings.telemetry") }));
+      await click(document.querySelector<HTMLElement>("#telemetry .confirmation-primary")!);
+    }
+    await app.findByText(reason);
+    const turnOff = app.getByText("turn off", { selector: tag("settings.telemetry") });
     // compare markup: a failing element diff crashes bun
     expect(document.activeElement?.outerHTML).toBe(turnOff.outerHTML);
-    expect(app.getByText("not changed. the state changed elsewhere; the row now shows the current state.")).toBeTruthy();
+    // this tab wrote nothing: no on receipt, only the warning that holds whoever turned it on
+    expect(app.queryByText(/restart zeta to start recording/)?.textContent ?? null).toBeNull();
+    expect(app.getByText("a zeta without zeta[otel] does not start; turn it off here.")).toBeTruthy();
     expect(app.queryByRole("dialog")).toBeNull();
     expect(writes.filter((write) => write === "home_settings_update")).toHaveLength(1);
   });

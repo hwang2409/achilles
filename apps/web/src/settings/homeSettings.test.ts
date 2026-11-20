@@ -60,7 +60,7 @@ describe("write", () => {
   test("update params are exactly the revision and one change, sent once inside the borrow", async () => {
     const zeta = fakeZeta({ home_settings_update: [updated(true)] });
     const { op, seen } = change(zeta);
-    expect(await op.execute()).toMatchObject({ status: "committed", receipt: "telemetry is on. if zeta[otel] is not installed, turn it off here before you restart zeta." });
+    expect(await op.execute()).toMatchObject({ status: "committed", receipt: "telemetry is on. restart zeta to start recording. a zeta without zeta[otel] does not start; turn it off here." });
     expect(zeta.calls).toEqual([["home_settings_update", { expected_revision: rev("a"), changes: [{ key: "telemetry.enabled", value: true }] }]]);
     expect(seen.committed).toEqual([[{ revision: rev("b"), telemetry: "on", editable: true, malformed: false }, { sessions: ["s1"], complete: true }]]);
   });
@@ -72,9 +72,9 @@ describe("write", () => {
     ["observer_read_only", error(-32008, "observer", { code: "observer_read_only" }), { reason: "refused" }, 0],
     ["settings_malformed", error(-32000, "settings.toml does not parse or validate", { code: "settings_malformed" }), { reason: "not-applied", message: "not changed. settings.toml has an error. zeta will not start until it is fixed." }, 1],
     ["telemetry_unavailable", error(-32602, "invalid params", { code: "telemetry_unavailable", detail: "zeta[otel] is\nnot installed" }),
-      { reason: "not-applied", message: "not changed. zeta cannot record telemetry on this computer: zeta[otel] is not installed" }, 0],
+      { reason: "not-applied", message: "not changed. zeta cannot record telemetry on this computer: zeta[otel] is not installed", final: true }, 1],
     ["telemetry_unavailable without text", error(-32602, "telemetry is unavailable", { code: "telemetry_unavailable" }),
-      { reason: "not-applied", message: "not changed. zeta cannot record telemetry on this computer: telemetry is unavailable" }, 0],
+      { reason: "not-applied", message: "not changed. zeta cannot record telemetry on this computer: telemetry is unavailable", final: true }, 1],
     ["a telemetry_unavailable reason (not code)", error(-32602, "invalid params", { reason: "telemetry_unavailable", detail: "x" }), { reason: "not-applied", message: "not changed. zeta refused this change: invalid params" }, 0],
     ["an unknown -32602 reason", error(-32602, "invalid params", { code: "invalid_params" }), { reason: "not-applied", message: "not changed. zeta refused this change: invalid params" }, 0],
     ["a -32602 with no data", error(-32602, "x".repeat(400)), { reason: "not-applied", message: `not changed. zeta refused this change: ${"x".repeat(261)}` }, 0],

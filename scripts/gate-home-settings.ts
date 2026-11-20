@@ -1,17 +1,25 @@
+import { createHash } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Browser } from "playwright";
 
 type WaitFor = (check: () => Promise<boolean>, label: string) => Promise<void>;
 
+const BUILT_IN = 'otel.endpoint = "http://127.0.0.1:4323/v1/traces"\n';
+// the pinned zeta's start error when `zeta[otel]` is missing; CI and the gate run without that extra
+const MISSING_OTEL = "OpenTelemetry support is not installed; install zeta[otel]";
+
 /** The telemetry row on /settings against the pinned zeta's temp home. Run it while no chat tab holds control.
- * A zeta without `zeta[otel]` may refuse to turn telemetry on (`telemetry_unavailable`); both outcomes are checked. */
+ * Without `zeta[otel]` zeta refuses to turn telemetry on (`telemetry_unavailable`); the off path runs on a line written here. */
 export async function gateHomeSettings(browser: Browser, origin: string, zetaHome: string, waitFor: WaitFor, screenshotDir?: string) {
   const file = join(zetaHome, "settings.toml");
   const bytes = () => readFile(file).then((data) => data.toString("utf8"), () => null);
   const original = await bytes();
+  // non-empty bytes, so "not written" compares real content
+  const seeded = `${original ?? ""}# synthetic gate settings\n`;
   const tab = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   try {
+    await writeFile(file, seeded, { mode: 0o600 });
     await tab.goto(`${origin}/settings#telemetry`);
     const row = tab.locator("#telemetry");
     const turnOn = row.getByRole("button", { name: "turn on telemetry", exact: true });
@@ -24,38 +32,46 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
       return dialog;
     };
     const dialog = await confirmOn();
-    const receipt = row.getByText(/^at .+: telemetry is on\. if zeta\[otel\] is not installed, turn it off here before you restart zeta\.$/);
     const refusal = dialog.getByRole("alert");
-    await waitFor(async () => await receipt.isVisible() || /^not changed\./.test(await refusal.textContent().catch(() => "") ?? ""), "telemetry on outcome");
-    if (await receipt.isVisible()) {
-      const on = await bytes();
-      if (!on?.includes('endpoint = "http://127.0.0.1:4323/v1/traces"')) throw new Error("telemetry on did not write the built-in endpoint line");
-      if (!(await row.innerText()).includes("restart zeta serve")) throw new Error("telemetry on receipt did not list zeta serve");
-      if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-on.png") });
-      await row.getByRole("button", { name: "turn off", exact: true }).click();
-      await row.getByRole("group").getByRole("button", { name: "turn off", exact: true }).click();
-      await waitFor(() => row.getByText(/^at .+: telemetry is off\. restart zeta to stop recording\.$/).isVisible(), "telemetry off receipt");
-      // a missing file hashes as empty bytes; on then off leaves an empty file
-      if ((await bytes()) !== (original ?? "")) throw new Error("telemetry off did not restore the exact original bytes");
-      console.log("settings telemetry: on wrote the built-in line and listed zeta serve; off restored the exact bytes");
-    } else {
-      const text = await refusal.textContent();
-      if (!text?.startsWith("not changed. zeta cannot record telemetry on this computer: ")) throw new Error(`telemetry on was refused with unexpected copy: ${text}`);
-      if ((await bytes()) !== original) throw new Error("a refused telemetry change wrote settings.toml");
-      await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
-      if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
-      console.log("settings telemetry: zeta refused turning it on; the row showed why and stayed off");
+    const refused = `not changed. zeta cannot record telemetry on this computer: ${MISSING_OTEL}`;
+    await waitFor(async () => await refusal.textContent().catch(() => "") === refused, "telemetry on refused with zeta's start error");
+    if ((await bytes()) !== seeded) throw new Error("a refused telemetry change wrote settings.toml");
+    if (screenshotDir) {
+      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-1440x900.png") });
+      await tab.setViewportSize({ width: 390, height: 844 });
+      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
+      await tab.setViewportSize({ width: 1440, height: 900 });
     }
+    await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
+    if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
+    const sha = createHash("sha256").update(seeded).digest("hex");
+    console.log(`settings telemetry: zeta refused turning it on; the row showed zeta's reason; settings.toml sha256 ${sha} unchanged`);
+    // off on a file that has the built-in line, written outside zeta. zeta checks that telemetry can start before
+    // the revision, so the stale case runs on off.
+    await writeFile(file, BUILT_IN + seeded, { mode: 0o600 });
+    await tab.reload();
+    const turnOff = row.getByRole("button", { name: "turn off", exact: true });
+    const confirmOff = async () => {
+      await turnOff.click();
+      const group = row.getByRole("group");
+      await group.getByRole("button", { name: "turn off", exact: true }).click();
+      return group;
+    };
+    await waitFor(() => turnOff.isVisible(), "settings telemetry row (on)");
     // an edit outside zeta after the page read the file: the change is refused as stale
-    const edited = `${(await bytes()) ?? ""}# synthetic gate edit\n`;
+    const edited = `${BUILT_IN}${seeded}# synthetic gate edit\n`;
     await writeFile(file, edited, { mode: 0o600 });
-    const stale = await confirmOn();
+    const stale = await confirmOff();
     const changed = row.getByText("not changed. the state changed elsewhere; the row now shows the current state.", { exact: true });
     await waitFor(() => changed.isVisible(), "stale telemetry change copy in the row");
     if ((await bytes()) !== edited) throw new Error("a stale telemetry change wrote settings.toml");
     if (await stale.isVisible()) throw new Error("a stale telemetry change left the old review open");
-    await waitFor(async () => await tab.evaluate(() => document.activeElement?.textContent) === "turn on telemetry", "focus on the row control after a stale change");
+    await waitFor(async () => await tab.evaluate(() => document.activeElement?.textContent) === "turn off", "focus on the row control after a stale change");
     console.log("settings telemetry: an outside edit made the change stale; nothing was written; the row kept the reason and the focus");
+    await confirmOff();
+    await waitFor(() => row.getByText(/^at .+: telemetry is off\. restart zeta to stop recording\.$/).isVisible(), "telemetry off receipt");
+    if ((await bytes()) !== `${seeded}# synthetic gate edit\n`) throw new Error("telemetry off did not remove exactly the built-in line");
+    console.log("settings telemetry: off removed exactly the built-in line");
   } finally {
     await tab.close();
     if (original === null) await rm(file, { force: true });
