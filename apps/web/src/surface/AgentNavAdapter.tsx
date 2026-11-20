@@ -46,17 +46,26 @@ export const PageChatCatalog = createContext<{
 } | null>(null);
 
 // The views tell the build owner which build rows are on screen; the owner decides what to read. Returns a callback ref.
+// On screen: inside the nearest scroll box, below its sticky heads (the box's scroll-padding-top), and not inert (a
+// page behind the open 390 drawer). Only those rows are read first.
 export function useOnScreen(id: string | undefined, report: ((id: string, shown: boolean) => void) | undefined) {
   const [node, setNode] = useState<Element | null>(null);
   useEffect(() => {
     if (!node || id === undefined || !report) return;
+    let root = node.parentElement;
+    while (root && !/auto|scroll/.test(getComputedStyle(root).overflowY)) root = root.parentElement;
+    const heads = parseFloat(getComputedStyle(root ?? document.documentElement).scrollPaddingTop) || 0;
+    let intersecting = false;
     let shown = false;
-    const observer = new IntersectionObserver((entries) => {
-      const next = entries.at(-1)!.isIntersecting;
+    const update = () => {
+      const next = intersecting && !node.closest("[inert]");
       if (next !== shown) report(id, shown = next);
-    });
+    };
+    const observer = new IntersectionObserver((entries) => { intersecting = entries.at(-1)!.isIntersecting; update(); }, { root, rootMargin: `-${heads}px 0px 0px 0px` });
+    const inert = new MutationObserver(update);
     observer.observe(node);
-    return () => { observer.disconnect(); if (shown) report(id, false); };
+    inert.observe(document.body, { attributes: true, attributeFilter: ["inert"], subtree: true });
+    return () => { observer.disconnect(); inert.disconnect(); if (shown) report(id, false); };
   }, [node, id, report]);
   return setNode;
 }

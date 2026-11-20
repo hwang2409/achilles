@@ -36,7 +36,7 @@
 .page-list-error button { min-height: 40px; padding: 8px 0; color: var(--fulcrum-accent); }
 /* no scroll snap here: a row inserted on top re-snapped the list to the old first row, under the sticky heads.
    scroll-padding-top stays: it keeps a focused row (arrow keys, scrollIntoView) below the two sticky heads
-   (36px list head + 36px group head) instead of hidden under them. */
+   (36px list head + 36px group head) instead of hidden under them. useOnScreen reads it too: a build row under the heads is not on screen. */
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
 .transcript [data-part="timeline-scroll"]:focus-visible { outline: none; }
