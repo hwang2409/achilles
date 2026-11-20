@@ -151,7 +151,10 @@ async function startupFailure(root: string, label: string) {
 async function waitForAchilles(origin: string, process: ChildProcess, root: string, signal?: AbortSignal) {
   for (let i = 0; i < 300; i++) {
     signal?.throwIfAborted();
-    if (await fetchDeadline(`${origin}/api/pages/home`, {}, signal, 1_000).then(response => response.ok, () => false)) return;
+    // another eval's achilles can answer on a port freePort handed out twice; uvicorn logs this line only after its own bind,
+    // and startAttempt truncates the log, so a line from a lost earlier attempt cannot count
+    const bound = await readFile(join(root, "achilles-home/serve.log"), "utf8").then(log => log.includes("Uvicorn running on"), () => false);
+    if (bound && await fetchDeadline(`${origin}/api/pages/home`, {}, signal, 1_000).then(response => response.ok, () => false)) return;
     if (process.exitCode !== null) await startupFailure(root, "achilles exited during startup"); await Bun.sleep(100);
   }
   await startupFailure(root, "timed out waiting for achilles");
@@ -183,7 +186,7 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
   })();
   try {
     config.signal?.throwIfAborted();
-    const achillesLog = openSync(join(root, "achilles-home/serve.log"), "a"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
+    const achillesLog = openSync(join(root, "achilles-home/serve.log"), "w"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
     await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
     // a live-tools task drops the narrow eval tool policy so the session carries zeta's full default tool set, exactly
     // like a `make dev` / achilles serve page chat; the achilles__* MCP tools stay available either way
