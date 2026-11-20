@@ -27,6 +27,8 @@ export class Unreadable extends Error {}
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+// nanosecond clocks pass 2^53, so a time is any non-negative number; it is only shown, never compared exactly.
+const time = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 const text = (value: unknown): value is string => typeof value === "string";
 const oneOf = <T extends string>(values: readonly T[], value: unknown) => values.find((item) => item === value);
 const formatOneFiles = new Set(["brief.md", "state.md", "backlog.md", "changelog.md", "decisions.md"]);
@@ -68,7 +70,7 @@ export function projectMemory(result: unknown): MemoryPage | null {
 export function projectInbox(result: unknown): Page<InboxRow> | null {
   return page(result, ({ message_id, kind, status, sender, summary, created_ns, trusted_assignment, has_body }) => {
     const known = oneOf(inboxKinds, kind), state = oneOf(inboxStatuses, status);
-    if (!text(message_id) || !known || !state || !text(sender) || !text(summary) || !count(created_ns) ||
+    if (!text(message_id) || !known || !state || !text(sender) || !text(summary) || !time(created_ns) ||
         typeof trusted_assignment !== "boolean" || typeof has_body !== "boolean") return undefined;
     return { id: message_id, kind: known, status: state, sender, summary, createdNs: created_ns, trusted: trusted_assignment, hasBody: has_body };
   });

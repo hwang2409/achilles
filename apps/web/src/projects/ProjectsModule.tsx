@@ -131,13 +131,13 @@ function Paged<T>({ view, noun, empty, children }: { view: Pages<T>; noun: strin
   </>;
 }
 
-const kindLabel = (kind: MemoryKind) => kind === "legacy" ? "written by hand" : kind;
+const kindLabel = (kind: MemoryKind) => kind === "legacy" ? "documents" : kind;
 
 function MemoryTab({ client, projectId, takeControl }: { client: ZetaClient; projectId: string; takeControl: () => Promise<string | null> }) {
   const view = usePages((cursor, signal) => readMemory(client, projectId, cursor, { signal }), [client, projectId]);
   const oldFormat = view.state === "data" && view.oldFormat;
   return <section className="projects-tab" aria-label="memory">
-    <p className="projects-note">summaries only · full text loads when you open it, is not cached, and never goes in the address</p>
+    {!oldFormat && <p className="projects-note">summaries only · full text loads when you open it, is not cached, and never goes in the address</p>}
     {oldFormat && <aside className="projects-notice" role="status">
       <strong>this project uses the old memory format</strong>
       <p>achilles shows its summaries only. read or edit it with <code>zeta project memory</code>.</p>

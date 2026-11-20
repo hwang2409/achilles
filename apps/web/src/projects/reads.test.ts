@@ -20,6 +20,7 @@ const rows = [
     expected: { rows: [{ ...safeMemory, id: "brief.md", kind: "legacy", automatic: false }], nextCursor: null, oldFormat: true } },
   { label: "memory of an unknown kind", read: () => projectMemory(page([{ ...memory, kind: "people" }])), expected: null },
   { label: "inbox page", read: () => projectInbox(page([message])), expected: { rows: [safeMessage], nextCursor: null } },
+  { label: "inbox with a real nanosecond time", read: () => projectInbox(page([{ ...message, created_ns: 1795175233062711000 }])), expected: { rows: [{ ...safeMessage, createdNs: 1795175233062711000 }], nextCursor: null } },
   { label: "inbox of an unknown status", read: () => projectInbox(page([{ ...message, status: "read" }])), expected: null },
   { label: "inbox with a string trust flag", read: () => projectInbox(page([{ ...message, trusted_assignment: "yes" }])), expected: null },
   { label: "kind text keeps one kind", read: () => projectKindText({ project: { id: "p_fixture" }, memory: { digest: "d".repeat(64), version_id: "v", kinds: [
