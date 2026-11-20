@@ -96,7 +96,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-saved .library-flag { margin-top: 4px; }
 .library-saved button { grid-column: 2; grid-row: 1; min-height: 32px; padding-inline: 10px; border: 1px solid var(--fulcrum-border); }
 .library-editor { padding: 24px 28px; max-width: 75ch; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.library-editor :is(h2, label) { overflow-wrap: anywhere; }
+.library-editor { overflow-wrap: anywhere; }
 .library-editor h2 { margin: 0; font-size: 21px; }
 .library-editor-row { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .library-editor-row legend { padding: 0; margin-bottom: 6px; }

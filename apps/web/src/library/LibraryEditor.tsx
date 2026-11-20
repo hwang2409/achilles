@@ -124,7 +124,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
 
   const shadow = existing && existing.source !== scope && (sourceTiers.indexOf(existing.source) < sourceTiers.indexOf(scope)
     ? `a ${existing.source} ${noun} named ${name} wins over this one.` : `this will win over the ${existing.source} ${name}.`);
-  const file = `.zeta/${folder(kind)}/${name}.md`;
+  const file = `.zeta/${folder(kind)}/${name || "<name>"}.md`;
   const where = scope === "project" && project.state === "available" ? `${project.label} · ${file}` : `home · ${folder(kind)}/${name}.md`;
 
   async function save() {
