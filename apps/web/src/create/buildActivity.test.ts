@@ -7,7 +7,8 @@ import { AppShell } from "../AppShell";
 import { useAgentNavAdapter } from "../surface/AgentNavAdapter";
 import { ShellDockSlot } from "../surface/ModuleState";
 import { chatsRoute } from "../surface/routes";
-import type { ZetaClient } from "@fulcrum/zeta";
+import type { Transport, ZetaClient } from "@fulcrum/zeta";
+import { teeRunEnds } from "../zeta/turnEnd";
 import type { Chat, PageLink } from "../surface/AgentNavAdapter";
 import { useBuildActivity } from "./buildActivity";
 
@@ -204,4 +205,24 @@ test("a build that needs you is counted once in the chats badge", async () => {
     for (let i = 0; i < 50 && !shell.view.container.querySelector(".chat-row"); i++) await flush();
     expect(badge()).toBe("1");
   } finally { shell.close(); }
+});
+
+test("a build's run end is read at once, not at the next poll", async () => {
+  // a chat waiting for zeta attaches on the same agent_end, and the pinned server then cannot read the build any more
+  const zeta = fakeZeta({ status: running, history: [call()] });
+  let deliver: (text: string) => void = () => {};
+  teeRunEnds({ send: () => {}, close: () => {}, onMessage: (callback: (text: string) => void) => { deliver = callback; } } as unknown as Transport, () => zeta.client).onMessage(() => {});
+  const chats = [chat], pages = [reading], reloadPages = () => {};
+  const hook = renderHook(() => useBuildActivity({ client: zeta.client, chats, pages, reloadPages }));
+  try {
+    for (let i = 0; i < 50 && zeta.calls.length < 2; i++) await flush();
+    expect(hook.result.current.rows[0]?.state).toBe("building");
+    zeta.become({ status: idle(), history: done });
+    act(() => deliver(JSON.stringify({ method: "event", params: { event: "agent_end", session_id: chat.session_id } })));
+    for (let i = 0; i < 50 && zeta.calls.length < 4; i++) await flush();
+    await flush();
+    expect({ state: hook.result.current.rows[0]?.state, receipt: hook.result.current.latestReceipt?.route ?? null }).toEqual({ state: "done", receipt: "/reading-list" });
+  } finally {
+    hook.unmount();
+  }
 });

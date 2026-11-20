@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { titleOf, type Chat, type PageLink } from "../surface/AgentNavAdapter";
 import type { ZetaClient } from "@fulcrum/zeta";
+import { onRunEnd } from "../zeta/turnEnd";
 
 // The one owner of displayed page-build state. Nothing else reads chat.last_state for page_build chats.
 export type BuildState = "building" | "needs you" | "done" | "unfinished" | "failed";
@@ -249,10 +250,17 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
     pageCheck.reloadPages();
   }));
   const [retry, setRetry] = useState(0);
+  const [latest] = useState(() => ({ chats }));
+  latest.chats = chats;
   useEffect(() => {
     void reader.refresh(chats, client?.request);
     return reader.stop;
   }, [chats, client, reader, retry]);
+  // A build's run end is read at once: a chat waiting for zeta attaches on the same frame, and after that switch the
+  // pinned server can no longer read the build. Subscribed once per client, so it runs before later waiting chats.
+  useEffect(() => client ? onRunEnd(client, (id) => {
+    if (latest.chats.some((chat) => isBuild(chat) && chat.session_id === id)) void reader.refresh(latest.chats, client.request);
+  }) : undefined, [client, latest, reader]);
   const activity = useMemo(() => projectBuilds(chats, live, memory), [chats, live, memory, revision]);
   // Same-document navigation (back/forward) can land on the receipt's page.
   useEffect(() => {
