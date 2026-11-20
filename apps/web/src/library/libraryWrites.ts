@@ -14,6 +14,7 @@ export const REDACTION_MARKER = "[secret omitted]";
 export const SAVED_NOTICE = "saved. running sessions pick up the change at their next catalog refresh.";
 const MAX_DOCUMENT_BYTES = 128 * 1024;
 const BUSY_BACKOFF_MS = [500, 1_000, 2_000];
+const RECONNECT_WAIT_MS = [500, 1_000, 2_000, 4_000];
 const DETAIL_CHARS = 500;
 
 export type WriteScope = "home" | "project";
@@ -87,21 +88,31 @@ function invalidMessage(reason: unknown, detail: unknown, target: WriteTarget) {
   }
 }
 
-/** One writer per library view. It keeps one write per item in flight, across client swaps. */
-export function createLibraryWriter(sleep: Sleep = defaultSleep) {
+/** One writer per library view. It keeps one write per item in flight, across client swaps. `live`: the connection's
+ * current client, so the read that settles an unknown result after a socket drop uses the reconnected client. */
+export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => ZetaClient | null = () => null) {
   const inFlight = new Map<string, Promise<WriteOutcome>>();
 
   // A reply that is not a definite answer: read the item; never send the write again.
   async function settle(client: ZetaClient, target: WriteTarget, base: string | null, expected: string): Promise<WriteOutcome> {
-    try {
-      const read = await client.request(libraryMethods(target.kind).read, { name: target.name, scope: target.scope }) as { revision?: unknown; data?: { redacted?: unknown } } | null;
-      if (read?.revision === expected) return { status: "saved", revision: expected, redacted: read.data?.redacted === true };
-      if (base !== null && read?.revision === base) return { status: "unknown", message: "zeta did not save it. try again." };
-      return { status: "stale", message: base !== null ? "this file changed after you opened it. your text is kept."
-        : `a ${target.scope} ${noun(target.kind)} named ${target.name} exists with other text.` };
-    } catch (error) {
-      if ((error as RpcError)?.data?.reason === "resource_not_found") return { status: "unknown", message: "zeta did not save it. try again." };
-      return { status: "unknown", message: "could not check whether zeta saved it. refresh the list before trying again." };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const read = await (live() ?? client).request(libraryMethods(target.kind).read, { name: target.name, scope: target.scope }) as { revision?: unknown; data?: { redacted?: unknown } } | null;
+        if (read?.revision === expected) return { status: "saved", revision: expected, redacted: read.data?.redacted === true };
+        if (base !== null && read?.revision === base) return { status: "unknown", message: "zeta did not save it. try again." };
+        return { status: "stale", message: base !== null ? "this file changed after you opened it. your text is kept."
+          : `a ${target.scope} ${noun(target.kind)} named ${target.name} exists with other text.` };
+      } catch (error) {
+        const rpc = error as RpcError;
+        if (rpc?.data?.reason === "resource_not_found") return { status: "unknown", message: "zeta did not save it. try again." };
+        // no JSON-RPC error code: the socket is gone. wait for the reconnect, then read with the new client.
+        const transport = !(typeof rpc?.code === "number" && rpc.code < 0);
+        if (transport && attempt < RECONNECT_WAIT_MS.length) {
+          await sleep(RECONNECT_WAIT_MS[attempt]!);
+          continue;
+        }
+        return { status: "unknown", message: "could not check whether zeta saved it. refresh the list before trying again." };
+      }
     }
   }
 

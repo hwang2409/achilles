@@ -35,6 +35,8 @@ export type LibraryWrite = {
   drafts: Map<string, CreateDraft>;
   /** The open edit per kind, held by the router for the same reason. */
   edits: Map<LibraryKind, EditDraft>;
+  /** The connection's current client (null while reconnecting), for reads after a socket drop. */
+  liveClient: () => ZetaClient | null;
 };
 
 const rowKey = (row: CatalogRow) => `${row.scope}/${row.name}`;
@@ -64,7 +66,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const search = useRef<HTMLInputElement>(null);
   const returnToList = useRef(false);
   const focusCreated = useRef(false);
-  const [writer] = useState(() => createLibraryWriter());
+  const [writer] = useState(() => createLibraryWriter(undefined, write?.liveClient));
   const draftKey = `${kind}/new`;
   const [creating, setCreating] = useState(() => Boolean(write?.drafts.has(draftKey)));
   const [taking, setTaking] = useState(false);
@@ -72,6 +74,8 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const [saved, setSaved] = useState<{ redacted: boolean } | null>(null);
   const [editing, setEditing] = useState<EditDraft | null>(() => write?.edits.get(kind) ?? null);
   const wasEditing = useRef(false);
+  // Changes whenever an editor opens or closes.
+  const form = useRef(0);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -166,7 +170,13 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     });
   }
 
+  function openCreate() {
+    form.current++;
+    setCreating(true);
+  }
+
   function closeEditor() {
+    form.current++;
     write?.drafts.delete(draftKey);
     setCreating(false);
   }
@@ -175,12 +185,14 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (row.scope === "effective") return;
     const draft = { target: { kind, name: row.name, scope: row.scope }, base: opened, text: opened.document, mine: null };
     withControl(() => {
+      form.current++;
       write?.edits.set(kind, draft);
       setEditing(draft);
     });
   }
 
   function closeEdit() {
+    form.current++;
     write?.edits.delete(kind);
     setEditing(null);
   }
@@ -196,6 +208,16 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     returnToList.current = true;
     setSelection(null);
   }
+
+  // A save reply can land after its form was discarded (a sent write cannot be recalled). It may close or clear only
+  // the form that sent it; for any other it only shows the notice and refreshes the list.
+  const sender = form.current;
+  const lateSave = (redacted: boolean) => {
+    if (sender === form.current) return false;
+    setSaved({ redacted });
+    refresh();
+    return true;
+  };
 
   let content: ReactNode;
   if (!catalog) content = <ModuleState kind="loading" title={reads.catalog ? "reading catalog…" : "reading session snapshot…"} />;
@@ -259,7 +281,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "live catalog · effective scope" : "active session snapshot · may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
           {write && !creating && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
-            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(() => setCreating(true))}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
+            aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
         {(controlFeedback || (write && !write.allowed && !creating)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
       </div>
@@ -270,11 +292,16 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
       {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows}
         draft={write.drafts.get(draftKey)} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
         takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEditor} onOpen={showCreated}
-        onCreated={(name, redacted) => { setSaved({ redacted }); showCreated(name); }} />
+        onCreated={(name, redacted) => {
+          if (lateSave(redacted)) return;
+          setSaved({ redacted });
+          showCreated(name);
+        }} />
       : editing && write ? <LibraryEdit key={`${editing.target.scope}/${editing.target.name}`} client={client} writer={writer} draft={editing}
         onDraft={(draft) => write.edits.set(kind, draft)} takeControl={write.takeControl} feedback={write.feedback}
         blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEdit}
         onSaved={(redacted) => {
+          if (lateSave(redacted)) return;
           // a redacted file has no editable copy any more: leave the editor and say why; the masked read view stays.
           if (redacted) {
             setSaved({ redacted });

@@ -135,3 +135,17 @@ describe("library edit outcomes", () => {
     expect(first).toEqual(second);
   });
 });
+
+test("after a socket drop, the read that settles an unknown result uses the reconnected client", async () => {
+  const dead = fakeZeta([new Error("socket closed")], [new Error("socket closed")]);
+  const fresh = fakeZeta([], [{ revision, data: { redacted: false } }]);
+  let current: ZetaClient | null = null;
+  const clock = fakeClock();
+  // the connection is still reconnecting for the first wait, then the new client is live.
+  const sleep = async (ms: number) => { await clock.sleep(ms); current = fresh.client; };
+  const outcome = await createLibraryWriter(sleep, () => current).create(dead.client, target, document);
+  expect(outcome).toMatchObject({ status: "saved", revision });
+  expect(dead.calls.map(([method]) => method)).toEqual(["skill_write", "skill_read"]);
+  expect(fresh.calls).toEqual([["skill_read", { name: target.name, scope: "home" }]]);
+  expect(clock.waits).toEqual([500]);
+});

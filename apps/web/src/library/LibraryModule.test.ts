@@ -55,26 +55,33 @@ test("a page with no rows still lists the files zeta skipped", async () => {
   expect(view.container.querySelector(".library-skipped li")?.textContent).toBe("home · broken/SKILL.md invalid YAML frontmatter");
 });
 
-test("a draft stays visible and read-only when zeta stops allowing the save, and nothing is sent", async () => {
+test("a create save that lands after discard does not close or clear a form opened later", async () => {
+  let land!: () => void;
   const calls: string[] = [];
-  const client = { request: (method: string) => { calls.push(method); return Promise.resolve({ revision: "r", data: { items: [] } }); } } as unknown as ZetaClient;
-  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map() };
-  const props = { client, kind: "skills" as const, reads: { catalog: true, read: true } };
-  const view = render(createElement(LibraryModule, { ...props, write }));
+  const client = { request: (method: string, params: { name?: string; mutation?: { document: string } }) => {
+    calls.push(method);
+    if (method !== "skill_write") return Promise.resolve({ revision: "r", data: { items: [] } });
+    return new Promise((resolve) => { land = async () => resolve({ revision: await sha(params.mutation!.document), data: { name: params.name, scope: "home", redacted: false } }); });
+  } } as unknown as ZetaClient;
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => client };
+  const view = render(createElement(LibraryModule, { client, kind: "skills", reads: { catalog: true, read: true }, write }));
   await view.findByText("no skills found");
+  const fill = async (name: string) => {
+    for (const [label, value] of [["name", name], ["description", "synthetic draft"]] as const)
+      await act(async () => { fireEvent.change(view.getByLabelText(label), { target: { value } }); });
+  };
   fireEvent.click(view.getByRole("button", { name: "+ new skill" }));
-  for (const [label, value] of [["name", "fixture-draft"], ["description", "synthetic draft"]] as const) {
-    const field = view.getByLabelText(label);
-    await act(async () => { fireEvent.change(field, { target: { value } }); });
-  }
-  view.rerender(createElement(LibraryModule, { ...props, write: { ...write, allowed: false } }));
+  await fill("fixture-first");
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "save skill" })); });
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "discard" })); });
+  fireEvent.click(view.getByRole("button", { name: "+ new skill" }));
+  await fill("fixture-second");
+  await act(async () => land());
 
-  const text = view.container.querySelector<HTMLTextAreaElement>(".library-editor textarea")!;
-  expect(text.value).toContain('name: "fixture-draft"');
-  expect(text.readOnly).toBe(true);
-  expect(view.getByRole("alert").textContent).toBe("this zeta does not allow saving here. your text is kept; nothing was sent.");
-  expect(view.queryByRole("button", { name: /^save/ })).toBeNull();
-  expect(calls.filter((method) => method.endsWith("_write"))).toEqual([]);
+  expect(view.container.querySelector<HTMLInputElement>('.library-editor input[aria-describedby$="-rules"]')?.value, "the form opened after discard").toBe("fixture-second");
+  expect(write.drafts.get("skills/new")?.name).toBe("fixture-second");
+  expect(await view.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  expect(calls.filter((method) => method === "skill_write")).toHaveLength(1);
 });
 
 // A synthetic zeta with one home skill file. Writes check the revision like zeta's compare-and-swap.
@@ -106,7 +113,7 @@ function editZeta(fixture: Fixture) {
   };
   return zeta;
 }
-const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map() });
+const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => null });
 const textarea = (view: ReturnType<typeof render>, label: RegExp) => view.getByLabelText(label) as HTMLTextAreaElement;
 async function openEditor(zeta: ReturnType<typeof editZeta>, write: ReturnType<typeof writable> = writable()) {
   const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));

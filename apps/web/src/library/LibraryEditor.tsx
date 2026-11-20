@@ -4,6 +4,8 @@ import { libraryMethods, projectBody, sourceTiers, type Body, type CatalogRow, t
 import { createProblems, nameProblem, SAVED_NOTICE, type createLibraryWriter, type WriteOutcome, type WriteScope, type WriteTarget } from "./libraryWrites";
 
 type Writer = ReturnType<typeof createLibraryWriter>;
+// The writer threw before sending (for example `crypto.subtle` is missing outside a secure context).
+const notSent: WriteOutcome = { status: "unknown", message: "this page could not send the save. nothing was sent." };
 type Failure = Exclude<WriteOutcome, { status: "saved" }>;
 /** What the user typed in the create form. Kept in memory only, never in storage or the URL: a draft can hold a secret. */
 export type CreateDraft = { name: string; description: string; scope: WriteScope; edited: string | null };
@@ -75,8 +77,8 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     setPending(true);
     setFailure(null);
     abort.current = new AbortController();
-    const outcome = await writer.create(client, { kind, name, scope }, text, abort.current.signal);
-    // a sent write cannot be recalled: a save that landed after discard is still shown.
+    const outcome = await writer.create(client, { kind, name, scope }, text, abort.current.signal).catch(() => notSent);
+    // a sent write cannot be recalled: a save that landed after discard is still reported (the owner decides how).
     if (outcome.status === "saved") return onCreated(name, outcome.redacted);
     if (abort.current.signal.aborted) return;
     setPending(false);
@@ -193,7 +195,7 @@ export function LibraryEdit({ client, writer, draft, onDraft, takeControl, feedb
     setPending(true);
     setFailure(null);
     const sent = text;
-    const outcome = await writer.save(client, target, base.revision, sent);
+    const outcome = await writer.save(client, target, base.revision, sent).catch(() => notSent);
     setPending(false);
     if (outcome.status !== "saved") return setFailure(outcome);
     // zeta wrote exactly these bytes (the writer checked the sha256), so they are the new baseline.
