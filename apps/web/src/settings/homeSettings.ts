@@ -77,7 +77,7 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
   const message = typeof rpc?.message === "string" ? rpc.message : "";
   switch (rpc?.code) {
     case -32602: {
-      // zeta cannot start with telemetry on here (for example `zeta[otel]` is missing); `detail` is its start error
+      // zeta checks that telemetry can start before it writes (for example `zeta[otel]` is missing); `detail` is its start error
       if (data.code === "telemetry_unavailable") {
         const reason = typeof data.detail === "string" && data.detail.trim() !== "" ? data.detail : message;
         return { result: failed("not-applied", plain(`not changed. zeta cannot record telemetry on this computer: ${reason}`)), reread: false };
@@ -100,7 +100,7 @@ export function mapUpdateError(error: unknown): { result: Failed; reread: boolea
 }
 
 export const receipt = (enabled: boolean) => enabled
-  ? reviewText("telemetry is on. if zeta[otel] is not installed, turn it off here before you restart zeta.")
+  ? reviewText("telemetry is on. restart zeta to start recording.")
   : reviewText("telemetry is off. restart zeta to stop recording.");
 type Committed = { status: "committed"; receipt: ReviewText; value: ReviewText };
 type WithControl = <T>(read: (client: ZetaClient) => Promise<T>) => Promise<{ value: T } | { refused: string }>;

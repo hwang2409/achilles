@@ -145,7 +145,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
         {activity && <Confirmation key={attempts} level={2} surface={WRITE_SURFACE.settingsTelemetry} activity={activity} title={reviewText("turn on telemetry")}
           scope={reviewText("every zeta on this computer (settings.toml in your zeta home)")}
           current={reviewText("off")} after={reviewText("on. zeta sends traces to the built-in receiver on 127.0.0.1:4323")}
-          effect={reviewText("records timings, model, tokens, tool names and error types on this computer. never prompts, replies, or tool arguments. it starts after zeta serve and running sessions restart. zeta needs zeta[otel] installed; without it zeta does not start until you install it or turn telemetry off (or remove the otel endpoint line from settings.toml).")}
+          effect={reviewText("records timings, model, tokens, tool names and error types on this computer. never prompts, replies, or tool arguments. it starts after zeta serve and running sessions restart. zeta needs zeta[otel] installed. zeta checks this before it writes; if telemetry cannot start, zeta refuses and says why here.")}
           undo={reviewText("turn it off here. settings.toml goes back to the exact bytes it had.")}
           proof={{ kind: "scope", label: reviewText("i understand this applies to every zeta on this computer") }}
           action={reviewText("turn on telemetry")} keep={reviewText("keep it off")} {...op(true)} />}
