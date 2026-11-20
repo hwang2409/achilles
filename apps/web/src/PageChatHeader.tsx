@@ -121,7 +121,8 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         <div role="listbox" id="page-chat-choices" aria-labelledby="page-chat-count" aria-busy={catalog.loading}>
           {chats.map((chat) => <button type="button" key={chat.session_id} className="page-chat-choice" role="option" data-popup-row tabIndex={-1} aria-selected={chat.session_id === sessionId} onClick={() => select(chat)}>
             <span className="page-chat-choice-title" title={titleOf(chat)}>{titleOf(chat)}</span>
-            <span className={`page-chat-status state-${chat.last_state ?? "idle"}`}>{chat.last_state === "approval" ? "needs you" : chat.last_state ?? "idle"}</span>
+            {/* a page build's state belongs to the build owner (create/buildActivity); this list makes no claim for it */}
+            {chat.purpose === "page_build" ? <span /> : <span className={`page-chat-status state-${chat.last_state ?? "idle"}`}>{chat.last_state === "approval" ? "needs you" : chat.last_state ?? "idle"}</span>}
             <time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time>
           </button>)}
         </div>

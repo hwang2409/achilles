@@ -51,23 +51,32 @@
   .create-landing .create-made { grid-template-columns: 1fr; }
 }
 
-.build-status { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; color: var(--fulcrum-muted); font-size: 12px; }
-.build-status a { color: var(--fulcrum-accent); }
-.build-status .build-needs-you, .create-landing li[data-state="needs you"] > a { color: var(--fulcrum-warn); }
-.build-status-nav { grid-column: 1 / -1; padding: 0 8px; }
-.build-status-main { flex: none; padding: 6px 16px; border-bottom: 1px solid var(--fulcrum-border); }
-.build-receipt { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 8px 16px; border-block-end: 1px solid var(--fulcrum-border); border-inline-start: 2px solid var(--fulcrum-accent); font-size: 12px; }
+.build-status { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; }
+.build-status :is(a, span) { color: var(--fulcrum-accent); text-decoration: none; }
+.build-status :is(a, span)::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: currentColor; }
+.build-status .build-needs-you, .create-landing li[data-state="needs you"]:not([data-last-known]) > a { color: var(--fulcrum-warn); }
+.create-split .build-status-nav { padding-inline: 8px; border-left: 1px solid var(--fulcrum-border); }
+.create-split:has(button) { flex-wrap: wrap; }
+.create-split:has(button) .build-status-nav { order: 3; flex-basis: 100%; min-height: 28px; border-left: 0; border-top: 1px solid var(--fulcrum-border); }
+/* status and receipt float over the content, so their arrival never moves the page */
+.build-dock { position: absolute; z-index: 2; inset-block-start: 64px; inset-inline-end: 16px; display: grid; gap: 8px; justify-items: end; max-width: min(460px, calc(100% - 32px)); pointer-events: none; }
+.build-dock > * { pointer-events: auto; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface, var(--fulcrum-bg)); }
+.build-status-main { padding: 6px 12px; }
+.build-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 12px; border-inline-start: 2px solid var(--fulcrum-accent); font-size: 12px; }
 .build-receipt span { margin-inline-end: auto; overflow-wrap: anywhere; }
-.build-receipt a { color: var(--fulcrum-accent); }
-.build-receipt button { min-height: 32px; padding-inline: 8px; }
+.build-receipt .build-open { display: inline-flex; align-items: center; min-height: 32px; padding-inline: 12px; background: var(--fulcrum-accent); color: var(--fulcrum-bg); text-decoration: none; }
+.build-receipt button { min-height: 32px; padding-inline: 8px; border-color: transparent; color: var(--fulcrum-muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.create-landing .build-meta { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.create-landing .build-meta :is(em, time) { font-style: normal; white-space: nowrap; }
+.create-landing .build-meta em + time::before { content: "· "; }
+.create-landing li[data-last-known] { border-color: var(--fulcrum-border); background: transparent; }
 .create-landing .build-tools { display: block; padding: 0 12px 8px; color: var(--fulcrum-muted); overflow-wrap: anywhere; }
 .create-landing .build-results { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 0 12px 8px; }
 .create-landing .build-results li { border: 0; }
-.create-landing .build-results a { display: inline-block; padding: 2px 0; color: var(--fulcrum-accent); }
+.create-landing .build-results a { display: inline-block; padding: 2px 0; color: var(--fulcrum-muted); font-size: 12px; }
 @media (max-width: 760px), (max-height: 500px) {
-  .surface-actions:has(.build-status-nav) { flex-wrap: wrap; }
-  .build-status-nav { flex-basis: 100%; }
-  .surface-actions .build-status small { display: inline; margin-inline-start: 0; }
-  .build-status a, .build-receipt a { display: inline-flex; align-items: center; min-height: 40px; }
-  .build-receipt button { min-height: 40px; }
+  .build-dock { inset-inline: 12px; justify-items: stretch; max-width: none; }
+  .build-receipt .build-open, .build-receipt button, .build-status a { min-height: 40px; }
+  .build-status a { display: inline-flex; align-items: center; }
 }

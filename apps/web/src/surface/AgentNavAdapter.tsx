@@ -1,13 +1,11 @@
 import { createContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { BuildActivity } from "../create/buildActivity";
+import { buildLabel, type BuildRow } from "../create/buildActivity";
 import { Highlight, type PaletteEntry } from "../CommandPalette";
 import { createListOwner, initialListState, type ListOwner, type ListState } from "../pageList";
 import { useInlineRename } from "../useInlineRename";
 import { useFocusAfterCommit } from "../keyboard";
 import { surfaceHref } from "./routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
-
-type BuildRow = Pick<BuildActivity["rows"][number], "chat" | "state" | "stale">;
 
 export type PageLink = {
   id: string;
@@ -86,7 +84,6 @@ const chatPage = (include: () => string | null) => async (search: string, before
 };
 
 const emptyChats: readonly Chat[] = [];
-const emptyPages: readonly PageLink[] = [];
 const initialPageListState = initialListState<PageLink, null>(null);
 const initialChatListState = initialListState<Chat, number>(0);
 const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : state.loading || state.items === null ? "loading" : "ready";
@@ -221,7 +218,7 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
 
   return {
     loading, query, pageEntries, searchChats,
-    pageCatalog: pageList, recentChats, pageRows: pageList.items ?? emptyPages,
+    pageCatalog: pageList, recentChats,
     reloadPages: () => void pageListOwner.current!.reload(null),
     morePages: loadOlder,
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
@@ -252,10 +249,12 @@ function ChatRow({ chat, build, current, active, index, query, onSelect, onRenam
   const rowId = index === undefined ? undefined : `chat-result-${index}`;
   // defer past the focus change: a blur commit flushes in a microtask while focus is on body, before the clicked control gets it
   useEffect(() => { if (rename.editing) return; const timer = setTimeout(onRenameEnd); return () => clearTimeout(timer); }, [rename.editing]);
-  const state = build ? build.state === "building" ? "running" : build.state === "needs you" ? "approval" : build.state : chat.last_state;
-  const label = state === "approval" ? "needs you" : state === "idle" ? null : state;
+  // A page build's state comes only from the build owner; with no row there is no claim.
+  const live = build && !build.reason ? build.state : null;
+  const state = chat.purpose === "page_build" ? live === "building" ? "running" : live === "needs you" ? "approval" : live : chat.last_state;
+  const label = chat.purpose === "page_build" ? build && buildLabel(build) : state === "approval" ? "needs you" : state === "idle" ? null : state;
   const rowClass = `chat-row state-${state ?? "idle"} ${current ? "current" : ""} ${active ? "active-result" : ""}`;
-  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{label && `${label} · `}{build?.stale && "stale · "}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
+  const meta = <span><span className="chat-row-meta" title={chat.page_title}>{label && `${label} · `}{chat.page_title}</span> <i>{timeLabel(chat.updated_at)}</i></span>;
   if (rename.editing) {
     // the hidden title under the editor keeps the row's height, so the list below does not move
     return <div id={rowId} data-chat-id={chat.session_id} className={`${rowClass} editing`}>

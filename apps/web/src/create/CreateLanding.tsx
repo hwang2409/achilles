@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { chatHref, timeLabel, titleOf, type useAgentNavAdapter } from "../surface/AgentNavAdapter";
 import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
-import type { BuildActivity } from "./buildActivity";
+import { buildLabel, type BuildActivity } from "./buildActivity";
 import "./create.css";
 
 const starters = [
@@ -41,15 +41,20 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
           {starters.map((starter) => <button type="button" key={starter} disabled={build.pending || build.locked} onClick={() => { build.setDraft(starter); prompt.current?.focus(); }}>{starter}</button>)}
         </div>
         <section aria-labelledby="create-open">
-          <header><h2 id="create-open">recent builds</h2>{activity.rows.some((row) => row.stale) && <button type="button" onClick={activity.refresh}>refresh</button>}</header>
+          <header><h2 id="create-open">recent builds</h2>{activity.rows.some((row) => row.reason) && <button type="button" onClick={activity.refresh}>refresh</button>}</header>
           {!activity.rows.length ? catalog.error ? <p>could not load builds. <button type="button" onClick={catalog.reload}>retry</button></p>
             : catalog.loading ? <p role="status">reading recent builds…</p> : <p>no recent page builds.</p>
-            : <ul>{activity.rows.map(({ chat, state, stale, tools, results }) => <li key={chat.session_id} data-state={state}>
-              <a href={chatHref(chat)}><span><strong>{titleOf(chat)}</strong></span>
-                <span><small>{state}{stale ? " · stale" : ""} · {timeLabel(chat.updated_at)}</small><b>{state === "needs you" ? "answer" : "open chat"}</b></span></a>
-              {tools.length > 0 && <small className="build-tools">{tools.map((tool) => tool.replace(/^achilles__/, "")).join(" · ")}</small>}
-              {results.length > 0 && <ul className="build-results" aria-label="result pages">{results.map((page) => <li key={page.id}><a href={surfaceHref(page.route)}>{page.route}</a></li>)}</ul>}
-            </li>)}</ul>}
+            : <ul>{activity.rows.slice(0, 4).map((row) => {
+              const { chat, state, reason, tools, results } = row;
+              const label = buildLabel(row);
+              return <li key={chat.session_id} data-state={state ?? undefined} data-last-known={reason ? "" : undefined}>
+                <a href={chatHref(chat)}><span><strong>{titleOf(chat)}</strong>
+                  <small className="build-meta">{label && <em>{label}</em>}<time dateTime={chat.updated_at}>{timeLabel(chat.updated_at)}</time></small></span>
+                  <b>{state === "needs you" && !reason ? "answer" : "open chat"}</b></a>
+                {tools.length > 0 && <small className="build-tools">{tools.map((tool) => tool.replace(/^achilles__/, "")).join(" · ")}</small>}
+                {results.length > 0 && <ul className="build-results" aria-label="result pages">{results.map((page) => <li key={page.id}><a href={surfaceHref(page.route)}>{page.route}</a></li>)}</ul>}
+              </li>;
+            })}</ul>}
         </section>
         <section aria-labelledby="create-made">
           <header><h2 id="create-made">made here</h2><a href={surfaceHref("/pages")}>all pages</a></header>

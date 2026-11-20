@@ -51,8 +51,8 @@ type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children
 export type RenderShell = (props: BuildShellProps) => ReactNode;
 
 function BuildShell({ client, children, ...props }: BuildShellProps & { client: ZetaClient | null }) {
-  const { recentChats, pageRows, reloadPages } = props.nav;
-  const activity = useBuildActivity({ client, chats: recentChats, pages: pageRows, reloadPages });
+  const { recentChats, pageCatalog, reloadPages } = props.nav;
+  const activity = useBuildActivity({ client, chats: recentChats, pages: pageCatalog.error ? null : pageCatalog.items, reloadPages });
   return <AppShell {...props} activity={activity}>{children(activity)}</AppShell>;
 }
 

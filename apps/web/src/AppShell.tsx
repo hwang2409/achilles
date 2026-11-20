@@ -175,12 +175,15 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
-      {!showNavActivity && <BuildStatus activity={activity} className="build-status-main" />}
-      {receipt && <aside className="build-receipt" aria-label="build receipt">
-        <span role="status"><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
-        <a href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>
-        <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
-      </aside>}
+      <div className="build-dock">
+        {!showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />}
+        {receipt && <aside className="build-receipt" aria-label="build receipt">
+          <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
+          <a className="build-open" href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>
+          <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
+        </aside>}
+      </div>
+      <span className="visually-hidden" role="status">{activity.announcement}</span>
       <PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
         <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
       </ModuleFrame> : children}</PageChatCatalog.Provider>

@@ -19,16 +19,15 @@ function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: Su
   </a>;
 }
 
-export function BuildStatus({ activity, className = "" }: { activity: BuildActivity; className?: string }) {
+export function BuildStatus({ activity, current, className = "" }: { activity: BuildActivity; current: SurfaceRoute; className?: string }) {
   const { rows, building, needsYou } = activity;
-  const attention = rows.filter((row) => row.state === "needs you");
-  const running = rows.filter((row) => row.state === "building");
-  const stale = [...attention, ...running].some((row) => row.stale);
-  return (building > 0 || needsYou > 0) ? <div className={`build-status ${className}`} aria-label="page build progress">
-    {building > 0 && <a href={running.length === 1 && running[0]!.stale ? chatHref(running[0]!.chat) : surfaceHref(createRoute.path)}>{building} building</a>}
-    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) : surfaceHref(createRoute.path)}>{needsYou} needs you</a>}
-    {stale && <small>stale</small>}
-  </div> : null;
+  if (!building && !needsYou) return null;
+  const attention = rows.filter((row) => row.state === "needs you" && !row.reason);
+  const create = surfaceHref(createRoute.path);
+  return <span className={`build-status ${className}`} aria-label="page build progress">
+    {building > 0 && (current === createRoute ? <span className="build-building" aria-current="page">{building} building</span> : <a className="build-building" href={create}>{building} building</a>)}
+    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) : create}>{needsYou} needs you</a>}
+  </span>;
 }
 
 export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus, activity }: {
@@ -59,13 +58,13 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
         {action}
         <div className="create-split" data-mode={createMode?.enabled ? "on" : undefined}>
           <PlaceLink route={createRoute} current={current} />
+          {activity && <BuildStatus activity={activity} current={current} className="build-status-nav" />}
           {createMode && <button type="button" aria-label="toggle create mode for this page" aria-pressed={createMode.enabled}
             aria-busy={createMode.pending || undefined} disabled={!createMode.available || createMode.pending}
             title={createMode.error ?? "create mode for this page"} onClick={() => void createMode.toggle()}>
             {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}<span aria-hidden="true"> {createMode.error ? "!" : "· this page"}</span>
           </button>}
         </div>
-        {activity && <BuildStatus activity={activity} className="build-status-nav" />}
       </div>
       <div className="surface-search">
         {search}
