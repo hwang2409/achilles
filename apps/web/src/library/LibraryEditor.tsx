@@ -70,8 +70,8 @@ function EditorActions({ dirty, what, onDiscard, save, status }: { dirty: boolea
   }, [confirm]);
   // distinct keys: React must not reuse "keep editing" as the save button, or the next Enter saves.
   if (confirm) return <div key="confirm" role="group" aria-label="discard changes?" className="library-editor-actions">
-    {/* non-breaking hyphens keep a name whole where it can; a name wider than the bar still wraps, so "?" stays in view */}
-    <span>discard your changes to <span className="library-name">{what.replaceAll("-", "\u2011")}?</span></span>
+    {/* a long name breaks after its hyphens, like the editor heading (copy gives the real name); "?" stays in view */}
+    <span>discard your changes to <span className="library-name">{what.split("-").flatMap((part, index) => index ? ["-", <wbr key={index} />, part] : [part])}?</span></span>
     <button type="button" ref={keep} onClick={() => setConfirm(false)}>keep editing</button>
     <button type="button" className="library-danger" onClick={onDiscard}>discard changes</button>
   </div>;

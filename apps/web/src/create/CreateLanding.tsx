@@ -4,6 +4,7 @@ import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
 import { buildLabel, type BuildActivity, type BuildRow } from "./buildActivity";
 import { ShellDockSlot } from "../surface/ModuleState";
+import { restoreFocus } from "../keyboard";
 import "./create.css";
 
 const starters = [
@@ -43,7 +44,13 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
           {starters.map((starter) => <button type="button" key={starter} disabled={build.pending || build.locked} onClick={() => { build.setDraft(starter); prompt.current?.focus(); }}>{starter}</button>)}
         </div>
         <section aria-labelledby="create-open">
-          <header><h2 id="create-open">recent builds</h2>{(activity.stale || activity.rows.some((row) => row.reason)) && <button type="button" title={activity.stale ? "could not check: zeta was busy" : undefined} onClick={activity.refresh}>refresh</button>}</header>
+          <header><h2 id="create-open">recent builds</h2>{(activity.stale || activity.rows.some((row) => row.reason)) && <div className="create-refresh">
+            {activity.stale && <span id="create-refresh-why">zeta was busy</span>}
+            {/* the button unmounts once used: a keyboard user keeps their place on the first build row on screen, not <body> */}
+            <button type="button" aria-describedby={activity.stale ? "create-refresh-why" : undefined} onClick={(event) => {
+              if (event.detail === 0 && document.activeElement === event.currentTarget) restoreFocus(...event.currentTarget.closest("section")!.querySelectorAll("li > a"));
+              activity.refresh();
+            }}>refresh</button></div>}</header>
           {!activity.rows.length ? catalog.error ? <p>could not load builds. <button type="button" onClick={catalog.reload}>retry</button></p>
             : catalog.loading ? <p role="status">reading recent builds…</p> : <p>no recent page builds.</p>
             : <ul>{activity.rows.slice(0, 4).map((row) => <BuildCard key={row.chat.session_id} row={row} onScreen={activity.onScreen} />)}</ul>}
