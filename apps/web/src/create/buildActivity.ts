@@ -262,9 +262,10 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     // Chats come newest first.
     for (const chat of latest.chats.filter(isBuild)) {
       const id = chat.session_id;
-      if (id === current || queue.includes(id)) continue;
-      if (!forced.includes(id) && !(queue.length < QUEUE_MAX && owed(chat))) continue;
+      if (id === current) continue;
+      // A run end marks the build forced even when its row already queued it.
       if (forced.includes(id)) forcedIds.add(id);
+      if (queue.includes(id) || (!forced.includes(id) && !(queue.length < QUEUE_MAX && owed(chat)))) continue;
       busyTries.delete(id); // each demand gets its own tries
       queue.push(id);
       added = true;
@@ -287,7 +288,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     inFlight = undefined;
     const { id } = sent;
     const code = errorCode(error);
-    if (code !== -32004) forcedIds.delete(id);
+    if (code !== -32004 || sent.epoch !== epoch) forcedIds.delete(id);
     if (sent.epoch !== epoch) { /* a manual refresh cleared the keys: the next pass asks again */ }
     else if (error === undefined) {
       // A stale read: the live pass saw this session current since it was sent. The next pass asks again.
@@ -305,13 +306,13 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       waiting = id;
       busyTimer = setTimeout(() => {
         busyTimer = waiting = undefined;
-        // A row that left the screen during the wait is not asked again until it is back.
-        if (tries < BUSY_TRIES) { if (!queue.includes(id) && (forcedIds.has(id) || wanted(id))) queue.unshift(id); }
+        // A row that left the screen during the wait loses its read key, so it is owed again when it is back.
+        if (tries < BUSY_TRIES) { if (forcedIds.has(id) || wanted(id)) { if (!queue.includes(id)) queue.unshift(id); } else readKeys.delete(id); }
         else { dropped.add(id); forcedIds.delete(id); }
         enqueue();
         changed();
       }, wait);
-    } else if (code === -32601) { reads = false; queue = []; }
+    } else if (code === -32601) { reads = false; queue = []; forcedIds.clear(); }
     // The build became zeta's attached session (plain invalid_params): the live pass reads it now. Every other -32602
     // (session_not_found: absent, another project, project versus none, a child id) is no claim, like -32005.
     else if (code === -32602 && errorData(error)?.code === "invalid_params") run();

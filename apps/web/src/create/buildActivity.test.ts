@@ -281,13 +281,6 @@ async function rememberBuilding() {
 }
 afterEach(() => { mounted.splice(0).forEach((hook) => hook.unmount()); jest.useRealTimers(); fakeClock = false; });
 
-test("flag absent: a remembered build keeps today's fallback and is never read", async () => {
-  await rememberBuilding();
-  const zeta = serveZeta({ features: [], status: () => idle("newer"), read: () => rows(done) });
-  const hook = await mount(zeta);
-  expect({ ...rowOf(hook), reads: zeta.reads() }).toEqual({ label: "last known building · not the current session", receipt: null, reads: [] });
-});
-
 test("flag present: a remembered build that finished elsewhere is done, with its receipt", async () => {
   await rememberBuilding();
   const zeta = serveZeta({ status: () => idle("newer"), read: () => rows(done) });
@@ -318,21 +311,6 @@ test("-32004: the read waits at least retry_after_ms before it asks again", asyn
   await settle();
   expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 2, label: "done", receipt: null });
   expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(2000);
-});
-
-test("-32004 three times: no read on a timer, and the next demand reads the build again", async () => {
-  await rememberBuilding();
-  jest.useFakeTimers(); fakeClock = true;
-  let busyReads = 3;
-  const zeta = serveZeta({ status: () => idle("newer"), read: () => { if (busyReads-- > 0) throw busy; return rows(done); } });
-  // remembered as building, so it is read with no row on screen
-  const hook = await mount(zeta, [chat], []);
-  for (let i = 0; i < 20; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
-  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 3, label: "last known building · not the current session", receipt: null });
-  // a focus reloads the chat list: same updated_at, a new demand
-  hook.rerender({ client: zeta.client, chats: [{ ...chat }] });
-  await settle();
-  expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 4, label: "done", receipt: "/reading-list" });
 });
 
 test("-32004 three times: the wait after the third holds the queue, and a new demand gets three tries again", async () => {
@@ -582,4 +560,70 @@ test("a second tab on a workspace route sees another tab's build when it comes b
     // it never saw that build run, so no receipt
     expect(view.result.current.latestReceipt).toBeNull();
   } finally { view.unmount(); settings.interceptor = null; }
+});
+
+// A wanted build is never left unread. The build under test (`chat`) can sit behind a newer build b2 ("o") whose reads
+// are held until "release". Ten older builds on screen ("full") hold their reads too, so they fill the queue behind it.
+// The build's own replies run in order; "hold" answers done at the next "release". "turn": a new turn on the build.
+type Reply = "done" | "hold" | "busy" | "holdbusy" | "nomethod";
+type ReadStep = "show" | "hide" | "release" | "wait" | "end" | "refresh" | "focus" | "turn" | "?";
+type ReadRow = { name: string; remember?: object; features?: string[]; shown?: ("o" | "t" | "full")[]; replies?: Reply[]; steps?: ReadStep[]; trace?: string[]; reads: number; label: string | null; pending?: boolean; stale?: boolean };
+const dropped: Reply[] = ["busy", "busy", "busy"];
+const lastKnown = "last known building · not the current session";
+const READ_ROWS: ReadRow[] = [
+  { name: "on screen: queued, in flight, then read", shown: ["o", "t"], replies: ["hold"], steps: ["?", "release", "?", "release"], trace: ["0 checking", "1 checking"], reads: 1, label: "done" },
+  { name: "on screen: a busy wait, then read", replies: ["busy"], steps: ["?", "wait"], trace: ["1 checking"], reads: 2, label: "done" },
+  { name: "leaves while queued and comes back: read once", shown: ["o", "t"], steps: ["hide", "release", "?", "show"], trace: ["0 null"], reads: 1, label: "done" },
+  { name: "leaves while in flight and comes back: read once", replies: ["hold"], steps: ["hide", "release", "show"], reads: 1, label: "done" },
+  { name: "leaves during a busy wait and comes back: read again", replies: ["busy"], steps: ["hide", "wait", "?", "show", "wait"], trace: ["1 null"], reads: 2, label: "done" },
+  { name: "leaves during a busy wait and stays away: no read off screen", replies: ["busy"], steps: ["hide", "wait", "wait"], reads: 1, label: null },
+  { name: "leaves after its read and comes back: no second read", steps: ["hide", "show"], reads: 1, label: "done" },
+  { name: "a run end while queued keeps it queued off screen", shown: ["o", "t"], steps: ["end", "hide", "release"], reads: 1, label: "done" },
+  { name: "a run end off screen reads it", shown: ["o"], steps: ["end", "release"], reads: 1, label: "done" },
+  { name: "a run end during a busy wait off screen reads it again", replies: ["busy"], steps: ["hide", "end", "wait"], reads: 2, label: "done" },
+  { name: "remembered building off screen is read", remember: running, shown: [], reads: 1, label: "done" },
+  { name: "remembered needing you off screen: a busy wait, then read", remember: approval, shown: [], replies: ["busy"], steps: ["wait"], reads: 2, label: "done" },
+  { name: "dropped after three busy replies: stale, no read on a timer", replies: dropped, steps: ["wait", "wait", "wait", "wait", "wait"], reads: 3, label: null, stale: true },
+  { name: "a new turn during the last busy wait with the queue full: dropped, not checking", shown: ["t", "full"], replies: dropped, steps: ["wait", "wait", "turn", "wait"], reads: 3, label: null, stale: true },
+  { name: "dropped, then refresh reads it", replies: dropped, steps: ["wait", "wait", "wait", "refresh"], reads: 4, label: "done" },
+  { name: "dropped, then a focus reads it", replies: dropped, steps: ["wait", "wait", "wait", "focus"], reads: 4, label: "done" },
+  { name: "dropped, then a scroll reads it", replies: dropped, steps: ["wait", "wait", "wait", "hide", "show"], reads: 4, label: "done" },
+  { name: "remembered building, dropped off screen, then a focus reads it", remember: running, shown: [], replies: dropped, steps: ["wait", "wait", "wait", "wait", "?", "focus"], trace: [`3 ${lastKnown}`], reads: 4, label: "done" },
+  { name: "-32601: reads stop and the row is not checking", replies: ["nomethod"], steps: ["wait", "focus", "hide", "show", "end"], reads: 1, label: null },
+  { name: "an old reply after a refresh is dropped and the build is read again", replies: ["hold"], steps: ["refresh", "release"], reads: 2, label: "done" },
+  { name: "an old busy reply after a refresh: no wait, read again", replies: ["holdbusy"], steps: ["refresh", "release", "?"], trace: ["2 done"], reads: 2, label: "done" },
+  { name: "without the read feature: never read, not checking", features: [], remember: running, steps: ["wait", "focus"], reads: 0, label: lastKnown },
+];
+test.each(READ_ROWS.map((row) => [row.name, row] as const))("a wanted build is never left unread: %s", async (_name, row) => {
+  if (row.remember) { const remember = row.remember; (await mount(serveZeta({ status: () => remember }), [chat], [])).unmount(); }
+  jest.useFakeTimers(); fakeClock = true;
+  const replies = [...(row.replies ?? [])];
+  const held: (() => void)[] = [];
+  const nomethod = Object.assign(Error("method not found"), { code: -32601 });
+  const zeta = serveZeta({ features: row.features, status: () => idle("newer"), history: () => { throw inactive; }, read: ({ session_id }) => {
+    const reply = session_id === chat.session_id ? replies.shift() ?? "done" : "hold";
+    if (reply === "busy") throw busy;
+    if (reply === "nomethod") throw nomethod;
+    if (reply === "done") return rows(done);
+    return new Promise((resolve, reject) => held.push(() => reply === "holdbusy" ? reject(busy) : resolve(rows(done))));
+  } });
+  const end = runEnds(zeta.client);
+  const older = builds(...Array.from({ length: 10 }, (_, n) => `c${n + 1}`));
+  let chats = [builds("b2")[0]!, chat, ...older];
+  const hook = await mount(zeta, chats, (row.shown ?? ["t"]).flatMap((one) => one === "o" ? ["b2"] : one === "full" ? older.map((build) => build.session_id) : [chat.session_id]));
+  const target = () => ({ reads: zeta.reads().filter((id) => id === chat.session_id).length, ...rowOf(hook), pending: !!hook.result.current.rows.find((one) => one.chat.session_id === chat.session_id)?.checking });
+  const trace: string[] = [];
+  for (const step of row.steps ?? []) {
+    if (step === "show" || step === "hide") act(() => hook.result.current.onScreen(chat.session_id, step === "show"));
+    else if (step === "release") act(() => held.splice(0).forEach((answer) => answer()));
+    else if (step === "wait") act(() => { jest.advanceTimersByTime(3000); });
+    else if (step === "end") end();
+    else if (step === "refresh") act(() => hook.result.current.refresh());
+    else if (step === "focus") hook.rerender({ client: zeta.client, chats: [...chats] });
+    else if (step === "turn") hook.rerender({ client: zeta.client, chats: chats = chats.map((one) => one === chat ? { ...chat, updated_at: "2030-01-02" } : one) });
+    else { const now = target(); trace.push(`${now.reads} ${now.label}`); }
+    await settle();
+  }
+  const { reads, label, pending } = target();
+  expect({ reads, label, pending, stale: hook.result.current.stale, trace }).toEqual({ reads: row.reads, label: row.label, pending: row.pending ?? false, stale: row.stale ?? false, trace: row.trace ?? [] });
 });
