@@ -63,7 +63,7 @@ test("a create save that lands after discard does not close or clear a form open
     if (method !== "skill_write") return Promise.resolve({ revision: "r", data: { items: [] } });
     return new Promise((resolve) => { land = async () => resolve({ revision: await sha(params.mutation!.document), data: { name: params.name, scope: "home", redacted: false } }); });
   } } as unknown as ZetaClient;
-  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => client };
+  const write = { controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => client, releaseControl: () => {} };
   const view = render(createElement(LibraryModule, { client, kind: "skills", reads: { catalog: true, read: true }, write }));
   await view.findByText("no skills found");
   const fill = async (name: string) => {
@@ -113,7 +113,7 @@ function editZeta(fixture: Fixture) {
   };
   return zeta;
 }
-const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => null });
+const writable = () => ({ controller: true, allowed: true, takeControl: async () => null, feedback: null, drafts: new Map(), edits: new Map(), liveClient: () => null, releaseControl: () => {} });
 const textarea = (view: ReturnType<typeof render>, label: RegExp) => view.getByLabelText(label) as HTMLTextAreaElement;
 async function openEditor(zeta: ReturnType<typeof editZeta>, write: ReturnType<typeof writable> = writable()) {
   const view = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));

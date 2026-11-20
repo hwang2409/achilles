@@ -155,6 +155,45 @@ describe("createConnection controller capacity vs version mismatch", () => {
     } finally { connection.stop(); }
   });
 
+  test.each([
+    ["an observer slot is free: it swaps to an observer socket", true],
+    ["no observer slot: it closes the controller and reconnects as observer", false],
+  ] as const)("an upgradable route gives control back: %s; a drop while holding reconnects as controller", async (_name, observerSlot) => {
+    const roles: string[] = [];
+    const drops: (() => void)[] = [];
+    let observerHellos = 0;
+    const connection = createConnection({
+      readOnly: "upgradable",
+      origin: "http://localhost",
+      discover: async () => discovery,
+      connect: async (_discovery, role) => {
+        roles.push(role);
+        // the first observer connects; the one release asks for is refused when there is no observer slot.
+        if (role === "observer" && ++observerHellos === 2 && !observerSlot) throw new ZetaError("busy", -32001);
+        return { onClose(callback: () => void) { drops.push(callback); }, close() { drops.at(-1)?.(); } } as never;
+      },
+    });
+    try {
+      await flush();
+      expect(await connection.takeControl()).toBeNull();
+      drops.at(-1)!(); // a drop while an editor holds control
+      connection.retryNow();
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
+      await connection.releaseControl();
+      connection.retryNow();
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
+      drops.at(-1)!();
+      connection.retryNow();
+      await flush();
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
+      expect(roles).toEqual(observerSlot
+        ? ["observer", "controller", "controller", "observer", "observer"]
+        : ["observer", "controller", "controller", "observer", "observer", "observer"]);
+    } finally { connection.stop(); }
+  });
+
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller
   // connects (the second-tab case) and -32002 "protocol_mismatch" for a real version mismatch. @fulcrum/zeta
   // surfaces these as ZetaError kinds "busy" and "version_mismatch". The two must not collapse into one state.

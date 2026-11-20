@@ -56,7 +56,7 @@ export function reduceConnection(state: ConnectionState, event: ConnectionEvent)
 }
 
 type RoleState = { role: ZetaRole; reason: string | null };
-type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "retry";
+type RoleEvent = "connect_writable" | "connect_read_only" | "controller_granted" | "observer_granted" | "controller_busy" | "observer_busy" | "both_busy" | "takeover_refused" | "takeover_failed" | "controller_closed" | "control_released" | "retry";
 
 export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
   switch (event) {
@@ -67,6 +67,7 @@ export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
       return { role: "controller", reason: null };
     case "connect_read_only":
     case "observer_granted":
+    case "control_released":
     case "controller_busy":
     case "observer_busy":
       return { role: "observer", reason: null };
@@ -106,6 +107,9 @@ export type Connection = {
   retryNow(): void;
   /** Reopens this page as controller, or keeps it as a live observer if the slot is still occupied. */
   takeControl(): Promise<string | null>;
+  /** `upgradable` only: gives the controller slot back taken by `takeControl` (reopens as observer), and reconnects
+   * as observer from then on, so a chat tab can take control. */
+  releaseControl(): Promise<void>;
   /** Whether the last established authority was an observer. */
   readonly observerPresentation: boolean;
   stop(): void;
@@ -172,6 +176,8 @@ export function createConnection({
   let retainedObserver = false;
   let liveDiscovery: ZetaDiscovery | null = null;
   let takingControl = false;
+  // `upgradable`: true from a successful takeControl until releaseControl, so a drop meanwhile reconnects as controller.
+  let holding = false;
   const listeners = new Set<() => void>();
   const send = (event: ConnectionEvent) => {
     if (event.type !== "connected" && event.type !== "closed" && event.type !== "attempt") retainedObserver = false;
@@ -227,7 +233,7 @@ export function createConnection({
     next.onClose(() => {
       if (client !== next) return;
       client = null;
-      roleState = transitionRole(roleState, authority === "controller" ? "controller_closed" : "retry");
+      roleState = transitionRole(roleState, authority !== "controller" ? "retry" : readOnly === "upgradable" && !holding ? "control_released" : "controller_closed");
       send({ type: "closed", now: now() });
     });
     retainedObserver = authority === "observer";
@@ -293,8 +299,25 @@ export function createConnection({
         roleState = transitionRole(roleState, opened.kind === "busy" ? "takeover_refused" : "takeover_failed");
         return roleState.reason;
       }
+      holding = true;
       adopt(opened.client, discovery, "controller");
       return null;
+    },
+    async releaseControl() {
+      if (readOnly !== "upgradable") return;
+      holding = false;
+      if (stopped || state.phase !== "connected" || state.authority !== "controller" || !client || !liveDiscovery) return;
+      const controller = client;
+      const discovery = liveDiscovery;
+      const opened = await openRole(discovery, "observer");
+      if (stopped || client !== controller || holding) {
+        if (opened.kind === "connected") opened.client.close();
+        return;
+      }
+      roleState = transitionRole(roleState, "control_released");
+      // without an observer slot, close the controller anyway: the reconnect opens as observer.
+      if (opened.kind === "connected") adopt(opened.client, discovery, "observer");
+      else controller.close();
     },
     stop() {
       stopped = true;

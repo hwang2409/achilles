@@ -16,7 +16,9 @@ const reads = new Set(["hello", "status", "session_settings", "session_history_a
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
-type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
+// `slot`: like zeta, one controller at a time across every socket (a second controller hello gets -32001); `roles`
+// records each hello role.
+type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
   const writes: string[] = [];
@@ -39,15 +41,20 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   if (options.extraChat) chats.push(options.extraChat);
   let app: RenderResult | undefined;
   let socket: Socket;
-  const emit = (event: object) => socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));
+  const reply = (target: EventTarget, event: object) => target.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));
+  const emit = (event: object) => reply(socket, event);
+  const controllers = new Set<Socket>();
   class Socket extends EventTarget {
     constructor() { super(); socket = this; options.sockets?.push(this); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
-    close() { this.dispatchEvent(new Event("close")); }
+    close() { controllers.delete(this); this.dispatchEvent(new Event("close")); }
     send(raw: string) {
       const { id, method, params } = JSON.parse(raw);
       requests.push(method);
       if (!reads.has(method)) writes.push(method);
-      const custom = options.rpc?.[method]?.(params, requests);
+      if (method === "hello") options.roles?.push(params.role);
+      const taken = options.slot && method === "hello" && params.role === "controller" && [...controllers].some((other) => other !== this);
+      if (options.slot && method === "hello" && params.role === "controller" && !taken) controllers.add(this);
+      const custom = taken ? { error: { code: -32001, message: "controller occupied" } } : options.rpc?.[method]?.(params, requests);
       const response = method === "hello" && authority === "observer" && params.role === "controller"
         ? { error: { code: -32001, message: "controller occupied" } }
         : custom ?? { result: ({
@@ -58,7 +65,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
           send: { accepted: true }, steer: { accepted: true }, delivery_status: { status: "delivered" },
           session_history_and_subscribe: { messages: [], next_before: null, status, ...options.joined },
         } as Record<string, unknown>)[method] ?? {} };
-      void Promise.resolve(response).then((reply) => emit({ jsonrpc: "2.0", id, ...reply }));
+      void Promise.resolve(response).then((result) => reply(this, { jsonrpc: "2.0", id, ...result }));
     }
   }
   try {
@@ -528,6 +535,49 @@ test("a typed create draft comes back after the socket drops and reconnects", as
     expect((text as HTMLTextAreaElement).value).toBe("---\nname: fixture-draft\ndescription: typed by hand\n---\nunsaved text\n");
     expect((select(app, '.library-editor input[aria-describedby$="-rules"]') as HTMLInputElement).value).toBe("fixture-draft");
     expect(writes.filter((write) => write.endsWith("_write"))).toEqual([]);
+  });
+});
+
+// A second tab asking zeta for the controller slot: the hello reply says whether it got it.
+const chatTabHello = () => new Promise<{ result?: object; error?: { code: number } }>((resolve) => {
+  const tab = new WebSocket("ws://fixture.invalid");
+  tab.addEventListener("message", (event) => { resolve(JSON.parse((event as MessageEvent).data)); tab.close(); });
+  tab.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hello", params: { role: "controller", features: [] } }));
+});
+
+test("a library tab gives control back after create + save, so a chat tab can then take control", async () => {
+  const roles: string[] = [];
+  await withApp("controller", { ...library(true), slot: true, roles }, async (app, writes) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    expect((await chatTabHello()).error?.code).toBe(-32001); // the library tab holds the slot while its editor is open
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
+    await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    didWrite(writes, "skill_write");
+    expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+    await act(async () => {});
+    expect((await chatTabHello()).result, `hello roles ${JSON.stringify(roles)}`).toBeTruthy();
+    expect(roles).toEqual(["observer", "controller", "controller", "observer", "controller"]);
+  });
+});
+
+test("a library tab reconnects as observer once its editor closed, and as controller while one is open", async () => {
+  const roles: string[] = [];
+  const sockets: (EventTarget & { close(): void })[] = [];
+  await withApp("controller", { ...library(true), slot: true, roles, sockets: sockets as EventTarget[] }, async (app) => {
+    await app.findByText("no skills found");
+    await click(select(app, tag("library.create")));
+    await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-draft");
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(await app.findByDisplayValue("fixture-draft", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(roles.at(-1)).toBe("controller");
+    await click(app.getByText("discard", { selector: "button", exact: true }));
+    await act(async () => {});
+    await act(async () => { sockets.at(-1)!.close(); });
+    expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
+    await act(async () => {});
+    expect(roles).toEqual(["observer", "controller", "controller", "observer", "observer"]);
   });
 });
 

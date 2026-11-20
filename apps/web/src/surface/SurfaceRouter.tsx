@@ -54,7 +54,7 @@ export function SurfaceRouter() {
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
-        write={libraryWrite(client, route.id, controller, takeLibraryControl, libraryControl, libraryDrafts, libraryEdits, () => connection.client)} />) : <ModuleFrame title={route.label}>
+        write={libraryWrite(client, route.id, controller, takeLibraryControl, libraryControl, libraryDrafts, libraryEdits, () => connection.client, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
@@ -71,9 +71,9 @@ function libraryReads(client: ZetaClient, kind: LibraryKind) {
   return { catalog: granted && supportsRequest(client, methods.catalog), read: granted && supportsRequest(client, methods.read) };
 }
 
-function libraryWrite(client: ZetaClient, kind: LibraryKind, controller: boolean, takeControl: () => Promise<string | null>, feedback: string | null, drafts: Map<string, CreateDraft>, edits: Map<LibraryKind, EditDraft>, liveClient: () => ZetaClient | null) {
+function libraryWrite(client: ZetaClient, kind: LibraryKind, controller: boolean, takeControl: () => Promise<string | null>, feedback: string | null, drafts: Map<string, CreateDraft>, edits: Map<LibraryKind, EditDraft>, liveClient: () => ZetaClient | null, releaseControl: () => void) {
   const access = writeAccess(client, kind, controller);
-  return access === "none" ? null : { controller, allowed: access === "allowed", takeControl, feedback, drafts, edits, liveClient };
+  return access === "none" ? null : { controller, allowed: access === "allowed", takeControl, feedback, drafts, edits, liveClient, releaseControl };
 }
 
 type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children: (activity: BuildActivity) => ReactNode };
