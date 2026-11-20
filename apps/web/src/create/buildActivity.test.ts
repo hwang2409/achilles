@@ -344,9 +344,12 @@ test("-32004 three times: the wait after the third holds the queue, and a new de
   expect(at.map(([id]) => id)).toEqual(["b1", "b1", "b1", "b2"]);
   // bun's fake clock follows real time across ticks: compare the times the fake read saw
   expect(at[3]![1] - at[2]![1]).toBeGreaterThanOrEqual(2000);
+  // b1 is on screen with no state: /create offers refresh
+  expect(hook.result.current.stale).toBe(true);
   hook.rerender({ client: zeta.client, chats: [{ ...builds("b1")[0]!, updated_at: "2030-01-02" }, builds("b2")[0]!] });
   for (let i = 0; i < 4; i++) { act(() => { jest.advanceTimersByTime(3000); }); await settle(); }
   expect(at.map(([id]) => id)).toEqual(["b1", "b1", "b1", "b2", "b1", "b1", "b1"]);
+  expect(hook.result.current.stale).toBe(true);
 });
 
 test("a page load does not read builds this tab already proved settled; a new turn or a manual refresh reads", async () => {
@@ -387,15 +390,27 @@ test.each([
   { name: "only builds on screen are read, newest first, at most 10 at once", shown: many.slice(0, 15), later: [], reads: many.slice(0, 15) },
   { name: "a build is read when its row scrolls into view", shown: ["b1", "b2"], later: ["b17"], reads: ["b1", "b2", "b17"] },
   { name: "no row on screen and no demand: no read", shown: [], later: [], reads: [] },
-])("$name", async ({ shown, later, reads }) => {
+  // a fling past every row: the read in flight runs on, the rows scrolled past leave the queue, the rows on screen are next
+  { name: "a fling past 30 rows: the rows on screen are read next, not the ones scrolled past", shown: many.slice(0, 12), fling: many.slice(12, 28), later: ["b29", "b30"], reads: ["b1", "b29", "b30"] },
+] as { name: string; shown: string[]; fling?: string[]; later: string[]; reads: string[] }[])("$name", async ({ shown, fling, later, reads }) => {
   jest.useFakeTimers(); fakeClock = true;
   const waiting: ((value: unknown) => void)[] = [];
   const zeta = serveZeta({ status: () => idle("newer"), read: () => new Promise((resolve) => waiting.push(resolve)) });
   const hook = await mount(zeta, builds(...many), shown);
-  const checking = hook.result.current.rows.filter((row) => row.checking).map((row) => row.chat.session_id);
-  expect(checking).toEqual(shown.slice(0, 10));
+  const checking = () => hook.result.current.rows.filter((row) => row.checking).map((row) => row.chat.session_id);
+  // every row on screen that waits for a read says so, queued or not
+  expect(checking()).toEqual(shown);
+  if (fling) {
+    act(() => {
+      shown.forEach((id) => hook.result.current.onScreen(id, false));
+      fling.forEach((id) => { hook.result.current.onScreen(id, true); hook.result.current.onScreen(id, false); });
+      later.forEach((id) => hook.result.current.onScreen(id, true));
+    });
+    await settle();
+    expect(checking()).toEqual(["b1", ...later]);
+  }
   for (let i = 0; i < 40 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
-  act(() => later.forEach((id) => hook.result.current.onScreen(id, true)));
+  if (!fling) act(() => later.forEach((id) => hook.result.current.onScreen(id, true)));
   await settle();
   for (let i = 0; i < 40 && waiting.length; i++) { waiting.shift()!(rows([])); await settle(); }
   // timers alone never read
