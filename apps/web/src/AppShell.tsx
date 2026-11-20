@@ -21,7 +21,7 @@ type Props = {
   current: SurfaceRoute;
   nav: ReturnType<typeof useAgentNavAdapter>;
   workspace?: WorkspaceActions;
-  newChat: { available: boolean; run: () => void };
+  newChat: { available: boolean; pending?: boolean; run: () => void };
   connectionStatus: { label: string; connected: boolean };
   hasComposer?: boolean;
   banner?: ReactNode;
@@ -151,7 +151,7 @@ export function AppShell({ current, nav, workspace, newChat, connectionStatus, h
   }, [workspace, shortcutsOpen, paletteOpen]);
 
   const commands: PaletteEntry[] = [
-    ...!newChat.available ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: startNewChat }],
+    ...!newChat.available || newChat.pending ? [] : [{ id: "new-chat", label: "new chat", shortcut: modKey("⇧O"), run: startNewChat }],
     ...loading || !createMode?.available || createMode.pending ? [] : [{ id: "create-mode", label: "toggle create mode", shortcut: modKey("."), detail: createMode.enabled ? "on · this page" : "off · this page", run: () => void createMode.toggle() }],
     ...displaySettings ? [{ id: "display-settings", label: "display settings", shortcut: modKey(","), run: () => openSettings(paletteOpener.current) }] : [],
     ...workspace ? [
@@ -163,7 +163,7 @@ export function AppShell({ current, nav, workspace, newChat, connectionStatus, h
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
     <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode}
-      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} title={!newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>new chat</b><kbd>{modKey("⇧O")}</kbd></button>}
+      action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "starting…" : "new chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
       search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
       {banner}

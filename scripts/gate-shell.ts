@@ -229,7 +229,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   const newChat = tab.locator(".surface-actions").getByRole("button", { name: "new chat", exact: true });
   const assertNewChat = async () => {
     // A navigation from the controller can reconnect as observer before its old socket closes.
-    const enabled = newChat.and(tab.locator(":enabled"));
+    const enabled = newChat.and(tab.locator(":enabled:not([aria-disabled=true])"));
     const takeover = tab.getByRole("button", { name: "take control", exact: true });
     await gateWait.playwright(enabled.or(takeover).first(), "waitFor");
     if (await takeover.isVisible()) await takeover.click();
@@ -269,17 +269,21 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   const expectedApproval = (await readHome()).approval_mode === "ask" || savedApproval === false ? "ask before running tools" : "auto-approve tools";
   const expectedFacts = `create on · runs in a new chat · ${expectedApproval}`;
   await gateWait.playwright(facts.filter({ hasText: expectedFacts }), "waitFor");
-  const build = tab.getByRole("button", { name: "build page", exact: true });
+  const build = tab.locator(".create-form-actions button[type=submit]");
+  const actionWidths = () => tab.locator(".new-chat, .create-form-actions button[type=submit]").evaluateAll((buttons) =>
+    buttons.map((button) => button.getBoundingClientRect().width));
   const prompt = tab.getByRole("textbox", { name: "describe your page" });
   await tab.setViewportSize({ width: 390, height: 844 });
   await tab.getByRole("button", { name: "a reading list with statuses" }).click();
   if (await prompt.inputValue() !== "a reading list with statuses" || !await prompt.evaluate((element) => element === document.activeElement) || requests.some(({ method }) => method === "send") || requests.filter(({ method }) => method === "new_session").length !== sessionBaseline) throw new Error("starter did more than fill and focus the prompt");
   const measure: number[] = [];
+  const readyWidths = new Map<number, number[]>();
   for (const width of [390, 1280, 1440, 1920]) {
     const height = width === 390 ? 844 : 900;
     await tab.setViewportSize({ width, height });
     await tab.evaluate(() => document.fonts.ready.then(() => undefined));
     if (await tab.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error(`create page overflow at ${width}px`);
+    readyWidths.set(width, await actionWidths());
     measure.push((await tab.locator(".create-landing").boundingBox())!.width);
     await capture("landing", width);
     if (width === 390) {
@@ -306,7 +310,15 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
     mode.push(route.request().postDataJSON());
     if (mode.length === 1) {
       if (await facts.innerText() !== expectedFacts) throw new Error("pending build omitted or changed its execution facts");
+      if (!await build.isDisabled() || !await newChat.isDisabled() || await build.innerText() !== "starting…" || !(await newChat.innerText()).includes("starting…")) throw new Error("pending build did not show both actions are busy");
       await capture("pending", 1440);
+      for (const width of [1440, 390]) {
+        await tab.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        const pendingWidths = await actionWidths();
+        if (pendingWidths.some((size, index) => Math.abs(size - readyWidths.get(width)![index]) > 1)) throw new Error(`busy action changed width at ${width}px`);
+        if (width === 390) await capture("pending", width);
+      }
+      await tab.setViewportSize({ width: 1440, height: 900 });
       await route.fulfill({ status: 503, json: { error: "synthetic refusal" } });
     } else await route.continue();
   });

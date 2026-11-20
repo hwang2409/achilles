@@ -16,8 +16,8 @@
 .create-landing textarea:focus-visible { outline: 1px solid var(--fulcrum-accent); }
 .create-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
 .create-form-actions span, .create-build-status { color: var(--fulcrum-muted); font-size: 12px; }
-.create-form-actions button { min-width: 112px; min-height: 36px; background: var(--fulcrum-accent); color: var(--fulcrum-bg); padding-inline: 12px; }
-.create-form-actions button[aria-disabled="true"] { opacity: .62; cursor: default; }
+.create-form-actions button { flex: 0 0 112px; min-height: 36px; white-space: nowrap; background: var(--fulcrum-accent); color: var(--fulcrum-bg); padding-inline: 12px; }
+.create-form-actions button[aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; border-color: var(--fulcrum-border); cursor: default; }
 .create-build-status { min-height: 24px; padding-top: 4px; }
 .create-build-status[role="alert"] { color: var(--fulcrum-error, #f78477); }
 .create-starters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
