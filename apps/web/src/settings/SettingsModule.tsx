@@ -16,7 +16,13 @@ export function SettingsModule(props: Props) {
   const openBrowserSettings = useContext(DisplaySettings);
   const [shown, setShown] = useState(() => ["#zeta-defaults", "#telemetry"].includes(location.hash) ? "zeta-defaults" : "browser");
   const section = (id: string, label: string) => <a href={`#${id}`} aria-current={shown === id ? "location" : undefined}
-    onClick={() => { setShown(id); document.querySelector<HTMLElement>(`#${id} h2`)?.focus(); }}>{label}</a>;
+    onClick={(event) => {
+      // navigate first: a fragment navigation to a section that cannot take focus resets focus to the body
+      event.preventDefault();
+      location.hash = id;
+      setShown(id);
+      document.querySelector<HTMLElement>(`#${id} h2`)?.focus();
+    }}>{label}</a>;
   return <ModuleFrame title="settings">
     <div className="sp">
       <nav className="sp-subnav" aria-label="settings sections">
