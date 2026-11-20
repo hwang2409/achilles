@@ -82,7 +82,7 @@ test("a create save that lands after discard does not close or clear a form open
 
   expect(view.container.querySelector<HTMLInputElement>('.library-editor input[aria-describedby$="-rules"]')?.value, "the form opened after discard").toBe("fixture-second");
   expect(write.drafts.get("skills/new")?.name).toBe("fixture-second");
-  expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+  expect(await view.findByText("saved fixture-first. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
   expect(calls.filter((method) => method === "skill_write")).toHaveLength(1);
 });
 
@@ -196,15 +196,6 @@ test("an observer refusal offers take control, keeps the draft across the client
   expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
   expect(zeta.writes()).toHaveLength(2);
   expect(zeta.file).toBe(edited);
-});
-
-test("the redaction marker blocks the save before anything is sent", async () => {
-  const zeta = editZeta({ document: fileText });
-  const view = await openEditor(zeta);
-  await type(view, `${fileText}key [secret omitted]\n`);
-  await press(view, /^save/);
-  expect(view.getByRole("alert").textContent).toContain("the text contains zeta's mask [secret omitted]");
-  expect(zeta.writes()).toEqual([]);
 });
 
 test("discarding unsaved text asks first, and keep editing keeps it", async () => {

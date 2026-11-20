@@ -68,6 +68,14 @@ function EditorActions({ dirty, what, onDiscard, save }: { dirty: boolean; what:
 const Demoted = ({ show }: { show: boolean }) => show
   ? <p role="status" className="library-flag">this tab is read-only now. save takes control first, if no other tab has it.</p> : null;
 
+/** One per open form: the writer's identity for it. Closing the form aborts it, so the writer stops its retries and
+ * never hands it a reply. */
+function useForm() {
+  const [form] = useState(() => new AbortController());
+  useEffect(() => () => form.abort(), [form]);
+  return form.signal;
+}
+
 /** Take control for a save on an observer tab; on refusal the failure shows the reason. Returns whether to send. */
 async function controlForSave({ controller, takeControl }: Control, fail: (failure: Failure) => void) {
   if (controller) return true;
@@ -90,7 +98,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
-  const abort = useRef<AbortController | null>(null);
+  const form = useForm();
   const alert = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const text = edited ?? header(kind, name, description);
@@ -100,10 +108,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   if (existing?.source === scope) problems.push(`a ${scope} ${noun} named ${name} already exists. open it to edit it.`);
   const dirty = Boolean(name || description || edited !== null);
 
-  useEffect(() => {
-    nameField.current?.focus();
-    return () => abort.current?.abort();
-  }, []);
+  useEffect(() => { nameField.current?.focus(); }, []);
   useEffect(() => { onDraft({ name, description, scope, edited }); }, [name, description, scope, edited]);
   useLeaveGuard(dirty || pending);
   // Project scope needs an open chat in a project: a one-row read says whether zeta has one, and the session's
@@ -133,12 +138,11 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     if (problems.length) return alert.current?.focus();
     setPending(true);
     setFailure(null);
-    abort.current = new AbortController();
     const outcome = await controlForSave(control, setFailure)
-      ? await writer.create(client, { kind, name, scope }, text, abort.current.signal).catch(() => notSent) : null;
-    // a sent write cannot be recalled: a save that landed after discard is still reported (the owner decides how).
+      ? await writer.create(client, { kind, name, scope }, text, form).catch(() => notSent) : undefined;
+    // null: the form closed (the writer reports a save that still landed).
+    if (outcome === null) return;
     if (outcome?.status === "saved") return onCreated(name, outcome.redacted, where);
-    if (abort.current.signal.aborted) return;
     setPending(false);
     if (outcome) setFailure(outcome);
   }
@@ -188,7 +192,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
         </>}
       </div>}
     </div>
-    <EditorActions dirty={dirty} what={`the new ${noun}`} onDiscard={() => { abort.current?.abort(); onClose(); }}
+    <EditorActions dirty={dirty} what={`the new ${noun}`} onDiscard={onClose}
       save={!blocked && <button type="button" className="library-primary" aria-disabled={pending || problems.length > 0} onClick={() => void save()}>
         {pending ? "saving…" : problems.length ? problemLabel(problems.length) : `save ${noun}`}
       </button>} />
@@ -231,6 +235,7 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
   const [saved, setSaved] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const alert = useRef<HTMLDivElement>(null);
+  const form = useForm();
   const dirty = text !== base.document;
   const problems = createProblems(target.name, text);
 
@@ -248,7 +253,8 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
     setFailure(null);
     const sent = text;
     const outcome = await controlForSave(control, setFailure)
-      ? await writer.save(client, target, base.revision, sent).catch(() => notSent) : null;
+      ? await writer.save(client, target, base.revision, sent, form).catch(() => notSent) : undefined;
+    if (outcome === null) return;
     setPending(false);
     if (!outcome) return;
     if (outcome.status !== "saved") return setFailure(outcome);

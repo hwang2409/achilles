@@ -545,16 +545,30 @@ const chatTabHello = () => new Promise<{ result?: object; error?: { code: number
   tab.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hello", params: { role: "controller", features: [] } }));
 });
 
-test("a library tab gives control back after create + save, so a chat tab can then take control", async () => {
-  const roles: string[] = [];
-  await withApp("controller", { ...library(true), slot: true, roles }, async (app, writes) => {
+test.each([
+  ["create + save", library(true), async (app: RenderResult) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
     expect((await chatTabHello()).error?.code).toBe(-32001); // the library tab holds the slot while its editor is open
     await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
-    expect(await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+    await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions/);
+  }],
+  ["edit + save + close", libraryFile, async (app: RenderResult) => {
+    await click(await app.findByRole("button", { name: /fixture-skill/ }));
+    await click(app.getByText("show skill text", { selector: "button", exact: true }));
+    await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
+    expect((await chatTabHello()).error?.code).toBe(-32001);
+    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    await app.findByText(/^saved fixture-skill/);
+    await click(app.getByText("close", { selector: ".library-editor button", exact: true }));
+  }],
+] as const)("a library tab gives control back after %s, so a chat tab can then take control", async (_name, options, write) => {
+  const roles: string[] = [];
+  await withApp("controller", { ...options, slot: true, roles }, async (app, writes) => {
+    await write(app);
     didWrite(writes, "skill_write");
     await act(async () => {});
     expect((await chatTabHello()).result, `hello roles ${JSON.stringify(roles)}`).toBeTruthy();

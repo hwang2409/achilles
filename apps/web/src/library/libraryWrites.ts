@@ -91,14 +91,21 @@ function invalidMessage(reason: unknown, detail: unknown, target: WriteTarget) {
   }
 }
 
-/** One writer per library view. It keeps one write per item in flight, across client swaps. `live`: the connection's
- * current client, so the read that settles an unknown result after a socket drop uses the reconnected client. */
-export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => ZetaClient | null = () => null) {
-  const inFlight = new Map<string, Promise<WriteOutcome>>();
+/** Another form's save of the same item is in flight; this one sends nothing. */
+export const IN_PROGRESS: WriteOutcome = { status: "busy", message: "another save of this item is in progress. nothing was sent; try again in a moment." };
 
-  // A reply that is not a definite answer: read the item; never send the write again.
-  async function settle(client: ZetaClient, target: WriteTarget, base: string | null, expected: string): Promise<WriteOutcome> {
-    for (let attempt = 0; ; attempt++) {
+/** One writer per library view, and the only owner of "which form owns this save". `form`: the open form's abort
+ * signal, its identity and its cancel. A call joins an in-flight save only when form and request are identical (a
+ * double submit); any other save of that item while one is in flight is refused with IN_PROGRESS. A closed form gets
+ * null and sends nothing more; a save it sent that lands after it closed goes to `landed` instead. `live`: the
+ * connection's current client, so the read that settles an unknown result after a socket drop uses the reconnected one. */
+export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => ZetaClient | null = () => null,
+  landed: (target: WriteTarget, redacted: boolean) => void = () => {}) {
+  const inFlight = new Map<string, { form: AbortSignal; base: string | null; document: string; run: Promise<WriteOutcome | null> }>();
+
+  // A reply that is not a definite answer: read the item; never send the write again. Stops when the form closes.
+  async function settle(client: ZetaClient, target: WriteTarget, base: string | null, expected: string, form: AbortSignal): Promise<WriteOutcome | null> {
+    for (let attempt = 0; !form.aborted; attempt++) {
       try {
         const read = await (live() ?? client).request(libraryMethods(target.kind).read, { name: target.name, scope: target.scope }) as { revision?: unknown; data?: { redacted?: unknown } } | null;
         if (read?.revision === expected) return { status: "saved", revision: expected, redacted: read.data?.redacted === true };
@@ -111,54 +118,62 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
         // no JSON-RPC error code: the socket is gone. wait for the reconnect, then read with the new client.
         const transport = !(typeof rpc?.code === "number" && rpc.code < 0);
         if (transport && attempt < RECONNECT_WAIT_MS.length) {
-          await sleep(RECONNECT_WAIT_MS[attempt]!);
+          try { await sleep(RECONNECT_WAIT_MS[attempt]!, form); } catch { return null; }
           continue;
         }
         return { status: "unknown", message: "could not check whether zeta saved it. refresh the list before trying again." };
       }
     }
+    return null;
   }
 
-  async function send(client: ZetaClient, target: WriteTarget, base: string | null, document: string, signal?: AbortSignal): Promise<WriteOutcome> {
+  async function send(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: AbortSignal): Promise<WriteOutcome | null> {
     const problems = createProblems(target.name, document);
     if (problems.length) return { status: "invalid", message: problems[0]! };
     const expected = await sha256(document);
     // base null: create (zeta refuses if the name exists). Otherwise zeta replaces the file only if it still has `base`.
     const params = { name: target.name, scope: target.scope, ...(base === null ? {} : { revision: base }), mutation: { document } };
-    for (let attempt = 0; ; attempt++) {
+    for (let attempt = 0; !form.aborted; attempt++) {
       try {
         // the live client: a save pressed on an observer tab sends after take control replaced the socket.
         const result = await (live() ?? client).request(libraryMethods(target.kind).write, params) as { revision?: unknown; data?: { name?: unknown; redacted?: unknown } } | null;
         if (result?.revision === expected && result.data?.name === target.name && typeof result.data.redacted === "boolean")
           return { status: "saved", revision: expected, redacted: result.data.redacted };
-        return settle(client, target, base, expected);
+        return settle(client, target, base, expected, form);
       } catch (error) {
         const outcome = mapError(error, target, base !== null);
         // busy: zeta refused before any change, so the same request is safe to repeat.
-        if (outcome?.status === "busy" && attempt < BUSY_BACKOFF_MS.length && !signal?.aborted) {
-          try { await sleep(BUSY_BACKOFF_MS[attempt]!, signal); continue; } catch { return outcome; }
+        if (outcome?.status === "busy" && attempt < BUSY_BACKOFF_MS.length) {
+          try { await sleep(BUSY_BACKOFF_MS[attempt]!, form); continue; } catch { return null; }
         }
-        return outcome ?? settle(client, target, base, expected);
+        return outcome ?? settle(client, target, base, expected, form);
       }
     }
+    return null;
   }
 
-  // A second call while one is pending for the same item returns the same promise.
-  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, signal?: AbortSignal) {
+  async function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: AbortSignal) {
     const key = `${target.kind}/${target.scope}/${target.name}`;
-    const pending = inFlight.get(key);
-    if (pending) return pending;
-    const run = send(client, target, base, document, signal).finally(() => inFlight.delete(key));
-    inFlight.set(key, run);
-    return run;
+    let flight = inFlight.get(key);
+    if (flight && (flight.form !== form || flight.base !== base || flight.document !== document)) return form.aborted ? null : IN_PROGRESS;
+    if (!flight) {
+      const run = send(client, target, base, document, form).then((outcome) => {
+        // a sent write cannot be recalled: one that lands after its form closed is reported once, here.
+        if (form.aborted && outcome?.status === "saved") landed(target, outcome.redacted);
+        return outcome;
+      }).finally(() => inFlight.delete(key));
+      inFlight.set(key, flight = { form, base, document, run });
+    }
+    const outcome = await flight.run;
+    return form.aborted ? null : outcome;
   }
 
   return {
-    /** Create `target` (no revision). `signal` stops busy retries only; a sent write cannot be recalled. */
-    create: (client: ZetaClient, target: WriteTarget, document: string, signal?: AbortSignal): Promise<WriteOutcome> =>
-      once(client, target, null, document, signal),
-    /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. */
-    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, signal?: AbortSignal): Promise<WriteOutcome> =>
-      once(client, target, base, document, signal),
+    /** Create `target` (no revision). null: `form` closed first. */
+    create: (client: ZetaClient, target: WriteTarget, document: string, form: AbortSignal): Promise<WriteOutcome | null> =>
+      once(client, target, null, document, form),
+    /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. null: `form` closed first. */
+    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, form: AbortSignal): Promise<WriteOutcome | null> =>
+      once(client, target, base, document, form),
   };
 }
