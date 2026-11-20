@@ -16,11 +16,12 @@
 .surface-search .chat-search:focus-within { outline: 1px solid var(--fulcrum-accent); }
 .surface-search .palette-button { position: absolute; right: 0; top: 0; height: 36px; min-width: 48px; color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
-.surface-search .waiting-count { margin: 0; color: var(--fulcrum-warn); font-size: 12px; }
 .place-nav { flex: none; margin: 0 14px 10px; }
 .place-nav h2 { margin: 14px 0 4px; font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--fulcrum-muted); }
 .place-link { display: flex; align-items: center; gap: 10px; min-height: 31px; padding: 0 10px; border-left: 2px solid transparent; font-size: 13px; line-height: 1.25; }
 .place-nav .place-link small { margin-left: auto; color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
+.place-link .waiting-count { color: var(--fulcrum-warn); }
+.place-link .waiting-count::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-end: 4px; vertical-align: .1em; background: currentColor; }
 .place-link svg { flex: none; color: var(--fulcrum-muted); }
 .place-link:hover { background: color-mix(in srgb, var(--fulcrum-accent) 7%, transparent); }
 .place-link[aria-current="page"] { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 12%, transparent); font-weight: 700; }
@@ -51,7 +52,7 @@
 @media (min-width: 761px) and (min-height: 501px) {
   .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
   .sidebar-collapsed .sidebar-scroll { scrollbar-width: none; }
-  .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .new-chat kbd, .surface-search .chat-search, .search-skeleton, .waiting-count, .place-link span, .place-link small, .place-nav h2, .chat-list, .collapse-label, footer kbd) { display: none; }
+  .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .new-chat kbd, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .place-nav h2, .chat-list, .collapse-label, footer kbd) { display: none; }
   .sidebar-collapsed :is(.surface-actions, .surface-search, .place-nav) { margin-inline: 6px; }
   .sidebar-collapsed :is(.place-link, .surface-actions > .place-link, .new-chat) { justify-content: center; min-height: 42px; padding: 0; }
   .sidebar-collapsed .surface-search .palette-button { position: static; min-width: 0; }
