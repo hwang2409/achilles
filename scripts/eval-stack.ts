@@ -124,13 +124,22 @@ async function prepareTargetWeb(owner: ProcessOwner, achillesDir: string) {
 }
 
 export function targetWebNeedsRepair(ok: boolean, body: string) { return !ok || /static file not found/i.test(body); }
-// evals sharing a checkout take turns: vite empties apps/web/dist while it builds, so a peer's repair breaks this check
+// evals sharing a checkout take turns: vite empties apps/web/dist while it builds, so a peer's repair breaks this check,
+// and two `uv run`s building one new venv at once let one import a half-installed package
 async function lockTargetWeb(owner: ProcessOwner, achillesDir: string) {
   const path = join(achillesDir, ".cache", "eval-web.lock"); await mkdir(join(achillesDir, ".cache"), { recursive: true });
   const holder = owner.spawn("uv", ["run", "--no-project", "python", "-c", "import fcntl, sys\nlock = open(sys.argv[1], 'a')\nfcntl.flock(lock, fcntl.LOCK_EX)\nprint('locked', flush=True)\nsys.stdin.read()", path], { stdio: ["pipe", "pipe", "ignore"] });
   const exited = new Promise<void>(resolveExit => { holder.once("exit", () => resolveExit()); holder.once("error", () => resolveExit()); });
   if (!await Promise.race([new Promise<boolean>(resolveLock => holder.stdout!.once("data", () => resolveLock(true))), exited.then(() => false)])) throw new Error(`could not lock ${path}`);
   return async () => { holder.stdin!.end(); await exited; };
+}
+// inexact, so a developer checkout keeps its test group (pytest, ruff) in .venv
+async function syncTarget(owner: ProcessOwner, achillesDir: string) {
+  const release = await lockTargetWeb(owner, achillesDir);
+  try {
+    const sync = await owner.run("uv", ["sync", "--inexact", "--project", achillesDir], undefined, 120_000);
+    if (sync.exitCode) throw new Error(`could not sync achilles: ${sync.stderr.trim()}`);
+  } finally { await release(); }
 }
 async function ensureTargetWeb(owner: ProcessOwner, achillesDir: string, origin: string) {
   const release = await lockTargetWeb(owner, achillesDir);
@@ -151,7 +160,10 @@ async function startupFailure(root: string, label: string) {
 async function waitForAchilles(origin: string, process: ChildProcess, root: string, signal?: AbortSignal) {
   for (let i = 0; i < 300; i++) {
     signal?.throwIfAborted();
-    if (await fetchDeadline(`${origin}/api/pages/home`, {}, signal, 1_000).then(response => response.ok, () => false)) return;
+    // another eval's achilles can answer on a port freePort handed out twice; uvicorn logs this line only after its own bind,
+    // and startAttempt truncates the log, so a line from a lost earlier attempt cannot count
+    const bound = await readFile(join(root, "achilles-home/serve.log"), "utf8").then(log => log.includes("Uvicorn running on"), () => false);
+    if (bound && await fetchDeadline(`${origin}/api/pages/home`, {}, signal, 1_000).then(response => response.ok, () => false)) return;
     if (process.exitCode !== null) await startupFailure(root, "achilles exited during startup"); await Bun.sleep(100);
   }
   await startupFailure(root, "timed out waiting for achilles");
@@ -171,19 +183,20 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
   const achillesPort = await freePort(); const zetaPort = await freePort(new Set([achillesPort]));
   await Bun.write(join(root, "zeta-home/mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `http://127.0.0.1:${achillesPort}/mcp/` } } }));
   const env = childEnvironment(root, accountHome, config.ollamaBaseUrl);
-  const achillesOrigin = `http://127.0.0.1:${achillesPort}`; const zetaOrigin = `ws://127.0.0.1:${zetaPort}`; let closing: Promise<CleanupProof> | undefined; let stack: EvalStack | undefined;
+  const achillesOrigin = `http://127.0.0.1:${achillesPort}`; const zetaOrigin = `ws://127.0.0.1:${zetaPort}`; let closing: Promise<CleanupProof> | undefined; let stack: EvalStack | undefined; let lostPort: number | undefined;
   const close = () => closing ??= (async () => {
     const discoveryPath = join(root, "zeta-home/run/serve.ws.json"); let discoveryPid = 0;
     try { discoveryPid = Number(JSON.parse(await readFile(discoveryPath, "utf8")).pid ?? 0); } catch {}
     const processProof = await owner.close();
-    const proof: CleanupProof = { ...processProof, ports: [achillesPort, zetaPort], ports_closed: (await Promise.all([portClosed(achillesPort), portClosed(zetaPort)])).every(Boolean), discovery_pid_dead: !discoveryPid || !pidAlive(discoveryPid), discovery_cleaned: false };
+    const proof: CleanupProof = { ...processProof, ports: [achillesPort, zetaPort], ports_closed: (await Promise.all([achillesPort, zetaPort].filter(port => port !== lostPort).map(portClosed))).every(Boolean), discovery_pid_dead: !discoveryPid || !pidAlive(discoveryPid), discovery_cleaned: false };
     await rm(join(root, "zeta-home/run"), { recursive: true, force: true }); proof.discovery_cleaned = true; if (stack) stack.cleanup = proof;
     if (!proof.pids_dead || !proof.pgids_dead || !proof.ports_closed || !proof.discovery_pid_dead) throw new Error(`stack cleanup verification failed: ${JSON.stringify(proof)}`);
     return proof;
   })();
   try {
     config.signal?.throwIfAborted();
-    const achillesLog = openSync(join(root, "achilles-home/serve.log"), "a"); const achillesProcess = owner.spawn("uv", ["run", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
+    await syncTarget(owner, achillesDir);
+    const achillesLog = openSync(join(root, "achilles-home/serve.log"), "w"); const achillesProcess = owner.spawn("uv", ["run", "--no-sync", "--project", achillesDir, "achilles", "serve", "--host", "127.0.0.1", "--port", String(achillesPort)], { cwd: achillesDir, env, stdio: ["ignore", achillesLog, achillesLog] }); closeSync(achillesLog);
     await waitForAchilles(achillesOrigin, achillesProcess, root, config.signal); await ensureTargetWeb(owner, achillesDir, achillesOrigin); if (Bun.env.EVAL_FORCE_STARTUP_FAILURE === "1") throw new Error("forced eval startup failure");
     // a live-tools task drops the narrow eval tool policy so the session carries zeta's full default tool set, exactly
     // like a `make dev` / achilles serve page chat; the achilles__* MCP tools stay available either way
@@ -198,7 +211,12 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
     }; const preflight = await connectEvalProtocol(discovery); await preflight.close();
     stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, toolPolicy: config.liveTools ? LIVE_TOOL_POLICY : TOOL_POLICY, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), restartZeta, close };
     return stack;
-  } catch (error) { const detail = error as Error & { cleanup?: CleanupProof }; detail.cleanup = await close(); throw detail; }
+  } catch (error) {
+    const detail = error as Error & { cleanup?: CleanupProof };
+    // a lost port race leaves that port open in the process that won it, so it is not ours to prove closed
+    if (/EADDRINUSE|address already in use/i.test(String(error))) lostPort = String(error).includes("achilles") ? achillesPort : zetaPort;
+    detail.cleanup = await close(); throw detail;
+  }
 }
 
 export async function retryAddressInUse<T>(start: (attempt: number) => Promise<T>, attempts = 5): Promise<T> {

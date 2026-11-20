@@ -116,14 +116,32 @@ else { await writeFile(builds + "/second-started", ""); await waitFor(dist + "in
   } finally { await rm(parent, { recursive: true, force: true }); }
 }, 55_000);
 
+test("two evals that pick the same achilles port each use their own achilles", async () => {
+  if (!await fixturesReady()) return;
+  const { parent, target } = await checkout();
+  try {
+    // forces the bad order: the second eval is handed the first eval's achilles port once, before either server binds it
+    const stackPath = join(target, "scripts", "eval-stack.ts"); const stackSource = await readFile(stackPath, "utf8"); const portFile = join(parent, "achilles-port");
+    expect(stackSource).toContain("const achillesPort = await freePort();");
+    await writeFile(stackPath, stackSource.replace("const achillesPort = await freePort();", `const achillesPort = await (async () => { const fs = await import("node:fs"); const port = await freePort(); try { fs.writeFileSync(${JSON.stringify(portFile)}, String(port), { flag: "wx" }); return port; } catch { const taken = fs.readFileSync(${JSON.stringify(portFile)}, "utf8"); if (!taken) return port; fs.writeFileSync(${JSON.stringify(portFile)}, ""); return Number(taken); } })();`));
+    await mkdir(join(target, "apps", "web", "dist"), { recursive: true });
+    await writeFile(join(target, "apps", "web", "dist", "index.html"), "<!doctype html><body>ready</body>");
+    const results = await Promise.all(["a", "b"].map(name => runEval(target, "harness-smoke", { REPORT_DIR: join(parent, `report-${name}`) })));
+    expect(await readFile(portFile, "utf8"), "the second eval was not handed the first eval's port").toBe("");
+    for (const result of results) expect(result.task.status, JSON.stringify(result.task)).toBe("pass");
+  } finally { await rm(parent, { recursive: true, force: true }); }
+}, 55_000);
+
 test("a queued accepted delivery becomes a structured harness error at the task deadline", async () => {
   if (!await fixturesReady()) return;
   const { parent, target } = await checkout();
   try {
     const evalPath = join(target, "scripts", "eval.ts");
     const evalSource = await readFile(evalPath, "utf8");
-    expect(evalSource).toContain("const TASK_TIMEOUT_MS = 180_000;");
-    await writeFile(evalPath, evalSource.replace("const TASK_TIMEOUT_MS = 180_000;", "const TASK_TIMEOUT_MS = 500;"));
+    // the deadline fires as soon as zeta accepts the delivery; a short TASK_TIMEOUT_MS could fire during setup instead
+    const accepted = "deliveries.set(deliveryId, await protocol.send(session.id, step.prompt ?? task.prompt!, deliveryId));";
+    expect(evalSource).toContain(accepted);
+    await writeFile(evalPath, evalSource.replace(accepted, `${accepted} timeout.abort(new Error("task deadline exceeded"));`));
     await mkdir(join(target, "apps", "web", "dist"), { recursive: true });
     await writeFile(join(target, "apps", "web", "dist", "index.html"), "<!doctype html><body>ready</body>");
     const evidence = join(parent, "delivery-evidence.json");
