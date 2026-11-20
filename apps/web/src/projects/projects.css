@@ -19,6 +19,7 @@
 .projects-group { border: 1px solid var(--fulcrum-border); padding: 12px 14px; }
 .projects-group h2 { display: flex; gap: 8px; align-items: baseline; margin: 0 0 6px; font-size: 13px; font-weight: 600; }
 .projects-group li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.projects-group li small { flex: none; }
 .projects-inbox { border: 1px solid var(--fulcrum-border); }
 .projects-inbox li { display: grid; gap: 4px; padding: 12px 14px; }
 .projects-inbox li[data-status="done"] strong { color: var(--fulcrum-muted); font-weight: 500; }
