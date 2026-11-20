@@ -4,7 +4,7 @@ import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
 import { LibraryEdit, LibraryEditor, uneditable, type CreateDraft, type EditDraft } from "./LibraryEditor";
-import { createLibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, SAVED_NOTICE } from "./libraryWrites";
+import { createLibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from "./libraryWrites";
 import "./library.css";
 
 const tabs = surfaceRoutes.filter(({ id }) => id === "skills" || id === "agent-profiles");
@@ -73,7 +73,10 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   const [creating, setCreating] = useState(() => Boolean(write?.drafts.has(draftKey)));
   const [taking, setTaking] = useState(false);
   const controlFeedback = write?.feedback ?? null;
-  const [saved, setSaved] = useState<{ redacted: boolean } | null>(null);
+  // The last save, named; it clears when another item is selected or it is dismissed.
+  const [saved, setSaved] = useState<{ name: string; redacted: boolean; where?: string } | null>(null);
+  const newButton = useRef<HTMLButtonElement>(null);
+  const focusNewButton = useRef(false);
   const [editing, setEditing] = useState<EditDraft | null>(() => write?.edits.get(kind) ?? null);
   const wasEditing = useRef(false);
   // Changes whenever an editor opens or closes.
@@ -115,6 +118,13 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
       (lastRow.current?.isConnected ? lastRow.current : search.current)?.focus();
     }
   }, [selected]);
+
+  // discarding a new item returns focus to "+ new".
+  useEffect(() => {
+    if (creating || !focusNewButton.current) return;
+    focusNewButton.current = false;
+    newButton.current?.focus();
+  }, [creating]);
 
   // leaving the editor returns focus to the item's detail.
   useEffect(() => {
@@ -158,6 +168,7 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     }
     keyboardPick.current = keyboard;
     setSelection(row.name);
+    if (saved && saved.name !== row.name) setSaved(null);
   }
 
   // Library tabs stay observers; pressing new or edit takes the controller slot only if it is free.
@@ -216,9 +227,9 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
   // A save reply can land after its form was discarded (a sent write cannot be recalled). It may close or clear only
   // the form that sent it; for any other it only shows the notice and refreshes the list.
   const sender = form.current;
-  const lateSave = (redacted: boolean) => {
+  const lateSave = (name: string, redacted: boolean, where?: string) => {
     if (sender === form.current) return false;
-    setSaved({ redacted });
+    setSaved({ name, redacted, where });
     refresh();
     return true;
   };
@@ -285,30 +296,33 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "live catalog · effective scope" : "active session snapshot · may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
           {write && !creating && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+            ref={newButton}
             aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
         {(controlFeedback || (write && !write.allowed && !creating)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
       </div>
       {saved && <div role="status" className="library-saved">
-        <p>{SAVED_NOTICE}</p>
+        <p>{savedNotice(saved.name, saved.where)}</p>
         {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
+        <button type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => setSaved(null)}>dismiss</button>
       </div>}
       {creating && write ? <LibraryEditor client={client} kind={kind} writer={writer} rows={rows}
         draft={write.drafts.get(draftKey)} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
-        takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEditor} onOpen={showCreated}
-        onCreated={(name, redacted) => {
-          if (lateSave(redacted)) return;
-          setSaved({ redacted });
+        controller={write.controller} takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onOpen={showCreated}
+        onClose={() => { focusNewButton.current = true; closeEditor(); }}
+        onCreated={(name, redacted, where) => {
+          if (lateSave(name, redacted, where)) return;
+          setSaved({ name, redacted, where });
           showCreated(name);
         }} />
       : editing && write ? <LibraryEdit key={`${editing.target.scope}/${editing.target.name}`} client={client} writer={writer} draft={editing}
-        onDraft={(draft) => write.edits.set(kind, draft)} takeControl={write.takeControl} feedback={write.feedback}
+        onDraft={(draft) => write.edits.set(kind, draft)} controller={write.controller} takeControl={write.takeControl} feedback={write.feedback}
         blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEdit}
         onSaved={(redacted) => {
-          if (lateSave(redacted)) return;
+          if (lateSave(editing.target.name, redacted)) return;
           // a redacted file has no editable copy any more: leave the editor and say why; the masked read view stays.
           if (redacted) {
-            setSaved({ redacted });
+            setSaved({ name: editing.target.name, redacted });
             closeEdit();
           }
           refresh();
@@ -353,7 +367,7 @@ function LibraryList({ view, kind, title, live, selected, query, onQuery, more, 
       <span role="status">{term ? `${matches.length} of ${rows.length}` : matches.length} {partial ? "loaded" : term ? "" : "found"}</span>
     </div>
     {live && !rows.some(({ source }) => source === "project") &&
-      <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
+      <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} found · zeta loads them from .zeta/{kind === "skills" ? "skills" : "agents"} in the open chat's project</p>}
     {matches.length === 0 && <p className="library-no-matches">{partial ? "no matches in the loaded rows. load more to search the rest." : "no matches. try a different search."}</p>}
     {sourceTiers.map((source) => {
       const group = matches.filter((row) => row.source === source);

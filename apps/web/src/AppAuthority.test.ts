@@ -401,15 +401,15 @@ const rows: Record<WriteSurfaceId, Row> = {
     // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
-      expect(app.getByText("another tab had control. try again after it closes.")).toBeTruthy();
+      expect(app.getByText("another tab has control. try again after it closes.")).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
     await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
+    expect(await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
-    expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
   } },
   "library.edit": { kind: "visible", options: libraryFile, check: async (app, authority, writes) => {
     // the edit control appears on a revealed file that zeta sent as a raw document; it takes control like "+ new".
@@ -417,14 +417,14 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
-      expect(app.getByText("another tab had control. try again after it closes.")).toBeTruthy();
+      expect(app.getByText("another tab has control. try again after it closes.")).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
     await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
     await click(app.getByText("save skill", { selector: "button", exact: true }));
+    expect(await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
-    expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
   } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
     const form = select(app, '.record-form form');
@@ -495,7 +495,7 @@ test.each([
     // after take control the form opens; without the write method it is read-only, says why, and has no save.
     expect(Boolean(app.container.querySelector(".library-editor"))).toBe(observer);
     if (observer) {
-      expect(Boolean(app.queryByText(/^save skill$/))).toBe(controller);
+      expect(Boolean(app.queryByText(/^save/, { selector: "button" }))).toBe(controller);
       expect(Boolean(app.queryByText("this zeta does not allow saving here. your text is kept; nothing was sent."))).toBe(!controller);
       expect((select(app, ".library-editor textarea") as HTMLTextAreaElement).readOnly).toBe(!controller);
     }
@@ -515,9 +515,9 @@ test("a library take-control refusal still shows after the observer socket is re
   await withApp("observer", options, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    expect(await app.findByText("another tab had control. try again after it closes.", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText("another tab has control. try again after it closes.", {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(app.getByText("another tab had control. try again after it closes.")).toBeTruthy();
+    expect(app.getByText("another tab has control. try again after it closes.")).toBeTruthy();
   });
 });
 
@@ -554,8 +554,8 @@ test("a library tab gives control back after create + save, so a chat tab can th
     await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
+    expect(await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
-    expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
     await act(async () => {});
     expect((await chatTabHello()).result, `hello roles ${JSON.stringify(roles)}`).toBeTruthy();
     expect(roles).toEqual(["observer", "controller", "controller", "observer", "controller"]);
@@ -573,6 +573,7 @@ test("a library tab reconnects as observer once its editor closed, and as contro
     expect(await app.findByDisplayValue("fixture-draft", {}, { timeout: 3_000 })).toBeTruthy();
     expect(roles.at(-1)).toBe("controller");
     await click(app.getByText("discard", { selector: "button", exact: true }));
+    await click(app.getByText("discard changes", { selector: "button", exact: true }));
     await act(async () => {});
     await act(async () => { sockets.at(-1)!.close(); });
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();

@@ -11,7 +11,9 @@ export const WRITE_FEATURE = "library_write_v1";
 export const REDACTED_NOTICE = "this file contains text that looks like a secret; zeta stored it as written; reads show it masked";
 /** zeta's redaction mask (src/zeta/memory/safety.py REDACTED_SECRET); saving it would replace a secret with the mask. */
 export const REDACTION_MARKER = "[secret omitted]";
-export const SAVED_NOTICE = "saved. running sessions pick up the change at their next catalog refresh.";
+/** `where`: the saved file, when the notice is not already next to the item. */
+export const savedNotice = (name: string, where?: string) =>
+  `saved ${name}${where ? ` to ${where}` : ""}. running sessions pick up the change at their next catalog refresh.`;
 const MAX_DOCUMENT_BYTES = 128 * 1024;
 const BUSY_BACKOFF_MS = [500, 1_000, 2_000];
 const RECONNECT_WAIT_MS = [500, 1_000, 2_000, 4_000];
@@ -47,7 +49,7 @@ export function createProblems(name: string, document: string): string[] {
   return problems.filter((problem): problem is string => problem !== null);
 }
 
-const markerMessage = `the text contains zeta's mask ${REDACTION_MARKER}. put the real text back before saving.`;
+const markerMessage = `the text contains zeta's mask ${REDACTION_MARKER}. remove it or replace it with the real text before saving.`;
 const noun = (kind: LibraryKind) => kind === "skills" ? "skill" : "profile";
 
 async function sha256(text: string) {
@@ -83,7 +85,8 @@ function invalidMessage(reason: unknown, detail: unknown, target: WriteTarget) {
     case "invalid_document": return `zeta could not load this file${typeof detail === "string" ? `: ${detail.slice(0, DETAIL_CHARS)}` : "."}`;
     case "name_mismatch": return `the name: in the header must be ${target.name}.`;
     case "document_too_large": return "the file is over 128 KiB.";
-    case "name_too_long": case "unsafe_path": return "this name cannot be a file name here.";
+    case "name_too_long": return "this name is too long for a file name.";
+    case "unsafe_path": return "this name cannot be a file name here.";
     default: return "zeta refused this name or text.";
   }
 }
@@ -124,7 +127,8 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
     const params = { name: target.name, scope: target.scope, ...(base === null ? {} : { revision: base }), mutation: { document } };
     for (let attempt = 0; ; attempt++) {
       try {
-        const result = await client.request(libraryMethods(target.kind).write, params) as { revision?: unknown; data?: { name?: unknown; redacted?: unknown } } | null;
+        // the live client: a save pressed on an observer tab sends after take control replaced the socket.
+        const result = await (live() ?? client).request(libraryMethods(target.kind).write, params) as { revision?: unknown; data?: { name?: unknown; redacted?: unknown } } | null;
         if (result?.revision === expected && result.data?.name === target.name && typeof result.data.redacted === "boolean")
           return { status: "saved", revision: expected, redacted: result.data.redacted };
         return settle(client, target, base, expected);

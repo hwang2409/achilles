@@ -74,13 +74,15 @@ test("a create save that lands after discard does not close or clear a form open
   await fill("fixture-first");
   await act(async () => { fireEvent.click(view.getByRole("button", { name: "save skill" })); });
   await act(async () => { fireEvent.click(view.getByRole("button", { name: "discard" })); });
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "discard changes" })); });
+  expect(document.activeElement?.textContent).toBe("+ new skill");
   fireEvent.click(view.getByRole("button", { name: "+ new skill" }));
   await fill("fixture-second");
   await act(async () => land());
 
   expect(view.container.querySelector<HTMLInputElement>('.library-editor input[aria-describedby$="-rules"]')?.value, "the form opened after discard").toBe("fixture-second");
   expect(write.drafts.get("skills/new")?.name).toBe("fixture-second");
-  expect(await view.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
   expect(calls.filter((method) => method === "skill_write")).toHaveLength(1);
 });
 
@@ -139,7 +141,7 @@ test("edit sends the opened revision, and the saved text becomes the new baselin
 
   expect(zeta.writes()).toEqual([{ name: "alpha", scope: "home", revision: opened, mutation: { document: edited } }]);
   expect(zeta.file).toBe(edited);
-  expect(await view.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
   expect(textarea(view, /^alpha · file text$/).value).toBe(edited);
   expect(view.getByRole("button", { name: "save skill" }).getAttribute("aria-disabled")).toBe("true");
   expect(zeta.calls.filter(([method]) => method === "skill_catalog")).toHaveLength(2);
@@ -191,7 +193,7 @@ test("an observer refusal offers take control, keeps the draft across the client
   view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
   expect(textarea(view, /file text/).value).toBe(edited);
   await press(view, "save skill");
-  expect(await view.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
   expect(zeta.writes()).toHaveLength(2);
   expect(zeta.file).toBe(edited);
 });
@@ -200,7 +202,7 @@ test("the redaction marker blocks the save before anything is sent", async () =>
   const zeta = editZeta({ document: fileText });
   const view = await openEditor(zeta);
   await type(view, `${fileText}key [secret omitted]\n`);
-  await press(view, "save skill");
+  await press(view, /^save/);
   expect(view.getByRole("alert").textContent).toContain("the text contains zeta's mask [secret omitted]");
   expect(zeta.writes()).toEqual([]);
 });
@@ -243,4 +245,23 @@ test("an open edit survives a socket drop that unmounts the library", async () =
   expect(textarea(again, /^alpha · file text/).value).toBe(`${fileText}draft\n`);
   await press(again, "save skill");
   expect(zeta.writes()).toEqual([{ name: "alpha", scope: "home", revision: await sha(fileText), mutation: { document: `${fileText}draft\n` } }]);
+});
+
+test("save on a tab that lost control takes control first, and sends nothing when the slot is taken", async () => {
+  const zeta = editZeta({ document: fileText });
+  const live = zeta.client();
+  let slotFree = false;
+  const write = { ...writable(), liveClient: () => live };
+  const view = await openEditor(zeta, write);
+  view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true },
+    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "another tab has control. try again after it closes." } }));
+  expect(view.getByText("this tab is read-only now. save takes control first, if no other tab has it.")).toBeTruthy();
+  await type(view, fileText.replace("original", "edited"));
+  await press(view, "save skill");
+  expect(await view.findByText("another tab has control. try again after it closes.", { selector: ".library-error" })).toBeTruthy();
+  expect(zeta.writes()).toEqual([]);
+  slotFree = true;
+  await press(view, "save skill");
+  expect(await view.findByText(/^saved alpha\./)).toBeTruthy();
+  expect(zeta.writes()).toHaveLength(1);
 });

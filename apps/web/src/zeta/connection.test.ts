@@ -41,7 +41,7 @@ test("startup and offline failures never retain observer presentation", async ()
 
 const controllerRole = { role: "controller", reason: null } as const;
 const observerRole = { role: "observer", reason: null } as const;
-const refusedRole = { ...observerRole, reason: "another tab had control. try again after it closes." };
+const refusedRole = { ...observerRole, reason: "another tab has control. try again after it closes." };
 test.each([
   ["connect on a read-only route", controllerRole, ["connect_read_only", "observer_busy", "retry"], observerRole],
   ["connect on a writable route", observerRole, ["connect_writable", "retry"], controllerRole],
