@@ -184,7 +184,7 @@ test("edit sends the opened revision, and the saved text becomes the new baselin
 
   expect(zeta.writes()).toEqual([{ name: "alpha", scope: "home", revision: opened, mutation: { document: edited } }]);
   expect(zeta.file).toBe(edited);
-  expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+  expect(await view.findByText(/^saved alpha to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
   expect(textarea(view, /^alpha · file text$/).value).toBe(edited);
   expect(view.getByRole("button", { name: "save skill" }).getAttribute("aria-disabled")).toBe("true");
   expect(zeta.calls.filter(([method]) => method === "skill_catalog")).toHaveLength(2);
@@ -236,7 +236,7 @@ test("an observer refusal offers take control, keeps the draft across the client
   view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
   expect(textarea(view, /file text/).value).toBe(edited);
   await press(view, "save skill");
-  expect(await view.findByText(/^saved (alpha|fixture-first to home · skills\/fixture-first\.md)\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+  expect(await view.findByText(/^saved alpha to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
   expect(zeta.writes()).toHaveLength(2);
   expect(zeta.file).toBe(edited);
 });
@@ -251,6 +251,11 @@ test("discarding unsaved text asks first, and keep editing keeps it", async () =
   expect(document.activeElement?.textContent).toBe("keep editing");
   await press(view, "keep editing");
   expect(textarea(view, /file text/).value).toBe(`${fileText}more\n`);
+  // focus returns to "discard": Enter (a click on the focused button) asks again and never saves.
+  expect(document.activeElement?.textContent).toBe("discard");
+  await act(async () => { fireEvent.click(document.activeElement!); });
+  expect(zeta.writes()).toEqual([]);
+  await press(view, "keep editing");
   await press(view, "discard");
   await press(view, "discard changes");
   expect(view.container.querySelector(".library-editor")).toBeNull();
@@ -290,14 +295,14 @@ test("save on a tab that lost control takes control first, and sends nothing whe
   const write = { ...writable(), writer: createLibraryWriter(undefined, () => live) };
   const view = await openEditor(zeta, write);
   view.rerender(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true },
-    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "another tab has control. try again after it closes." } }));
+    write: { ...write, controller: false, takeControl: async () => slotFree ? null : "another tab has control. try again after it closes or finishes editing." } }));
   expect(view.getByText("this tab is read-only now. save takes control first, if no other tab has it.")).toBeTruthy();
   await type(view, fileText.replace("original", "edited"));
   await press(view, "save skill");
-  expect(await view.findByText("another tab has control. try again after it closes.", { selector: ".library-error" })).toBeTruthy();
+  expect(await view.findByText("another tab has control. try again after it closes or finishes editing.", { selector: ".library-error" })).toBeTruthy();
   expect(zeta.writes()).toEqual([]);
   slotFree = true;
   await press(view, "save skill");
-  expect(await view.findByText(/^saved alpha\./)).toBeTruthy();
+  expect(await view.findByText(/^saved alpha to home · skills\./)).toBeTruthy();
   expect(zeta.writes()).toHaveLength(1);
 });

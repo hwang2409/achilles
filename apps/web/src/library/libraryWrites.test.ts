@@ -103,7 +103,7 @@ describe("library edit outcomes", () => {
     const zeta = fakeZeta(writes, reads);
     const clock = fakeClock();
     const writer = createLibraryWriter(clock.sleep);
-    const outcome = await outcomeOf(writer, (form) => writer.save(zeta.client, target, opened, text, form));
+    const outcome = await outcomeOf(writer, (form) => writer.save(zeta.client, target, opened, text, form, "home · skills"));
     expect(outcome).toMatchObject(expected.status === "saved" ? { ...expected, revision: rev } : expected);
     expect(zeta.calls).toHaveLength(requests);
     // every write carries the revision the user opened; a read never turns into a second write.
@@ -191,7 +191,7 @@ describe("which form owns a save", () => {
     writer.onLanded((item) => landed.push(item.name));
     const base = await sha(opened);
     const save = (form: "A" | "B", text: "A" | "B") => row.op === "create"
-      ? writer.create(first, target, texts[text], forms[form], "home · skills/fixture-skill.md") : writer.save(first, target, base, texts[text], forms[form]);
+      ? writer.create(first, target, texts[text], forms[form], "home · skills/fixture-skill.md") : writer.save(first, target, base, texts[text], forms[form], "home · skills");
     if (row.writes[0] instanceof Error && row.drop) gone = true; // the socket is already gone when the write goes out
     const a = save("A", "A");
     if (row.cancel === "before send") writer.close(forms.A);

@@ -33,6 +33,9 @@ const header = (kind: LibraryKind, name: string, description: string) =>
   (kind === "skills" ? "describe when and how to use this skill.\n" : "describe how this agent works.\n");
 const problemLabel = (count: number) => `save · fix ${count} ${count === 1 ? "problem" : "problems"} first`;
 const folder = (kind: LibraryKind) => kind === "skills" ? "skills" : "agents";
+/** The saved notice's place: "home · skills/<file>" or "<project label> · .zeta/skills/<file>". Without `file`, the folder. */
+export const whereText = (kind: LibraryKind, scope: WriteScope, label: string, file?: string) =>
+  `${scope === "project" ? `${label} · .zeta/` : "home · "}${folder(kind)}${file ? `/${file}` : ""}`;
 
 /** An achilles page's chat runs in `<home>/pages/<id>/workspace`: name that project by the page title, which the user
  * knows. null for any other folder, or when achilles does not know the page. */
@@ -53,18 +56,27 @@ function useLeaveGuard(active: boolean) {
   }, [active]);
 }
 
-/** Discard with a level-1 confirm when the draft changed; focus lands on "keep editing". `save` is the save button. */
-function EditorActions({ dirty, what, onDiscard, save }: { dirty: boolean; what: string; onDiscard: () => void; save: ReactNode }) {
+/** Discard with a level-1 confirm when the draft changed; focus lands on "keep editing", and back on "discard" after it.
+ * `save` is the save button; `status` (the save outcome) sits in the sticky bar above the buttons, so it stays in view. */
+function EditorActions({ dirty, what, onDiscard, save, status }: { dirty: boolean; what: string; onDiscard: () => void; save: ReactNode; status?: ReactNode }) {
   const [confirm, setConfirm] = useState(false);
   const keep = useRef<HTMLButtonElement>(null);
-  useEffect(() => { if (confirm) keep.current?.focus(); }, [confirm]);
-  if (confirm) return <div role="group" aria-label="discard changes?" className="library-editor-actions">
-    <span>discard your changes to {what}?</span>
+  const discard = useRef<HTMLButtonElement>(null);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (confirm) keep.current?.focus();
+    else if (asked.current) discard.current?.focus();
+    asked.current ||= confirm;
+  }, [confirm]);
+  // distinct keys: React must not reuse "keep editing" as the save button, or the next Enter saves.
+  if (confirm) return <div key="confirm" role="group" aria-label="discard changes?" className="library-editor-actions">
+    <span>discard your changes to <span className="library-nowrap">{what}?</span></span>
     <button type="button" ref={keep} onClick={() => setConfirm(false)}>keep editing</button>
     <button type="button" className="library-danger" onClick={onDiscard}>discard changes</button>
   </div>;
-  return <div className="library-editor-actions">
-    <button type="button" onClick={() => dirty ? setConfirm(true) : onDiscard()}>{dirty ? "discard" : "close"}</button>
+  return <div key="bar" className="library-editor-actions">
+    {status}
+    <button type="button" ref={discard} onClick={() => dirty ? setConfirm(true) : onDiscard()}>{dirty ? "discard" : "close"}</button>
     {save}
   </div>;
 }
@@ -106,7 +118,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
   const [pending, setPending] = useOutcome(writer, form, (outcome, sent) => outcome.status === "saved"
-    ? onCreated(sent.target.name, outcome.redacted, sent.where!) : setFailure(outcome));
+    ? onCreated(sent.target.name, outcome.redacted, sent.where) : setFailure(outcome));
   const alert = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const text = edited ?? header(kind, name, description);
@@ -145,8 +157,7 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     ? `a ${existing.source} ${noun} named ${name} wins over this one.` : `this will win over the ${existing.source} ${name}.`);
   const file = `.zeta/${folder(kind)}/${name || "<name>"}.md`;
   // fixed when the save starts and carried with its outcome: a remount may not know the project label yet.
-  const where = scope === "project"
-    ? `${project.state === "available" ? project.label : "project"} · .zeta/${folder(kind)}/${name}.md` : `home · ${folder(kind)}/${name}.md`;
+  const where = whereText(kind, scope, project.state === "available" ? project.label : "project", `${name}.md`);
 
   async function save() {
     if (pending || blocked) return;
@@ -222,13 +233,14 @@ export function uneditable(body: Body) {
 
 /** An open edit, kept in memory only (it can hold a secret). `base`: the read the user opened or last saved; its
  * revision is the only one a save may send. `mine`: the user's text kept beside the latest version after a conflict. */
-export type EditDraft = { target: WriteTarget; base: { revision: string; document: string }; text: string; mine: string | null; form: string };
+/** `where`: the saved notice's place, fixed when the edit opens. */
+export type EditDraft = { target: WriteTarget; where: string; base: { revision: string; document: string }; text: string; mine: string | null; form: string };
 type EditProps = Control & {
   client: ZetaClient; writer: Writer;
   /** Starts the editor from this draft; every change is reported back, so a socket drop that unmounts it loses nothing.
    * `onSaved` runs after each save; the editor shows the saved notice itself while the text is unchanged. */
   draft: EditDraft; onDraft: (draft: EditDraft) => void;
-  onSaved: (redacted: boolean) => void; onClose: () => void;
+  onSaved: (redacted: boolean, where: string) => void; onClose: () => void;
 };
 
 /** Edits one existing file. Like the create form, its text lives only in memory and survives a client swap. */
@@ -244,14 +256,15 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
   const [failure, setFailure] = useState<Failure | null>(null);
   const [tried, setTried] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
+  // the saved notice's place, while the saved text is unchanged.
+  const [saved, setSaved] = useState<string | null>(null);
   const [pending, setPending] = useOutcome(writer, draft.form, (outcome, sent) => {
     if (outcome.status !== "saved") return setFailure(outcome);
     // zeta wrote exactly these bytes (the writer checked the sha256), so they are the new baseline.
     setBase({ revision: outcome.revision, document: sent.document });
     setTried(false);
-    setSaved(true);
-    onSaved(outcome.redacted);
+    setSaved(sent.where);
+    onSaved(outcome.redacted, sent.where);
   });
   const field = useRef<HTMLTextAreaElement>(null);
   const alert = useRef<HTMLDivElement>(null);
@@ -259,7 +272,7 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
   const problems = createProblems(target.name, text);
 
   useEffect(() => { field.current?.focus(); }, []);
-  useEffect(() => { onDraft({ target, base, text, mine, form: draft.form }); }, [base, text, mine]);
+  useEffect(() => { onDraft({ ...draft, base, text, mine }); }, [base, text, mine]);
   useEffect(() => { if (failure || (tried && problems.length)) alert.current?.focus(); }, [failure, tried]);
   useLeaveGuard(dirty || pending);
 
@@ -270,7 +283,7 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
     if (problems.length) return alert.current?.focus();
     setPending(true);
     setFailure(null);
-    if (await controlForSave(control, setFailure)) void writer.save(client, target, base.revision, text, draft.form);
+    if (await controlForSave(control, setFailure)) void writer.save(client, target, base.revision, text, draft.form, draft.where);
     else setPending(false);
   }
 
@@ -311,8 +324,6 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
       <textarea id={`${id}-mine`} className="library-mine" readOnly value={mine} spellCheck={false} rows={8} />
       <button type="button" className="library-dismiss" onClick={() => setMine(null)}>dismiss your text</button>
     </div>}
-    <p role="status" className="library-editor-saved">{saved && !dirty ? savedNotice(target.name) : ""}</p>
-    {saved && !dirty && controller && <p className="library-edit-why">this tab keeps control of zeta until you close the editor.</p>}
     <Demoted show={!controller && !blocked} />
     <div ref={alert} tabIndex={-1} className="library-editor-status">
       {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
@@ -329,7 +340,10 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
         {failure.status === "busy" && <button type="button" onClick={() => void save()}>try again</button>}
       </div>}
     </div>
-    <EditorActions dirty={dirty} what={target.name} onDiscard={onClose}
+    <EditorActions dirty={dirty} what={target.name} onDiscard={onClose} status={<>
+      <p role="status" className="library-editor-saved">{saved && !dirty ? savedNotice(target.name, saved) : ""}</p>
+      {saved && !dirty && controller && <p className="library-edit-why">this tab keeps control of zeta until you close the editor.</p>}
+    </>}
       save={!blocked && <button type="button" className="library-primary" aria-disabled={pending || stale || !dirty || problems.length > 0} onClick={() => void save()}>
         {pending ? "saving…" : stale ? "load the latest version first" : problems.length ? problemLabel(problems.length) : `save ${noun}`}
       </button>} />

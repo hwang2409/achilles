@@ -3,7 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { chatsRoute, surfaceHref, surfaceRoutes } from "../surface/routes";
 import { appendPage, libraryMethods, projectBody, projectCatalog, projectCatalogPage, sourceTiers, type Body, type CatalogPage, type CatalogRow, type LibraryKind } from "./catalog";
-import { LibraryEdit, LibraryEditor, uneditable, type CreateDraft, type EditDraft } from "./LibraryEditor";
+import { LibraryEdit, LibraryEditor, uneditable, whereText, type CreateDraft, type EditDraft } from "./LibraryEditor";
 import { type LibraryWriter, REDACTED_NOTICE, REFUSED_NOTICE, savedNotice } from "./libraryWrites";
 import "./library.css";
 
@@ -207,7 +207,8 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
     if (scope === "effective") return;
     withControl(() => {
       if (!write) return;
-      const draft = { target: { kind, name: row.name, scope }, base: opened, text: opened.document, mine: null, form: write.writer.open() };
+      // the catalog row has no file name, so an edit's notice names the folder.
+      const draft = { target: { kind, name: row.name, scope }, where: whereText(kind, scope, "project"), base: opened, text: opened.document, mine: null, form: write.writer.open() };
       write.edits.set(kind, draft);
       setEditing(draft);
     });
@@ -320,10 +321,10 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
       : editing && write ? <LibraryEdit key={editing.form} client={client} writer={write.writer} draft={write.edits.get(kind) ?? editing}
         onDraft={(draft) => write.edits.set(kind, draft)} controller={write.controller} takeControl={write.takeControl}
         blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEdit}
-        onSaved={(redacted) => {
+        onSaved={(redacted, where) => {
           // a redacted file has no editable copy any more: leave the editor and say why; the masked read view stays.
           if (redacted) {
-            setSaved({ name: editing.target.name, redacted });
+            setSaved({ name: editing.target.name, redacted, where });
             closeEdit();
           }
           refresh();

@@ -72,7 +72,7 @@ export function transitionRole(state: RoleState, event: RoleEvent): RoleState {
     case "observer_busy":
       return { role: "observer", reason: null };
     case "takeover_refused":
-      return { role: state.role, reason: "another tab has control. try again after it closes." };
+      return { role: state.role, reason: "another tab has control. try again after it closes or finishes editing." };
     case "takeover_failed":
       return { role: state.role, reason: "could not take control. try again." };
     case "retry":

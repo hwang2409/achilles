@@ -3365,7 +3365,7 @@ with _database() as db:
   const takeControl = observerBanner.getByRole("button", { name: "take control", exact: true });
   const helloRoles = () => observerSockets.filter((row) => row.direction === "sent" && row.method === "hello").map((row) => row.role).join(",");
   await takeControl.click();
-  const takeoverReason = observerPage.getByText("another tab has control. try again after it closes.", { exact: true });
+  const takeoverReason = observerPage.getByText("another tab has control. try again after it closes or finishes editing.", { exact: true });
   await gateWait.playwright(takeoverReason, "waitFor", { state: "visible", timeout: 20_000 });
   if (helloRoles() !== "controller,observer,controller" || observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed")) throw new Error(`refused takeover did not retain its live observer: ${helloRoles()}`);
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-refused-1440x900.png") });

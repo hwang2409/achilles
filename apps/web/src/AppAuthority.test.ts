@@ -401,14 +401,14 @@ const rows: Record<WriteSurfaceId, Row> = {
     // library tabs start as observers either way; "+ new" takes control only if the controller slot is free.
     await click(select(app, tag("library.create")));
     if (authority === "observer") {
-      expect(app.getByText("another tab has control. try again after it closes.")).toBeTruthy();
+      expect(app.getByText("another tab has control. try again after it closes or finishes editing.")).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
     await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
-    expect(await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+    expect(await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
   } },
   "library.edit": { kind: "visible", options: libraryFile, check: async (app, authority, writes) => {
@@ -417,13 +417,13 @@ const rows: Record<WriteSurfaceId, Row> = {
     await click(app.getByText("show skill text", { selector: "button", exact: true }));
     await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
     if (authority === "observer") {
-      expect(app.getByText("another tab has control. try again after it closes.")).toBeTruthy();
+      expect(app.getByText("another tab has control. try again after it closes or finishes editing.")).toBeTruthy();
       expect(app.container.querySelector(".library-editor")).toBeNull();
       return;
     }
     await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
     await click(app.getByText("save skill", { selector: "button", exact: true }));
-    expect(await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
+    expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
   } },
   "record.insert": { kind: "visible", options: records, check: async (app, authority, writes) => {
@@ -515,9 +515,9 @@ test("a library take-control refusal still shows after the observer socket is re
   await withApp("observer", options, async (app) => {
     await app.findByText("no skills found");
     await click(select(app, tag("library.create")));
-    expect(await app.findByText("another tab has control. try again after it closes.", {}, { timeout: 3_000 })).toBeTruthy();
+    expect(await app.findByText("another tab has control. try again after it closes or finishes editing.", {}, { timeout: 3_000 })).toBeTruthy();
     expect(await app.findByText("no skills found", {}, { timeout: 3_000 })).toBeTruthy();
-    expect(app.getByText("another tab has control. try again after it closes.")).toBeTruthy();
+    expect(app.getByText("another tab has control. try again after it closes or finishes editing.")).toBeTruthy();
   });
 });
 
@@ -553,7 +553,7 @@ test.each([
     await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
     await click(app.getByText("save skill", { selector: "button", exact: true }));
-    await app.findByText(/^saved fixture-skill( to home · skills\/fixture-skill\.md)?\. running sessions/);
+    await app.findByText(/^saved fixture-skill to home · skills\/fixture-skill\.md\. running sessions/);
   }],
   ["edit + save + close", libraryFile, async (app: RenderResult) => {
     await click(await app.findByRole("button", { name: /fixture-skill/ }));

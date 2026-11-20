@@ -56,7 +56,7 @@ export function SurfaceRouter() {
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
-        write={libraryWrite(client, route.id, controller, takeLibraryControl, libraryControl, libraryDrafts, libraryEdits, libraryWriter, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
+        write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;

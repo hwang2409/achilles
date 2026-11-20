@@ -99,8 +99,8 @@ const IN_PROGRESS: WriteOutcome = { status: "busy", message: "another save of th
 const NOT_SENT: WriteOutcome = { status: "unknown", message: "this page could not send the save. nothing was sent." };
 
 /** What a form sent, delivered with its outcome, so a form that remounted applies the save it actually sent.
- * `where`: create only, the saved file's location as the form named it when the save started. */
-export type Sent = { target: WriteTarget; document: string; where?: string };
+ * `where`: the saved notice's place, as the form named it when the save started. */
+export type Sent = { target: WriteTarget; document: string; where: string };
 type Deliver = (outcome: WriteOutcome, sent: Sent) => void;
 type Form = { abort: AbortController; deliver?: Deliver; held?: [WriteOutcome, Sent] };
 
@@ -174,7 +174,7 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
     else state.held = [outcome, sent];
   }
 
-  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: string, where?: string): Promise<void> {
+  function once(client: ZetaClient, target: WriteTarget, base: string | null, document: string, form: string, where: string): Promise<void> {
     const state = forms.get(form);
     if (!state) return Promise.resolve();
     const key = `${target.kind}/${target.scope}/${target.name}`;
@@ -221,6 +221,6 @@ export function createLibraryWriter(sleep: Sleep = defaultSleep, live: () => Zet
     /** Create `target` (no revision). Resolves when the save is done; the outcome goes to `attach` with `where`. */
     create: (client: ZetaClient, target: WriteTarget, document: string, form: string, where: string) => once(client, target, null, document, form, where),
     /** Replace `target` only if zeta still has the `base` revision the user opened; stale is never retried. */
-    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, form: string) => once(client, target, base, document, form),
+    save: (client: ZetaClient, target: WriteTarget, base: string, document: string, form: string, where: string) => once(client, target, base, document, form, where),
   };
 }
