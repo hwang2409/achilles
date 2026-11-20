@@ -104,7 +104,7 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
     const top = layers.at(-1);
     if (!top) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename], .page-chat-head[data-popup]"))) return;
+      if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest("[data-inline-rename], .page-chat-head[data-popup], .confirmation-bar"))) return;
       event.preventDefault();
       event.stopPropagation();
       top();
