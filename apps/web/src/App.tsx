@@ -197,6 +197,8 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
   const observerConnected = connectionState.phase === "connected" && connectionState.authority === "observer";
+  // the approval a click took control for: a new client remounts the timeline, so it lives here, not in the card.
+  const tookControl = useRef<TookControl>(null);
   const readOnlyReason = READ_ONLY_REASON;
   const active = useActiveChat(client, connectionState.phase === "connected", undefined, canWrite, homeAlias, createRoute.path);
   const landing = location.pathname === createRoute.path;
@@ -353,7 +355,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
   const recovery = authErrorId && ready && client ? { id: authErrorId, client, sessionId: ready.sessionId, canWrite, onNewChat: active.newChat } : null;
-  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
+  const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
   const placeholder = hasBlocks ? "ask about this page, or tell it what to change" : "message zeta";
@@ -457,26 +459,37 @@ export function AgentSurface({ connection, client, connectionState, observerBann
  * A pending approval. In a tab that is not in control it says so, and one click (never an automatic one) takes control:
  * the button sits in the card's action row under that line. After the take, focus moves to approve and a line says so.
  */
-function ChatApproval({ id, observer, takeControl, ...decision }: { observer: boolean; takeControl: () => Promise<string | null> } & ComponentProps<typeof Approval>) {
+type TookControl = { id: string; focus: boolean } | null;
+function ChatApproval({ id, observer, takeControl, took, ...decision }: { observer: boolean; takeControl: () => Promise<string | null>; took: { current: TookControl } } & ComponentProps<typeof Approval>) {
   const item = useItem(id);
   const [working, setWorking] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const [took, setTook] = useState(false);
   // fulcrum's Approval has no slot for an extra action: render into its action row.
   const [row, setRow] = useState<Element | null>(null);
   const card = () => document.querySelector(`[data-part="approval"][data-id="${CSS.escape(id)}"]`);
   useLayoutEffect(() => setRow(card()?.querySelector('[data-part="approval-actions"]') ?? null));
-  useLayoutEffect(() => { if (took && !observer) card()?.querySelector<HTMLElement>('button[data-action="approve"]')?.focus(); }, [took, observer]);
+  // the take swaps the client, and the timeline can replace this card more than once: while focus is lost, put it on
+  // approve. once focus is on anything else, stop.
+  useLayoutEffect(() => {
+    if (observer || took.current?.id !== id || !took.current.focus) return;
+    const approve = card()?.querySelector<HTMLElement>('button[data-action="approve"]:not([aria-disabled="true"])');
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== approve) took.current = { id, focus: false };
+    else approve?.focus();
+  });
   const pending = item?.type === "approval" && !item.ended;
   const control = !pending ? null : observer ? <>
     <button type="button" aria-label="take control to answer" aria-disabled={working || undefined} onClick={async () => {
       if (working) return;
-      setWorking(true); setRefusal(null); setTook(false);
+      setWorking(true); setRefusal(null);
+      // set before the take: the new client can render this card before the take resolves. a refusal keeps observer.
+      took.current = { id, focus: true };
       const reason = await takeControl();
-      setRefusal(reason); setTook(reason === null); setWorking(false);
+      if (reason !== null) took.current = null;
+      setRefusal(reason); setWorking(false);
     }}>{working ? "taking control…" : "take control"}</button>
     {refusal && <span role="status">{refusal}</span>}
-  </> : took ? <span role="status">this tab is now in control</span> : null;
+  </> : took.current?.id === id ? <span role="status">this tab is now in control</span> : null;
   return <>
     <Approval id={id} {...(observer ? { disabledReason: "this tab is not in control · take control to answer" } : decision)} />
     {row && control && createPortal(<div className="approval-control">{control}</div>, row)}
