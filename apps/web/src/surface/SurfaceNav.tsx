@@ -5,10 +5,15 @@ import { createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./ro
 
 const groups = [...new Set(surfaceRoutes.flatMap((route) => route.group ?? []))];
 
-function PlaceLink({ route, current, detail, count }: { route: SurfaceRoute; current: SurfaceRoute; detail?: string; count?: string }) {
-  return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={detail ? `${route.label} (${detail})` : route.label} title={route.label}>
+type PlaceCount = { total?: string; waiting?: number };
+
+function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: SurfaceRoute; count?: PlaceCount }) {
+  const total = count?.total;
+  const waiting = count?.waiting || undefined;
+  return <a className="place-link" href={surfaceHref(route.path)} aria-current={current === route ? "page" : undefined} aria-label={route.label} aria-description={waiting ? `${waiting} waiting approvals` : undefined} title={route.label}>
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d={route.icon} /></svg>
-    <span>{route.label}</span>{(detail ?? count) && <small>{detail ?? count}</small>}
+    <span>{route.label}</span>
+    {(total || waiting) && <small aria-hidden="true">{waiting && <span className="waiting-count">{waiting}</span>}{waiting && total && " · "}{total}</small>}
   </a>;
 }
 
@@ -24,7 +29,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
   createMode?: CreateModeOwner;
   action?: ReactNode;
   search: ReactNode;
-  counts: Partial<Record<string, string>>;
+  counts: Partial<Record<string, PlaceCount>>;
   recent: ReactNode;
   connectionStatus: { label: string; connected: boolean };
 }) {
