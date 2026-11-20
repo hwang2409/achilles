@@ -174,14 +174,15 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
   const achillesPort = await freePort(); const zetaPort = await freePort(new Set([achillesPort]));
   await Bun.write(join(root, "zeta-home/mcp.json"), JSON.stringify({ servers: { achilles: { transport: "streamable-http", url: `http://127.0.0.1:${achillesPort}/mcp/` } } }));
   const env = childEnvironment(root, accountHome, config.ollamaBaseUrl);
-  const achillesOrigin = `http://127.0.0.1:${achillesPort}`; const zetaOrigin = `ws://127.0.0.1:${zetaPort}`; let closing: Promise<CleanupProof> | undefined; let stack: EvalStack | undefined;
+  const achillesOrigin = `http://127.0.0.1:${achillesPort}`; const zetaOrigin = `ws://127.0.0.1:${zetaPort}`; let closing: Promise<CleanupProof> | undefined; let stack: EvalStack | undefined; let lostPort = false;
   const close = () => closing ??= (async () => {
     const discoveryPath = join(root, "zeta-home/run/serve.ws.json"); let discoveryPid = 0;
     try { discoveryPid = Number(JSON.parse(await readFile(discoveryPath, "utf8")).pid ?? 0); } catch {}
     const processProof = await owner.close();
     const proof: CleanupProof = { ...processProof, ports: [achillesPort, zetaPort], ports_closed: (await Promise.all([portClosed(achillesPort), portClosed(zetaPort)])).every(Boolean), discovery_pid_dead: !discoveryPid || !pidAlive(discoveryPid), discovery_cleaned: false };
     await rm(join(root, "zeta-home/run"), { recursive: true, force: true }); proof.discovery_cleaned = true; if (stack) stack.cleanup = proof;
-    if (!proof.pids_dead || !proof.pgids_dead || !proof.ports_closed || !proof.discovery_pid_dead) throw new Error(`stack cleanup verification failed: ${JSON.stringify(proof)}`);
+    // a lost port race leaves the port open in the process that won it, so only our own processes must be gone
+    if (!proof.pids_dead || !proof.pgids_dead || (!proof.ports_closed && !lostPort) || !proof.discovery_pid_dead) throw new Error(`stack cleanup verification failed: ${JSON.stringify(proof)}`);
     return proof;
   })();
   try {
@@ -201,7 +202,7 @@ async function startAttempt(config: EvalStackConfig, owner: ProcessOwner, root: 
     }; const preflight = await connectEvalProtocol(discovery); await preflight.close();
     stack = { root, achillesDir, achillesSha: shas.achilles, zetaSha: shas.zeta, achillesOrigin, zetaOrigin, provider: selected.provider, model: selected.model, accountHome, toolPolicy: config.liveTools ? LIVE_TOOL_POLICY : TOOL_POLICY, run: (command, args, cwd, timeoutMs) => owner.run(command, args, cwd, timeoutMs), restartZeta, close };
     return stack;
-  } catch (error) { const detail = error as Error & { cleanup?: CleanupProof }; detail.cleanup = await close(); throw detail; }
+  } catch (error) { const detail = error as Error & { cleanup?: CleanupProof }; lostPort = /EADDRINUSE/.test(String(error)); detail.cleanup = await close(); throw detail; }
 }
 
 export async function retryAddressInUse<T>(start: (attempt: number) => Promise<T>, attempts = 5): Promise<T> {
