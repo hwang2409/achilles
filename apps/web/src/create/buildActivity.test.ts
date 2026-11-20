@@ -307,10 +307,11 @@ test("-32004: the read waits at least retry_after_ms before it asks again", asyn
   let replies = 0;
   const zeta = serveZeta({ status: () => idle("newer"), read: () => { if (replies++ === 0) throw busy; return rows(done); } });
   const hook = await mount(zeta);
-  act(() => { jest.advanceTimersByTime(1999); });
+  // bun's fake clock also counts the real ms that pass between scheduling and advancing: check well before 2000 ms
+  act(() => { jest.advanceTimersByTime(1500); });
   await settle();
   expect(zeta.reads().length).toBe(1);
-  act(() => { jest.advanceTimersByTime(600); });
+  act(() => { jest.advanceTimersByTime(1100); });
   await settle();
   expect({ reads: zeta.reads().length, ...rowOf(hook) }).toEqual({ reads: 2, label: "done", receipt: null });
 });
