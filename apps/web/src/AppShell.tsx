@@ -6,7 +6,7 @@ import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFoc
 import { PageChatCatalog, titleOf, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
-import { ModuleFrame, ModuleState } from "./surface/ModuleState";
+import { ModuleFrame, ModuleState, ShellDock } from "./surface/ModuleState";
 import type { BuildActivity } from "./create/buildActivity";
 import { BuildStatus, SurfaceNav } from "./surface/SurfaceNav";
 import type { CreateModeOwner } from "./create/createMode";
@@ -163,6 +163,16 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
   ];
   const receipt = activity.latestReceipt;
   const showNavActivity = narrow ? drawer : !collapsed;
+  // One in-flow slot under the route's bar: the chat header here, or the module/create/telemetry bar via ShellDock.
+  const status = !showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />;
+  const dock = (status || receipt) ? <div className="build-dock">
+    {status}
+    {receipt && <aside className="build-receipt" aria-label="build receipt">
+      <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
+      <a className="build-open" href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>
+      <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
+    </aside>}
+  </div> : null;
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
@@ -175,18 +185,12 @@ export function AppShell({ activity, current, nav, workspace, newChat, connectio
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
-      <div className="build-dock">
-        {!showNavActivity && <BuildStatus activity={activity} current={current} className="build-status-main" />}
-        {receipt && <aside className="build-receipt" aria-label="build receipt">
-          <span><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
-          <a className="build-open" href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>
-          <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
-        </aside>}
-      </div>
-      <span className="visually-hidden" role="status">{activity.announcement}</span>
-      <PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
+      {workspace && dock}
+      <ShellDock.Provider value={workspace ? null : dock}><PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
         <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
-      </ModuleFrame> : children}</PageChatCatalog.Provider>
+      </ModuleFrame> : children}</PageChatCatalog.Provider></ShellDock.Provider>
+      {/* last in main, so it never separates the shell header from the route frame */}
+      <span className="visually-hidden" role="status">{activity.announcement}</span>
     </main>
     {displaySettings && <SettingsDialog open={settingsOpen} onClose={closeSettings} serverForcesAsk={serverForcesAsk} canWrite={canWrite} />}
     {workspace && shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}

@@ -3,6 +3,7 @@ import { chatHref, timeLabel, titleOf, type useAgentNavAdapter } from "../surfac
 import { surfaceHref } from "../surface/routes";
 import type { useActiveChat } from "../useActiveChat";
 import { buildLabel, type BuildActivity } from "./buildActivity";
+import { ShellDockSlot } from "../surface/ModuleState";
 import "./create.css";
 
 const starters = [
@@ -22,6 +23,7 @@ export function CreateLanding({ build, nav, activity }: { activity: BuildActivit
   }, [build.error]);
   return <>
     <header className="create-heading"><strong>create</strong><a href={surfaceHref("/pages")}>all pages</a></header>
+    <ShellDockSlot />
     <div className="create-scroll">
       <div className="create-landing">
         <h1>what should we build?</h1>

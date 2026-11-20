@@ -1,9 +1,14 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import "./surface.css";
+
+// The shell's build status strip and receipt; each route frame renders it once, under its own bar.
+export const ShellDock = createContext<ReactNode>(null);
+export const ShellDockSlot = () => <>{useContext(ShellDock)}</>;
 
 export function ModuleFrame({ title, children }: { title: string; children: ReactNode }) {
   return <section className="module-frame">
     <header><h1>{title}</h1></header>
+    <ShellDockSlot />
     <div className="module-body">{children}</div>
   </section>;
 }

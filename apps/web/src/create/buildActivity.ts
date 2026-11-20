@@ -71,6 +71,7 @@ function fromHistory(status: Record<string, unknown>, history: unknown): (Observ
 }
 
 type Store = Pick<Storage, "getItem" | "setItem">;
+type Receipt = { chat: Chat; page: PageLink };
 const receiptKey = (id: string, route: string) => `achilles:build-receipt:${JSON.stringify([id, route])}`;
 const observationKey = (id: string) => `achilles:build-observed:${id}`;
 
@@ -91,6 +92,16 @@ export function buildMemory(storage: () => Store) {
     },
     observe: (id: string, { state, routes }: Observation) => write(observationKey(id), JSON.stringify({ state, routes })),
     seen: (id: string, route: string) => read(receiptKey(id, route)) === "1",
+    // The last receipt this tab showed, so a reload can show it on the first render, before any catalog or zeta read.
+    receipt(): Receipt | undefined {
+      try {
+        const value = object(JSON.parse(read("achilles:build-receipt-shown") ?? "null"));
+        const chat = object(value?.chat), page = object(value?.page);
+        if (typeof chat?.session_id === "string" && typeof page?.id === "string" && isRoute(page.route)) return { chat: chat as Chat, page: page as PageLink };
+      } catch { /* an unknown row is no receipt */ }
+      return undefined;
+    },
+    keepReceipt: (receipt: Receipt) => write("achilles:build-receipt-shown", JSON.stringify(receipt)),
     acknowledge: (id: string, route: string) => write(receiptKey(id, route), "1"),
     // True only the first time this tab asks, so a receipt is announced once and not on every route load.
     announce(id: string, route: string) {
@@ -136,6 +147,8 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     stop();
     const current = generation;
     if (!request) return publish({ current: null, reason: "zeta offline" });
+    // No page builds: nothing to read, and no extra status call.
+    if (!chats.some(isBuild)) return publish({ current: null, reason: "not the current session" });
     controller = new AbortController();
     const live = await readLive(chats, request, controller.signal);
     if (current !== generation) return;
@@ -157,7 +170,7 @@ export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReas
 export const buildLabel = ({ state, reason }: Pick<BuildRow, "state" | "reason">) => state === null ? null : reason ? `last known ${state} · ${reason}` : state;
 
 function projectBuilds(chats: readonly Chat[], pages: readonly PageLink[] | null, live: Live, memory: Memory) {
-  let latestReceipt: { chat: Chat; page: PageLink } | null = null;
+  let latestReceipt: Receipt | null = null;
   const rows: BuildRow[] = [];
   for (const chat of chats.filter(isBuild)) {
     const isLive = live.current === chat.session_id;
@@ -175,6 +188,9 @@ function projectBuilds(chats: readonly Chat[], pages: readonly PageLink[] | null
     rows.push({ chat, state, reason, results, tools });
   }
   const count = (state: BuildState) => rows.filter((row) => row.state === state && !row.reason).length;
+  // Until both catalogs load, the receipt this tab last showed stands in, so it renders at once and nothing shifts.
+  const kept = !latestReceipt && (!chats.length || pages === null) ? memory.receipt() : undefined;
+  if (kept && !memory.seen(kept.chat.session_id, kept.page.route)) latestReceipt = kept;
   return { rows, latestReceipt, building: count("building"), needsYou: count("needs you") };
 }
 
@@ -202,6 +218,7 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
   // The shell mounts its status region empty; the text arrives later so screen readers announce it.
   const [announcement, setAnnouncement] = useState("");
   const receipt = activity.latestReceipt;
+  useEffect(() => { if (receipt) memory.keepReceipt(receipt); }, [receipt, memory]);
   useEffect(() => {
     if (receipt && memory.announce(receipt.chat.session_id, receipt.page.route)) setAnnouncement(`${titleOf(receipt.chat)} finished · ${receipt.page.route} is ready`);
   }, [receipt?.chat.session_id, receipt?.page.route, memory]);

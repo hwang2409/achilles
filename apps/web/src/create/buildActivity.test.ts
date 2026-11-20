@@ -34,7 +34,7 @@ const done = [call(), result, end];
 /** One page load: zeta's status reply, and the history reply when the status names a build. */
 type Load = { status: object | Error; history?: unknown[] | Error; superseded?: unknown[] };
 type Shown = { state: string | null; reason?: string | null; results?: string[]; tools?: string[] };
-type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: boolean };
+type Row = { name: string; loads: Load[]; recover?: Load; chats?: Chat[]; pages?: PageLink[]; id?: string; shown: Shown; building?: number; needsYou?: number; receipt?: string | null; dismiss?: boolean; cold?: boolean };
 
 // Each load is a fresh page load in the same tab (same sessionStorage); the last one is asserted.
 const ROWS: Row[] = [
@@ -58,6 +58,7 @@ const ROWS: Row[] = [
   { name: "an ordinary running chat never appears", chats: [ordinary], id: ordinary.session_id, loads: [{ status: running }], shown: { state: "absent" }, building: 0 },
   { name: "receipt names the first result the catalog confirms (Q3)", pages: [expenses], loads: [{ status: idle(), history: [call(), result, call("existing"), resultOf("existing", '{"route":"/expenses","existing":true}'), end] }], shown: { state: "done", results: ["/expenses"] }, receipt: "/expenses" },
   { name: "an outage during a build, then recovery, is live again", loads: [{ status: running, history: [call()] }, { status: offline }], recover: { status: running, history: [call()] }, shown: { state: "building", reason: null }, building: 1 },
+  { name: "a reload shows the kept receipt on the first render, before any catalog or zeta read", cold: true, loads: [{ status: idle(), history: done }, { status: offline }], shown: { state: "absent" }, receipt: "/reading-list" },
   { name: "a stale response arriving after a newer one", loads: [{ status: idle(), history: done, superseded: [call()] }], shown: { state: "done", tools: [] }, building: 0 },
 ];
 
@@ -80,6 +81,7 @@ function fakeZeta(first: Load, hold = false) {
 }
 
 let fakeClock = false;
+const noChats: Chat[] = [];
 const flush = () => act(async () => { await new Promise((resolve) => { setTimeout(resolve, 0); if (fakeClock) jest.advanceTimersByTime(0); }); });
 
 test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) => {
@@ -94,13 +96,16 @@ test.each(ROWS.map((row) => [row.name, row] as const))("%s", async (_name, row) 
       if (row.recover && load === row.loads.at(-1)) { jest.useFakeTimers(); fakeClock = true; }
       const zeta = fakeZeta(load);
       const first = load.superseded ? fakeZeta({ status: load.status }, true) : zeta;
-      hook = renderHook(({ client }) => useBuildActivity({ client, chats, pages, reloadPages: () => {} }), { initialProps: { client: first.client } });
+      // a cold load starts with neither catalog loaded
+      const cold = row.cold && load === row.loads.at(-1);
+      hook = renderHook(({ client }) => useBuildActivity({ client, chats: cold ? noChats : chats, pages: cold ? null : pages, reloadPages: () => {} }), { initialProps: { client: first.client } });
+      if (cold) expect(hook.result.current.latestReceipt?.page.route).toBe(row.receipt!);
       if (load.superseded) {
         late.push(first);
         while (first.calls.length < 2) await flush();
         hook.rerender({ client: zeta.client });
       }
-      const expected = load.history === undefined || load.status instanceof Error ? 1 : 2;
+      const expected = cold ? 0 : load.history === undefined || load.status instanceof Error ? 1 : 2;
       for (let i = 0; i < 50 && zeta.calls.length < expected; i++) await flush();
       await flush();
       if (load.superseded) { first.release(load.superseded); await flush(); }
