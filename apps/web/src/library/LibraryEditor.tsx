@@ -12,8 +12,6 @@ type Control = {
   /** Whether this tab controls zeta now. When it does not, save first takes control (only if the slot is free). */
   controller: boolean;
   takeControl: () => Promise<string | null>;
-  /** The last take-control refusal (held above the editor, so it survives a socket replace). */
-  feedback: string | null;
   /** Why this tab cannot save here; the draft stays visible, read-only, and nothing is sent. */
   blocked: string | null;
 };
@@ -36,6 +34,15 @@ const header = (kind: LibraryKind, name: string, description: string) =>
 const problemLabel = (count: number) => `save · fix ${count} ${count === 1 ? "problem" : "problems"} first`;
 const folder = (kind: LibraryKind) => kind === "skills" ? "skills" : "agents";
 
+/** An achilles page's chat runs in `<home>/pages/<id>/workspace`: name that project by the page title, which the user
+ * knows. null for any other folder, or when achilles does not know the page. */
+async function pageTitle(cwd: string | null) {
+  const id = cwd?.match(/[\\/]pages[\\/]([^\\/]+)[\\/]workspace[\\/]?$/)?.[1];
+  if (!id) return null;
+  const page = await fetch(`/api/pages/${encodeURIComponent(id)}`, { cache: "no-store" }).then((response) => response.ok ? response.json() : null, () => null) as { title?: unknown } | null;
+  return page ? `page ${typeof page.title === "string" && page.title ? page.title : id}` : null;
+}
+
 /** The browser asks before a reload, a close or a full page load (the library tabs) drops a changed draft. */
 function useLeaveGuard(active: boolean) {
   useEffect(() => {
@@ -54,7 +61,7 @@ function EditorActions({ dirty, what, onDiscard, save }: { dirty: boolean; what:
   if (confirm) return <div role="group" aria-label="discard changes?" className="library-editor-actions">
     <span>discard your changes to {what}?</span>
     <button type="button" ref={keep} onClick={() => setConfirm(false)}>keep editing</button>
-    <button type="button" onClick={onDiscard}>discard changes</button>
+    <button type="button" className="library-danger" onClick={onDiscard}>discard changes</button>
   </div>;
   return <div className="library-editor-actions">
     <button type="button" onClick={() => dirty ? setConfirm(true) : onDiscard()}>{dirty ? "discard" : "close"}</button>
@@ -86,7 +93,7 @@ async function controlForSave({ controller, takeControl }: Control, fail: (failu
 
 /** The create form. The draft is mirrored to `onDraft`, so a socket drop that unmounts the form does not lose it. */
 export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, catalogMethod, onCreated, onOpen, onClose, ...control }: Props) {
-  const { takeControl, feedback, blocked, controller } = control;
+  const { takeControl, blocked, controller } = control;
   const noun = kind === "skills" ? "skill" : "profile";
   const id = useId();
   const { form } = draft;
@@ -106,7 +113,12 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
   const existing = rows.find((row) => row.name === name);
   const problems = createProblems(name, text);
   if (edited === null && !description.trim()) problems.push("enter a description");
-  if (existing?.source === scope) problems.push(`a ${scope} ${noun} named ${name} already exists. open it to edit it.`);
+  // shown once, as the flag with "open it"; not while this form's own save of that name is in flight.
+  const collision = existing?.source === scope && !pending;
+  if (collision) problems.push(`a ${scope} ${noun} named ${name} already exists. open it to edit it.`);
+  const listed = collision ? problems.slice(0, -1) : problems;
+  // a refusal answers the text that was sent: any change clears it.
+  const change = <T,>(set: (value: T) => void) => (value: T) => { setFailure(null); set(value); };
   const dirty = Boolean(name || description || edited !== null);
 
   useEffect(() => { nameField.current?.focus(); }, []);
@@ -121,7 +133,8 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
       async () => {
         const status = await client.request("status", {}).catch(() => null) as { session?: { cwd?: unknown } | null } | null;
         const cwd = typeof status?.session?.cwd === "string" ? status.session.cwd : null;
-        if (live) setProject({ state: "available", label: cwd?.split(/[\\/]/).filter(Boolean).at(-1) ?? "the open chat's project" });
+        const label = await pageTitle(cwd) ?? cwd?.split(/[\\/]/).filter(Boolean).at(-1) ?? "the open chat's project";
+        if (live) setProject({ state: "available", label });
       },
       (error) => { if (live) setProject({ state: "unavailable", why: (error as { code?: unknown })?.code === -32005 ? "needs an open chat in a project" : "could not check project items" }); });
     return () => { live = false; };
@@ -153,39 +166,41 @@ export function LibraryEditor({ client, kind, writer, rows, draft, onDraft, cata
     <div className="library-editor-row">
       <label htmlFor={`${id}-name`}>name</label>
       <input id={`${id}-name`} ref={nameField} readOnly={Boolean(blocked)} value={name} autoComplete="off" spellCheck={false} aria-describedby={`${id}-rules`} aria-invalid={Boolean(name && nameProblem(name))}
-        onChange={(event) => setName(event.target.value)} onKeyDown={onEnter} />
+        onChange={(event) => change(setName)(event.target.value)} onKeyDown={onEnter} />
       <small id={`${id}-rules`} data-invalid={Boolean(name && nameProblem(name)) || undefined}>one word: no spaces, no / or \, not . or ..</small>
     </div>
     <fieldset className="library-editor-row">
       <legend>scope</legend>
-      <label><input type="radio" name={`${id}-scope`} checked={scope === "home"} disabled={Boolean(blocked) && scope !== "home"} onChange={() => setScope("home")} /> home · every project</label>
+      <label><input type="radio" name={`${id}-scope`} checked={scope === "home"} disabled={Boolean(blocked) && scope !== "home"} onChange={() => change(setScope)("home")} /> home · every project</label>
       <label><input type="radio" name={`${id}-scope`} checked={scope === "project"} disabled={project.state !== "available" || (Boolean(blocked) && scope !== "project")} aria-describedby={`${id}-project`}
-        onChange={() => setScope("project")} /> project · {project.state === "available" ? project.label : "this project only"}</label>
+        onChange={() => change(setScope)("project")} /> project · {project.state === "available" ? project.label : "this project only"}</label>
       <small id={`${id}-project`}>{project.state === "available" ? `saves to ${file} in ${project.label}` : project.why}</small>
     </fieldset>
     <div className="library-editor-row">
       <label htmlFor={`${id}-description`}>description</label>
       {edited === null
-        ? <input id={`${id}-description`} readOnly={Boolean(blocked)} value={description} autoComplete="off" onChange={(event) => setDescription(event.target.value)} onKeyDown={onEnter} />
+        ? <input id={`${id}-description`} readOnly={Boolean(blocked)} value={description} autoComplete="off" onChange={(event) => change(setDescription)(event.target.value)} onKeyDown={onEnter} />
         : <small id={`${id}-description`}>the description is in the file text now. edit it there.</small>}
     </div>
     <div className="library-editor-row">
       <label htmlFor={`${id}-text`}>{name || "<name>"}.md · file text</label>
-      <textarea id={`${id}-text`} readOnly={Boolean(blocked)} value={text} spellCheck={false} rows={12} onChange={(event) => setEdited(event.target.value)} />
+      <textarea id={`${id}-text`} readOnly={Boolean(blocked)} value={text} spellCheck={false} rows={12} onChange={(event) => change(setEdited)(event.target.value)} />
       <small>the name and description fill the header until you edit the file text. sessions pick up the change at their next catalog refresh.</small>
     </div>
     {shadow && <p className="library-flag">{shadow}</p>}
-    {existing?.source === scope && <p className="library-flag">{`a ${scope} ${noun} named ${name} already exists.`} <button type="button" onClick={() => onOpen(name)}>open it</button></p>}
+    {collision && <p className="library-flag">{`a ${scope} ${noun} named ${name} already exists.`} <button type="button" onClick={() => onOpen(name)}>open it</button></p>}
     <Demoted show={!controller && !blocked} />
     <div ref={alert} tabIndex={-1} className="library-editor-status">
       {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
-      {tried && problems.length > 0 && <ul role="alert" className="library-error">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
+      {tried && listed.length > 0 && <ul role="alert" className="library-error">{listed.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
       {failure && <div role="alert">
         <p className="library-error">{failure.message}</p>
         {failure.status === "stale" && <button type="button" onClick={() => onOpen(name)}>open it</button>}
         {failure.status === "observer" && <>
-          <button type="button" onClick={() => void takeControl().then((reason) => { if (!reason) { setFailure(null); nameField.current?.focus(); } })}>take control</button>
-          {feedback && <span role="status">{feedback}</span>}
+          <button type="button" onClick={() => void takeControl().then((reason) => {
+            setFailure(reason ? { status: "observer", message: reason } : null);
+            if (!reason) nameField.current?.focus();
+          })}>take control</button>
         </>}
       </div>}
     </div>
@@ -217,7 +232,7 @@ type EditProps = Control & {
 
 /** Edits one existing file. Like the create form, its text lives only in memory and survives a client swap. */
 export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, ...control }: EditProps) {
-  const { takeControl, feedback, blocked, controller } = control;
+  const { takeControl, blocked, controller } = control;
   const { target } = draft;
   const noun = target.kind === "skills" ? "skill" : "profile";
   const id = useId();
@@ -296,6 +311,7 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
       <button type="button" className="library-dismiss" onClick={() => setMine(null)}>dismiss your text</button>
     </div>}
     <p role="status" className="library-editor-saved">{saved && !dirty ? savedNotice(target.name) : ""}</p>
+    {saved && !dirty && controller && <p className="library-edit-why">this tab keeps control of zeta until you close the editor.</p>}
     <Demoted show={!controller && !blocked} />
     <div ref={alert} tabIndex={-1} className="library-editor-status">
       {blocked && <p role="alert" className="library-error">{blocked}. your text is kept; nothing was sent.</p>}
@@ -304,8 +320,10 @@ export function LibraryEdit({ client, writer, draft, onDraft, onSaved, onClose, 
         <p className="library-error">{failure.message}</p>
         {stale && <button type="button" aria-disabled={loading} onClick={() => void loadLatest()}>{loading ? "loading…" : "load the latest version"}</button>}
         {failure.status === "observer" && <>
-          <button type="button" onClick={() => void takeControl().then((reason) => { if (!reason) { setFailure(null); field.current?.focus(); } })}>take control</button>
-          {feedback && <span role="status">{feedback}</span>}
+          <button type="button" onClick={() => void takeControl().then((reason) => {
+            setFailure(reason ? { status: "observer", message: reason } : null);
+            if (!reason) field.current?.focus();
+          })}>take control</button>
         </>}
         {failure.status === "busy" && <button type="button" onClick={() => void save()}>try again</button>}
       </div>}

@@ -120,7 +120,11 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor h2 small { margin-left: 8px; font-size: 13px; font-weight: normal; color: var(--fulcrum-muted); }
 .library-editor .library-flag button { margin-left: 8px; min-height: 32px; padding-inline: 10px; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 .library-editor-row .library-dismiss { justify-self: start; min-height: 36px; padding-inline: 12px; border: 1px solid var(--fulcrum-border); }
-.library-editor-actions[role="group"] { align-items: center; flex-wrap: wrap; }
+/* the prompt wraps inside its own box, so both buttons stay on one row */
+.library-editor-actions[role="group"] { align-items: center; }
+.library-editor-actions[role="group"] span { flex: 1 1 auto; min-width: 0; }
+.library-editor-actions button { flex: none; white-space: nowrap; }
+.library-editor-actions .library-danger { border-color: var(--fulcrum-danger); color: var(--fulcrum-danger); }
 .library-conflict { padding: 10px 12px; border: 1px solid var(--fulcrum-warn); }
 .library-edit-why { margin: 12px 0 0; font-size: 13px; color: var(--fulcrum-muted); }
 .library-text .library-text-actions:last-child { margin-top: 12px; }

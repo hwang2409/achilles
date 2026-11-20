@@ -83,7 +83,7 @@ function mapError(error: unknown, target: WriteTarget, edit: boolean): WriteOutc
 function invalidMessage(reason: unknown, detail: unknown, target: WriteTarget) {
   switch (reason) {
     case "contains_redaction_marker": return markerMessage;
-    case "invalid_document": return `zeta could not load this file${typeof detail === "string" ? `: ${detail.slice(0, DETAIL_CHARS)}` : "."}`;
+    case "invalid_document": return `zeta did not save it: ${typeof detail === "string" ? detail.slice(0, DETAIL_CHARS) : "the file is not valid."}`;
     case "name_mismatch": return `the name: in the header must be ${target.name}.`;
     case "document_too_large": return "the file is over 128 KiB.";
     case "name_too_long": return "this name is too long for a file name.";

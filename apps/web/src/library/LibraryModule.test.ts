@@ -235,6 +235,8 @@ test("an observer refusal offers take control, keeps the draft across the client
 test("discarding unsaved text asks first, and keep editing keeps it", async () => {
   const zeta = editZeta({ document: fileText });
   const view = await openEditor(zeta);
+  // an open edit holds control: "+ new" is not offered, so nothing can replace the edit or give the slot back.
+  expect(view.queryByRole("button", { name: "+ new skill" })).toBeNull();
   await type(view, `${fileText}more\n`);
   await press(view, "discard");
   expect(document.activeElement?.textContent).toBe("keep editing");
@@ -247,7 +249,7 @@ test("discarding unsaved text asks first, and keep editing keeps it", async () =
 });
 
 test.each<[string, Fixture, string]>([
-  ["redacted", { document: fileText, redacted: true }, "this file has text that looks like a secret, shown masked."],
+  ["redacted", { document: fileText, redacted: true }, "edit it in your own editor; saving here would replace the secret with the mask."],
   ["truncated", { document: fileText, truncated: true }, "this file is over 128 KiB."],
   ["document withheld", { document: fileText, withheld: true }, "zeta did not send an editable copy"],
   ["packaged", { document: fileText, source: "packaged" }, "built-in items are read-only."],

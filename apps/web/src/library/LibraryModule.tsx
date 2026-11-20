@@ -295,27 +295,30 @@ export function LibraryModule({ client, kind, reads, write = null }: { client: Z
         <div className="library-snapshot">
           <span data-live={reads.catalog || undefined}>{reads.catalog ? "live catalog · effective scope" : "active session snapshot · may be stale"}</span>
           <button type="button" aria-disabled={!catalog} onClick={refresh}>refresh</button>
-          {write && !creating && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
+          {write && !creating && !editing && <button type="button" className="library-new" data-write-surface="library.create" aria-disabled={taking || !write.allowed}
             ref={newButton}
             aria-describedby={controlFeedback || !write.allowed ? "library-control-feedback" : undefined} onClick={() => withControl(openCreate)}>{taking ? "taking control…" : `+ new ${noun}`}</button>}
         </div>
-        {(controlFeedback || (write && !write.allowed && !creating)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
+        {!creating && !editing && (controlFeedback || (write && !write.allowed)) && <p id="library-control-feedback" role="status" className="library-control">{controlFeedback ?? REFUSED_NOTICE}</p>}
       </div>
       {saved && <div role="status" className="library-saved">
         <p>{savedNotice(saved.name, saved.where)}</p>
         {saved.redacted && <p className="library-flag">{REDACTED_NOTICE}</p>}
-        <button type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => setSaved(null)}>dismiss</button>
+        <button type="button" aria-label={`dismiss the notice for ${saved.name}`} onClick={() => {
+          setSaved(null);
+          (newButton.current ?? detailHeading.current ?? search.current)?.focus();
+        }}>dismiss</button>
       </div>}
       {creating && write && createDraft ? <LibraryEditor client={client} kind={kind} writer={write.writer} rows={rows}
         draft={createDraft} onDraft={(draft) => write.drafts.set(draftKey, draft)} catalogMethod={reads.catalog ? methods.catalog : null}
-        controller={write.controller} takeControl={write.takeControl} feedback={write.feedback} blocked={write.allowed ? null : REFUSED_NOTICE} onOpen={showCreated}
+        controller={write.controller} takeControl={write.takeControl} blocked={write.allowed ? null : REFUSED_NOTICE} onOpen={showCreated}
         onClose={() => { focusNewButton.current = true; closeEditor(); }}
         onCreated={(name, redacted, where) => {
           setSaved({ name, redacted, where });
           showCreated(name);
         }} />
       : editing && write ? <LibraryEdit key={editing.form} client={client} writer={write.writer} draft={write.edits.get(kind) ?? editing}
-        onDraft={(draft) => write.edits.set(kind, draft)} controller={write.controller} takeControl={write.takeControl} feedback={write.feedback}
+        onDraft={(draft) => write.edits.set(kind, draft)} controller={write.controller} takeControl={write.takeControl}
         blocked={write.allowed ? null : REFUSED_NOTICE} onClose={closeEdit}
         onSaved={(redacted) => {
           // a redacted file has no editable copy any more: leave the editor and say why; the masked read view stays.
@@ -467,7 +470,9 @@ function LibraryText({ client, method, row, noun, edit, onGone }: { client: Zeta
 
 /** The edit control for a revealed item, or why it cannot be edited here. Only zeta's raw `document` can be edited. */
 function EditEntry({ edit, row, body }: { edit: EditControl; row: CatalogRow; body: Body }) {
-  const why = !row.editable ? "built-in items are read-only." : uneditable(body);
+  // the read view already says the text looks like a secret and is shown masked: say only what to do.
+  const why = !row.editable ? "built-in items are read-only."
+    : body.redacted ? "edit it in your own editor; saving here would replace the secret with the mask." : uneditable(body);
   if (why || !body.editable) return <p className="library-edit-why">{why}</p>;
   const opened = body.editable;
   return <div className="library-text-actions">
