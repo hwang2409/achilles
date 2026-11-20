@@ -163,7 +163,7 @@ export function LibraryModule({ client, kind, reads }: { client: ZetaClient; kin
         {typeof more === "object" && <span role="alert">could not load more: {more.message}</span>}
       </div>}
       {reads.catalog && !rows.some(({ source }) => source === "project") &&
-        <p className="library-hint">project {kind === "skills" ? "skills" : "profiles"} show when a chat is open in a project.</p>}
+        <p className="library-hint">no project {kind === "skills" ? "skills" : "profiles"} loaded · they appear when a chat is open in a project that has them</p>}
     </section>
     <section className="library-detail" aria-label="catalog detail">
       {selected ? <>
