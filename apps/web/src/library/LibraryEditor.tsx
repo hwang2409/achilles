@@ -175,7 +175,7 @@ export function LibraryEdit({ client, writer, target, opened, takeControl, feedb
 
   async function save() {
     // a stale save waits for "load the latest version": never a second write with a revision the user did not see.
-    if (pending || blocked || failure?.status === "stale") return;
+    if (pending || blocked || !dirty || failure?.status === "stale") return;
     setTried(true);
     if (problems.length) return alert.current?.focus();
     setPending(true);

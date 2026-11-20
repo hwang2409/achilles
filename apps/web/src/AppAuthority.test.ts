@@ -202,6 +202,11 @@ const library = (writes: boolean, feature = writes, method = writes): Options =>
   skill_catalog: () => ({ result: { revision: "r", data: { items: [] } } }),
   skill_write: async (params) => ({ result: { revision: await sha256((params.mutation as { document: string }).document), data: { name: params.name, scope: params.scope, redacted: false } } }),
 } });
+const fixtureFile = "---\nname: fixture-skill\ndescription: synthetic skill\n---\nbody\n";
+const libraryFile: Options = { ...library(true), rpc: { ...library(true).rpc,
+  skill_catalog: () => ({ result: { revision: "r", data: { items: [{ name: "fixture-skill", description: "synthetic skill", keywords: [], source: "home", scope: "home", editable: true, diagnostics: [] }] } } }),
+  skill_read: async () => ({ result: { revision: await sha256(fixtureFile), data: { name: "fixture-skill", frontmatter: {}, body: "body\n", source: "home", editable: true, redacted: false, document: fixtureFile } } }),
+} };
 const blockedCreation = (path: string, method: string) => path === "/api/pages/page/chats" && method === "POST" ? new Response(null, { status: 503 }) : undefined;
 const creationAction = (action: "retry" | "discard"): Row => ({ kind: action === "retry" ? "visible" : "local-only", absent: true, options: { pending: true, http: blockedCreation }, check: async (app, authority, writes, requests) => {
   const id = `create.${action}` as const;
@@ -395,6 +400,21 @@ const rows: Record<WriteSurfaceId, Row> = {
     }
     await change(select(app, '.library-editor input[aria-describedby$="-rules"]'), "fixture-skill");
     await change(app.getByLabelText("description") as HTMLElement, "synthetic skill");
+    await click(app.getByText("save skill", { selector: "button", exact: true }));
+    didWrite(writes, "skill_write");
+    expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
+  } },
+  "library.edit": { kind: "visible", options: libraryFile, check: async (app, authority, writes) => {
+    // the edit control appears on a revealed file that zeta sent as a raw document; it takes control like "+ new".
+    await click(await app.findByRole("button", { name: /fixture-skill/ }));
+    await click(app.getByText("show skill text", { selector: "button", exact: true }));
+    await click(await app.findByText("edit", { selector: tag("library.edit"), exact: true }));
+    if (authority === "observer") {
+      expect(app.getByText("another tab had control. try again after it closes.")).toBeTruthy();
+      expect(app.container.querySelector(".library-editor")).toBeNull();
+      return;
+    }
+    await change(select(app, ".library-editor textarea"), `${fixtureFile}more\n`);
     await click(app.getByText("save skill", { selector: "button", exact: true }));
     didWrite(writes, "skill_write");
     expect(await app.findByText("saved. running sessions pick up the change at their next catalog refresh.")).toBeTruthy();
