@@ -32,6 +32,9 @@ async function checkout() {
   await mkdir(join(target, "vendor"), { recursive: true });
   await symlink(join(fixtureRoot, "vendor", "fulcrum"), join(target, "vendor", "fulcrum"));
   await symlink(join(fixtureRoot, "apps", "web", "node_modules"), join(target, "apps", "web", "node_modules"));
+  // two evals' `uv run` would otherwise build this new venv at once, and one can import a half-installed package
+  const sync = Bun.spawnSync([uv, "sync", "--project", target, "--quiet"]);
+  if (sync.exitCode) throw new Error(sync.stderr.toString());
   return { parent, target };
 }
 
