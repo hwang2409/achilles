@@ -160,8 +160,8 @@ const POLL_MS = 2000;
 const RETRY_MS = [2000, 5000, 10000];
 const READ_FEATURE = "session_history_read_v1";
 const BUSY_TRIES = 3;
-// The builds the chat list shows are read, at most this many.
-const READ_BUILDS = 8;
+// The builds the chat list shows are read, at most this many: one chat-list page, so every row the nav and switcher show gets a state.
+const READ_BUILDS = 50;
 const errorCode = (error: unknown) => object(error)?.code;
 const errorData = (error: unknown) => object(object(error)?.data);
 // A run-end read of a build that status says is not current: its rows (null: no turn end in view), or no reply.
@@ -210,7 +210,9 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   let epoch = 0;
   let reads = true;
   let queue: string[] = [];
-  let inFlight: { id: string; epoch: number; stamp?: number } | undefined;
+  let inFlight: { id: string; epoch: number; stamp?: number; at?: string } | undefined;
+  // The build whose -32004 wait holds the queue.
+  let waiting: string | undefined;
   let busyTimer: ReturnType<typeof setTimeout> | undefined;
   const readKeys = new Map<string, string | undefined>();
   const busyTries = new Map<string, number>();
@@ -222,15 +224,16 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
 
   // The one receipt rule: a completion shows a receipt only when this tab saw the build active (building, needs you,
   // or its run end). A build first seen already done, on any path, is quiet.
-  const observe = (id: string, seen: Seen) => {
-    const merged = memory.observe(id, seen, !ranHere.has(id) && !active(memory.observed(id)?.state ?? "done"), updatedAt(id));
+  // `at`: the updated_at the proof belongs to (a queued read: the one it was sent for).
+  const observe = (id: string, seen: Seen, at = updatedAt(id)) => {
+    const merged = memory.observe(id, seen, !ranHere.has(id) && !active(memory.observed(id)?.state ?? "done"), at);
     if (merged && !active(merged.state)) ranHere.delete(id);
     return merged;
   };
   // Rows prove only a turn end.
-  const prove = (id: string, seen: Seen | null) => {
+  const prove = (id: string, seen: Seen | null, at?: string) => {
     if (!seen) return;
-    const merged = observe(id, seen);
+    const merged = observe(id, seen, at ?? updatedAt(id));
     changed();
     if (merged?.routes.length) reloadPages(merged.routes);
   };
@@ -245,6 +248,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     const builds = chats.filter(isBuild);
     // The builds the chat list shows, and any build this tab last knew as active.
     const shown = new Set(builds.slice(0, READ_BUILDS).map((chat) => chat.session_id));
+    let added = false;
     for (const chat of builds) {
       const id = chat.session_id;
       if (id === current || queue.includes(id)) continue;
@@ -252,16 +256,18 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       if (!forced.includes(id) && !(wanted && readKeys.get(id) !== chat.updated_at && !settled(chat))) continue;
       busyTries.delete(id); // each demand gets its own tries
       queue.push(id);
+      added = true;
     }
     pump();
+    if (added) changed();
   };
   const pump = () => {
     const { client } = latest;
     if (inFlight || busyTimer || !client) return;
     const id = queue.shift();
     if (id === undefined) return;
-    const sent = inFlight = { id, epoch, stamp: liveSeen.get(id) };
-    readKeys.set(id, updatedAt(id));
+    const sent = inFlight = { id, epoch, stamp: liveSeen.get(id), at: updatedAt(id) };
+    readKeys.set(id, sent.at);
     client.request("session_history_read", { session_id: id, limit: 128 }, { signal: controller.signal, timeoutMs: 12000 })
       .then((page) => settle(sent, page), (error) => settle(sent, undefined, error ?? Error("read failed")));
   };
@@ -276,7 +282,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       if (id === current || liveSeen.get(id) !== sent.stamp) readKeys.delete(id);
       else {
         busyTries.delete(id);
-        try { prove(id, fromHistory(null, page, "next_cursor")); } catch { /* an unknown reply is no claim */ }
+        try { prove(id, fromHistory(null, page, "next_cursor"), sent.at); } catch { /* an unknown reply is no claim */ }
       }
     } else if (code === -32004) {
       // Another read is in flight on this serve (another tab or client): wait at least what zeta asks, with jitter,
@@ -284,16 +290,19 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       const tries = (busyTries.get(id) ?? 0) + 1;
       busyTries.set(id, tries);
       const wait = Math.max(2000, Number(errorData(error)?.retry_after_ms) || 0) + Math.random() * 500;
+      waiting = id;
       busyTimer = setTimeout(() => {
-        busyTimer = undefined;
+        busyTimer = waiting = undefined;
         if (tries < BUSY_TRIES && !queue.includes(id)) queue.unshift(id);
         pump();
+        changed();
       }, wait);
     } else if (code === -32601) { reads = false; queue = []; }
     // The build became zeta's attached session (plain invalid_params): the live pass reads it now. Every other -32602
     // (session_not_found: absent, another project, project versus none, a child id) is no claim, like -32005.
     else if (code === -32602 && errorData(error)?.code === "invalid_params") run();
     pump();
+    changed();
   };
 
   const once = async (mine: number) => {
@@ -342,7 +351,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     refreshed = false;
     clearTimeout(timer);
     clearTimeout(busyTimer);
-    busyTimer = undefined;
+    busyTimer = waiting = undefined;
     controller.abort();
     controller = new AbortController();
     queue = [];
@@ -358,18 +367,21 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       run();
     },
     stop,
+    // Builds a read will answer soon: queued, in flight, or waiting out a busy reply.
+    pending: (id: string) => queue.includes(id) || inFlight?.id === id || waiting === id,
     // A manual refresh: every wanted build is read again (one at a time).
     forget: () => { epoch++; refreshed = true; readKeys.clear(); busyTries.clear(); },
   };
 }
 
-export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: string[]; tools: string[] };
+// `checking`: no state yet, and a read of this build is queued or in flight.
+export type BuildRow = { chat: Chat; state: BuildState | null; reason: BuildReason | null; results: string[]; tools: string[]; checking?: boolean };
 // A reason marks a remembered state that is not live now; it is never counted.
-export const buildLabel = ({ state, reason }: Pick<BuildRow, "state" | "reason">) => state === null ? null : reason ? `last known ${state} · ${reason}` : state;
+export const buildLabel = ({ state, reason, checking }: Pick<BuildRow, "state" | "reason" | "checking">) => state === null ? checking ? "checking" : null : reason ? `last known ${state} · ${reason}` : state;
 // The chat-list state class for a build row: only live states get a live tone.
 export const buildTone = (row?: BuildRow) => !row?.state || row.reason ? null : row.state === "building" ? "running" : row.state === "needs you" ? "approval" : row.state;
 
-function projectBuilds(chats: readonly Chat[], live: Live, memory: Memory) {
+function projectBuilds(chats: readonly Chat[], live: Live, memory: Memory, pending: (id: string) => boolean) {
   let latestReceipt: Receipt | null = null;
   const rows: BuildRow[] = [];
   for (const chat of chats.filter(isBuild)) {
@@ -378,7 +390,7 @@ function projectBuilds(chats: readonly Chat[], live: Live, memory: Memory) {
     const known = (isLive && live.observed) || memory.observed(chat.session_id);
     const tools = isLive ? live.observed?.tools ?? [] : [];
     if (!known) {
-      rows.push({ chat, state: null, reason: null, results: [], tools });
+      rows.push({ chat, state: null, reason: null, results: [], tools, checking: !isLive && pending(chat.session_id) });
       continue;
     }
     const { state, turn, done, routes: results } = known;
@@ -420,7 +432,7 @@ export function useBuildActivity({ client, chats, pages, reloadPages }: {
   useEffect(() => client ? onRunEnd(client, (id) => {
     if (latest.chats.some((chat) => isBuild(chat) && chat.session_id === id)) reader.refresh(latest.chats, client, id);
   }) : undefined, [client, latest, reader]);
-  const activity = useMemo(() => projectBuilds(chats, live, memory), [chats, live, memory, revision]);
+  const activity = useMemo(() => projectBuilds(chats, live, memory, reader.pending), [chats, live, memory, reader, revision]);
   // Same-document navigation (back/forward) can land on the receipt's page.
   useEffect(() => {
     const moved = () => setRevision((value) => value + 1);

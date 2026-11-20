@@ -41,3 +41,5 @@ export const surfaceHref = (path: string) => {
 };
 
 export const newChatIntent = "#new-chat";
+// the "needs you" link: the chat focuses its pending approval when it loads
+export const approvalIntent = "#approval";
