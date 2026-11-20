@@ -7,7 +7,7 @@ import { CodeFence } from "./chat/CodeFence";
 import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
 import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { AppShell } from "./AppShell";
+import type { RenderShell } from "./surface/SurfaceRouter";
 import { titleOf, useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { chatsRoute, createRoute, type SurfaceRoute } from "./surface/routes";
 import { CreateLanding } from "./create/CreateLanding";
@@ -192,7 +192,7 @@ function connectionFailure(state: ConnectionState): string | null {
   }
 }
 
-export function AgentSurface({ connection, client, connectionState, observerBanner, current, homeAlias, connectionStatus }: { connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode; current: SurfaceRoute; homeAlias?: string; connectionStatus: { label: string; connected: boolean } }) {
+export function AgentSurface({ connection, client, connectionState, observerBanner, current, homeAlias, connectionStatus, renderShell }: { renderShell: RenderShell; connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode; current: SurfaceRoute; homeAlias?: string; connectionStatus: { label: string; connected: boolean } }) {
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
   const readOnlyReason = READ_ONLY_REASON;
@@ -429,12 +429,12 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     onRenameChat: (chat, text) => { if (canWrite) void active.rename(chat.session_id, text); },
     refreshKey: active.listRefresh, pageRefreshKey: pageRefreshNonce,
   });
-  return <AppShell current={landing ? createRoute : current === createRoute ? chatsRoute : current} nav={nav} connectionStatus={connectionStatus} banner={observerBanner} hasComposer={!landing && hasComposer}
-    newChat={{ available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() }}
-    workspace={landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createMode }}
-    header={!landing && activePage && createMode && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} createMode={createMode} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />}>
-    {landing ? <CreateLanding build={active.build} nav={nav} /> : content}
-  </AppShell>;
+  return renderShell({ current: landing ? createRoute : current === createRoute ? chatsRoute : current, nav, connectionStatus, banner: observerBanner, hasComposer: !landing && hasComposer,
+    newChat: { available: canWrite && (!landing || active.state.phase === "empty"), pending: active.startingChat, run: () => void active.newChat() },
+    workspace: landing ? undefined : { canWrite, serverForcesAsk: (ready ?? empty)?.serverApprovalMode === "ask", createMode },
+    header: !landing && activePage && createMode && <ChatHeader page={activePage} docked={hasBlocks} sessionId={ready?.sessionId ?? null} title={title} state={state} queued={composerActivity.queued} createMode={createMode} onRename={!canWrite ? undefined : ready ? (id, text) => { void active.rename(id, text); } : undefined} onHistory={(opener) => { historyOpener.current = opener; setHistoryOpen(true); }} />,
+    children: (activity) => landing ? <CreateLanding build={active.build} nav={nav} activity={activity} /> : content,
+  });
 }
 
 function BusyNotice({ busy, openSessionId, onOpen, onRetry, canWrite = false }: { busy: { sessionId: string | null; chat: { title: string | null; first_title?: string | null } | null; retry: "attach" | "new" }; openSessionId: string | null; onOpen: () => void; onRetry: () => void; canWrite?: boolean }) {

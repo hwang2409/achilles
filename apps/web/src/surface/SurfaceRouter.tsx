@@ -1,6 +1,8 @@
+import type { ZetaClient } from "@fulcrum/zeta";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
-import { AppShell } from "../AppShell";
+import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
+import { AppShell, type AppShellProps } from "../AppShell";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { createConnection, isObserverPresentation, type Connection } from "../zeta";
@@ -24,8 +26,9 @@ export function SurfaceRouter() {
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
   const observerBanner = observer && <ObserverBanner connection={connection} readOnly={readOnly} />;
+  const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
-    return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner}
+    return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
       current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} />;
   }
   if (!route) return null;
@@ -40,15 +43,24 @@ export function SurfaceRouter() {
   } else if (route.id !== "pages" && route.id !== "settings") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
-  return <CatalogShell route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
+  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
 }
 
-function CatalogShell({ route, connectionStatus, banner, children }: { route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
+type BuildShellProps = Omit<AppShellProps, "activity" | "children"> & { children: (activity: BuildActivity) => ReactNode };
+export type RenderShell = (props: BuildShellProps) => ReactNode;
+
+function BuildShell({ client, children, ...props }: BuildShellProps & { client: ZetaClient | null }) {
+  const { recentChats, pageRows, reloadPages } = props.nav;
+  const activity = useBuildActivity({ client, chats: recentChats, pages: pageRows, reloadPages });
+  return <AppShell {...props} activity={activity}>{children(activity)}</AppShell>;
+}
+
+function CatalogShell({ renderShell, route, connectionStatus, banner, children }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
-  return <AppShell current={route} nav={nav} banner={banner} connectionStatus={connectionStatus}
-    newChat={{ available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) }}>
-    {route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages()}</ModuleFrame> : children}
-  </AppShell>;
+  return renderShell({ current: route, nav, banner, connectionStatus,
+    newChat: { available: connectionStatus.connected, run: () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent) },
+    children: () => route.id === "pages" ? <ModuleFrame title={route.label}>{nav.pages()}</ModuleFrame> : children,
+  });
 }
 
 function ObserverBanner({ connection, readOnly }: { connection: Connection; readOnly: boolean }) {

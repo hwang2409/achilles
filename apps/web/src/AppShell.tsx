@@ -3,13 +3,14 @@ import { CommandPalette, ShortcutsSheet, type PaletteEntry } from "./CommandPale
 import { SettingsDialog } from "./SettingsDialog";
 import { updateSettings, useSettings } from "./settings";
 import { firstFocusable, hasAppModifier, isEditableTarget, modKey, restorableFocus, useFocusAfterCommit, useModalFocus } from "./keyboard";
-import { PageChatCatalog, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
+import { PageChatCatalog, titleOf, type useAgentNavAdapter } from "./surface/AgentNavAdapter";
 import { WRITE_SURFACE } from "./writeSurfaces";
 
 import { ModuleFrame, ModuleState } from "./surface/ModuleState";
-import { SurfaceNav } from "./surface/SurfaceNav";
+import type { BuildActivity } from "./create/buildActivity";
+import { BuildStatus, SurfaceNav } from "./surface/SurfaceNav";
 import type { CreateModeOwner } from "./create/createMode";
-import type { SurfaceRoute } from "./surface/routes";
+import { surfaceHref, type SurfaceRoute } from "./surface/routes";
 
 type WorkspaceActions = {
   canWrite: boolean;
@@ -17,7 +18,8 @@ type WorkspaceActions = {
   createMode?: CreateModeOwner;
 };
 
-type Props = {
+export type AppShellProps = {
+  activity: BuildActivity;
   current: SurfaceRoute;
   nav: ReturnType<typeof useAgentNavAdapter>;
   workspace?: WorkspaceActions;
@@ -32,7 +34,7 @@ type Props = {
 // Short screens use a drawer too. Keep this breakpoint in sync with shell.css.
 const DRAWER_MEDIA = "(max-width: 760px), (max-height: 500px)";
 
-export function AppShell({ current, nav, workspace, newChat, connectionStatus, hasComposer, banner, header, children }: Props) {
+export function AppShell({ activity, current, nav, workspace, newChat, connectionStatus, hasComposer, banner, header, children }: AppShellProps) {
   const { canWrite = false, serverForcesAsk = false, createMode } = workspace ?? {};
   const settingsPlace = current.id === "settings";
   const displaySettings = Boolean(workspace) || settingsPlace;
@@ -159,10 +161,11 @@ export function AppShell({ current, nav, workspace, newChat, connectionStatus, h
       { id: "shortcuts", label: "keyboard shortcuts", shortcut: "?", run: () => openShortcuts(paletteOpener.current) },
     ] : [],
   ];
+  const receipt = activity.latestReceipt;
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""} ${drawer ? "drawer-open" : ""} ${loading ? "shell-loading" : ""}`}>
     <a className="skip-link" href="#message-composer" inert={narrow && drawer ? true : undefined} onClick={(event) => { event.preventDefault(); const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="message"]'); if (composer) composer.focus(); else document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>{hasComposer ? "skip to message" : "skip to main content"}</a>
     <button className="drawer-scrim" aria-label="close menu" hidden={!drawer} tabIndex={-1} onClick={closeDrawer} />
-    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode}
+    <SurfaceNav current={current} sidebar={sidebar} narrow={narrow} drawer={drawer} collapsed={collapsed} onClose={closeDrawer} onCollapse={collapse} openPalette={openPalette} connectionStatus={connectionStatus} createMode={createMode} activity={activity}
       action={<button className="new-chat" aria-label="new chat" data-write-surface={WRITE_SURFACE.shellNewChat} disabled={!newChat.available} aria-disabled={newChat.pending || undefined} aria-busy={newChat.pending || undefined} title={newChat.pending ? "starting chat…" : !newChat.available ? "this tab is read-only; take control to create a chat" : "new chat"} onClick={startNewChat}><span aria-hidden="true">+</span><b>{newChat.pending ? "starting…" : "new chat"}</b><kbd>{modKey("⇧O")}</kbd></button>}
       search={nav.searchControl(dismissDrawer)} counts={nav.counts} recent={nav.recent(dismissDrawer)} />
     <main className="main-pane" tabIndex={-1} aria-hidden={narrow && drawer ? "true" : undefined} inert={narrow && drawer ? true : undefined}>
@@ -171,6 +174,12 @@ export function AppShell({ current, nav, workspace, newChat, connectionStatus, h
         <button ref={menuButton} className="menu-button" aria-label="open menu" aria-controls="surface-sidebar" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
         {header}
       </div>
+      {current.id !== "create" && <BuildStatus activity={activity} className="build-status-main" />}
+      {receipt && <aside className="build-receipt" aria-label="build receipt">
+        <span role="status"><strong>{titleOf(receipt.chat)}</strong> finished · {receipt.page.route} is ready</span>
+        <a href={surfaceHref(receipt.page.route)} onClick={activity.dismissReceipt}>open page</a>
+        <button type="button" onClick={() => { activity.dismissReceipt(); document.querySelector<HTMLElement>(".main-pane")?.focus(); }}>dismiss</button>
+      </aside>}
       <PageChatCatalog.Provider value={catalog}>{settingsPlace ? <ModuleFrame title={current.label}>
         <ModuleState kind="unsupported" title="display settings are here for now. more settings come later." action={{ label: "display settings", run: () => openSettings(activeElement()) }} />
       </ModuleFrame> : children}</PageChatCatalog.Provider>

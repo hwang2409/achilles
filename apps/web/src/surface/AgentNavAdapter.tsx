@@ -74,6 +74,8 @@ const chatPage = (include: () => string | null) => async (search: string, before
   return { items: result.chats, next: result.next, meta: result.approval_count };
 };
 
+const emptyChats: readonly Chat[] = [];
+const emptyPages: readonly PageLink[] = [];
 const initialPageListState = initialListState<PageLink, null>(null);
 const initialChatListState = initialListState<Chat, number>(0);
 const listStatus = <T, M>(state: ListState<T, M>) => state.error ? "error" : state.loading || state.items === null ? "loading" : "ready";
@@ -82,6 +84,7 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
   const requestFocus = useFocusAfterCommit();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
+  const [recentChats, setRecentChats] = useState(emptyChats);
   const [chatList, setChatList] = useState(initialChatListState);
   const [pageList, setPageList] = useState(initialPageListState);
   const [activeResult, setActiveResult] = useState(0);
@@ -101,7 +104,11 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
     }, (item) => item.id, setPageList, 20, 200);
   }
   if (!chatListOwner.current) {
-    chatListOwner.current = createListOwner(initialChatListState, chatPage(() => openChat.current), (item) => item.session_id, setChatList, 50, 200);
+    chatListOwner.current = createListOwner(initialChatListState, async (key, before, signal, limit) => {
+      const page = await chatPage(() => openChat.current)(key, before, signal, limit);
+      if (!key && !before && !signal.aborted) setRecentChats(page.items);
+      return page;
+    }, (item) => item.session_id, setChatList, 50, 200);
   }
   const chats = chatList.items ?? [];
   const loading = chatList.items === null && !chatList.error;
@@ -203,7 +210,8 @@ export function useAgentNavAdapter({ sessionId, waiting, canWrite, onSelectChat,
 
   return {
     loading, query, pageEntries, searchChats,
-    pageCatalog: pageList,
+    pageCatalog: pageList, recentChats, pageRows: pageList.items ?? emptyPages,
+    reloadPages: () => { void pageListOwner.current!.reload(null); },
     clearSearch: () => { setQuery(""); setSearch(""); setActiveResult(0); document.querySelector<HTMLInputElement>(".chat-search input")?.focus(); },
     searchControl: (close: () => void) => loading ? <div className="search-skeleton" aria-label="loading search" /> : <label className="chat-search"><span>⌕</span><input aria-label="search chats and pages" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={searchKey(close)} placeholder="search chats / pages" role="combobox" aria-expanded={Boolean(search)} aria-controls="chat-search-results" aria-activedescendant={search && chats.length ? `chat-result-${activeResult}` : undefined} /><kbd>/</kbd></label>,
     counts: {

@@ -1,4 +1,6 @@
 import type { ReactNode, Ref } from "react";
+import type { BuildActivity } from "../create/buildActivity";
+import { chatHref } from "./AgentNavAdapter";
 import type { CreateModeOwner } from "../create/createMode";
 import { isMac, modKey } from "../keyboard";
 import { createRoute, surfaceHref, surfaceRoutes, type SurfaceRoute } from "./routes";
@@ -17,7 +19,20 @@ function PlaceLink({ route, current, count }: { route: SurfaceRoute; current: Su
   </a>;
 }
 
-export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus }: {
+export function BuildStatus({ activity, className = "" }: { activity: BuildActivity; className?: string }) {
+  const { rows, building, needsYou } = activity;
+  const attention = rows.filter((row) => row.state === "needs you");
+  const running = rows.filter((row) => row.state === "building");
+  const stale = [...attention, ...running].some((row) => row.stale);
+  return (building > 0 || needsYou > 0) ? <div className={`build-status ${className}`} aria-label="page build progress">
+    {building > 0 && <a href={running.length === 1 && running[0]!.stale ? chatHref(running[0]!.chat) : surfaceHref(createRoute.path)}>{building} building</a>}
+    {needsYou > 0 && <a className="build-needs-you" href={attention.length === 1 ? chatHref(attention[0]!.chat) : surfaceHref(createRoute.path)}>{needsYou} needs you</a>}
+    {stale && <small>stale</small>}
+  </div> : null;
+}
+
+export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClose, onCollapse, openPalette, createMode, action, search, counts, recent, connectionStatus, activity }: {
+  activity: BuildActivity;
   current: SurfaceRoute;
   sidebar: Ref<HTMLElement>;
   narrow: boolean;
@@ -50,6 +65,7 @@ export function SurfaceNav({ current, sidebar, narrow, drawer, collapsed, onClos
             {createMode.pending ? "saving…" : createMode.enabled ? "on" : "off"}<span aria-hidden="true"> {createMode.error ? "!" : "· this page"}</span>
           </button>}
         </div>
+        <BuildStatus activity={activity} className="build-status-nav" />
       </div>
       <div className="surface-search">
         {search}
