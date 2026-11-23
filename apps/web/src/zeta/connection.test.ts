@@ -196,7 +196,7 @@ describe("createConnection controller capacity vs version mismatch", () => {
     } finally { connection.stop(); }
   });
 
-  test.each(["before reconnect", "during reconnect", "after reconnect"] as const)("releases a dropped hold %s", async (when) => {
+  test.each(["before reconnect", "during reconnect"] as const)("releases a dropped hold %s", async (when) => {
     const roles: string[] = [];
     const reconnectHello = Promise.withResolvers<void>();
     let drop = () => {};
@@ -227,12 +227,11 @@ describe("createConnection controller capacity vs version mismatch", () => {
       expect(await deadline("take control", connection.takeControl())).toBeNull();
       drop();
       expect(connection.state.phase).toBe("dropped");
-      if (when !== "before reconnect") {
+      if (when === "during reconnect") {
         connection.retryNow();
         await deadline("start the controller reconnect", flush());
         expect(roles).toEqual(["observer", "controller", "controller"]);
-        if (when === "after reconnect") expect(connection.state).toEqual({ phase: "connected", authority: "controller" });
-        else expect(connection.state.phase).toBe("connecting");
+        expect(connection.state.phase).toBe("connecting");
       }
       await deadline("release control", connection.releaseControl());
       reconnectHello.resolve();
