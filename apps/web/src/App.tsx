@@ -6,7 +6,7 @@ import { createHighlighter } from "@fulcrum/highlight";
 import { Markdown, type Fences, type MarkdownProps } from "@fulcrum/markdown/react";
 import { CodeFence } from "./chat/CodeFence";
 import { ToolSummaryBody, toolArgumentSummary } from "./chat/ToolSummary";
-import { Approval, Fallback, Message, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
+import { Approval, Fallback, Message, Notification, RunProvider, Timeline, ToolCall, useItem, type ComposerProps, type Renderers } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
 import { titleOf, useAgentNavAdapter } from "./surface/AgentNavAdapter";
@@ -31,7 +31,9 @@ import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
+import { continuationNotification } from "./chat/continuation";
 import "./chat/markdown.css";
+import "./chat/continuation.css";
 import "./shell.css";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
@@ -57,7 +59,13 @@ function UnknownRow({ id }: { id: string }) {
   if (item?.type === "unknown" && item.event.type === "unknown" && item.event.name === "replay_stream_ended") return null;
   return <Fallback id={id} />;
 }
-const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow, unknown: UnknownRow };
+function ChatNotification({ id }: { id: string }) {
+  const item = useItem(id);
+  if (item?.type !== "notification" || item.event.type !== "notification" || item.event.notification_id !== continuationNotification || typeof item.event.data?.text !== "string") return <Notification id={id} />;
+  return <p className="chat-continuation" role="status">{item.event.data.text}</p>;
+}
+
+const renderers: Renderers = { notification: ChatNotification, message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow, unknown: UnknownRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles.
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
@@ -294,9 +302,10 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     if (ready?.sessionId) setFollowRequest((value) => value + 1);
   }, [ready?.sessionId]);
   useLayoutEffect(() => {
-    setMobileChatOpen(false);
-    setPageChatFocusRequest(0);
-  }, [ready?.sessionId, activePage?.id]);
+    const openContinuation = hasBlocks && ready?.continued;
+    setMobileChatOpen(!!openContinuation);
+    setPageChatFocusRequest(openContinuation ? 1 : 0);
+  }, [ready?.sessionId, activePage?.id, ready?.continued, setMobileChatOpen]);
   useModalFocus(pageChatSheetOpen, pageChatSurface, pageChatClose, true);
   const askPageChat = (draft: string) => {
     const sessionId = ready?.sessionId ?? (activePage ? `new:${activePage.id}` : null);

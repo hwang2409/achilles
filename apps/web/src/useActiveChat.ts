@@ -1,7 +1,8 @@
-import { newChatIntent } from "./surface/routes";
+import { continueChatIntent, newChatIntent } from "./surface/routes";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ZetaError, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
-import type { Chat } from "./surface/AgentNavAdapter";
+import { findChat, type Chat } from "./surface/AgentNavAdapter";
+import { continuationNotification, sessionMissing } from "./chat/continuation";
 import { supportsFeature } from "./zeta";
 import { getSettings, useSettings } from "./settings";
 import { draftStore } from "./draftStore";
@@ -16,7 +17,7 @@ type PageAttachment = { page: Page; serverApprovalMode: string | null; credentia
 // newChat: the user asked for a new chat that zeta refused to start; its first send must create one, never open a chat
 type EmptyState = PageAttachment & { phase: "empty"; newChat?: true };
 // rebind: attached during a live turn without `resume`, so the page MCP binding must be re-sent once zeta is idle.
-type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean };
+type ReadyState = PageAttachment & { phase: "ready"; sessionId: string; lease: SessionLease; continued?: true; pendingApprovalMode: string | null; title: string; autoTitle: string; sent: boolean; rebind: boolean };
 type BusyState = PageAttachment & { phase: "busy"; busySessionId: string | null };
 type State = { phase: "loading" } | { phase: "error"; error: string } | { phase: "missing" } | EmptyState | ReadyState | BusyState;
 type BusyChat = { sessionId: string | null; chat: Chat | null; retry: "attach" | "new" };
@@ -96,22 +97,6 @@ function attachmentError(caught: unknown, context: "loading" | "creation" = "loa
     : message;
 }
 
-async function findChat(sessionId: string) {
-  let before: string | null = null;
-  do {
-    const params = new URLSearchParams({ limit: "200", include: sessionId });
-    if (before) params.set("before", before);
-    const response = await fetch(`/api/chats?${params}`, { cache: "no-store" });
-    if (!response.ok) return null;
-    const result = await response.json() as { chats: Chat[]; next: string | null };
-    const found = result.chats.find((chat) => chat.session_id === sessionId);
-    if (found) return found;
-    if (!result.chats.length) return null;
-    before = result.next;
-  } while (before);
-  return null;
-}
-
 // the newest listed chat (the sidebar's order) that matches
 async function findNewestChat(matches: (chat: Chat) => boolean) {
   let before: string | null = null;
@@ -145,6 +130,7 @@ export async function attachPage(
   forceNew = false,
   canWrite = false,
   purpose?: ChatCreationInput["purpose"],
+  continuing = false,
 ): Promise<EmptyState | ReadyState | BusyState> {
   let ownsLease = false;
   try {
@@ -157,7 +143,10 @@ export async function attachPage(
     const credential = ((await credentialResponse.json()) as { credential: string }).credential; requireCurrent(owner, token);
     const creationInput = { client, pageId: page.id, credential, cwd: page.workspace, purpose, mode: creationApprovalMode(page.approval_mode, getSettings().autoApproveDefault) };
     const selectedChat = selectedId ? await findChat(selectedId) : null; requireCurrent(owner, token);
-    if (selectedId && selectedChat?.page_id !== page.id) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
+    if (selectedId && selectedChat?.page_id !== page.id) {
+      if (continuing) throw new Error(sessionMissing);
+      throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
+    }
     const serverApprovalMode = page.approval_mode ?? null;
 
     const observer = !canWrite;
@@ -173,6 +162,8 @@ export async function attachPage(
         : await openHomeSession(client, sessionId, credential, page.workspace, serverApprovalMode, () => owner.current(token));
       requireCurrent(owner, token);
       const lease = await loadSession(client, session.id, () => owner.current(token));
+      const continued = continuing && canWrite && owner.current(token);
+      if (continued) lease.store.dispatch({ type: "notification", notification_id: continuationNotification, data: { text: `today · continuing session ${session.id}. zeta keeps the full history; new messages append to it.` } });
       if (!owner.accept(token, lease)) throw new StaleAttachment();
       ownsLease = true;
       page.approval_mode = session.approvalMode;
@@ -185,12 +176,12 @@ export async function attachPage(
       const title = userTitled ? (storedChat?.title?.trim() || autoTitle) : autoTitle;
       if (canWrite && !userTitled && session.name?.trim() && session.name.trim() !== storedChat?.title?.trim())
         void fetch(`/api/chats/${encodeURIComponent(session.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
-      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind };
+      return { phase: "ready", page, serverApprovalMode, sessionId: session.id, lease, ...(continued ? { continued: true } as const : {}), credential, pendingApprovalMode: session.pending ? "ask" : null, title, autoTitle, sent: storedChat?.message_sent ?? false, rebind: session.rebind };
     };
     const busy = (busySessionId: string | null): BusyState => ({ phase: "busy", page, serverApprovalMode, credential, busySessionId });
 
     // An explicit build attachment must not resume a pending ordinary create.
-    const creationStatus = canWrite && selectedChat?.purpose !== "page_build" ? creation.status(page.id, purpose) : undefined;
+    const creationStatus = canWrite && !continuing && selectedChat?.purpose !== "page_build" ? creation.status(page.id, purpose) : undefined;
     const pending = creationStatus?.pending;
     if (creationStatus?.createMode !== undefined) page.create_mode = creationStatus.createMode;
     // with no chat named, a page opens on its most recent chat (the sidebar's order), then on its home chat (page.zeta_session_id)
@@ -202,6 +193,7 @@ export async function attachPage(
       catch (caught) {
         if (caught instanceof ChatBusyError) return busy(caught.sessionId);
         if (!(caught instanceof SessionNotFoundError)) throw caught;
+        if (continuing) throw new Error(sessionMissing);
         if (selectedId) throw new MissingChatError(creationInput, page.route === "/" ? "/" : page.route);
         // only a lost home chat is replaced: the replacement moves page.zeta_session_id. a lost newer chat falls back to home
         if (sessionId === page.zeta_session_id) create = true;
@@ -587,6 +579,7 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
     const retrying = retryingCreation.current; retryingCreation.current = false;
     if (!client || !connected) return;
     const landing = location.pathname === createPath;
+    const continuing = !landing && !!selectedId && location.hash === continueChatIntent;
     const startFresh = !landing && createAfterLoad.current && location.hash === newChatIntent;
     const key = landing ? "home" : keyFromPath(homeAlias);
     const token = owner.current.begin(`${key}:${landing ? "build" : selectedId ?? "default"}`, true);
@@ -604,8 +597,12 @@ export function useActiveChat(client: ZetaClient | null, connected: boolean, clo
       if (!owner.current.current(token)) throw new StaleAttachment();
       if (creation.current.status(next.page.id).pending) publishReady(next, token, readAt);
       else applyActive(token, { kind: "snapshot", state: next, readAt });
-    }, landing || startFresh, !landing && !startFresh && canWrite).then((next) => {
+    }, landing || startFresh, !landing && !startFresh && canWrite, undefined, continuing).then((next) => {
       if (!owner.current.current(token)) return;
+      if (next.phase === "ready" && next.continued && location.hash === continueChatIntent) {
+        history.replaceState(history.state, "", location.pathname + location.search);
+        setFocusSessionId(next.sessionId);
+      }
       setCreationPageId(next.page.id);
       if (next.phase === "busy") void showBusy(token, next.busySessionId, "attach");
       applyActive(token, { kind: "snapshot", state: next, readAt });
