@@ -20,7 +20,7 @@ export async function gateShell(
   await page.keyboard.press(appShortcut("k"));
   const palette = page.getByRole("dialog", { name: "command palette" });
   const catalogPlaces = await palette.getByRole("option").evaluateAll((options) => options.flatMap((option) => {
-    const path = option.textContent?.match(/\/(?:chats|pages|agents|sessions|projects|telemetry|skills|agent-profiles|settings|accounts|mcp|create)$/)?.[0];
+    const path = option.textContent?.match(/\/(?:chats|pages|agents|sessions|projects|telemetry|skills|agent-profiles|settings|accounts|connections|create)$/)?.[0];
     return path ? [path] : [];
   }));
   if (catalogPlaces.length !== 12 || new Set(catalogPlaces).size !== 12) throw new Error("palette does not list all stable places exactly once");
