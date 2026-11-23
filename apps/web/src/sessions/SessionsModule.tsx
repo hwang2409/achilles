@@ -88,7 +88,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats }: {
   useLayoutEffect(() => {
     if (focus.current) {
       focus.current = false;
-      if (id) detail.current?.focus();
+      if (id) detail.current?.querySelector<HTMLAnchorElement>(".sessions-back")?.focus();
       else (restore.current && rowRefs.current.get(restore.current) || search.current)?.focus();
     }
     if (id) restore.current = id;
@@ -142,7 +142,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats }: {
               <a className="sessions-row" ref={(node) => { if (node) rowRefs.current.set(one.id, node); else rowRefs.current.delete(one.id); }}
                 href={href(one.id)} aria-current={one.id === id ? "page" : undefined} onClick={(event) => follow(event, href(one.id))}>
                 <span><strong title={one.title}>{one.title}</strong><small>{[one.project, short(one.id)].filter(Boolean).join(" · ")}</small></span>
-                <span>{owned.has(one.id) ? "achilles" : "outside achilles"}</span><StateTag state={one.status} />
+                <span>{owned.has(one.id) ? "achilles" : ""}</span><StateTag state={one.status} />
                 <span>{one.updated && <time dateTime={one.updated}>{timeLabel(one.updated)}</time>}</span>
               </a>
             </li>)}</ul>
@@ -166,7 +166,7 @@ function SessionDetail({ row, reader, transcript, owned, follow }: {
 }) {
   const [copied, setCopied] = useState("");
   const access = useMemo(() => reader && !transcript ? (signal: AbortSignal) => reader.transcriptMode(row, signal) : undefined, [reader, row.id, row.project, transcript]);
-  const mode = useRead(access);
+  const mode = useRead(access, 30000);
   const agents = useCollection(reader, row, "agents", !transcript);
   const tasks = useCollection(reader, row, "background_tasks", !transcript);
   const snapshot = [agents.data, tasks.data].filter((data) => !!data).sort((a, b) => b.reportedAt - a.reportedAt)[0]?.state ?? row.state;
@@ -174,9 +174,8 @@ function SessionDetail({ row, reader, transcript, owned, follow }: {
   const transcriptHref = href(row.id, true);
   const fields = (values: (readonly [string, ReactNode])[]) => values.filter(([, value]) => value !== undefined);
   return <>
-    <div className="sessions-title"><h2>{row.title}</h2><p><StateTag state={state} /> · {owned ? "achilles" : "outside achilles"}{row.project && <> · project {row.project}</>}</p></div>
+    <div className="sessions-title"><h2>{row.title}</h2><p><StateTag state={state} />{owned && " · achilles"}{row.project && <> · project {row.project}</>}</p></div>
     {transcript ? <SessionTranscript row={row} reader={reader} /> : <>
-      {state === "running" && !owned && <p className="sessions-callout">this session is running outside this achilles chat</p>}
       <dl className="sessions-fields">{fields([
         ["session id", <><code title={row.id}>{short(row.id)}</code> <button className="sessions-copy" type="button" onClick={async () => {
           try { await navigator.clipboard.writeText(row.id); setCopied("copied"); } catch { setCopied("could not copy"); }
