@@ -55,6 +55,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await resetKeeps(false);
   await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
+  if (await focused() !== "auto-approve default") throw new Error(`confirming auto-approve dropped focus to ${await focused()}`);
   await page.getByRole("option", { name: /gruvbox-light/ }).click();
   await resetKeeps(true);
   await page.getByRole("button", { name: "esc" }).click();
