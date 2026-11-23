@@ -10,10 +10,18 @@
   line-height: var(--g1-leading-chat);
 }
 [data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
-  border-inline-start-color: var(--g1-selection);
-  font-weight: 500;
+  grid-template-columns: minmax(0, 1fr);
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--g1-space-2) var(--g1-space-3);
+  border: var(--g1-border-width) solid var(--g1-border);
+  border-radius: var(--g1-radius-control);
+  background: var(--g1-panel);
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
-[data-part="message-prompt"],
+[data-part="item"][data-kind="user"] > [data-part="delivery-note"] { grid-column: 1; }
+[data-part="message-prompt"] { display: none; }
 [data-part="delivery-note"],
 [data-part="run-end-marker"] {
   font-family: var(--achilles-code-font, var(--g1-font-mono));
