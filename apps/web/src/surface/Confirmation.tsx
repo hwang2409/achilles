@@ -45,8 +45,9 @@ type Review = Common & Operation<Committed> & {
   undo: ReviewText;
   fields?: readonly { label: ReviewText; value: ReviewText | { provided: boolean } }[];
   proof: { kind: "name"; name: ReviewText } | { kind: "scope"; name?: never; label?: ReviewText };
-  // Keep the confirmation mounted through completion, along with its focus return target.
-  activity: HTMLElement;
+  // An adapter with its own trigger, receipt, and focus return mounts the review already open.
+  external?: { onKeep(): void };
+  activity?: HTMLElement;
 };
 export type ConfirmationProps = Inline | Review;
 
@@ -55,8 +56,8 @@ type Receipt = { text: ReviewText; at: Date };
 
 export function Confirmation(props: ConfirmationProps) {
   const id = useId();
-  const [phase, setPhase] = useState<Phase>("idle");
-  const phaseRef = useRef<Phase>("idle");
+  const [phase, setPhase] = useState<Phase>(() => props.level === 2 && props.external ? "review" : "idle");
+  const phaseRef = useRef(phase);
   const transition = (next: Phase) => { phaseRef.current = next; setPhase(next); };
   const [attempt, setAttempt] = useState<ConfirmationProps>(props);
   const [proof, setProof] = useState("");
@@ -103,7 +104,9 @@ export function Confirmation(props: ConfirmationProps) {
     transition("review");
   };
   const keep = () => {
-    if (phaseRef.current === "review") transition("idle");
+    if (phaseRef.current !== "review") return;
+    transition("idle");
+    if (attempt.level === 2) attempt.external?.onKeep();
   };
   const run = async (check: boolean) => {
     if (check ? phaseRef.current !== "unknown" : phaseRef.current !== "review" || !proved || failure?.final) return;
@@ -167,7 +170,7 @@ export function Confirmation(props: ConfirmationProps) {
   const step = phase === "pending" ? "confirming…" : phase === "checking" ? "checking…"
     : phase === "unknown" ? "result unknown" : failure ? "not changed" : "review";
   return <>
-    <button ref={opener} className="confirmation-trigger" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</button>
+    {!props.external && <button ref={opener} className="confirmation-trigger" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</button>}
     {open && createPortal(<dialog ref={dialog} className="confirmation-dialog" data-proof={attempt.proof.kind}
       aria-labelledby={`${id}-title`} aria-describedby={`${id}-effect ${id}-undo`}
       onCancel={event => { event.preventDefault(); event.stopPropagation(); keep(); }}
@@ -214,6 +217,6 @@ export function Confirmation(props: ConfirmationProps) {
         </footer>
       </form>
     </dialog>, document.body)}
-    {createPortal(notice, props.activity)}
+    {props.activity && createPortal(notice, props.activity)}
   </>;
 }
