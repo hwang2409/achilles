@@ -68,20 +68,20 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
   useEffect(() => { if (route && !route.known) { const href = hrefOf(route.id, "memory"); history.replaceState(null, "", surfaceHref(href)); setPath(href); } }, [route?.id, route?.known]);
   const listed = projects.state === "data" ? projects.rows : [];
   const lookup = useProjectLookup(client, projectReads(client) ? route?.id ?? null : null, listed, actions?.refresh);
-  if (!projectReads(client)) return <ModuleFrame title="projects">
+  if (!projectReads(client)) return <ModuleFrame title="Projects">
     <ModuleState kind="unsupported" title="projects need a newer zeta" detail="the zeta that achilles talks to cannot list projects. update zeta, then check again. chats, pages and the library still work."
       action={{ label: "check again", run: () => location.reload() }} />
   </ModuleFrame>;
   const link = (href: string, children: ReactNode, current?: boolean) =>
     <a href={surfaceHref(href)} aria-current={current ? "page" : undefined} onClick={(event) => go(event, href)}>{children}</a>;
-  if (!route) return <ModuleFrame title="projects">
+  if (!route) return <ModuleFrame title="Projects">
     <div className="projects">
       <Paged view={projects} noun="projects" empty="no projects yet. zeta creates one when a chat opens in a git folder.">
         {(rows) => <ul className="projects-list">
           {rows.map((row) => <li key={row.id}>{link(hrefOf(row.id), <>
             <strong data-row={row.id} title={row.name}>{row.name}</strong>
             <span title={row.path ?? undefined}>{row.path ?? "no folder"}</span>
-            <small>{row.sessions} sessions · {row.memory} memory · {row.inbox.new} new in inbox</small>
+            <small>{row.sessions} {row.sessions === 1 ? "session" : "sessions"} · {row.memory} memory · {row.inbox.new} new in inbox</small>
           </>)}</li>)}
         </ul>}
       </Paged>
@@ -89,13 +89,13 @@ export function ProjectsModule({ client, control, actions }: { client: ZetaClien
   </ModuleFrame>;
   const project = lookup.names.get(route.id);
   const name = project?.name ?? (lookup.state === "reading" ? "…" : "unknown project");
-  if (lookup.state === "missing") return <ModuleFrame title="projects">
+  if (lookup.state === "missing") return <ModuleFrame title="Projects">
     <div className="projects">
       <div className="projects-bar">{link(hrefOf(), "‹ all projects")}</div>
       <ModuleState kind="empty" title="no project with this id" detail="it may have been removed, or the address is wrong." />
     </div>
   </ModuleFrame>;
-  return <ModuleFrame title={`projects / ${name}`}>
+  return <ModuleFrame title={`Projects / ${name}`}>
     <div className="projects">
       <div className="projects-bar">
         {link(hrefOf(), "‹ all projects")}

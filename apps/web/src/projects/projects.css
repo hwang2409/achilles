@@ -6,8 +6,11 @@
 .projects :is(a, button):hover { background: var(--g1-hover); }
 .projects ul { list-style: none; margin: 0; padding: 0; }
 .projects-inbox li + li, .projects-group li + li { border-top: 1px solid var(--g1-rule); }
-.projects-list a { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) auto; align-items: center; gap: 4px 16px; padding: 10px 16px; min-height: 52px; border-bottom: 1px solid var(--g1-rule); text-decoration: none; }
-.projects-list span { font-size: var(--g1-type-meta); }
+.projects-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) auto; column-gap: var(--g1-space-4); }
+.projects-list :is(li, a) { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+.projects-list a { align-items: center; row-gap: 4px; padding: 10px 16px; min-height: 52px; border-bottom: 1px solid var(--g1-rule); text-decoration: none; }
+.projects-list span { font-size: var(--g1-type-meta); text-align: start; }
+.projects-list small { text-align: end; }
 .projects-list a:hover { box-shadow: inset var(--g1-selection-width) 0 var(--g1-accent); }
 .projects-list :is(span, small), .projects-note, .projects-group small, .projects-inbox small { color: var(--fulcrum-muted); }
 .projects-list small, .projects-note, .projects-group small, .projects-inbox small { font-size: 12px; }
@@ -44,7 +47,8 @@
 
 @media (max-width: 760px), (max-height: 500px) {
   .projects { padding: var(--g1-space-4); }
-  .projects-list a { grid-template-columns: minmax(0, 1fr); }
+  .projects-list { grid-template-columns: minmax(0, 1fr); }
+  .projects-list small { text-align: start; }
 }
 
 .projects-selection, .projects-memory-row, .projects-entry-action { display: flex; align-items: center; gap: 8px; }

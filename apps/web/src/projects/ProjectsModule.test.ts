@@ -67,10 +67,10 @@ test.each([
     zeta.held.add("state_projects");
     const { view } = mount(zeta, "/projects/p_target/memory");
     const reveal = await view.findByRole("button", { name: "take control and show decision text" });
-    expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / …");
+    expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Projects / …");
     zeta.held.delete("state_projects");
     await act(async () => { fireEvent.click(reveal); });
-    await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / target"));
+    await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Projects / target"));
     expect(view.getByText("/fixture/target")).toBeTruthy();
   }],
   ["lookup fails on a live socket -> nothing stored, the name resolves on the next client", async (zeta: ReturnType<typeof fakeZeta>) => {
@@ -78,9 +78,9 @@ test.each([
     const { view } = mount(zeta, "/projects/p_target/memory");
     const reveal = await view.findByRole("button", { name: "take control and show decision text" });
     await waitFor(() => expect(zeta.asked("state_projects")).toBe(3)); // list page 1, lookup page 1, lookup page 2 (busy)
-    expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / …");
+    expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Projects / …");
     await act(async () => { fireEvent.click(reveal); });
-    await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("projects / target"));
+    await waitFor(() => expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Projects / target"));
   }],
   ["load more interrupted by a borrow -> the next page loads after the borrow", async (zeta: ReturnType<typeof fakeZeta>) => {
     const { view } = mount(zeta, "/projects/p_target/memory");
