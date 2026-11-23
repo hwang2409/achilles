@@ -3,8 +3,10 @@ import { ZetaError, type ZetaClient } from "@fulcrum/zeta";
 import { NoAnswer } from "../zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
-import { hasKindText, memoryKinds, projectReads, readInbox, readKindText, readMemory, readMessage, readProjects, Unreadable,
-  type Body, type InboxRow, type MemoryKind, type MemoryPage, type Page, type ProjectRow } from "./reads";
+import type { MemoryActions } from "./MemoryActions";
+import { MAX_RESOLVE, memoryWriteAccess, type MemoryAction, type MemoryReceipt } from "./memoryWrites";
+import { canAcceptMemory, hasKindText, isMemoryId, memoryKinds, projectReads, readInbox, readKindText, readMemory, readMessage, readProjects, Unreadable,
+  type Body, type InboxRow, type MemoryKind, type MemoryRow, type MemoryPage, type Page, type ProjectRow } from "./reads";
 import "./projects.css";
 
 type Tab = "memory" | "inbox";
@@ -41,7 +43,7 @@ function problemOf(error: unknown): Problem | "observer" {
   return { message: "zeta could not read it", retry: true };
 }
 
-export function ProjectsModule({ client, control }: { client: ZetaClient; control: Control }) {
+export function ProjectsModule({ client, control, actions }: { client: ZetaClient; control: Control; actions?: MemoryActions }) {
   // read the address here, not from the router: a reconnect remounts this module after pushState changed it.
   const [path, setPath] = useState(() => location.pathname);
   useEffect(() => {
@@ -55,9 +57,9 @@ export function ProjectsModule({ client, control }: { client: ZetaClient; contro
     if (href !== location.pathname) history.pushState(null, "", surfaceHref(href));
     setPath(href);
   };
-  const projects = usePages(client, (reader, cursor, signal) => readProjects(reader, cursor, { signal }), [], projectReads(client));
+  const projects = usePages(client, (reader, cursor, signal) => readProjects(reader, cursor, { signal }), [actions?.refresh], projectReads(client));
   const [borrowing, setBorrowing] = useState(false);
-  const borrow: Borrow = { ...control, observer: control.observer || borrowing, borrowing, withControl: async (read) => {
+  const borrow: Borrow = { ...control, observer: control.observer || borrowing, borrowing: borrowing || !!actions?.working, withControl: async (read) => {
     setBorrowing(true);
     try { return await control.withControl(read); } finally { setBorrowing(false); }
   } };
@@ -65,7 +67,7 @@ export function ProjectsModule({ client, control }: { client: ZetaClient; contro
   // an unknown view segment shows memory: say so in the address too.
   useEffect(() => { if (route && !route.known) { const href = hrefOf(route.id, "memory"); history.replaceState(null, "", surfaceHref(href)); setPath(href); } }, [route?.id, route?.known]);
   const listed = projects.state === "data" ? projects.rows : [];
-  const lookup = useProjectLookup(client, projectReads(client) ? route?.id ?? null : null, listed);
+  const lookup = useProjectLookup(client, projectReads(client) ? route?.id ?? null : null, listed, actions?.refresh);
   if (!projectReads(client)) return <ModuleFrame title="projects">
     <ModuleState kind="unsupported" title="projects need a newer zeta" detail="the zeta that achilles talks to cannot list projects. update zeta, then check again. chats, pages and the library still work."
       action={{ label: "check again", run: () => location.reload() }} />
@@ -103,7 +105,7 @@ export function ProjectsModule({ client, control }: { client: ZetaClient; contro
       </div>
       {project?.path && <p className="projects-note projects-path" title={project.path}>{project.path}</p>}
       {route.tab === "memory"
-        ? <MemoryTab key={route.id} client={client} projectId={route.id} control={borrow} />
+        ? <MemoryTab key={route.id} client={client} projectId={route.id} control={borrow} projectName={name} actions={actions} refresh={actions?.refresh ?? 0} />
         : <InboxTab key={route.id} client={client} projectId={route.id} control={borrow} names={lookup.names} />}
     </div>
   </ModuleFrame>;
@@ -112,7 +114,7 @@ export function ProjectsModule({ client, control }: { client: ZetaClient; contro
 type Lookup = { names: ReadonlyMap<string, ProjectRow>; state: "found" | "reading" | "missing" | "unknown" };
 
 /** Names from every loaded list page, plus a bounded search for the selected project when it is not loaded yet. */
-function useProjectLookup(client: ZetaClient, id: string | null, listed: ProjectRow[]): Lookup {
+function useProjectLookup(client: ZetaClient, id: string | null, listed: ProjectRow[], refresh?: number): Lookup {
   const [searched, setSearched] = useState<{ id: string; rows: ProjectRow[]; state: Lookup["state"] } | null>(null);
   const names = new Map<string, ProjectRow>();
   for (const row of [...(searched?.rows ?? []), ...listed]) names.set(row.id, row);
@@ -135,7 +137,7 @@ function useProjectLookup(client: ZetaClient, id: string | null, listed: Project
       setSearched({ id, rows, state: rows.some((row) => row.id === id) ? "found" : cursor === null ? "missing" : "unknown" });
     })();
     return () => abort.abort();
-  }, [id, known, client]);
+  }, [id, known, client, refresh]);
   return { names, state: known ? "found" : id !== null && searched?.id === id ? searched.state : "reading" };
 }
 
@@ -221,12 +223,41 @@ const kindLabel = (kind: MemoryKind) => kind === "legacy" ? "documents" : kind;
 const ControlNote = ({ control, shown }: { control: Borrow; shown: boolean }) => control.observer && shown
   ? <p id={CONTROL_NOTE} className="projects-note">zeta lets only the tab in control read full text. taking control pauses sending and approvals in other tabs for this read.</p> : null;
 
-function MemoryTab({ client, projectId, control }: { client: ZetaClient; projectId: string; control: Borrow }) {
-  const view = usePages(client, (reader, cursor, signal) => readMemory(reader, projectId, cursor, { signal }), [projectId]);
+function MemoryTab({ client, projectId, projectName, control, actions, refresh }: {
+  client: ZetaClient; projectId: string; projectName: string; control: Borrow; actions?: MemoryActions; refresh: number;
+}) {
+  const view = usePages(client, (reader, cursor, signal) => readMemory(reader, projectId, cursor, { signal }), [projectId, refresh]);
   const oldFormat = view.state === "data" && view.oldFormat;
+  const [selection, setSelection] = useState<{ refresh: number; ids: Set<string> }>(() => ({ refresh, ids: new Set() }));
+  const selected = selection.refresh === refresh ? selection.ids : new Set<string>();
+  const canWrite = !!actions && !oldFormat && memoryWriteAccess(client, !control.observer);
+  const waiting = control.borrowing || !!actions?.working;
+  const feedback = actions?.feedback?.projectId === projectId ? actions.feedback : null;
+  const active = view.state === "data" ? view.rows.filter((row) => selected.has(row.id)) : [];
+  const start = (event: MouseEvent<HTMLButtonElement>, action: MemoryAction, rows: MemoryRow[], receipt?: MemoryReceipt) => {
+    if (!waiting && canWrite) void actions.start(event.currentTarget, projectId, projectName, action, rows, receipt);
+  };
   // format 1 summaries are the files' first lines, usually a markdown heading: show the heading text.
   const summary = (text: string) => (oldFormat ? text.replace(/^#+\s*/, "") : text) || "(empty)";
-  return <section className="projects-tab" aria-label="memory">
+  return <section className="projects-tab" aria-label="memory" tabIndex={-1} data-memory-tab>
+    {feedback && <aside className="projects-notice" tabIndex={-1} data-memory-feedback>
+      <div role={feedback.error ? "alert" : "status"}>{feedback.message}</div>
+      <div className="projects-actions">
+        {feedback.receipt && canWrite && <button type="button" data-write-surface="project.memory.undo" aria-disabled={waiting}
+          aria-describedby={control.observer ? "projects-write-note" : undefined}
+          onClick={(event) => start(event, "undo", [], feedback.receipt)}>undo this memory change</button>}
+        <button type="button" onClick={(event) => { actions?.dismiss(); event.currentTarget.closest<HTMLElement>("[data-memory-tab]")?.focus(); }}>dismiss</button>
+      </div>
+    </aside>}
+    {actions?.working && <p className="projects-note" role="status">preparing or finishing memory review…</p>}
+    {canWrite && control.observer && ((view.state === "data" && view.rows.length > 0) || feedback?.receipt) &&
+      <p id="projects-write-note" className="projects-note">zeta lets only the tab in control read full text. reviewing a change takes control to read the memory revision. it will not interrupt a chat tab in control.</p>}
+    {canWrite && view.state === "data" && view.rows.some((row) => isMemoryId(row.id)) && <div className="projects-selection">
+      <span role="status">{active.length} selected{active.length === MAX_RESOLVE ? " · limit reached" : " · select up to 64 to resolve"}</span>
+      <button type="button" data-write-surface="project.memory.resolve" aria-disabled={!active.length || waiting}
+        aria-describedby={control.observer ? "projects-write-note" : undefined}
+        onClick={(event) => { if (active.length) start(event, "resolve", active); }}>review resolve</button>
+    </div>}
     <ControlNote control={control} shown={view.state === "data" && !oldFormat && view.rows.some((row) => hasKindText(row.kind))} />
     {view.state === "data" && view.rows.length > 0 && !oldFormat && <p className="projects-note">summaries only · full text loads when you open it, is not cached, and never goes in the address</p>}
     {oldFormat && <aside className="projects-notice" role="status">
@@ -239,7 +270,24 @@ function MemoryTab({ client, projectId, control }: { client: ZetaClient; project
         return group.length > 0 && <section key={kind} className="projects-group" aria-labelledby={`memory-${kind}`}>
           <h2 id={`memory-${kind}`}>{kindLabel(kind)} <small>{group.length}</small></h2>
           <ul>
-            {group.map((row) => <li key={row.id} data-row={row.id} tabIndex={-1}><span>{summary(row.summary)}</span>{row.automatic && <small>automatic</small>}</li>)}
+            {group.map((row) => <li key={row.id} data-row={row.id} tabIndex={-1}>
+              {canWrite && isMemoryId(row.id) ? <div className="projects-memory-row">
+                <label className="projects-select-entry">
+                  <input type="checkbox" checked={selected.has(row.id)} disabled={waiting || (!selected.has(row.id) && selected.size >= MAX_RESOLVE)}
+                    onChange={(event) => {
+                      const ids = new Set(selected);
+                      if (event.currentTarget.checked) ids.add(row.id); else ids.delete(row.id);
+                      setSelection({ refresh, ids });
+                    }} />
+                  <span>{summary(row.summary)}</span>
+                </label>
+                {row.automatic && <div className="projects-entry-action"><small>{row.accepted ? "accepted" : "automatic"}</small>
+                  {canAcceptMemory(row) && <button type="button" data-write-surface="project.memory.accept" aria-disabled={waiting}
+                    aria-describedby={control.observer ? "projects-write-note" : undefined}
+                    onClick={(event) => start(event, "accept", [row])}>review accept</button>}
+                </div>}
+              </div> : <><span>{summary(row.summary)}</span>{row.automatic && <small>automatic</small>}</>}
+            </li>)}
           </ul>
           {!oldFormat && hasKindText(kind) && <Reveal id={`${projectId}/${kind}`} noun={`${kind} text`} client={client} control={control}
             load={(reader, signal) => readKindText(reader, projectId, kind, { signal })} />}
