@@ -62,7 +62,7 @@ export function CommandPalette({ commands, pages, searchChats, onClose }: { comm
   return <Modal className="command-palette" label="command palette" onClose={onClose}>
     <div className="palette-input">
       <span aria-hidden="true">&gt;</span>
-      <input autoFocus aria-label="search commands, pages, and chats" placeholder="type a command, page, or chat" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} role="combobox" aria-expanded="true" aria-controls="palette-results" aria-activedescendant={entries.length ? `palette-option-${current}` : undefined} autoComplete="off" spellCheck={false} />
+      <input autoFocus aria-label="search commands, pages, and chats" placeholder="Search commands, pages, and chats" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} role="combobox" aria-expanded="true" aria-controls="palette-results" aria-activedescendant={entries.length ? `palette-option-${current}` : undefined} autoComplete="off" spellCheck={false} />
       <kbd>esc</kbd>
     </div>
     <div ref={list} className="palette-results" id="palette-results" role="listbox" aria-label="results">
