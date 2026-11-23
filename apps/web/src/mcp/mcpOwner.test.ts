@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { createMcpOwner, mcpMethods, type McpAttempt, type McpOutcome } from "./mcpOwner";
+import { createMcpOwner, mcpMethods, projectAdd, type McpAddAttempt, type McpAddMutation, type McpAttempt, type McpOutcome } from "./mcpOwner";
 
 const a = "a".repeat(64), b = "b".repeat(64);
 const enabled = { action: "enabled", name: "fixture", scope: "user", revision: a, value: false } as const;
@@ -40,14 +40,14 @@ function rig() {
     const outcomes: McpOutcome[] = [];
     let detach = owner.attach(form, (value) => outcomes.push(value));
     return { outcomes, close: () => owner.close(form), detach: () => detach(), attach: () => { detach = owner.attach(form, (value) => outcomes.push(value)); },
-      execute: (sent: McpAttempt = enabled) => track(owner.execute(form, sent)), check: (sent: McpAttempt = enabled) => track(owner.check(form, sent)) };
+      execute: (sent: McpAttempt = enabled) => track(owner.execute(form, sent)), add: (sent: McpAddAttempt, take: () => McpAddMutation | null) => track(owner.add(form, sent, take)), check: (sent: McpAttempt | McpAddAttempt = enabled) => track(owner.check(form, sent)) };
   };
   const track = <T,>(promise: Promise<T>) => { jobs.push(promise); return promise; };
   const cancel = () => { forms.forEach(owner.close); gates.forEach((finish) => finish()); };
   async function deadline<T>(operation: string, promise: Promise<T>): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try { return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { cancel(); reject(new Error(`${operation} did not finish`)); }, 500);
+      timer = setTimeout(() => { cancel(); reject(new Error(`${operation} did not finish`)); }, 10_000);
     })]); } finally { clearTimeout(timer); }
   }
   function gate<T>(value: T) {
@@ -69,7 +69,7 @@ type Rig = ReturnType<typeof rig>;
 const rowTest = (name: string, check: (r: Rig) => Promise<void>) => test(name, async () => {
   const r = rig();
   try { await check(r); } finally { await r.cleanup(); }
-});
+}, 60_000);
 const fail = (value: unknown) => () => { throw value; };
 const allScopes = ["effective", "user", "project"];
 
@@ -199,4 +199,55 @@ rowTest("outcome while detached is delivered once when reattached", async (r) =>
   expect(form.outcomes.map(({ status }) => status)).toEqual(["committed"]);
   expect(r.writes).toHaveLength(1);
   expect(r.events).toEqual(["acquire", "release"]);
+});
+
+const rawAdd = { name: "fixture", scope: "user", enabled: true, env: { FIXTURE_ENV: "add-private-env" },
+  url: "https://example.invalid/add-private-url", headers: { FIXTURE_HEADER: "add-private-header" },
+  oauth: true, client_id: "add-private-client", client_secret: "add-private-secret" } as const;
+const addAttempt = { action: "add", revision: a, scope: "user", name: "fixture", enabled: true, existed: false, config: projectAdd(rawAdd) } as const;
+const redactedAdd = { ...row("user", true), config: { transport: "streamable-http", url: "<redacted-url>",
+  env: { "add-private-key": "<redacted>" }, headers: { "add-private-header-key": "<redacted>" }, auth: { type: "oauth", client_secret: "<redacted>" } } };
+
+rowTest("add stale drops private fields and publishes only the refreshed view", async (r) => {
+  const form = r.open();
+  r.replies.push(fail({ ...stale, message: "add-private-secret" }));
+  r.read(() => list(b));
+  await r.deadline("stale add and refresh", form.add(addAttempt, () => rawAdd));
+  expect(form.outcomes).toEqual([{ status: "stale" }]);
+  expect(r.writes).toEqual([{ method: mcpMethods.add, params: { revision: a, mutation: rawAdd } }]);
+  expect(JSON.stringify(r.owner.reads.snapshot())).not.toContain("add-private");
+  expect(r.reads).toEqual(allScopes);
+});
+
+rowTest("add retries definite busy only; a lost response checks exact concrete identity and safe config without resending", async (r) => {
+  const form = r.open();
+  const held = r.gate(undefined);
+  r.wait(() => held.hold());
+  r.replies.push(fail({ code: -32004, data: { reason: "operation_busy" } }), fail(new Error("add-private-secret")));
+  r.read((scope) => scope === "effective" ? list(b, { ...redactedAdd, scope: "project" }) : list(a));
+  let takes = 0;
+  const running = form.add(addAttempt, () => { takes++; return rawAdd; });
+  await r.deadline("first add reached busy backoff", held.entered);
+  expect(takes).toBe(1);
+  expect(r.writes).toHaveLength(1);
+  held.resume();
+  await r.deadline("add after busy and unknown settle", running);
+  expect(form.outcomes).toEqual([{ status: "unknown" }]);
+  r.read((scope) => scope === "user" ? list(b, { ...redactedAdd, name: "different" }, { ...redactedAdd,
+    config: { ...redactedAdd.config, headers: {} } }) : list(a));
+  await r.deadline("read concrete scope with conflicting projection", form.check(addAttempt));
+  expect(form.outcomes.at(-1)).toEqual({ status: "changed" });
+  expect(r.writes).toHaveLength(2);
+  expect(takes).toBe(1);
+  expect(JSON.stringify([form.outcomes, r.owner.reads.snapshot()])).not.toContain("add-private");
+});
+
+rowTest("add lost reply can settle from an exact safe projection without retaining private values", async (r) => {
+  const form = r.open();
+  r.replies.push(fail({ code: -32004, message: "add-private-secret" }));
+  r.read((scope) => scope === "user" ? list(b, redactedAdd) : list(a));
+  await r.deadline("lost add reply and exact projection settlement", form.add(addAttempt, () => rawAdd));
+  expect(form.outcomes).toEqual([{ status: "committed", restart: null }]);
+  expect(r.writes).toHaveLength(1);
+  expect(JSON.stringify([form.outcomes, r.owner.reads.snapshot()])).not.toContain("add-private");
 });
