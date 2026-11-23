@@ -7,6 +7,7 @@ import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { useMemoryActions } from "../projects/MemoryActions";
 import { ProjectsModule } from "../projects/ProjectsModule";
+import { createChildControls } from "../agents/childControls";
 import { createChildSendOwner } from "../agents/childSend";
 import { AgentsModule } from "../agents/AgentsModule";
 import { SessionsModule } from "../sessions/SessionsModule";
@@ -55,6 +56,7 @@ export function SurfaceRouter() {
   });
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
+  const [childControls] = useState(() => createChildControls(connection));
   const [childSend] = useState(() => createChildSendOwner(connection));
   const [mcpOwner] = useState(() => createMcpOwner({
     live: () => connection.client,
@@ -88,7 +90,7 @@ export function SurfaceRouter() {
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
   } else if (route.id === "agents") {
-    content = <AgentsModule send={childSend} client={client} connecting={connecting} retry={() => connection.retryNow()} />;
+    content = <AgentsModule controls={childControls} send={childSend} client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
     content = <McpModule client={client} owner={mcpOwner} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {

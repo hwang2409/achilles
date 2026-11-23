@@ -45,13 +45,15 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   const emit = (event: object) => reply(socket, event);
   const controllers = new Set<Socket>();
   class Socket extends EventTarget {
+    role?: string;
     constructor() { super(); socket = this; options.sockets?.push(this); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
     close() { controllers.delete(this); this.dispatchEvent(new Event("close")); }
     send(raw: string) {
       const { id, method, params } = JSON.parse(raw);
       requests.push(method);
       if (!reads.has(method)) writes.push(method);
-      if (method === "hello") options.roles?.push(params.role);
+      if (method === "hello") { this.role = params.role; options.roles?.push(params.role); }
+      if (method === "child_run_spawn" || method === "child_run_cancel") expect(this.role).toBe("controller");
       const taken = options.slot && method === "hello" && params.role === "controller" && [...controllers].some((other) => other !== this);
       if (options.slot && method === "hello" && params.role === "controller" && !taken) controllers.add(this);
       const custom = taken ? { error: { code: -32001, message: "controller occupied" } } : options.rpc?.[method]?.(params, requests);
@@ -361,7 +363,58 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
   } };
 }
 
+function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
+  const spawning = id === "agents.spawn";
+  const method = spawning ? "child_run_spawn" : "child_run_cancel";
+  const roles: string[] = [];
+  return { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["agent_run_catalog", ...(params.role === "controller" ? [method] : [])] } } }),
+    status: () => ({ result: { state: "idle", session: { session_id: spawning ? "active-parent" : "session", cwd: "/fixture",
+      agent_catalog: [{ name: "fixture-profile", description: "fixture profile", tools: [] }] } } }),
+    agent_run_catalog: ({ root_session_id }) => ({ result: { revision: "1", data: { items: root_session_id === "active-parent" ? [] : [{
+      session_id: "session", run_id: "fixture-run", parent_run_id: null, agent_type: "fixture-profile", description: "fixture task",
+      status: "running", accepts_follow_ups: false, turns_used: 1, tool_count: 0, current_step: "working", started_at: "2026-01-01",
+      finished_at: null, elapsed_seconds: 1,
+    }] } } }),
+    [method]: (params) => {
+      expect(params).toEqual(spawning ? { session_id: "active-parent", agent_type: "fixture-profile", task: "reviewed task", background: true }
+        : { session_id: "session", run_id: "fixture-run", reason: "user_cancelled" });
+      return { result: { data: { accepted: true, run_id: spawning ? "new-fixture-run" : "fixture-run", state: "cancelling" } } };
+    },
+  } }, check: async (app, authority, writes) => {
+    const before = roles.length;
+    expect(roles.at(-1)).toBe("observer");
+    await app.findByRole("heading", { name: /fixture task/ });
+    if (spawning) {
+      await click(app.getByRole("button", { name: "+ spawn agent" }));
+      await app.findByRole("option", { name: "fixture-profile" });
+      await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
+      await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
+      await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
+    } else await click(select(app, tag(id)));
+    expect(roles).toHaveLength(before);
+    expect(writes).toEqual([]);
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(true);
+    if (spawning) await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+    else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
+    expect(confirm.disabled).toBe(false);
+    await act(async () => { fireEvent.submit(confirm.form!); });
+    if (authority === "observer") {
+      expect(app.getByRole("alert").textContent).toContain("another tab had control");
+      expect(roles.slice(before)).toEqual(["controller"]);
+    } else {
+      expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
+      expect(writes).toEqual([method]);
+      expect(roles.slice(before)).toEqual(["controller", "observer"]);
+    }
+  } };
+}
+
 const rows: Record<WriteSurfaceId, Row> = {
+  "agents.spawn": agentControl("agents.spawn"),
+  "agents.cancel": agentControl("agents.cancel"),
   "agents.send": { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: ["agent_run_catalog_v1", "child_runs"],
       requests: ["agent_run_catalog", ...(params.role === "controller" ? ["child_run_send"] : [])] } } }),
