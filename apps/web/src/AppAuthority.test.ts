@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "list_sessions", "state_sessions", "state_session"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -21,6 +21,7 @@ type Authority = "observer" | "controller";
 type Options = { path?: string; observerBanner?: false; sockets?: EventTarget[]; slot?: boolean; roles?: string[]; browserPreference?: keyof ReturnType<typeof getSettings>; unsent?: boolean; pending?: boolean; attached?: boolean; extraChat?: typeof chat; page?: Record<string, unknown>; tool?: object; chat?: object; joined?: object; rpc?: Record<string, (params: Record<string, unknown>, requests: readonly string[]) => object | Promise<object>>; http?: (path: string, method: string) => Response | undefined };
 
 async function withApp(authority: Authority, options: Options, check: (app: RenderResult, writes: string[], requests: string[], emit: (event: object) => void) => Promise<void>) {
+  options.roles?.splice(0);
   const writes: string[] = [];
   const requests: string[] = [];
   // Happy DOM has no layout; give the real virtual timeline a viewport.
@@ -127,6 +128,11 @@ const select = (app: RenderResult, selector: string) => {
   expect(element, selector).not.toBeNull();
   return element!;
 };
+
+const sessionDetail = (metadata: object = {}): Options => ({
+  path: "/sessions/session", observerBanner: false,
+  rpc: { status: () => ({ result: { session: null, state: "idle" } }), list_sessions: () => ({ result: { sessions: [{ session_id: "session", name: "Fixture session", project_id: "other-project", parent_session_id: null, in_use: false, ...metadata }], next_offset: null } }) },
+});
 
 type Row = { kind: "visible" | "command" | "passive" | "local-only"; absent?: true; options?: Options; check: (app: RenderResult, authority: Authority, writes: string[], requests: string[]) => Promise<void> };
 const tag = (id: WriteSurfaceId) => `[data-write-surface="${id}"]`;
@@ -465,6 +471,25 @@ const rows: Record<WriteSurfaceId, Row> = {
     await act(async () => { fireEvent.submit(field.closest("form")!); });
     didWrite(writes, "send");
   } },
+  "sessions.continue": { kind: "visible", options: { ...sessionDetail(), roles: [] }, check: async (app, authority, writes, requests) => {
+    const action = await app.findByRole("button", { name: "continue in chat" });
+    expect(disabled(action)).toBe(false);
+    expect(requests.filter((method) => method === "hello")).toHaveLength(1);
+    expect(rows["sessions.continue"].options!.roles).toEqual(["observer"]);
+    expect(writes).toEqual([]);
+    action.focus();
+    await click(action);
+    expect(rows["sessions.continue"].options!.roles).toEqual(["observer", "controller"]);
+    if (authority === "observer") {
+      expect(await app.findByText(/^at .+ another tab had control\. a chat tab keeps it while it is open; try again after it finishes or closes\.$/)).toBeTruthy();
+      expect(location.pathname).toBe("/sessions/session");
+      expect(document.activeElement).toBe(action);
+      expect(writes).toEqual([]);
+    } else {
+      expect(location.pathname + location.search + location.hash).toBe("/?chat=session#continue-chat");
+      expect(writes).toEqual(['POST /api/pages/home/chats {"session_id":"session"}']);
+    }
+  } },
   "passive.last-state": { kind: "passive", options: { attached: true }, check: async (_app, authority, writes) => {
     if (authority === "controller") didWrite(writes, 'PATCH /api/chats/session {"last_state":');
   } },
@@ -500,6 +525,69 @@ test.each(WRITE_SURFACES)("public authority: $id", async ({ id, visibility }) =>
   for (const authority of ["observer", "controller"] as const) {
     await withApp(authority, row.options ?? {}, (app, writes, requests) => row.check(app, authority, writes, requests));
   }
+});
+
+test.each([
+  ["child", { parent_session_id: "parent" }, "child sessions cannot continue as top-level chats. open the parent session instead."],
+  ["leased", { in_use: true, owner_pid: 999999 }, "this session is active in another zeta process. close it there, then try again."],
+  ["offline", {}, "connect to zeta to continue this session in chat."],
+  ["pending", {}, "opening this session in chat…"],
+] as const)("session continuation detail: %s", async (name, metadata, reason) => {
+  const sockets: EventTarget[] = [];
+  const options = { ...sessionDetail(metadata), sockets };
+  await withApp("controller", options, async (app, writes) => {
+    const action = await app.findByRole("button", { name: "continue in chat" });
+    if (name === "offline") await act(async () => { sockets[0]!.dispatchEvent(new Event("close")); });
+    if (name === "pending") {
+      // The scheduled hello reply has not reached the app in this synchronous click task.
+      act(() => { fireEvent.click(action); });
+      expect(action.textContent).toBe("continuing…");
+    }
+    expect(disabled(action)).toBe(true);
+    expect(document.getElementById(action.getAttribute("aria-describedby")!)?.textContent).toBe(reason);
+    expect(app.container.textContent).not.toContain("999999");
+    expect(writes).toEqual([]);
+    if (name === "pending") await act(async () => {});
+  });
+});
+
+for (const authority of ["controller", "observer"] as const) test(`continuation attachment and replay: ${authority}`, async () => {
+  const divider = "today · continuing session session. zeta keeps the full history; new messages append to it.";
+  await withApp(authority, { path: "/?chat=session#continue-chat", chat, joined: { messages: [userMessage] } }, async (app, writes, _requests, emit) => {
+    const old = await app.findByText("Fixture history title", { selector: '.transcript *' });
+    if (authority === "observer") {
+      expect(writes).toEqual([]);
+      expect(app.queryByText(divider)).toBeNull();
+      expect(location.hash).toBe("#continue-chat");
+      return;
+    }
+    const marker = await app.findByText(divider);
+    expect(marker.getAttribute("role")).toBe("status");
+    expect(old.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(writes.filter((method) => method === "resume")).toHaveLength(1);
+    expect(location.hash).toBe("");
+    expect(document.activeElement).toBe(app.getByRole("textbox", { name: "message" }));
+    await act(async () => { emit({ jsonrpc: "2.0", method: "event", params: { event: "user_message", session_id: "session", text: "Fixture appended message", mode: "send" } }); });
+    const appended = await app.findByText("Fixture appended message");
+    expect(marker.compareDocumentPosition(appended) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  if (authority === "controller") await withApp(authority, { attached: true, joined: { messages: [userMessage] } }, async (app) => {
+    await app.findByText("Fixture history title", { selector: '.transcript *' });
+    expect(app.queryByText(divider)).toBeNull();
+  });
+});
+
+test.each([
+  [-32004, "session_owned", "this session is active in another zeta process. close it there, then try again."],
+  [-32003, "session_not_found", "this session no longer exists. refresh sessions to update the list."],
+] as const)("continuation attachment sanitizes %s %s", async (code, reason, copy) => {
+  const resume = () => ({ error: { code, message: "fixture raw error 999999", data: { code: reason, owner: { pid: 999999, surface: "fixture surface" } } } });
+  await withApp("controller", { path: "/?chat=session#continue-chat", chat, rpc: { resume } }, async (app, writes) => {
+    expect(await app.findByText(copy, {}, { timeout: 3000 })).toBeTruthy();
+    expect(writes).toEqual(Array(code === -32004 ? 4 : 1).fill("resume"));
+    expect(app.container.textContent).not.toContain("999999");
+    expect(app.queryByRole("textbox", { name: "message" })).toBeNull();
+  });
 });
 
 test.each([

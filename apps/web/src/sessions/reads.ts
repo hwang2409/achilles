@@ -27,11 +27,12 @@ function state(v: unknown) {
 
 function metadata(v: unknown) {
   if (!isObject(v) || !nonempty(v.session_id) || (v.project_id !== undefined && project(v.project_id) === undefined) ||
+      (v.in_use !== undefined && typeof v.in_use !== "boolean") ||
       (v.parent_session_id !== undefined && project(v.parent_session_id) === undefined) ||
       ["name", "model", "provider", "cwd", "first_message_preview"].some((key) => v[key] != null && typeof v[key] !== "string")) return;
   return { id: v.session_id, title: text(v.name) ?? text(v.first_message_preview) ?? v.session_id, preview: text(v.first_message_preview), project: project(v.project_id),
     model: text(v.model), provider: text(v.provider), cwd: text(v.cwd), created: date(v.created_at), updated: date(v.updated_at),
-    parent: project(v.parent_session_id) };
+    parent: project(v.parent_session_id), inUse: v.in_use === true };
 }
 
 type SessionState = NonNullable<ReturnType<typeof state>>;
@@ -187,13 +188,21 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
       ]);
       if (mine !== generation) throw new DOMException("superseded", "AbortError");
       signal.throwIfAborted();
+      // The pinned catalog also reports this serve's own attached lease as in use.
+      let attached: unknown;
+      if ([...durable.items.values()].some((row) => row.inUse)) {
+        const status = await request("status", {}, signal).catch(() => null);
+        if (isObject(status) && isObject(status.session)) attached = status.session.session_id;
+        if (mine !== generation) throw new DOMException("superseded", "AbortError");
+        signal.throwIfAborted();
+      }
       const reportedAt = Date.now();
       if (overlay.result) lastOverlay = { items: overlay.result.items, reportedAt };
       const staleState = !overlay.result && overlay.warning !== oldState ? lastOverlay?.reportedAt : undefined;
       const stateRows = overlay.result?.items ?? (staleState !== undefined ? lastOverlay?.items : undefined);
       const items: SessionRow[] = [...durable.items.values()].map((row) => {
         const snapshot = stateRows?.get(row.id);
-        return { ...row, status: snapshot?.status ?? "unknown", state: snapshot };
+        return { ...row, inUse: row.inUse && row.id !== attached, status: snapshot?.status ?? "unknown", state: snapshot };
       });
       return { items, reportedAt, staleState, warnings: [durable.warning, overlay.warning].filter(nonempty),
         omitted: durable.omitted + (overlay.result?.omitted ?? 0), complete: durable.complete };

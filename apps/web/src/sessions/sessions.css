@@ -75,3 +75,7 @@
   .sessions-detail { padding-top: 8px; }
   .sessions-fields > div { grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr); }
 }
+.sessions-continue { margin-bottom: 20px; }
+.sessions-continue .sessions-help:empty { margin: 0; }
+.sessions-transcript-action[aria-disabled="true"], .sessions-transcript-secondary { background: transparent; border-color: var(--fulcrum-border); color: var(--fulcrum-fg); }
+.sessions-frame .sessions-transcript-action:is(:disabled, [aria-disabled="true"], .sessions-transcript-secondary):focus-visible { outline-color: var(--fulcrum-accent); }
