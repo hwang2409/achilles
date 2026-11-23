@@ -13,6 +13,7 @@ import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
 import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
+import { gateMcpTest, mcpTestArtifacts } from "./gate-mcp-test";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
@@ -419,6 +420,7 @@ with _database() as db:
   // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
+  const mcpTestSurfaceId = await gateMcpTest(browser, origin, zetaHome, cwd, screenshotDir);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -3179,7 +3181,7 @@ with _database() as db:
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
-  const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId]);
+  const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, mcpTestSurfaceId]);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
     for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
   };
@@ -3459,7 +3461,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...mcpTestArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
