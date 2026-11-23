@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "agent_run_catalog", "list_sessions", "state_sessions", "state_session"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -46,13 +46,15 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
   const emit = (event: object) => reply(socket, event);
   const controllers = new Set<Socket>();
   class Socket extends EventTarget {
+    role?: string;
     constructor() { super(); socket = this; options.sockets?.push(this); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
     close() { controllers.delete(this); this.dispatchEvent(new Event("close")); }
     send(raw: string) {
       const { id, method, params } = JSON.parse(raw);
       requests.push(method);
       if (!reads.has(method)) writes.push(method);
-      if (method === "hello") options.roles?.push(params.role);
+      if (method === "hello") { this.role = params.role; options.roles?.push(params.role); }
+      if (method === "child_run_spawn" || method === "child_run_cancel") expect(this.role).toBe("controller");
       const taken = options.slot && method === "hello" && params.role === "controller" && [...controllers].some((other) => other !== this);
       if (options.slot && method === "hello" && params.role === "controller" && !taken) controllers.add(this);
       const custom = taken ? { error: { code: -32001, message: "controller occupied" } } : options.rpc?.[method]?.(params, requests);
@@ -284,7 +286,141 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "vi
   }
 } });
 
+const mcpAddCanary = "fixture-private-command";
+function mcpAdd(): Row {
+  const method = "mcp_server_add";
+  const roles: string[] = [];
+  const before = { revision: "a".repeat(64), data: { items: [] } };
+  const after = { revision: "b".repeat(64), data: { items: [{ name: "fixture-user", scope: "user", enabled: true,
+    trusted: true, status: "configured", auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } }] } };
+  let applied = false;
+  return { kind: "visible", options: { path: "/connections", observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
+    mcp_server_list: ({ scope }) => ({ result: applied && scope !== "project" ? after : before }),
+    [method]: (params) => {
+      expect(params.mutation).toMatchObject({ name: "fixture-user", scope: "user", command: mcpAddCanary });
+      expect(document.querySelector<HTMLInputElement>('input[name="command"]')?.value).toBe("");
+      applied = true;
+      return { result: { ...after, restart: { serve: false, sessions: [], complete: true } } };
+    },
+  } }, check: async (app, authority, writes) => {
+    const start = roles.length;
+    const url = location.href;
+    await click(select(app, tag("mcp.add")));
+    await change(app.getByRole("textbox", { name: "connection name" }), "fixture-user");
+    const command = app.getByLabelText("local command") as HTMLInputElement;
+    await change(command, mcpAddCanary);
+    await act(async () => { fireEvent.submit(command.form!); });
+    expect(document.body.innerHTML).not.toContain(mcpAddCanary);
+    expect(roles).toHaveLength(start);
+    expect(writes).toEqual([]);
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(true);
+    await click(app.getByRole("checkbox", { name: "i reviewed the scope for this connection" }));
+    expect(confirm.disabled).toBe(false);
+    await act(async () => { fireEvent.submit(confirm.form!); });
+    expect(command.value).toBe("");
+    expect(location.href).toBe(url);
+    expect(JSON.stringify([localStorage, sessionStorage])).not.toContain(mcpAddCanary);
+    if (authority === "observer") {
+      expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+      expect(roles.slice(start)).toEqual(["controller"]);
+      expect(writes).toEqual([]);
+    } else {
+      expect(app.getByText(/new sessions use this configuration/)).toBeTruthy();
+      expect(roles.slice(start)).toEqual(["controller", "observer"]);
+      expect(writes).toEqual([method]);
+    }
+  } };
+}
+
+function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: string): Row {
+  const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: false, status: "pending trust",
+    auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
+  const view = (items: object[] = [fixture]) => ({ revision: "a".repeat(64), data: { items } });
+  const roles: string[] = [];
+  return { kind: "visible", options: { path: "/connections/project/fixture-project", observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
+    mcp_server_list: ({ scope }) => ({ result: view(scope === "user" ? [] : [fixture]) }),
+    [method]: () => ({ result: { ...view(id === "mcp.remove" ? [] : [{ ...fixture, enabled: false, trusted: true }]),
+      restart: { serve: false, sessions: [], complete: true } } }),
+  } }, check: async (app, authority, writes) => {
+    const requestStart = roles.length;
+    expect(roles.at(-1)).toBe("observer");
+    const trigger = select(app, tag(id));
+    await click(trigger);
+    expect(writes).toEqual([]);
+    expect(roles).toHaveLength(requestStart);
+    if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(false);
+    if (id === "mcp.enabled") await click(confirm);
+    else await act(async () => { fireEvent.submit(confirm.form!); });
+    if (authority === "observer") {
+      expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+      expect(roles.slice(requestStart)).toEqual(["controller"]);
+      expect(writes).toEqual([]);
+    } else {
+      expect(roles.slice(requestStart)).toEqual(["controller", "observer"]);
+      expect(writes).toEqual([method]);
+    }
+  } };
+}
+
+function agentControl(id: "agents.spawn" | "agents.cancel"): Row {
+  const spawning = id === "agents.spawn";
+  const method = spawning ? "child_run_spawn" : "child_run_cancel";
+  const roles: string[] = [];
+  return { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["agent_run_catalog", ...(params.role === "controller" ? [method] : [])] } } }),
+    status: () => ({ result: { state: "idle", session: { session_id: spawning ? "active-parent" : "session", cwd: "/fixture",
+      agent_catalog: [{ name: "fixture-profile", description: "fixture profile", tools: [] }] } } }),
+    agent_run_catalog: ({ root_session_id }) => ({ result: { revision: "1", data: { items: root_session_id === "active-parent" ? [] : [{
+      session_id: "session", run_id: "fixture-run", parent_run_id: null, agent_type: "fixture-profile", description: "fixture task",
+      status: "running", accepts_follow_ups: false, turns_used: 1, tool_count: 0, current_step: "working", started_at: "2026-01-01",
+      finished_at: null, elapsed_seconds: 1,
+    }] } } }),
+    [method]: (params) => {
+      expect(params).toEqual(spawning ? { session_id: "active-parent", agent_type: "fixture-profile", task: "reviewed task", background: true }
+        : { session_id: "session", run_id: "fixture-run", reason: "user_cancelled" });
+      return { result: { data: { accepted: true, run_id: spawning ? "new-fixture-run" : "fixture-run", state: "cancelling" } } };
+    },
+  } }, check: async (app, authority, writes) => {
+    const before = roles.length;
+    expect(roles.at(-1)).toBe("observer");
+    await app.findByRole("heading", { name: /fixture task/ });
+    if (spawning) {
+      await click(app.getByRole("button", { name: "+ spawn agent" }));
+      await app.findByRole("option", { name: "fixture-profile" });
+      await change(app.getByRole("combobox", { name: "profile" }), "fixture-profile");
+      await change(app.getByRole("textbox", { name: "task" }), "reviewed task");
+      await act(async () => { fireEvent.submit((select(app, tag(id)) as HTMLButtonElement).form!); });
+    } else await click(select(app, tag(id)));
+    expect(roles).toHaveLength(before);
+    expect(writes).toEqual([]);
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(true);
+    if (spawning) await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+    else await change(app.getByRole("textbox", { name: /type fixture-profile · ture-run to confirm/ }), "fixture-profile · ture-run");
+    expect(confirm.disabled).toBe(false);
+    await act(async () => { fireEvent.submit(confirm.form!); });
+    if (authority === "observer") {
+      expect(app.getByRole("alert").textContent).toContain("another tab had control");
+      expect(roles.slice(before)).toEqual(["controller"]);
+    } else {
+      expect(await app.findByText(spawning ? /spawned fixture-profile as/ : /cancellation requested\./)).toBeTruthy();
+      expect(writes).toEqual([method]);
+      expect(roles.slice(before)).toEqual(["controller", "observer"]);
+    }
+  } };
+}
+
 const rows: Record<WriteSurfaceId, Row> = {
+  "agents.spawn": agentControl("agents.spawn"),
+  "agents.cancel": agentControl("agents.cancel"),
   "agents.send": { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: ["agent_run_catalog_v1", "child_runs"],
       requests: ["agent_run_catalog", ...(params.role === "controller" ? ["child_run_send"] : [])] } } }),
@@ -466,6 +602,10 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
   } },
+  "mcp.add": mcpAdd(),
+  "mcp.enabled": mcpWrite("mcp.enabled", "mcp_server_set_enabled"),
+  "mcp.trusted": mcpWrite("mcp.trusted", "mcp_server_set_trusted"),
+  "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
     // the settings place browses as an observer; confirming the change borrows control for the one update.
     await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));

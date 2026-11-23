@@ -1,4 +1,4 @@
-.sessions-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, "JetBrains Mono", monospace); }
+.sessions-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
 .sessions-frame > .sessions-head { flex-wrap: wrap; gap: 4px 16px; padding: 6px 24px; }
 .sessions-head > span { margin-left: auto; color: var(--fulcrum-muted); font-size: .85em; }
 .sessions-head > button { min-height: 40px; padding-inline: 12px; margin-left: auto; }

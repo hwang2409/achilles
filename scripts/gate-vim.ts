@@ -40,7 +40,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
       await dialog.getByRole("group", { name: "UI font" }).getByRole("button", { name: "IBM Plex Sans" }).click();
       await dialog.getByRole("group", { name: "code font" }).getByRole("button", { name: "IBM Plex Mono" }).click();
       await dialog.getByRole("group", { name: "font size" }).getByRole("button", { name: "16" }).click();
-      await dialog.getByRole("option", { name: "gruvbox-dark" }).click();
+      await dialog.getByRole("option", { name: "Dark", exact: true }).click();
       await dialog.getByRole("button", { name: "esc" }).click();
       await gateWait.playwright(dialog, "waitFor", { state: "hidden", timeout: 10_000 });
       await gateWait.playwright(settingsPage, "waitForFunction", () => document.activeElement?.textContent === "display settings");
