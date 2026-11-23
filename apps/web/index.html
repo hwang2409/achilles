@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       (() => {
-        const defaults = { v: 1, theme: "auto", uiFont: "jetbrains-mono", codeFont: "jetbrains-mono", size: 14, density: "comfortable", vim: false, autoApproveDefault: true };
-        const themes = ["auto", "gruvbox-dark", "gruvbox-light", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "github-dark", "github-light", "one-dark"];
-        const uiFonts = { "jetbrains-mono": '"JetBrains Mono",ui-monospace,monospace', "ibm-plex-sans": '"IBM Plex Sans",system-ui,sans-serif', inter: '"Inter",system-ui,sans-serif', system: "system-ui,sans-serif" };
-        const codeFonts = { "jetbrains-mono": '"JetBrains Mono",ui-monospace,monospace', "ibm-plex-mono": '"IBM Plex Mono",ui-monospace,monospace', "system-mono": "ui-monospace,SFMono-Regular,Consolas,monospace" };
+        const defaults = { v: 1, theme: "auto", uiFont: "geist", codeFont: "system-mono", size: 14, density: "comfortable", vim: false, autoApproveDefault: true };
+        const themes = ["auto", "g1-light", "g1-dark"];
+        const uiFonts = { geist: "var(--g1-font-ui)", "jetbrains-mono": '"JetBrains Mono",ui-monospace,monospace', "ibm-plex-sans": '"IBM Plex Sans",system-ui,sans-serif', inter: '"Inter",system-ui,sans-serif', system: "system-ui,sans-serif" };
+        const codeFonts = { "jetbrains-mono": '"JetBrains Mono",ui-monospace,monospace', "ibm-plex-mono": '"IBM Plex Mono",ui-monospace,monospace', "system-mono": "var(--g1-font-mono)" };
         let saved = {};
         try { const value = JSON.parse(localStorage.getItem("achilles-settings") || "{}"); if (value && typeof value === "object" && !Array.isArray(value)) saved = value; } catch {}
         const settings = {
@@ -23,7 +23,10 @@
         };
         const queryTheme = new URLSearchParams(location.search).get("theme");
         const theme = themes.includes(queryTheme) ? queryTheme : settings.theme;
-        if (theme !== "auto") document.documentElement.dataset.fulcrumTheme = theme;
+        if (theme !== "auto") {
+          document.documentElement.dataset.achillesTheme = theme;
+          document.documentElement.dataset.fulcrumTheme = theme === "g1-dark" ? "github-dark" : "github-light";
+        }
         document.documentElement.dataset.density = settings.density;
         document.documentElement.style.setProperty("--achilles-ui-font", uiFonts[settings.uiFont]);
         document.documentElement.style.setProperty("--achilles-code-font", codeFonts[settings.codeFont]);

@@ -1,5 +1,7 @@
 :root {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--achilles-ui-font, var(--g1-font-ui));
+  font-size: var(--achilles-ui-size, var(--g1-type-ui));
+  font-variant-numeric: tabular-nums;
   color: var(--fulcrum-fg);
   background: var(--fulcrum-bg);
 }
@@ -7,11 +9,26 @@
 html, body, #root { height: 100%; overflow: hidden; }
 body { margin: 0; }
 button, input, textarea, select { color: inherit; font: inherit; }
-.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-button, input, a { border-radius: 0; }
-button { background: transparent; border: 1px solid var(--fulcrum-border); cursor: pointer; }
+.sidebar code, .sidebar pre, .chat-header code, .chat-header pre, .empty-chat code, .empty-chat pre, .connection-banner code, .connection-banner pre, .full-state code, .full-state pre, .record-list code, .record-list pre, .record-detail code, .record-detail pre { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+button, input, textarea, select { border-radius: var(--g1-radius-control); }
+body button { background: transparent; border: var(--g1-border-width) solid var(--g1-control-border); cursor: pointer; }
+:where(input:not([type="checkbox"], [type="radio"]), textarea, select) {
+  background: var(--g1-bg);
+  border: var(--g1-border-width) solid var(--g1-control-border);
+}
+button:where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
+[data-part="composer"] { border-radius: var(--g1-radius-control); border-color: var(--g1-control-border); border-left-color: var(--rail); }
+[data-part="composer"]:focus-within { box-shadow: var(--g1-focus-halo); }
+[data-part="composer"] [data-part="composer-field"] textarea:focus-visible,
+[data-part="composer"] .cm-content:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; box-shadow: none; }
+:where(button, input, textarea, select):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: .65; }
+:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
+:is(input:not([type="checkbox"], [type="radio"]), textarea, select):focus-visible {
+  border-color: var(--g1-accent);
+  box-shadow: var(--g1-focus-halo);
+}
 a { color: inherit; text-decoration: none; }
-kbd { color: var(--fulcrum-muted); font: inherit; }
+kbd { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 mark { color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 18%, transparent); }
 .observer-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; flex: none; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--fulcrum-border); background: color-mix(in srgb, var(--fulcrum-accent) 8%, var(--fulcrum-bg)); color: var(--fulcrum-fg); }
 .observer-banner div { display: grid; gap: 2px; min-width: 0; }
@@ -29,17 +46,17 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 .approval-control span { color: var(--fulcrum-muted); text-wrap: pretty; }
 @media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; flex-wrap: nowrap; gap: 8px; } .observer-banner > div:first-child, #take-control-feedback { flex: none; } .observer-action { width: 100%; justify-items: start; } .observer-banner button { min-height: 44px; width: 100%; } }
-.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
 .page-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 @media (width >= 1280px) {
   .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
 }
-.main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: var(--achilles-ui-size, 14px); }
-.main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); }
+.main-pane [data-part="composer"] :is(textarea, button, .cm-editor) { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--achilles-ui-size, 14px); }
+.main-pane [data-part="composer"].vim-composer .cm-editor { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 [data-part="composer-queue"] { display: grid; gap: 1px; margin: 0; padding: 6px var(--inset) 0; list-style: none; font-size: 12px; line-height: 20px; }
 [data-part="composer-queued"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 2px 8px; border-left: 1px solid var(--fulcrum-border); color: var(--fulcrum-fg); }
 [data-part="composer-queued-label"] { flex: none; color: var(--fulcrum-accent); }
-[data-part="composer-queued-label"]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; vertical-align: 1px; outline: 1px solid currentColor; outline-offset: -1px; }
+[data-part="composer-queued-label"]::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-right: 8px; vertical-align: 1px; outline: 1px solid currentColor; outline-offset: -1px; }
 [data-part="composer-queued"][data-sending] [data-part="composer-queued-label"]::before { background: currentColor; }
 [data-part="composer-queued"][data-failed] { border-left-color: var(--fulcrum-danger); }
 [data-part="composer-queued"][data-failed] [data-part="composer-queued-label"] { color: var(--fulcrum-danger); font-weight: 700; }

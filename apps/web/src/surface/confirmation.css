@@ -1,5 +1,5 @@
 .confirmation-inline, .confirmation-dialog, .confirmation-activity, .confirmation-trigger {
-  font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, "JetBrains Mono", monospace);
+  font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, var(--g1-font-ui));
   color: var(--fulcrum-fg);
   overflow-wrap: anywhere;
 }

@@ -1,11 +1,10 @@
 import { useSyncExternalStore } from "react";
-import { themes } from "@fulcrum/react";
 
 export const SETTINGS_KEY = "achilles-settings";
 export const AUTO_THEME = "auto";
-export const themeChoices = [AUTO_THEME, ...themes] as const;
+export const themeChoices = [AUTO_THEME, "g1-light", "g1-dark"] as const;
 export type ThemeChoice = (typeof themeChoices)[number];
-export type UiFont = "jetbrains-mono" | "ibm-plex-sans" | "inter" | "system";
+export type UiFont = "geist" | "jetbrains-mono" | "ibm-plex-sans" | "inter" | "system";
 export type CodeFont = "jetbrains-mono" | "ibm-plex-mono" | "system-mono";
 export type Density = "comfortable" | "compact";
 
@@ -23,15 +22,15 @@ export type Settings = {
 export const defaultSettings: Settings = {
   v: 1,
   theme: AUTO_THEME,
-  uiFont: "jetbrains-mono",
-  codeFont: "jetbrains-mono",
+  uiFont: "geist",
+  codeFont: "system-mono",
   size: 14,
   density: "comfortable",
   vim: false,
   autoApproveDefault: true,
 };
 
-const uiFonts: readonly UiFont[] = ["jetbrains-mono", "ibm-plex-sans", "inter", "system"];
+const uiFonts: readonly UiFont[] = ["geist", "jetbrains-mono", "ibm-plex-sans", "inter", "system"];
 const codeFonts: readonly CodeFont[] = ["jetbrains-mono", "ibm-plex-mono", "system-mono"];
 const densities: readonly Density[] = ["comfortable", "compact"];
 const sizes: readonly Settings["size"][] = [13, 14, 15, 16];
@@ -58,6 +57,7 @@ export function parseSettings(value: string | null): Settings {
 }
 
 const uiFontValues: Record<UiFont, string> = {
+  geist: "var(--g1-font-ui)",
   "jetbrains-mono": '"JetBrains Mono", ui-monospace, monospace',
   "ibm-plex-sans": '"IBM Plex Sans", system-ui, sans-serif',
   inter: '"Inter", system-ui, sans-serif',
@@ -66,7 +66,7 @@ const uiFontValues: Record<UiFont, string> = {
 const codeFontValues: Record<CodeFont, string> = {
   "jetbrains-mono": '"JetBrains Mono", ui-monospace, monospace',
   "ibm-plex-mono": '"IBM Plex Mono", ui-monospace, monospace',
-  "system-mono": "ui-monospace, SFMono-Regular, Consolas, monospace",
+  "system-mono": "var(--g1-font-mono)",
 };
 
 function queryTheme(): ThemeChoice | null {
@@ -79,8 +79,13 @@ export function applySettings(settings: Settings): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   const theme = queryTheme() ?? settings.theme;
-  if (theme === AUTO_THEME) delete root.dataset.fulcrumTheme;
-  else root.dataset.fulcrumTheme = theme;
+  if (theme === AUTO_THEME) {
+    delete root.dataset.achillesTheme;
+    delete root.dataset.fulcrumTheme;
+  } else {
+    root.dataset.achillesTheme = theme;
+    root.dataset.fulcrumTheme = theme === "g1-dark" ? "github-dark" : "github-light";
+  }
   root.dataset.density = settings.density;
   root.style.setProperty("--achilles-ui-font", uiFontValues[settings.uiFont]);
   root.style.setProperty("--achilles-code-font", codeFontValues[settings.codeFont]);

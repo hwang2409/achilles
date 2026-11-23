@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defaultSettings, parseSettings } from "./settings";
+import { applySettings, defaultSettings, parseSettings } from "./settings";
 
 async function moduleMockCalls() {
   const calls: string[] = [];
@@ -18,6 +18,31 @@ describe("web test isolation", () => {
 });
 
 describe("parseSettings", () => {
+  test("defaults to system appearance, Geist, Menlo, and 14px", () => {
+    expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "geist", codeFont: "system-mono", size: 14 });
+  });
+
+  test("replaces old named palettes but still applies v1 font and size choices", () => {
+    const palettes = ["github-light", "github-dark", "gruvbox-light", "gruvbox-dark", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "one-dark"];
+    for (const theme of palettes) expect(parseSettings(JSON.stringify({ theme })).theme).toBe("auto");
+    const ui = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "system-ui"]] as const;
+    const code = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "--g1-font-mono"]] as const;
+    const root = document.documentElement;
+    const original = root.style.cssText;
+    try {
+      for (const [uiFont, uiFamily] of ui) for (const [codeFont, codeFamily] of code) for (const size of [13, 14, 15, 16]) {
+        const saved = parseSettings(JSON.stringify({ v: 1, theme: "nord", uiFont, codeFont, size }));
+        expect(saved).toMatchObject({ theme: "auto", uiFont, codeFont, size });
+        applySettings(saved);
+        expect(root.style.getPropertyValue("--achilles-ui-font")).toContain(uiFamily);
+        expect(root.style.getPropertyValue("--achilles-code-font")).toContain(codeFamily);
+        expect(root.style.getPropertyValue("--achilles-ui-size")).toBe(`${size}px`);
+      }
+    } finally {
+      root.style.cssText = original;
+    }
+  });
+
   test("falls back per field for malformed browser storage", () => {
     expect(parseSettings("not json")).toEqual(defaultSettings);
     expect(parseSettings(JSON.stringify({

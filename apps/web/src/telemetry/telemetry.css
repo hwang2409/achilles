@@ -1,10 +1,10 @@
-/* telemetry pages. gruvbox dark only: the root sets data-fulcrum-theme, so every --fulcrum-* below is gruvbox. */
+/* Telemetry inherits the browser theme. */
 .telemetry-module {
-  --tm-mono: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --tm-mono: var(--achilles-code-font, var(--g1-font-mono));
   --tm-line: color-mix(in srgb, var(--fulcrum-border) 70%, transparent);
-  --tm-bar: #665c54;
-  --tm-bar-hover: #7c6f64;
-  --tm-tool: #8ec07c;
+  --tm-bar: var(--g1-fg-3);
+  --tm-bar-hover: var(--g1-fg-2);
+  --tm-tool: var(--g1-ok);
   --tm-pad: 40px;
   height: 100%;
   overflow: auto;

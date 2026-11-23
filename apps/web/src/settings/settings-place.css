@@ -11,7 +11,7 @@
 .sp-subnav a[aria-current] { border-inline-start-color: var(--fulcrum-accent); font-weight: 600; }
 .sp-content { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
 .sp-content section { display: flex; flex-direction: column; gap: 12px; scroll-margin-top: 16px; }
-.sp-content section > button { align-self: flex-start; min-height: 44px; }
+.sp-content section > button { align-self: flex-start; min-height: 44px; border-color: var(--g1-control-border); }
 .sp h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .sp h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .sp p { margin: 0; }
