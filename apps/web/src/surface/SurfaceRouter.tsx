@@ -7,6 +7,7 @@ import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { useMemoryActions } from "../projects/MemoryActions";
 import { ProjectsModule } from "../projects/ProjectsModule";
+import { createChildSendOwner } from "../agents/childSend";
 import { AgentsModule } from "../agents/AgentsModule";
 import { SessionsModule } from "../sessions/SessionsModule";
 import { continuationHref, mappingFailed } from "../sessions/continueChat";
@@ -32,7 +33,7 @@ export function SurfaceRouter() {
     const route = matchSurfaceRoute(pathname);
     const readOnly = route !== undefined && route !== chatsRoute && route !== createRoute;
     // Upgradable tabs browse as observers and take control only when the user asks for it.
-    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "settings" || route.id === "accounts" || route.id === "sessions" ? "upgradable" : "locked";
+    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "settings" || route.id === "accounts" || route.id === "agents" || route.id === "sessions" ? "upgradable" : "locked";
     return { route, pathname, connection: createConnection({ origin: location.origin, readOnly: mode }), readOnly };
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -55,6 +56,7 @@ export function SurfaceRouter() {
   });
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
+  const [childSend] = useState(() => createChildSendOwner(connection));
   const [mcpReads] = useState(createMcpReads);
   const [liveClient] = useState(() => () => connection.client);
   const takeLibraryControl = async () => {
@@ -106,7 +108,7 @@ export function SurfaceRouter() {
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
   } else if (route.id === "agents") {
-    content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
+    content = <AgentsModule send={childSend} client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
     content = <McpModule client={client} reads={mcpReads} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {
