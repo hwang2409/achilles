@@ -10,7 +10,7 @@ const PAGE = 50;
 export type ProjectRow = { id: string; name: string; path: string | null; sessions: number; memory: number; inbox: { new: number; claimed: number; done: number } };
 export const memoryKinds = ["brief", "decision", "state", "backlog", "changelog", "legacy"] as const;
 export type MemoryKind = typeof memoryKinds[number];
-export type MemoryRow = { id: string; kind: MemoryKind; automatic: boolean; summary: string };
+export type MemoryRow = { id: string; kind: MemoryKind; automatic: boolean; accepted: boolean | null; summary: string; sourceSession: string | null };
 const inboxStatuses = ["new", "claimed", "done"] as const;
 const inboxKinds = ["bug_report", "change_request", "question", "info", "reply"] as const;
 export type InboxRow = { id: string; kind: typeof inboxKinds[number]; status: typeof inboxStatuses[number]; sender: string; summary: string; createdNs: number; trusted: boolean; hasBody: boolean };
@@ -59,10 +59,11 @@ export function projectProjects(result: unknown): Page<ProjectRow> | null {
 }
 
 export function projectMemory(result: unknown): MemoryPage | null {
-  const parsed = page(result, ({ memory_id, kind, automatic, summary }) => {
+  const parsed = page(result, ({ memory_id, kind, automatic, accepted, summary, source_session_id }) => {
     const known = oneOf(memoryKinds, kind);
-    if (!text(memory_id) || !known || typeof automatic !== "boolean" || !text(summary)) return undefined;
-    return { id: memory_id, kind: known, automatic, summary };
+    if (!text(memory_id) || !known || typeof automatic !== "boolean" || !text(summary) ||
+        !(source_session_id == null || text(source_session_id)) || (accepted !== undefined && typeof accepted !== "boolean")) return undefined;
+    return { id: memory_id, kind: known, automatic, accepted: accepted ?? null, summary, sourceSession: source_session_id ?? null };
   });
   return parsed && { ...parsed, oldFormat: parsed.rows.some(({ id }) => formatOneFiles.has(id)) };
 }
@@ -85,6 +86,19 @@ export function projectKindText(result: unknown, kind: MemoryKind): KindText | n
   return { text: found.rendered, truncated: found.rendered_truncated, digest: memory.digest };
 }
 
+export const canAcceptMemory = (row: Pick<MemoryRow, "automatic" | "accepted">) => row.automatic && row.accepted === false;
+export const isMemoryId = (value: unknown): value is string => text(value) && /^[A-Za-z0-9_-]{1,128}(?![\s\S])/.test(value);
+export const isMemoryDigest = (value: unknown): value is string => text(value) && /^[a-f0-9]{64}(?![\s\S])/.test(value);
+
+/** Format 2 uses `kinds` instead of the legacy `files`. No text from this controller-only reply survives. */
+export function projectMemoryRevision(result: unknown) {
+  const memory = record(result) ? result.memory : undefined;
+  if (!record(memory) || !isMemoryDigest(memory.digest) || !isMemoryId(memory.version_id) || !count(memory.schema_version) ||
+      !Array.isArray(memory.kinds) || !memory.kinds.length || !memory.kinds.every((item) =>
+        record(item) && text(item.key) && text(item.rendered) && typeof item.rendered_truncated === "boolean")) return null;
+  return { digest: memory.digest, versionId: memory.version_id };
+}
+
 export function projectMessage(result: unknown, messageId: string): Body | null {
   if (!record(result) || !record(result.message) || result.message.message_id !== messageId || !text(result.body) || typeof result.truncated !== "boolean") return null;
   return { text: result.body, truncated: result.truncated };
@@ -94,17 +108,20 @@ function checked<T>(value: T | null) {
   if (value === null) throw new Unreadable("zeta sent data this view cannot read");
   return value;
 }
-type Read = { signal?: AbortSignal };
+type Read = { signal?: AbortSignal; timeoutMs?: number };
 
 export const readProjects = async (client: ZetaClient, cursor: string | null, { signal }: Read = {}) =>
   checked(projectProjects(await client.request("state_projects", { limit: PAGE, cursor }, { signal })));
-export const readMemory = async (client: ZetaClient, projectId: string, cursor: string | null, { signal }: Read = {}) =>
-  checked(projectMemory(await client.request("state_memory", { project_id: projectId, limit: PAGE, cursor }, { signal })));
+export const readMemory = async (client: ZetaClient, projectId: string, cursor: string | null, options: Read = {}) =>
+  checked(projectMemory(await client.request("state_memory", { project_id: projectId, limit: PAGE, cursor }, options)));
 export const readInbox = async (client: ZetaClient, projectId: string, cursor: string | null, { signal }: Read = {}) =>
   checked(projectInbox(await client.request("state_inbox", { project_id: projectId, limit: PAGE, cursor }, { signal })));
 /** Controller only: `project_show` returns every kind; only the one asked for is kept. */
 export const readKindText = async (client: ZetaClient, projectId: string, kind: MemoryKind, { signal }: Read = {}) =>
   checked(projectKindText(await client.request("project_show", { project_id: projectId }, { signal }), kind));
+/** Controller only. */
+export const readMemoryRevision = async (client: ZetaClient, projectId: string, options: Read = {}) =>
+  checked(projectMemoryRevision(await client.request("project_show", { project_id: projectId }, options)));
 /** Controller only. */
 export const readMessage = async (client: ZetaClient, projectId: string, messageId: string, { signal }: Read = {}) =>
   checked(projectMessage(await client.request("state_inbox_detail", { project_id: projectId, message_id: messageId }, { signal }), messageId));

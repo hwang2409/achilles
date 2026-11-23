@@ -5,6 +5,7 @@ import { AppShell, type AppShellProps } from "../AppShell";
 import { PagesLanding } from "../page/PagesLanding";
 import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
+import { useMemoryActions } from "../projects/MemoryActions";
 import { ProjectsModule } from "../projects/ProjectsModule";
 import { SettingsModule } from "../settings/SettingsModule";
 import { HOME_SETTINGS_FEATURE } from "../settings/homeSettings";
@@ -41,6 +42,11 @@ export function SurfaceRouter() {
   const [libraryEdits] = useState(() => new Map<LibraryKind, EditDraft>());
   // reveals a dropped socket cut short: the drop unmounts the projects module, and the reveal says why on remount.
   const [projectsDropped] = useState(() => new Set<string>());
+  const memoryActions = useMemoryActions({
+    live: () => connection.state.phase === "connected" && connection.state.authority === "controller" ? connection.client : null,
+    take: connection.takeControl,
+    release: connection.releaseControl,
+  });
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
   const [liveClient] = useState(() => () => connection.client);
@@ -62,7 +68,7 @@ export function SurfaceRouter() {
   if (route.id === "telemetry" || route.id === "skills" || route.id === "agent-profiles" || route.id === "projects") {
     content = client ? (route.id === "telemetry" ? <TelemetryModule client={client} pathname={pathname}
       openTelemetrySettings={supportsFeature(client, HOME_SETTINGS_FEATURE) ? () => location.assign(surfaceHref("/settings") + "#telemetry") : undefined} />
-      : route.id === "projects" ? <ProjectsModule client={client} control={{ observer: !controller, withControl: (read) => connection.withControl(read), dropped: projectsDropped }} />
+      : route.id === "projects" ? <ProjectsModule client={client} actions={memoryActions} control={{ observer: !controller, withControl: (read) => connection.withControl(read), dropped: projectsDropped }} />
       : <LibraryModule key={route.id} client={client} kind={route.id} reads={libraryReads(client, route.id)}
         write={libraryWrite(client, route.id, controller, takeLibraryControl, controller ? null : libraryControl, libraryDrafts, libraryEdits, libraryWriter, () => void connection.releaseControl())} />) : <ModuleFrame title={route.label}>
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
@@ -73,7 +79,7 @@ export function SurfaceRouter() {
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
-  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}</CatalogShell>;
+  return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
