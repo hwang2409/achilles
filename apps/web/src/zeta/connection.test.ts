@@ -196,6 +196,57 @@ describe("createConnection controller capacity vs version mismatch", () => {
     } finally { connection.stop(); }
   });
 
+  test.each(["before reconnect", "during reconnect"] as const)("releases a dropped hold %s", async (when) => {
+    const roles: string[] = [];
+    const reconnectHello = Promise.withResolvers<void>();
+    let drop = () => {};
+    let closedControllers = 0;
+    async function deadline<T>(operation: string, promise: Promise<T>): Promise<T> {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`deadline: ${operation}`)), 10_000); })]);
+      } finally { clearTimeout(timer); }
+    }
+    const connection = createConnection({
+      readOnly: "upgradable",
+      origin: "http://localhost",
+      discover: async () => discovery,
+      connect: async (_discovery, role) => {
+        roles.push(role);
+        if (when === "during reconnect" && role === "controller" && roles.length === 3)
+          await deadline("finish the controller reconnect hello", reconnectHello.promise);
+        let onClose = () => {};
+        return {
+          onClose(callback: () => void) { drop = onClose = callback; },
+          close() { if (role === "controller") closedControllers++; onClose(); },
+        } as never;
+      },
+    });
+    try {
+      await deadline("open the initial observer", flush());
+      expect(await deadline("take control", connection.takeControl())).toBeNull();
+      drop();
+      expect(connection.state.phase).toBe("dropped");
+      if (when === "during reconnect") {
+        connection.retryNow();
+        await deadline("start the controller reconnect", flush());
+        expect(roles).toEqual(["observer", "controller", "controller"]);
+        expect(connection.state.phase).toBe("connecting");
+      }
+      await deadline("release control", connection.releaseControl());
+      reconnectHello.resolve();
+      connection.retryNow();
+      await deadline("reconnect as observer", flush());
+      expect(connection.state).toEqual({ phase: "connected", authority: "observer" });
+      expect(roles).toEqual(when === "before reconnect" ? ["observer", "controller", "observer"] : ["observer", "controller", "controller", "observer"]);
+      expect(closedControllers).toBe(when === "before reconnect" ? 0 : 1);
+    } finally {
+      connection.stop();
+      reconnectHello.resolve();
+      await deadline("drain reconnect and close", flush());
+    }
+  }, 60_000);
+
   // zeta's serve protocol (docs/serve-protocol.md) sends -32001 "connection_capacity" when a second controller
   // connects (the second-tab case) and -32002 "protocol_mismatch" for a real version mismatch. @fulcrum/zeta
   // surfaces these as ZetaError kinds "busy" and "version_mismatch". The two must not collapse into one state.
