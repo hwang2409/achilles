@@ -199,6 +199,22 @@ const dockedWrite = (id: WriteSurfaceId, write: string, options = docked): Row =
   }
 } });
 const userMessage = { id: "message", role: "user", content: [{ type: "text", text: "Fixture history title" }] };
+
+test("replay stream end is not a chat transcript row", async () => {
+  const reply = { id: "reply", role: "assistant", content: [{ type: "text", text: "Fixture final reply" }] };
+  await withApp("controller", { attached: true, joined: { messages: [userMessage, reply] } }, async (app, _writes, _requests, emit) => {
+    await app.findByText("Fixture final reply", {}, { timeout: 10_000 });
+    const event = (name: string, fields = {}) => emit({ jsonrpc: "2.0", method: "event", params: { event: name, session_id: "session", ...fields } });
+    await act(async () => {
+      event("replay_stream_ended", { stream_id: "fixture-stream", reason: "rejoined" });
+      event("fixture_future_event");
+    });
+    const nextRow = await app.findByText("fixture_future_event", {}, { timeout: 10_000 });
+    const transcript = nextRow.closest(".transcript");
+    expect(transcript).not.toBeNull();
+    expect(transcript?.textContent).not.toContain("replay_stream_ended");
+  });
+}, 25_000);
 const pendingKey = "achilles-pending-chats";
 const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 // The skills route with library_read_v1, and library_write_v1 + skill_write when `writes` (each part can be withheld).
