@@ -31,7 +31,6 @@
 .sessions-row strong { font-weight: 500; }
 .sessions-row[aria-current="page"] strong { font-weight: 650; }
 .sessions-row small, .sessions-labels, .sessions-row time, .sessions-filters > div > span { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; }
-.sessions-row :is(small, time), .sessions-filters > div > span { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .sessions-labels, .sessions-row time, .sessions-row .sessions-state { font-size: .85em; }
 .sessions-state { display: inline-flex; align-items: center; gap: .55ch; color: var(--fulcrum-muted); white-space: nowrap; }
 .sessions-state::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); flex: none; border: 1px solid currentColor; }

@@ -1,6 +1,6 @@
 .agents-frame { font: var(--achilles-ui-size, 14px)/1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
 .agents-frame > .agents-head { gap: 8px 16px; justify-content: space-between; flex-wrap: wrap; }
-.agents-head > span, .agents-elapsed { color: var(--fulcrum-muted); font-family: var(--achilles-code-font, var(--g1-font-mono)); font-variant-numeric: tabular-nums; font-size: .85em; }
+.agents-head > span, .agents-elapsed { color: var(--fulcrum-muted); font-variant-numeric: tabular-nums; font-size: .85em; }
 .agents-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); flex: 1; min-height: 0; }
 .agents-catalog, .agents-detail { min-width: 0; overflow: auto; scrollbar-width: thin; }
 .agents-catalog { border-inline-end: 1px solid var(--fulcrum-border); }
@@ -32,7 +32,6 @@
 .agents-row-copy { flex: 1; min-width: 0; }
 .agents-row-copy :is(.agents-row-title, small) { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agents-row-title b, .agents-run-head h2 span { color: var(--fulcrum-accent); font-weight: 500; }
-.agents-lane h2 small, .agents-row small { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .agents-row small, .agents-run-head p { color: var(--fulcrum-muted); }
 .agents-state { color: var(--fulcrum-muted); }
 .agents-state::before { content: ""; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: .55ch; display: inline-block; background: currentColor; }
@@ -48,7 +47,7 @@
 .agents-run-head dl { margin: 0; border-top: 1px solid var(--g1-border); }
 .agents-run-head dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; padding-block: 8px; border-bottom: 1px solid var(--g1-rule); }
 .agents-run-head dt, .agents-activity small { color: var(--fulcrum-muted); font-size: .85em; }
-.agents-run-head dd { margin: 0; font-family: var(--achilles-code-font, var(--g1-font-mono)); font-variant-numeric: tabular-nums; }
+.agents-run-head dd { margin: 0; font-variant-numeric: tabular-nums; }
 .agents-run-head dd a, .agents-back:hover { text-decoration: underline; }
 .agents-activity { border-top: 1px solid var(--fulcrum-border); }
 .agents-activity h3 { margin: 0; font-size: 1em; }

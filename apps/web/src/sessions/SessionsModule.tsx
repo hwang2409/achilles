@@ -100,7 +100,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats, cont
   const owned = new Set(chats.map((chat) => chat.session_id));
   const continuationLabel = data?.complete ? "" : " loaded";
   return <section className="module-frame sessions-frame">
-    <header className="sessions-head">
+    <header className="sessions-head ui-page-header">
       <h1>sessions</h1>
       {data && <span>all zeta sessions on this computer · {rows.length}{continuationLabel}</span>}
       <button type="button" className="sessions-new" onClick={newChat} disabled={!client}>+ new chat</button>

@@ -13,7 +13,6 @@
 .account-usage p { margin: 0; }
 .account-default { color: var(--fulcrum-warn); }
 [data-available="false"] .account-availability, .account-usage [data-failed="true"] { color: var(--fulcrum-danger); }
-.account-window :is(time, data, strong) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .account-window { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
 .account-window > div { display: flex; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
 .account-window meter { width: 100%; height: 8px; accent-color: var(--fulcrum-accent); }

@@ -5,7 +5,6 @@
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-bg-subtle); overflow: hidden; z-index: 4; }
 .chat-group h2 { position: sticky; top: 36px; z-index: 1; height: 36px; box-sizing: border-box; margin: 0; padding: 0 var(--g1-space-3); color: var(--g1-muted); background: var(--g1-bg-subtle); font-size: var(--g1-type-meta); font-weight: 600; line-height: 36px; }
 .chat-group h2::first-letter, .list-head > span::first-letter { text-transform: uppercase; }
-.chat-row.current strong { font-weight: 600; }
 .main-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .brand-row { flex: 0 0 44px; display: flex; align-items: center; gap: var(--g1-space-2); padding: 0 var(--g1-space-4); border-bottom: 1px solid var(--g1-border); }
 .list-head { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--g1-space-3); border: 0; font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
@@ -18,7 +17,7 @@
 .chat-row.state-running { box-shadow: inset var(--g1-selection-width) 0 var(--g1-accent); }
 .chat-row.state-approval { box-shadow: inset var(--g1-selection-width) 0 var(--g1-warn-fill); }
 .chat-row.state-failed { box-shadow: inset var(--g1-selection-width) 0 var(--g1-danger-mark); }
-.chat-row.current { box-shadow: inset var(--g1-selection-width) 0 var(--g1-selection); background: var(--g1-selected); }
+.chat-row.current { background: var(--g1-selected); }
 .chat-row.active-result { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .chat-row:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 
@@ -187,7 +186,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .vim-composer [data-part="composer-field"] .cm-content::before { font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
 .main-pane [data-part="composer-bar"] { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 6px 8px 8px 14px; }
 .main-pane [data-part="composer-status"] { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; }
-.main-pane [data-part="composer-hint"] { display: block; white-space: nowrap; font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
+.main-pane [data-part="composer-hint"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .main-pane [data-part="composer-submit"],
 .main-pane [data-part="composer-stop"] { min-height: 32px; padding: 0 12px; font-size: 13px; }
 .main-pane [data-part="composer-submit"] { color: var(--g1-fg-3); background: transparent; }

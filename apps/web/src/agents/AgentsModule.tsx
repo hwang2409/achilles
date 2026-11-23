@@ -114,7 +114,7 @@ export function AgentsModule({ client, connecting, retry, send, controls }: { cl
     </li>;
   };
   return <section className="module-frame agents-frame">
-    <header className="agents-head"><h1>agents</h1>{report && <span>{client ? "reported" : "offline · reported"} <time dateTime={new Date(report.reportedAt).toISOString()}>{stamp(report.reportedAt)}</time></span>}</header>
+    <header className="agents-head ui-page-header"><h1>agents</h1>{report && <span>{client ? "reported" : "offline · reported"} <time dateTime={new Date(report.reportedAt).toISOString()}>{stamp(report.reportedAt)}</time></span>}</header>
     <ShellDockSlot />
     <AgentSpawn client={client} owner={controls} refresh={refresh} />
     {!report ? <div className="module-body">
