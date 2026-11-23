@@ -5,7 +5,9 @@ import { ACCOUNT_LIST_IDLE_FEATURE, AccountReadError, NoAnswer, readAccounts, su
 import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { loginIdentity, type createAccountLogin, type LoginTarget } from "./accountLogin";
+import { AccountSwitchReceipt } from "./AccountSwitchReview";
 import { AccountLoginStatus } from "./AccountLoginStatus";
+import { usePageAccountSwitch, type SwitchAction } from "./usePageAccountSwitch";
 import "./accounts.css";
 
 type Props = {
@@ -21,7 +23,7 @@ const resetTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", time
 const percent = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
 const windowLabel = (minutes: number) => minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
 
-function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void }) {
+function AccountRows({ accounts, stale, signIn, switchAction }: { accounts: Account[]; stale: boolean; signIn?: (target: LoginTarget, opener: HTMLButtonElement) => void; switchAction: SwitchAction }) {
   return <ul className="account-rows" aria-label={stale ? "last loaded accounts" : "model accounts"} data-stale={stale}>
     {accounts.map(({ account, label, available, current, default: isDefault, usage }) => <li key={account} data-default={isDefault} data-available={available}>
       <div className="account-identity">
@@ -41,6 +43,9 @@ function AccountRows({ accounts, stale, signIn }: { accounts: Account[]; stale: 
         </div>)}
         {usage?.refreshFailed && <p className="account-availability" data-failed="true">last usage refresh failed</p>}
       </div>
+      {available && !current && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch}
+        aria-label={`switch active chat to ${account}`} disabled={!!switchAction.reason} aria-describedby={switchAction.reason ? "account-switch-reason" : undefined}
+        onClick={event => switchAction.open(account, event.currentTarget)}>switch chat</button>}
       {!available && signIn && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountLogin}
         aria-label={`sign in again to ${account}`} onClick={event => signIn({ provider: account.startsWith("anthropic:") ? "claude" : "codex", account }, event.currentTarget)}>sign in again</button>}
     </li>)}
@@ -64,14 +69,23 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
   const rows = (refreshed?.value.accounts ?? last?.accounts) ?? [];
   const fresh = !!client && (refreshed ? refreshed.client === client : last?.client === client);
   const canSignIn = fresh && !!supported && !loading && !failure && !active;
+  const switchAction = usePageAccountSwitch(client, rows, canSignIn, accounts => {
+    setReadAfter(latestCatalog);
+    setLast({ client: connection.client, accounts });
+  });
   const show = async () => {
     if (!supported || loading || active || review) return;
     heading.current?.focus();
     setLoading(true);
     setFailure(null);
+    switchAction.reset();
     try {
-      const result = await connection.withControl((controller) => readAccounts(controller));
-      if ("refused" in result) setFailure(result.refused);
+      const result = await connection.withControl(async controller => {
+        const result = await readAccounts(controller);
+        await switchAction.refresh(controller);
+        return result;
+      });
+      if ("refused" in result) { setFailure(result.refused); switchAction.refuse(result.refused); }
       else {
         setReadAfter(latestCatalog);
         setLast({ client: connection.client, accounts: result.value.accounts });
@@ -91,10 +105,15 @@ export function AccountsModule({ client, connecting, connection, login }: Props)
         : !client ? (connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
           : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />)
         : !supported ? <ModuleState kind="unsupported" title="update zeta to manage accounts here" detail="on this version, use /accounts inside an active chat." />
-        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={failure} action={{ ...showAction, label: "try again" }} />
+        : failure ? <ModuleState kind="failed" title="could not load accounts" detail={switchAction.refusal ? undefined : failure} action={{ ...showAction, label: "try again" }} />
         : !fresh ? <ModuleState kind="empty" title="accounts need control to load" detail="this page borrows control for one read. it will not interrupt another tab." action={showAction} />
         : !rows.length && <ModuleState kind="empty" title="no model accounts yet" detail="sign in to a model provider to start." />}
-      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} />}
+      {!!rows.length && (!client || supported || loading) && <AccountRows accounts={rows} stale={!fresh || active || loading || !!failure} signIn={canSignIn ? signIn : undefined} switchAction={switchAction} />}
+      <AccountSwitchReceipt />
+      {switchAction.reason && supported && <div className="account-switch-availability">
+        {!rows.some(row => row.available && !row.current) && <button className="account-action" type="button" data-write-surface={WRITE_SURFACE.accountPageSwitch} disabled aria-describedby="account-switch-reason">switch chat</button>}
+        <p id="account-switch-reason">{switchAction.reason}</p>{switchAction.refusal && !failure && <button className="account-action" type="button" onClick={() => void show()}>try again</button>}
+      </div>}
       {attempt && <AccountLoginStatus attempt={attempt} login={login} canSignIn={canSignIn} signIn={signIn}
         available={fresh && rows.some(row => row.account === loginIdentity(attempt.target) && row.available)} />}
       {canSignIn && !rows.length && <div className="account-actions">

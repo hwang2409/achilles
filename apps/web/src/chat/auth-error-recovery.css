@@ -14,17 +14,17 @@
 .chat-auth-error code { color: var(--fulcrum-fg); font: inherit; }
 .chat-auth-error p { max-width: 74ch; margin: 0; color: var(--fulcrum-muted); }
 .chat-auth-error-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--recovery-gap); }
-.chat-auth-error-actions button, .chat-auth-login-link { min-height: 52px; max-width: 100%; padding: 6px 20px; text-align: left; overflow-wrap: anywhere; }
+.chat-auth-error-actions button, .chat-auth-error-actions a { min-height: 52px; max-width: 100%; padding: 6px 20px; text-align: left; overflow-wrap: anywhere; }
 .chat-auth-error-actions button:first-child:not(:disabled) { background: var(--fulcrum-accent); color: var(--fulcrum-bg); border-color: var(--fulcrum-accent); font-weight: 700; }
 .chat-auth-error-actions button:not(:disabled):hover { border-color: var(--fulcrum-fg); }
 .chat-auth-error-actions button:disabled { color: var(--fulcrum-muted); cursor: not-allowed; }
-.chat-auth-login-link { width: fit-content; display: inline-flex; align-items: center; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-accent); text-decoration: underline; }
+.chat-auth-error-actions a { width: fit-content; display: inline-flex; align-items: center; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-accent); text-decoration: underline; }
 @container (width < 600px) {
   .chat-auth-error { --recovery-inset: 16px; --recovery-gap: 12px; --recovery-size: var(--achilles-ui-size, 14px); }
-  .chat-auth-error-actions button, .chat-auth-login-link { min-height: 44px; padding-inline: 10px; }
+  .chat-auth-error-actions button, .chat-auth-error-actions a { min-height: 44px; padding-inline: 10px; }
 }
 @media (max-width: 600px) {
   .chat-auth-error { --recovery-inset: 16px; --recovery-gap: 12px; --recovery-size: var(--achilles-ui-size, 14px); }
   .page-chat:not(.page-chat-docked) .chat-auth-error { margin-inline: 12px; }
-  .chat-auth-error-actions button, .chat-auth-login-link { min-height: 44px; padding-inline: 10px; }
+  .chat-auth-error-actions button, .chat-auth-error-actions a { min-height: 44px; padding-inline: 10px; }
 }

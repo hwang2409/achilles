@@ -13,6 +13,7 @@ import { SessionsModule } from "../sessions/SessionsModule";
 import { McpModule } from "../mcp/McpModule";
 import { createMcpOwner } from "../mcp/mcpOwner";
 import { createAccountLogin } from "../accounts/accountLogin";
+import { AccountSwitchProvider } from "../accounts/AccountSwitchReview";
 import { AccountsModule } from "../accounts/AccountsModule";
 import { SettingsModule } from "../settings/SettingsModule";
 import { HOME_SETTINGS_FEATURE } from "../settings/homeSettings";
@@ -74,8 +75,8 @@ export function SurfaceRouter() {
   const observerBanner = observer && route?.id !== "accounts" && <ObserverBanner connection={connection} readOnly={readOnly} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
-    return <AgentSurface connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
-      current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} />;
+    return <AccountSwitchProvider connection={connection}><AgentSurface accountLogin={accountLogin} connection={connection} client={client} connectionState={connectionState} observerBanner={observerBanner} renderShell={renderShell}
+      current={route ?? chatsRoute} homeAlias={chatsRoute.path} connectionStatus={connectionStatus} /></AccountSwitchProvider>;
   }
   if (!route) return null;
   const connecting = phase === "connected" || (phase === "connecting" && connectionState.attempt === 0);
@@ -96,7 +97,7 @@ export function SurfaceRouter() {
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id === "accounts") {
-    content = <AccountsModule login={accountLogin} client={client} connecting={connecting} connection={connection} />;
+    content = <AccountSwitchProvider connection={connection}><AccountsModule login={accountLogin} client={client} connecting={connecting} connection={connection} /></AccountSwitchProvider>;
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
