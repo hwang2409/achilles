@@ -40,17 +40,16 @@ test.each([
 });
 
 test("invalid envelopes fail, and an outdated overlay cannot replace current proof", async () => {
-  let release!: (reply: unknown) => void;
   let overlay = 0;
   let failMetadata = false;
   const { reader } = serve((method) => method === "list_sessions" ? failMetadata ? { sessions: null } : { sessions: [row("a")], next_offset: null }
-    : ++overlay === 1 ? new Promise((answer) => { release = answer; })
+    : ++overlay === 1 ? { items: [state("a", "idle")], next_cursor: null }
     : overlay === 2 ? { items: [state("a", "running")], next_cursor: null }
     : Promise.reject({ code: -32005 }));
-  const first = reader.catalog(signal());
-  const fresh = await reader.catalog(signal());
-  release({ items: [state("a", "idle")], next_cursor: null });
-  await expect(first).rejects.toHaveProperty("name", "AbortError");
+  const [first, second] = await Promise.allSettled([reader.catalog(signal()), reader.catalog(signal())]);
+  expect(first).toMatchObject({ status: "rejected", reason: { name: "AbortError" } });
+  if (second.status === "rejected") throw second.reason;
+  const fresh = second.value;
   const stale = await reader.catalog(signal());
   expect([stale.items[0]?.status, stale.staleState, stale.warnings]).toEqual(["running", fresh.reportedAt, ["zeta could not read this data right now"]]);
   failMetadata = true;
