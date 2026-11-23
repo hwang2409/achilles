@@ -83,7 +83,7 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
   const failure = (failure: Failure, project: boolean) => <FailedRead key={`${scope}:${failure.reason}`} failure={failure}
     project={project} retry={retryRead} reading={reading} offline={offline} />;
 
-  return <ModuleFrame title="mcp connections">
+  return <ModuleFrame title="Connections">
     <div className="mcp-place">
       <p className="mcp-context">configuration for new sessions · user + zeta’s current project</p>
       {client && !supported ? <ModuleState kind="unsupported" title="needs a newer zeta" detail="update zeta to manage mcp connections here" />
