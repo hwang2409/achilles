@@ -29,7 +29,7 @@ export function SettingsModule(props: Props) {
         {section("browser", "This browser")}
         {section("zeta-defaults", "Zeta defaults")}
         <a href={surfaceHref("/accounts")}>Accounts <span aria-hidden="true">→</span></a>
-        <a href={surfaceHref(connectionsRoute.path)}>MCP connections <span aria-hidden="true">→</span></a>
+        <a href={surfaceHref(connectionsRoute.path)}>Connections <span aria-hidden="true">→</span></a>
       </nav>
       <div className="sp-content">
         <section id="browser" aria-labelledby="settings-browser">
