@@ -11,6 +11,7 @@ import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, 
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
+import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
@@ -417,6 +418,16 @@ with _database() as db:
   // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
+  const agentsHome = join(temp, "agents-zeta");
+  const agentsDiscovery = join(agentsHome, "agents-ws.json");
+  await mkdir(agentsHome, { mode: 0o700 });
+  const agentsServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/agent-controls-server.py")], {
+    ...env, ZETA_HOME: agentsHome, ZETA_ACCOUNT_HOME: agentsHome, ZETA_PROOF_DISCOVERY: agentsDiscovery,
+  });
+  await waitFor(async () => await Bun.file(agentsDiscovery).exists(), "agent controls zeta discovery");
+  const agentDiscovery = await readDiscovery(agentsDiscovery);
+  const agentWriteSurfaceIds = await gateAgentControls(browser, origin, { ...agentDiscovery, url: `ws://127.0.0.1:${agentDiscovery.port}` }, waitFor, screenshotDir);
+  await stop(agentsServer);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -3177,7 +3188,7 @@ with _database() as db:
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
-  const renderedWriteSurfaceIds = new Set<string>(mcpWriteSurfaceIds);
+  const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, ...agentWriteSurfaceIds]);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
     for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
   };
@@ -3457,7 +3468,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...agentControlArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),
