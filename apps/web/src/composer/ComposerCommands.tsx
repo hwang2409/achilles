@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { restorableFocus } from "../keyboard";
 import { WRITE_SURFACE } from "../writeSurfaces";
-import { listAccounts, supportsRequest, switchAccount, type Account } from "../zeta";
+import { listAccounts, safeAccountId, supportsRequest, type Account } from "../zeta";
+import { useAccountSwitch } from "../accounts/AccountSwitchReview";
+import { currentAccount, type ChatDestination } from "../accounts/accountSwitch";
 import "./composer-commands.css";
 
 type Output = { accounts: Account[] } | { text: string; error?: boolean };
 
-export function useComposerCommands(client: ZetaClient | null, sessionId: string | null, canWrite: boolean) {
+export function useComposerCommands(client: ZetaClient | null, chat: ChatDestination | null, canWrite: boolean) {
+  const sessionId = chat?.id ?? null;
+  const openSwitch = useAccountSwitch();
   const [output, setOutput] = useState<Output | null>(null);
   const revision = useRef(0);
   const close = useCallback(() => { revision.current++; setOutput(null); }, []);
@@ -15,24 +19,32 @@ export function useComposerCommands(client: ZetaClient | null, sessionId: string
   const canList = Boolean(canWrite && client && sessionId && supportsRequest(client, "account_list"));
   const canSwitch = Boolean(canList && client && supportsRequest(client, "account_switch"));
 
-  async function accounts(account?: string) {
+  function switchTo(rows: Account[], to: string, opener: HTMLElement | null) {
+    if (!chat || !canSwitch) return;
+    if (!safeAccountId(to) || !rows.some(row => row.account === to && row.available && !row.current)) {
+      setOutput({ text: "choose an available account that is not already in use (see /accounts).", error: true });
+      return;
+    }
+    openSwitch({ chat, from: currentAccount(rows, to), to, onCatalog: accounts => setOutput({ accounts }) }, WRITE_SURFACE.composerAccountSwitch, opener);
+  }
+
+  async function accounts(account: string, opener: HTMLElement | null) {
     if (!client || !sessionId || !canList) return;
     const request = ++revision.current;
-    setOutput({ text: account ? `switching to ${account}…` : "reading accounts…" });
+    setOutput({ text: "reading accounts…" });
     try {
-      if (account) await switchAccount(client, sessionId, account);
+      const rows = await listAccounts(client, sessionId);
       if (request !== revision.current) return;
-      const accounts = await listAccounts(client, sessionId);
-      if (request === revision.current) setOutput({ accounts });
-    } catch (error) {
-      if (request === revision.current) setOutput({ text: `could not ${account ? `switch to ${account}` : "read accounts"}: ${error instanceof Error ? error.message : String(error)}`, error: true });
+      setOutput({ accounts: rows });
+      if (account) switchTo(rows, account, opener);
+    } catch {
+      if (request === revision.current) setOutput({ text: "could not read accounts from zeta.", error: true });
     }
   }
 
   return {
-    output, close, canSwitch,
-    switchTo: (account: string) => { if (canSwitch) void accounts(account); },
-    run(command: { name: string; arg: string }) {
+    output, close, canSwitch, switchTo,
+    run(command: { name: string; arg: string }, opener: HTMLElement | null) {
       revision.current++;
       if (!canWrite) return false;
       if (command.name !== "accounts") {
@@ -43,7 +55,7 @@ export function useComposerCommands(client: ZetaClient | null, sessionId: string
         setOutput({ text: sessionId ? "accounts are not available on this zeta" : "start a chat before using /accounts", error: true });
         return false;
       }
-      void accounts(command.arg || undefined);
+      void accounts(command.arg, opener);
       return true;
     },
   };
@@ -56,14 +68,14 @@ export function CommandOutput({ commands, opener }: { commands: ReturnType<typeo
   useEffect(() => {
     if (!open) return;
     const onClick = (event: MouseEvent) => {
-      if (!(event.target instanceof Node) || !event.target.isConnected || panel.current?.contains(event.target) || opener?.contains(event.target)) return;
+      if (!(event.target instanceof Node) || !event.target.isConnected || (event.target instanceof Element && event.target.closest(".confirmation-dialog")) || panel.current?.contains(event.target) || opener?.contains(event.target)) return;
       const active = document.activeElement;
       // Click runs after the browser has assigned focus, as in the page chat overflow.
       if (!restorableFocus(active) || panel.current?.contains(active)) opener?.focus({ preventScroll: true });
       close();
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || (event.target instanceof Element && event.target.closest(".confirmation-dialog"))) return;
       event.preventDefault();
       event.stopPropagation();
       opener?.focus({ preventScroll: true });
@@ -81,7 +93,7 @@ export function CommandOutput({ commands, opener }: { commands: ReturnType<typeo
       {output.accounts.map((account) => <li key={account.account}>
         <span>{account.account}</span>
         <small>{[account.current ? "current" : account.default ? "default" : "", !account.available ? "needs login" : ""].filter(Boolean).join(" · ")}</small>
-        {!account.current && <button type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch} aria-label={`switch to ${account.account}`} onClick={() => { opener?.focus({ preventScroll: true }); switchTo(account.account); }}>switch</button>}
+        {!account.current && <button type="button" data-write-surface={WRITE_SURFACE.composerAccountSwitch} disabled={!canSwitch || !account.available} aria-label={`switch to ${account.account}`} onClick={() => switchTo(output.accounts, account.account, opener)}>switch</button>}
       </li>)}
     </ul>}
   </div>;
