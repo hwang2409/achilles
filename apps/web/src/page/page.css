@@ -160,7 +160,7 @@
 .record-list-empty p, .record-list-error p { margin: 8px 0 16px; color: var(--fulcrum-muted); font-size: 13px; }
 .record-list-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .record-list-actions button { min-height: 36px; padding: 0 16px; border: 1px solid var(--fulcrum-accent); border-radius: 0; color: var(--fulcrum-accent); background: transparent; font: inherit; cursor: pointer; }
-.record-list-actions .record-list-chat { border-color: var(--fulcrum-border); }
+.record-list-actions .record-list-chat { border-color: var(--g1-control-border); }
 .record-list-error strong::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: var(--g1-space-2); vertical-align: .12em; background: var(--g1-danger-mark); }
 .record-list-error .record-list-actions { justify-content: flex-start; }
 .record-list-skeleton { display: grid; }

@@ -18,7 +18,7 @@
 .page-chat-trigger { flex: none; height: 44px; min-width: 44px; padding: 0; border: 1px solid var(--fulcrum-border); background: transparent; color: var(--fulcrum-fg); }
 .page-chat-trigger span { color: var(--fulcrum-muted); }
 .page-chat-icon { width: 44px; font-size: 16px; }
-.page-chat-switcher { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; text-align: left; border-color: transparent; margin-inline-start: -1px; }
+.page-chat-switcher { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding-inline: 8px; text-align: left; border-color: var(--g1-control-border); }
 .page-chat-close { border-color: transparent; font-size: 21px; }
 .page-chat-head button:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
 .page-chat-trigger[aria-expanded="true"], .page-chat-trigger:hover:not(:disabled) { border-color: var(--fulcrum-accent); }
@@ -26,7 +26,7 @@
 .page-chat-controls .page-chat-icon { display: grid; place-items: center; border: 0; }
 .page-chat-controls .page-chat-icon span {
   display: grid; place-items: center; box-sizing: border-box; width: 28px; height: 28px;
-  border: 1px solid var(--fulcrum-border); color: inherit;
+  border: 1px solid var(--g1-control-border); color: inherit;
 }
 .page-chat-controls .page-chat-icon:is([aria-expanded="true"], :hover:not(:disabled)) span { border-color: var(--fulcrum-accent); }
 .page-chat-popup {
