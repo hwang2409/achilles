@@ -96,11 +96,6 @@ export async function listAccounts(client: ZetaClient, sessionId: string): Promi
   return (await readAccounts(client, sessionId)).accounts;
 }
 
-/** Switch this session's account for its provider. zeta requires the session idle; `account` is `provider:name`. */
-export async function switchAccount(client: ZetaClient, sessionId: string, account: string): Promise<void> {
-  await client.request("account_switch", { session_id: sessionId, account });
-}
-
 const providerOf = (account: string) => account.split(":", 1)[0];
 
 /** If more than one provider has a current account, the auth error cannot identify which failed. */

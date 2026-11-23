@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
+import type { CDPSession, Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
 import { gateAccountsPlace, gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
@@ -216,7 +216,9 @@ try {
       ...authEnv, ZETA_TEST_SCRIPTED_PROVIDER: scripted ? "1" : "0",
     }, cwd);
     await waitFor(async () => await Bun.file(authDiscovery).exists(), "switch-then-reply zeta discovery");
-    await readDiscovery(authDiscovery);
+    const discovery = await readDiscovery(authDiscovery);
+    const ps = await Bun.$`ps eww -p ${discovery.pid ?? child.pid!}`.quiet().nothrow();
+    if (ps.exitCode !== 0 || /\bZETA_TOOL_SUBPROCESS=/.test(ps.text())) throw new Error("could not verify the serve environment");
     return child;
   };
   const stop = async (child: ChildProcess) => {
@@ -258,24 +260,157 @@ try {
   await restartAuth(false);
   const authPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   try {
+    const sentinel = "https://provider.invalid/fixture-browser-sign-in";
+    await authPage.context().route(sentinel, route => route.fulfill({ body: "synthetic provider sign-in" }));
+    const log: string[] = [];
+    authPage.on("console", message => log.push(message.text()));
+    const loginRequests: unknown[] = [];
+    const switches: { id: number; account: string }[] = [];
+    let settledByRead = false;
+    let drop = false;
+    await authPage.routeWebSocket(/.*/, socket => {
+      const server = socket.connectToServer();
+      let droppedReply: number | undefined;
+      socket.onMessage(async raw => {
+        const { id, method, params } = JSON.parse(String(raw));
+        if (method === "login_start") {
+          loginRequests.push(params);
+          socket.send(JSON.stringify({ jsonrpc: "2.0", id, result: { state: "pending", authorization_url: sentinel } }));
+          return;
+        }
+        if (method === "login_status") {
+          await seedOAuth("failed");
+          socket.send(JSON.stringify({ jsonrpc: "2.0", id, result: { state: "succeeded" } }));
+          return;
+        }
+        if (method === "account_switch") {
+          switches.push({ id, account: params.account });
+          if (drop) { drop = false; droppedReply = id; }
+        }
+        if (method === "account_list" && switches.length === 2 && droppedReply === undefined) settledByRead = true;
+        server.send(raw);
+      });
+      server.onMessage(raw => {
+        if (droppedReply !== undefined && JSON.parse(String(raw)).id === droppedReply) {
+          void socket.close();
+          return;
+        }
+        socket.send(raw);
+      });
+    });
+    const review = authPage.getByRole("dialog", { name: "review chat account switch" });
+    const capture = async (name: string, locator: Locator, device?: CDPSession) => {
+      if (!screenshotDir) return;
+      await locator.evaluate(async element => {
+        const start = performance.now();
+        let prior = "";
+        for (;;) {
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const box = JSON.stringify(element.getBoundingClientRect());
+          if (box === prior && performance.now() - start >= 300) break;
+          if (performance.now() - start > 3_000) throw new Error("account proof layout did not settle");
+          prior = box;
+        }
+      }, undefined, { timeout: 5_000 });
+      const path = join(screenshotDir, `accounts-${name}.png`);
+      if (device) await Bun.write(path, Buffer.from((await device.send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+      else await authPage.screenshot({ path, animations: "disabled" });
+    };
+    const confirm = async (account: string, chat: string) => {
+      await review.waitFor({ timeout: 10_000 });
+      if (!(await review.textContent())?.includes(chat)) throw new Error("account switch did not name the active chat");
+      const action = review.getByRole("button", { name: "switch chat account", exact: true });
+      if (await action.isEnabled()) throw new Error("switch review did not require the typed account id");
+      await review.getByRole("textbox").fill(account);
+      await action.click();
+    };
+    authPage.setDefaultTimeout(10_000);
     await authPage.goto(`${origin}/not-a-real-page`);
     await authPage.getByRole("button", { name: "new chat", exact: true }).click({ timeout: 20_000 });
     const composer = authPage.getByRole("textbox", { name: "message", exact: true });
-    await composer.fill("fail with the pinned account", { timeout: 20_000 });
+    const title = "fixture account recovery";
+    await composer.fill(title, { timeout: 20_000 });
     // A missing credential triggers real auth failure without sending a provider request.
     await rm(oauthPath("failed"));
     await composer.press("Enter");
-    const card = authPage.getByText("this chat can't reach its account", { exact: true });
+    const card = authPage.locator(".chat-auth-error");
     await card.waitFor({ timeout: 20_000 });
     const id = await authPage.locator("[data-session-id]").getAttribute("data-session-id");
     if (!id) throw new Error("switch-then-reply chat has no session id");
+    const chatUrl = authPage.url();
     const pin = async () => JSON.parse(await Bun.file(join(authHome, "sessions", id, "meta.json")).text()).selected_accounts.anthropic;
     if (await pin() !== "anthropic:failed") throw new Error("switch-then-reply chat did not start pinned to anthropic:failed");
-    await seedOAuth("failed");
+    await capture("auth-card-1440", card);
+    await card.getByRole("link", { name: "/accounts", exact: true }).click();
+    await authPage.getByRole("button", { name: "show accounts", exact: true }).click();
+    const occupied = authPage.getByText(/another tab had control/, { selector: "#account-switch-reason" });
+    if (await authPage.getByRole("button", { name: "try again", exact: true }).isVisible()) await authPage.getByRole("button", { name: "try again", exact: true }).click();
+    await authPage.getByRole("button", { name: "sign in again to anthropic:failed", exact: true }).click();
+    const login = authPage.getByRole("dialog", { name: "review browser sign-in" });
+    await login.getByRole("checkbox").check();
+    const popupEvent = authPage.waitForEvent("popup", { timeout: 10_000 });
+    const [popup, confirmed] = await Promise.allSettled([popupEvent, login.getByRole("button", { name: "sign in again", exact: true }).click()]);
+    if (popup.status === "rejected") throw new Error("named sign-in popup did not open", { cause: popup.reason });
+    try {
+      if (confirmed.status === "rejected") throw confirmed.reason;
+      await popup.value.waitForURL(sentinel, { timeout: 10_000 });
+    } finally { await popup.value.close(); }
+    await authPage.getByText(/^signed in at/).waitFor();
+    const pageData = await authPage.evaluate(() => JSON.stringify([document.documentElement.outerHTML, location.href, history.state,
+      ...[localStorage, sessionStorage].map(store => Object.entries(store))]));
+    if (pageData.includes(sentinel) || log.some(line => line.includes(sentinel))) throw new Error("authorization URL escaped the popup");
+    if (JSON.stringify(loginRequests) !== '[{"provider":"claude","account":"anthropic:failed"}]') throw new Error("browser sign-in did not name the failed account");
+    await capture("named-sign-in-1440", authPage.getByText(/^signed in at/));
+    const toWorking = authPage.getByRole("button", { name: "switch active chat to anthropic:working" });
+    await toWorking.click();
+    await review.waitFor();
+    await capture("page-review-1440", review);
+    await authPage.setViewportSize({ width: 390, height: 844 });
+    await capture("page-review-390", review);
+    await authPage.setViewportSize({ width: 1440, height: 900 });
+    // At 200% a 1440×900 surface has a 720×450 CSS-pixel layout viewport.
+    const cdp = await authPage.context().newCDPSession(authPage);
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: 720, height: 450, deviceScaleFactor: 2, mobile: false });
+    if (!await review.evaluate(dialog => [...dialog.querySelectorAll(".confirmation-name input, .confirmation-actions button")].every(node => {
+      const box = node.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth;
+    }))) throw new Error("typed proof and actions are not visible at 200% zoom");
+    await capture("page-review-1440-200pct", review, cdp);
+    await confirm("anthropic:working", title);
+    await authPage.getByText(/switched to anthropic:working/).waitFor();
+    await capture("page-receipt-1440-200pct", authPage.getByText(/switched to anthropic:working/), cdp);
+    if (await pin() !== "anthropic:working") throw new Error("/accounts did not switch the active session");
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+    await cdp.detach();
+    const other = await browser.newPage();
+    try {
+      await other.goto(chatUrl);
+      await other.getByRole("textbox", { name: "message", exact: true }).waitFor({ timeout: 10_000 });
+      await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).click();
+      await confirm("anthropic:failed", title);
+      await review.getByText(/another tab had control/).waitFor();
+      await review.getByRole("button", { name: "keep current account" }).click();
+      await occupied.waitFor();
+      if (await authPage.getByRole("button", { name: "switch active chat to anthropic:failed" }).isEnabled() || switches.length !== 1)
+        throw new Error("/accounts did not disable switching after control refusal");
+      await capture("controller-refusal-1440", occupied);
+    } finally { await other.close(); }
+    await authPage.goto(chatUrl);
+    await composer.fill("/accounts anthropic:failed");
+    await composer.press("Enter");
+    await review.waitFor();
+    await capture("composer-review-1440", review);
+    drop = true;
+    await confirm("anthropic:failed", title);
+    await authPage.getByText(/current account confirmed as anthropic:failed/).waitFor({ timeout: 20_000 });
+    await capture("composer-read-receipt-1440", authPage.getByText(/current account confirmed as anthropic:failed/));
+    if (await pin() !== "anthropic:failed" || !settledByRead || Number(switches.length) !== 2) throw new Error("lost switch reply was not settled by read alone");
     await restartAuth(true);
     await authPage.reload();
     await card.waitFor({ timeout: 20_000 });
-    await authPage.getByRole("button", { name: "switch this chat to anthropic:working", exact: true }).click({ timeout: 20_000 });
+    await card.getByRole("button", { name: "switch this chat to anthropic:working", exact: true }).click({ timeout: 20_000 });
+    await confirm("anthropic:working", title);
+    await authPage.getByText(/switched to anthropic:working/).waitFor();
     await waitFor(async () => await pin() === "anthropic:working", "switch-then-reply working pin");
     // Old zeta uses the real backend after switching. Keep that path offline too.
     await rm(oauthPath("working"));
@@ -289,6 +424,9 @@ try {
   }
   await stop(authZeta);
   await stop(authApp);
+  if (process.env.ACCOUNTS_PROOF_ONLY === "1") {
+    passed = true;
+  } else {
   const sharedProcess = start(
     "uv",
     ["run", "--project", zeta, "zeta", "serve", "--port", "0", "--ws", "0", "--ws-origin", origin, "--provider", "codex"],
@@ -3496,6 +3634,7 @@ with _database() as db:
   passed = true;
   console.log(`real-zeta gate passed: session ${first}, created /reading with tools, late call rejected`);
 
+  }
 } finally {
   // the last live server's tokens, read before shutdown and rm(temp) remove its discovery file.
   for (const path of [ownDiscovery, sharedDiscovery]) await readDiscovery(path).catch(() => {});

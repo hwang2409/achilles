@@ -1,3 +1,5 @@
+import { AccountSwitchReceipt } from "./accounts/AccountSwitchReview";
+import type { createAccountLogin } from "./accounts/accountLogin";
 import { PageChatHeader } from "./PageChatHeader";
 import { createContext, useContext, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -10,7 +12,7 @@ import { Approval, Fallback, Message, Notification, RunProvider, Timeline, ToolC
 import type { ZetaClient } from "@fulcrum/zeta";
 import type { RenderShell } from "./surface/SurfaceRouter";
 import { titleOf, useAgentNavAdapter } from "./surface/AgentNavAdapter";
-import { approvalIntent, chatsRoute, createRoute, type SurfaceRoute } from "./surface/routes";
+import { surfaceHref, approvalIntent, chatsRoute, createRoute, type SurfaceRoute } from "./surface/routes";
 import { CreateLanding } from "./create/CreateLanding";
 import type { CreateModeOwner } from "./create/createMode";
 import { AuthErrorRecovery } from "./chat/AuthErrorRecovery";
@@ -47,12 +49,13 @@ const highlight = createHighlighter();
 addEventListener("pagehide", () => highlight.dispose(), { once: true });
 const fences: Fences = new Proxy({}, { get: () => CodeFence });
 const RichMarkdown = (props: MarkdownProps) => <Markdown {...props} highlight={highlight} fences={fences} />;
-const AuthRecoveryContext = createContext<{ id: string; sessionId: string; client: ZetaClient; canWrite: boolean; onNewChat: () => void } | null>(null);
+const AuthRecoveryContext = createContext<({ id: string; sessionId: string } & Omit<ComponentProps<typeof AuthErrorRecovery>, "code">) | null>(null);
 function ErrorRow({ id }: { id: string }) {
   const recovery = useContext(AuthRecoveryContext);
   const item = useItem(id);
   const code = item?.type === "error" && item.event.type === "error" ? item.event.error.code : undefined;
-  return recovery?.id === id ? <AuthErrorRecovery key={`${recovery.sessionId}:${id}:${recovery.canWrite}`} {...recovery} code={code} /> : <Fallback id={id} />;
+  if (recovery?.id === id) return <AuthErrorRecovery key={`${recovery.sessionId}:${id}:${recovery.canWrite}`} {...recovery} code={code} />;
+  return <><Fallback id={id} />{code === "auth_error" && <a href={surfaceHref("/accounts")}>/accounts</a>}</>;
 }
 function ChatNotification({ id }: { id: string }) {
   const item = useItem(id);
@@ -94,10 +97,10 @@ function usePageChatSheet() {
 }
 
 // `fromNewChat`: this chat is unsent, so it takes the page's new-chat queue owner if that owner's first send created it
-function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, readyId, canWrite }: { client: ZetaClient | null; readyId: string | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
+function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, focusRequest = 0, props, onActivity, client, chat, canWrite }: { client: ZetaClient | null; chat: { id: string; title: string } | null; canWrite: boolean; sessionId: string; fromNewChat?: string; focus: boolean; vim: boolean; questionWaiting: boolean; focusRequest?: number; props: ComposerProps; onActivity: (activity: ComposerActivity) => void }) {
   const slot = useRef<HTMLDivElement>(null);
   const commandOpener = useRef<HTMLElement | null>(null);
-  const commands = useComposerCommands(client, readyId, canWrite);
+  const commands = useComposerCommands(client, chat, canWrite);
   const draft = useSyncExternalStore(
     (listener) => {
       const unsubscribeConfirm = draftStore.subscribeConfirm(sessionId, listener);
@@ -125,14 +128,14 @@ function ComposerSlot({ sessionId, fromNewChat, focus, vim, questionWaiting, foc
     onCommand: (command: Parameters<typeof commands.run>[0]) => {
       const field = slot.current?.querySelector<HTMLElement>('textarea[aria-label="message"], [role="textbox"]');
       commandOpener.current = field ?? null;
-      return commands.run(command);
+      return commands.run(command, commandOpener.current);
     },
     commandOutput: commands.output && <CommandOutput commands={commands} opener={commandOpener.current} />,
   };
   const composer = vim
     ? <Suspense fallback={<VimLoading />}><LazyVimComposer {...adapterProps} /></Suspense>
     : <PlainComposer {...adapterProps} />;
-  return <div id="message-composer" ref={slot} style={{ display: "contents" }}>{composer}</div>;
+  return <div id="message-composer" ref={slot} style={{ display: "contents" }}><AccountSwitchReceipt />{composer}</div>;
 }
 
 function VimLoading() {
@@ -202,7 +205,7 @@ function connectionFailure(state: ConnectionState): string | null {
   }
 }
 
-export function AgentSurface({ connection, client, connectionState, observerBanner, current, homeAlias, connectionStatus, renderShell }: { renderShell: RenderShell; connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode; current: SurfaceRoute; homeAlias?: string; connectionStatus: { label: string; connected: boolean } }) {
+export function AgentSurface({ connection, client, connectionState, observerBanner, current, homeAlias, connectionStatus, renderShell, accountLogin }: { accountLogin: ReturnType<typeof createAccountLogin>; renderShell: RenderShell; connection: Connection; client: ZetaClient | null; connectionState: ConnectionState; observerBanner: ReactNode; current: SurfaceRoute; homeAlias?: string; connectionStatus: { label: string; connected: boolean } }) {
   const settings = useSettings();
   const canWrite = canWriteForState(connectionState);
   const observerConnected = connectionState.phase === "connected" && connectionState.authority === "observer";
@@ -364,7 +367,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
     return () => removeEventListener("beforeunload", warn);
   }, [connected, lastState, client]);
   const approval = connected && client && store ? createApprovalDecider(client, store) : null;
-  const recovery = authErrorId && ready && client ? { id: authErrorId, client, sessionId: ready.sessionId, canWrite, onNewChat: active.newChat } : null;
+  const recovery = ready && client ? { id: authErrorId ?? "", client, chat: { id: ready.sessionId, title: ready.title }, sessionId: ready.sessionId, login: accountLogin, canWrite, onNewChat: active.newChat } : null;
   const appRenderers: Renderers = { ...renderers, user: ({ id }) => <UserRow id={id} queued={queuedSteers} />, approval: ({ id }) => <ChatApproval id={id} observer={observerConnected} takeControl={() => connection.takeControl()} took={tookControl} disabledReason={!canWrite ? readOnlyReason : !approval ? "zeta is offline" : undefined} onApprove={!canWrite ? undefined : approval ? (request) => approval("approve", request) : undefined} onDeny={!canWrite ? undefined : approval ? (request) => approval("deny", request) : undefined} /> };
   const failure = connectionFailure(connectionState);
   const lost = connectionState.phase !== "connected" && "lost" in connectionState && connectionState.lost;
@@ -451,7 +454,7 @@ export function AgentSurface({ connection, client, connectionState, observerBann
           scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "auto" });
         }} aria-label="jump to latest" title="jump to latest"><span data-jump-label="full">jump to latest</span><span data-jump-label="compact" aria-hidden="true">↓</span></button></div>}
         </section>
-        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} readyId={ready?.sessionId ?? null} canWrite={canWrite} />
+        <ComposerSlot key={ready?.sessionId ?? `new:${activePage.id}`} sessionId={ready?.sessionId ?? `new:${activePage.id}`} fromNewChat={ready && !ready.sent ? `new:${activePage.id}` : undefined} onActivity={setComposerActivity} focus={!active.creatingChat && (!ready || active.focusSessionId === ready.sessionId)} vim={settings.vim && !matchMedia("(pointer: coarse)").matches} questionWaiting={waiting > 0} focusRequest={pageChatFocusRequest} props={composerProps} client={client} chat={ready ? { id: ready.sessionId, title } : null} canWrite={canWrite} />
         </div>
         </div>
         </div>

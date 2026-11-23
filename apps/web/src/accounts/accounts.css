@@ -36,3 +36,7 @@
 .account-login h3 { font-size: 1em; margin: 0; }
 .account-login p { margin: 8px 0; text-wrap: pretty; }
 .account-login button { min-height: 44px; }
+
+.account-switch-availability { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.account-switch-availability p { margin: 0; }
+.account-switch-receipt:not(:has(time)) { display: none; }
