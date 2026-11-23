@@ -30,7 +30,7 @@
 
 :root, [data-achilles-theme] {
   --g1-font-ui: "Geist", system-ui, sans-serif;
-  --g1-font-mono: Menlo, ui-monospace, "SF Mono", monospace;
+  --g1-font-mono: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
   --g1-type-kbd: 11px;
   --g1-type-meta: 12px;
   --g1-type-small: 13px;

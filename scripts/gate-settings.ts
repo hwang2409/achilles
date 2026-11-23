@@ -29,8 +29,10 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
     const style = getComputedStyle(node);
     return { ui: style.fontFamily, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
   });
-  if (!fresh.ui.includes("Geist") || !fresh.mono.trim().startsWith("Menlo,") || fresh.size !== "14px")
+  if (!fresh.ui.includes("Geist") || fresh.mono.trim() !== 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "14px")
     throw new Error(`wrong fresh typography: ${JSON.stringify(fresh)}`);
+  const jetBrainsFaces = () => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("JetBrains Mono")).length);
+  if (await jetBrainsFaces()) throw new Error("JetBrains Mono was registered with default settings");
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
     await assertAppearance(colorScheme);
@@ -46,6 +48,16 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
   await page.getByRole("option", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "IBM Plex Sans" }).click();
+  await page.getByRole("button", { name: "JetBrains Mono", exact: true }).last().click();
+  const checkSavedMono = async () => {
+    await page.waitForFunction(() => [...document.fonts].some(face => face.family.includes("JetBrains Mono")));
+    const loaded = await page.evaluate(async () => {
+      const faces = await document.fonts.load('14px "JetBrains Mono"', "text");
+      return faces.some(face => face.status === "loaded") && getComputedStyle(document.documentElement).getPropertyValue("--achilles-code-font").includes("JetBrains Mono");
+    });
+    if (!loaded) throw new Error("saved JetBrains Mono did not load and apply");
+  };
+  await checkSavedMono();
   if (await theme(page) !== "g1-light") throw new Error("g1-light did not apply live");
   await assertAppearance("light");
   await page.getByRole("button", { name: "esc" }).click();
@@ -56,6 +68,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   if (await theme(page) !== "g1-light") throw new Error("stored theme did not survive reload");
   const uiFont = await page.locator("html").evaluate((node) => getComputedStyle(node).getPropertyValue("--achilles-ui-font"));
   if (!uiFont.includes("IBM Plex Sans")) throw new Error("stored UI font did not survive reload");
+  await checkSavedMono();
 
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto(`${origin}/allow?theme=g1-dark`);

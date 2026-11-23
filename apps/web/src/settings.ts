@@ -58,14 +58,14 @@ export function parseSettings(value: string | null): Settings {
 
 const uiFontValues: Record<UiFont, string> = {
   geist: "var(--g1-font-ui)",
-  "jetbrains-mono": '"JetBrains Mono", ui-monospace, monospace',
+  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
   "ibm-plex-sans": '"IBM Plex Sans", system-ui, sans-serif',
   inter: '"Inter", system-ui, sans-serif',
   system: "system-ui, sans-serif",
 };
 const codeFontValues: Record<CodeFont, string> = {
-  "jetbrains-mono": '"JetBrains Mono", ui-monospace, monospace',
-  "ibm-plex-mono": '"IBM Plex Mono", ui-monospace, monospace',
+  "jetbrains-mono": '"JetBrains Mono", var(--g1-font-mono)',
+  "ibm-plex-mono": '"IBM Plex Mono", var(--g1-font-mono)',
   "system-mono": "var(--g1-font-mono)",
 };
 
@@ -85,6 +85,9 @@ export function applySettings(settings: Settings): void {
   } else {
     root.dataset.achillesTheme = theme;
     root.dataset.fulcrumTheme = theme === "g1-dark" ? "github-dark" : "github-light";
+  }
+  if (settings.uiFont === "jetbrains-mono" || settings.codeFont === "jetbrains-mono") {
+    void import("./fonts-jetbrains.css");
   }
   root.dataset.density = settings.density;
   root.style.setProperty("--achilles-ui-font", uiFontValues[settings.uiFont]);

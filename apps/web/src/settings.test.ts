@@ -18,7 +18,7 @@ describe("web test isolation", () => {
 });
 
 describe("parseSettings", () => {
-  test("defaults to system appearance, Geist, Menlo, and 14px", () => {
+  test("defaults to system appearance, Geist, system monospace, and 14px", () => {
     expect(parseSettings(null)).toMatchObject({ theme: "auto", uiFont: "geist", codeFont: "system-mono", size: 14 });
   });
 

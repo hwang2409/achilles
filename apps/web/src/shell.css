@@ -39,7 +39,7 @@
    (36px list head + 36px group head) instead of hidden under them. useOnScreen reads it too: a build row under the heads is not on screen. */
 .chat-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 72px; }
 .chat-list > .list-head { position: sticky; top: 0; z-index: 1; background: var(--fulcrum-bg); }
-.transcript [data-part="timeline-scroll"]:focus-visible { outline: none; }
+.transcript [data-part="timeline-scroll"]:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; }
 /* the rows paint over an outline of the scroll box itself, so its focus ring is a layer of the frame above them */
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible) { position: relative; }
 .transcript [data-part="timeline-frame"]:has(> [data-part="timeline-scroll"]:focus-visible)::after { content: ""; position: absolute; inset: 0 -6px; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 2px var(--fulcrum-accent); }
@@ -123,6 +123,13 @@
   .header-status .fold-mark::before { width: 7px; height: 7px; margin-right: 5px; }
 }
 /* on narrow headers, keep the named create marker visible and fold only the less important auto marker. */
+/* Keep the existing fold menu on screen at mobile widths under 200% zoom. */
+@container (max-width: 180px) {
+  .chat-actions { gap: 4px; }
+  .chat-heading { gap: 4px; }
+  .header-menu { min-width: min(210px, 100cqw); }
+  .header-menu button { white-space: normal; }
+}
 @container (max-width: 25em) {
   .fold-mark-approve { display: none; }
 }
@@ -144,7 +151,7 @@
 .page-chat { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; }
 .page-chat-surface { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
 /* The pane owns the transcript scroll area; page blocks and chat scroll separately. */
-.transcript { position: relative; font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); flex: 1 1 0; min-height: 0; overflow: hidden; padding: 0; }
+.transcript { position: relative; font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); flex: 1 1 0; min-height: 0; overflow: hidden; padding: 0; }
 html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript > [data-part="timeline-frame"] { width: 100%; max-width: none; height: 100%; margin: 0; }
 .transcript [data-part="timeline-scroll"] { scroll-behavior: auto; }
