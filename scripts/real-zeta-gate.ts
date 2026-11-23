@@ -653,7 +653,7 @@ with _database() as db:
         await observerTelemetry.screenshot({ path: join(screenshotDir, name), animations: "disabled" });
         telemetryArtifacts.push(name);
       };
-      for (const viewport of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
+      for (const viewport of [{ width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
         const size = `${viewport.width}x${viewport.height}`;
         await observerTelemetry.setViewportSize(viewport);
         if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
@@ -677,7 +677,7 @@ with _database() as db:
             const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
-          if (viewport.width === 360 && (!geometry.scrollTop || !geometry.visible)) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
           await captureRecovery(`${size}-bottom`);
           await notice.evaluate(element => { element.scrollTop = 0; });
         }
@@ -1486,9 +1486,9 @@ with _database() as db:
     JSON.stringify(homeInspectValue).includes(achillesHome)
   )
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
-  const theme = process.env.GATE_THEME ?? "gruvbox-dark";
+  const theme = process.env.GATE_THEME ?? "g1-dark";
   await page.goto(`${origin}/reading?theme=${encodeURIComponent(theme)}`);
-  const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.fulcrumTheme ?? "auto" }));
+  const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.achillesTheme ?? "auto" }));
   if (themeProof.applied !== theme) throw new Error(`requested theme ${theme} was not applied: ${JSON.stringify(themeProof)}`);
   if (screenshotDir) await writeFile(join(screenshotDir, "run-proof.txt"), [
     `private temp homes: true`,
