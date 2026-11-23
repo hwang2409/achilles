@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "agent_run_catalog", "list_sessions"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -313,6 +313,34 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
 }
 
 const rows: Record<WriteSurfaceId, Row> = {
+  "agents.send": { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: ["agent_run_catalog_v1", "child_runs"],
+      requests: ["agent_run_catalog", ...(params.role === "controller" ? ["child_run_send"] : [])] } } }),
+    agent_run_catalog: () => ({ result: { revision: "1", data: { items: [{ session_id: "session", run_id: "fixture-run", parent_run_id: null,
+      agent_type: "fixture-profile", description: "fixture task", status: "idle", accepts_follow_ups: true, turns_used: 1,
+      tool_count: 0, current_step: "waiting", started_at: "2026-01-01", finished_at: null, elapsed_seconds: 1 }] } } }),
+    child_run_send: (params) => {
+      expect(params).toEqual({ session_id: "session", run_id: "fixture-run", text: "fixture follow-up" });
+      return { result: { accepted: true, run_id: "fixture-run" } };
+    },
+  } }, check: async (app, authority, writes) => {
+    const field = await app.findByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement;
+    const control = select(app, tag("agents.send"));
+    expect(control.textContent).toBe("send to fixture-profile");
+    expect(disabled(control)).toBe(true);
+    await change(field, "fixture follow-up");
+    expect(disabled(control)).toBe(false);
+    expect(writes).toEqual([]);
+    await click(control);
+    if (authority === "observer") {
+      expect(await app.findByText(/another tab had control\./)).toBeTruthy();
+      expect(field.value).toBe("fixture follow-up");
+    } else {
+      expect(await app.findByText("message accepted by zeta.")).toBeTruthy();
+      didWrite(writes, "child_run_send");
+      expect((app.getByRole("textbox", { name: "message fixture-profile" }) as HTMLTextAreaElement).value).toBe("");
+    }
+  } },
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
   "busy.retry": { kind: "visible", absent: true, options: { rpc: { status: (_params, requests) => ({ result: requests.filter((request) => request === "status").length <= 2 ? { state: "running", session: { session_id: "other" } } : { state: "idle" } }) } }, check: async (app, authority, writes) => {

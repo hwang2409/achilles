@@ -32,6 +32,7 @@ export type AgentRun = {
   toolCount?: number;
   elapsedSeconds?: number;
   background?: boolean;
+  acceptsFollowUps?: boolean;
 };
 export type AgentFilters = { root?: string; status?: AgentStatus };
 type Cursor = string | number;
@@ -57,7 +58,7 @@ function rich(v: unknown): AgentRun | undefined {
       typeof v.current_step !== "string" || typeof v.accepts_follow_ups !== "boolean" || !count(v.turns_used) ||
       !count(v.tool_count) || !finite(v.elapsed_seconds) || !date(v.started_at) || (v.finished_at !== null && !date(v.finished_at))) return;
   return { ...id, agentType: v.agent_type || undefined, status: catalogStatuses.find((s) => s === v.status) ?? "unknown",
-    description: v.description, currentStep: v.current_step, turnsUsed: v.turns_used, toolCount: v.tool_count,
+    description: v.description, acceptsFollowUps: v.accepts_follow_ups, currentStep: v.current_step, turnsUsed: v.turns_used, toolCount: v.tool_count,
     elapsedSeconds: v.elapsed_seconds, startedAt: Date.parse(v.started_at), finishedAt: v.finished_at === null ? undefined : Date.parse(v.finished_at) };
 }
 
