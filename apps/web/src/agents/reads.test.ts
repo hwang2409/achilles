@@ -1,0 +1,104 @@
+import { expect, test } from "bun:test";
+import type { ZetaClient } from "@fulcrum/zeta";
+import { createAgentRunsReader, sourceNote } from "./reads";
+
+const rich = (id = "a:1") => ({ run_id: id, session_id: "a", parent_run_id: null, status: "completed", agent_type: "worker", description: "check sample", accepts_follow_ups: false, turns_used: 2, tool_count: 0, current_step: "completed", started_at: "2026-01-02T00:00:00Z", finished_at: null, elapsed_seconds: 5 });
+const catalog = (items: unknown[], next_cursor?: string) => ({ revision: "sample", data: { items, ...(next_cursor ? { next_cursor } : {}) } });
+const error = (code: number) => Object.assign(new Error("test rpc error"), { code });
+const stored = { run_id: "a:1", session_id: "a", parent_run_id: null, profile: "worker", status: "finished", background: null, started_ns: null, ended_ns: null };
+function setup(features: string[], replies: unknown[], methods = ["agent_run_catalog", "state_agents", "child_run_list"]) {
+  const calls: [string, unknown, AbortSignal | undefined][] = [];
+  const client = { features, request: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
+    calls.push([method, params, options?.signal]);
+    if (!replies.length) throw new Error(`unexpected ${method}`);
+    const response = replies.shift();
+    if (response instanceof Error) throw response;
+    return response;
+  } } as unknown as ZetaClient;
+  return { calls, reader: createAgentRunsReader(client, (method) => methods.includes(method), () => 42) };
+}
+
+// Only defer replies that a test needs to reorder; teardown resolves and drains them even on a failed assertion.
+async function deadline<T>(promise: Promise<T>, operation: string, cancel: () => void = () => {}): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => { cancel(); reject(new Error(`deadline: ${operation}`)); }, 1000); })]); }
+  finally { clearTimeout(timer); }
+}
+
+test("catalog needs feature and exact method; reads configured filters, validates rows and keeps an empty continuation", async () => {
+  const { reader, calls } = setup(["agent_run_catalog_v1"], [catalog([{ ...rich(), tool_count: "0" }], "after"), catalog([rich(), { ...rich("b:1"), session_id: "b" }])]);
+  await reader.refresh({ root: "a", status: "completed" });
+  expect(calls[0]?.slice(0, 2)).toEqual(["agent_run_catalog", { limit: 100, root_session_id: "a", state: "completed" }]);
+  expect(reader.snapshot().report).toMatchObject({ rows: [], omitted: 1, reportedAt: 42, complete: false });
+  await reader.more();
+  expect(calls[1]?.[1]).toEqual({ limit: 100, root_session_id: "a", state: "completed", cursor: "after" });
+  expect(reader.snapshot().report).toMatchObject({ omitted: 2, complete: true, rows: [{ runId: "a:1", elapsedSeconds: 5 }] });
+  const missing = setup(["agent_run_catalog_v1"], [], []);
+  await missing.reader.refresh();
+  expect(missing.reader.snapshot().unsupported).toBe(true);
+  expect(missing.calls).toHaveLength(0);
+});
+
+test("method rejection falls back to state then attached; invalid rows are not promoted or invented", async () => {
+  const { reader, calls } = setup(["agent_run_catalog_v1", "state_read_v1", "child_runs"], [error(-32601), { as_of_ns: 2, items: [stored, { ...stored, status: "completed" }], next_cursor: null }, error(-32601), { session: { session_id: "a" } }, { runs: [rich(), { ...rich("b:1"), session_id: "b" }], next_offset: 2 }, { runs: [] }]);
+  await reader.refresh({ root: "a", status: "completed" });
+  expect(calls[1]?.[1]).toEqual({ limit: 100, cursor: null, session_id: "a", status: "finished" });
+  expect(reader.snapshot().report).toMatchObject({ source: "state", omitted: 1, rows: [{ status: "completed", agentType: "worker" }] });
+  expect(reader.snapshot().report?.rows[0]?.elapsedSeconds).toBeUndefined();
+  expect(sourceNote.state).toBe("full agent details need a newer zeta. showing stored agent state.");
+  await reader.refresh();
+  expect(calls.slice(2).map(([method]) => method)).toEqual(["state_agents", "status", "child_run_list"]);
+  expect(reader.snapshot().report).toMatchObject({ source: "attached", omitted: 1, complete: false });
+  await reader.more();
+  expect(calls[5]?.[1]).toEqual({ session_id: "a", limit: 100, offset: 2 });
+  expect(reader.snapshot().report?.complete).toBe(true);
+  const unattached = setup(["child_runs"], [{ session: null }]);
+  await unattached.reader.refresh();
+  expect(unattached.reader.snapshot().unsupported).toBe(true);
+  expect(unattached.calls.map(([method]) => method)).toEqual(["status"]);
+});
+
+test.each([
+  [catalog([], ""), undefined],
+  [{ revision: "sample", data: { items: [], next_cursor: null } }, "zeta returned an invalid response"],
+  [error(-32005), "zeta could not read agent runs right now"],
+  [error(-32007), "zeta could not fit the agent runs in a reply"],
+])("refresh maps %p and only replaces the last valid report on success", async (reply, message) => {
+  const { reader } = setup(["agent_run_catalog_v1"], [catalog([rich()]), reply]);
+  await reader.refresh();
+  const report = reader.snapshot().report;
+  await reader.refresh();
+  expect(reader.snapshot().warning).toBe(message);
+  if (message) expect(reader.snapshot().report).toBe(report);
+  else expect(reader.snapshot().report?.rows).toEqual([]);
+});
+
+test("rejected continuation restarts once at the first page, not a merge of generations", async () => {
+  const { reader, calls } = setup(["agent_run_catalog_v1"], [catalog([rich()], "stale"), error(-32602), catalog([rich("a:3")], "loop"), catalog([rich("a:4")], "loop"), error(-32602)]);
+  await reader.refresh();
+  await reader.more();
+  expect(calls.map(([, params]) => params)).toEqual([{ limit: 100 }, { limit: 100, cursor: "stale" }, { limit: 100 }]);
+  expect(reader.snapshot().report?.rows.map((row) => row.runId)).toEqual(["a:3"]);
+  await reader.more();
+  expect(calls).toHaveLength(5);
+  expect(reader.snapshot().warning).toContain("rejected");
+  expect(reader.snapshot().report?.rows.map((row) => row.runId)).toEqual(["a:3"]);
+});
+
+test("a delayed continuation cannot append after refresh replaced its base", async () => {
+  const gate = Promise.withResolvers<unknown>();
+  const { reader, calls } = setup(["agent_run_catalog_v1"], [catalog([rich()], "older"), gate.promise, catalog([rich("a:3")])]);
+  const cancel = () => { reader.stop(); gate.resolve(catalog([])); };
+  await deadline(reader.refresh(), "load first report", cancel);
+  const more = reader.more();
+  try {
+    await deadline(reader.refresh(), "replace the report", cancel);
+    expect(calls[1]?.[2]?.aborted).toBe(true);
+    gate.resolve(catalog([rich("a:2")]));
+    await deadline(more, "drain superseded continuation", cancel);
+    expect(reader.snapshot().report?.rows.map((row) => row.runId)).toEqual(["a:3"]);
+  } finally {
+    cancel();
+    await deadline(more, "drain continuation on teardown");
+  }
+});

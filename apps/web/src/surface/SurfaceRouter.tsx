@@ -7,6 +7,7 @@ import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { useMemoryActions } from "../projects/MemoryActions";
 import { ProjectsModule } from "../projects/ProjectsModule";
+import { AgentsModule } from "../agents/AgentsModule";
 import { SessionsModule } from "../sessions/SessionsModule";
 import { McpModule } from "../mcp/McpModule";
 import { createMcpReads } from "../mcp/mcpReads";
@@ -78,6 +79,8 @@ export function SurfaceRouter() {
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
+  } else if (route.id === "agents") {
+    content = <AgentsModule client={client} connecting={connecting} retry={() => connection.retryNow()} />;
   } else if (route.id === "connections") {
     content = <McpModule client={client} reads={mcpReads} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {
