@@ -104,15 +104,11 @@ export function PageChatHeader({ pageId, sessionId, title, state, stateLabel, on
         <button className="ui-button page-chat-switcher" type="button" ref={switcher} aria-label={`${title}, ${count}`} aria-haspopup="listbox" aria-expanded={popup === "chats"} aria-controls={popup === "chats" ? "page-chat-choices" : undefined} onClick={() => open("chats")}>
           <strong id="page-chat-title" title={title}>{title}</strong><span aria-hidden="true">⌄</span>
         </button>
-        {close && <button className="ui-icon-button page-chat-icon page-chat-close" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><span aria-hidden="true">×</span></button>}
-      </div>
-      <div className="page-chat-controls">
-        <div className="page-chat-readouts ui-status">
-          {state !== "idle" && <span title={stateLabel}>{stateLabel}</span>}
-        </div>
         <button className="ui-icon-button page-chat-icon" type="button" aria-label="new page chat" data-write-surface={WRITE_SURFACE.pageChatNew} title={newReason ?? "new page chat"} aria-describedby={newReason ? "page-chat-new-reason" : undefined} disabled={!newChat} onClick={newChat}><span aria-hidden="true">+</span></button>
         <button className="ui-icon-button page-chat-icon" type="button" ref={menu} aria-label="page chat options" aria-haspopup="menu" aria-expanded={popup === "modes"} aria-controls={popup === "modes" ? "page-chat-modes" : undefined} onClick={() => open("modes")}><span aria-hidden="true">⋯</span></button>
+        {close && <button className="ui-icon-button page-chat-icon page-chat-close" type="button" ref={closeRef} aria-label="close page chat" onClick={close}><span aria-hidden="true">×</span></button>}
       </div>
+      {state !== "idle" && <div className="page-chat-readouts ui-status" title={stateLabel}>{stateLabel}</div>}
       {popup === "chats" && <div className="page-chat-popup" data-kind="chats" ref={panel} tabIndex={-1}>
         <div className="page-chat-popup-note" id="page-chat-count">{count} on this page</div>
         <div role="listbox" id="page-chat-choices" aria-labelledby="page-chat-count" aria-busy={catalog.loading}>

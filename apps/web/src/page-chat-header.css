@@ -1,13 +1,13 @@
 .page-chat-head {
   position: relative; z-index: 1;
   flex: none; min-width: 0;
-  padding: 0 16px; border-block: 1px solid var(--fulcrum-border);
+  padding: var(--g1-space-1) var(--g1-space-4); border-bottom: 1px solid var(--g1-border);
   font-size: 12px; white-space: nowrap; box-sizing: border-box;
 }
 .page-chat-head strong, .page-chat-choice-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.page-chat-title-row, .page-chat-controls { display: flex; align-items: center; gap: 8px; }
+.page-chat-title-row { display: flex; align-items: center; gap: 8px; }
 .page-chat-head strong { font-size: 14px; font-weight: 600; }
-.page-chat-readouts { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.page-chat-readouts { padding-inline: var(--g1-space-2); overflow: hidden; text-overflow: ellipsis; }
 .page-chat-new-reason { padding: var(--g1-space-1) var(--g1-space-4); color: var(--g1-muted); font-size: var(--g1-type-meta); }
 .page-chat-switcher { display: flex; align-items: center; gap: var(--g1-space-2); flex: 1; min-width: 0; text-align: start; }
 .page-chat-icon { flex: none; font-size: 18px; }

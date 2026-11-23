@@ -106,7 +106,7 @@ describe("RecordList", () => {
     expect(text(result)).not.toContain("could not load books");
     expect(text(result)).not.toContain("No books yet");
     expect(result.queryByRole("button", { name: "add a record", exact: true })).toBeNull();
-    expect(result.queryByRole("button", { name: "ask the chat", exact: true })).toBeNull();
+    expect(result.queryByRole("button", { name: "Ask the chat", exact: true })).toBeNull();
   });
 
   test("resets rows when the layout page identity changes", async () => {

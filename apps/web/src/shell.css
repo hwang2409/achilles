@@ -168,9 +168,9 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; max-width: 34ch; font-size: 24px; line-height: 32px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .empty-chat p { max-width: 68ch; color: var(--fulcrum-muted); line-height: 1.7; }
 .chat-starters { margin-top: 30px; border-top: 1px solid var(--fulcrum-border); }
-.chat-starters button { width: 100%; min-height: 52px; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--g1-control-border); text-align: left; }
+.chat-starters button { width: 100%; min-height: 52px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--g1-border); border-radius: 0; text-align: left; }
 .chat-starters b { color: var(--fulcrum-accent); }
-.chat-starters span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-starters span { text-wrap: pretty; }
 .chat-starters i { color: var(--fulcrum-muted); font-style: normal; font-size: 12px; }
 .main-pane [data-part="composer"] {
   width: min(var(--g1-content-max), calc(100% - 48px));

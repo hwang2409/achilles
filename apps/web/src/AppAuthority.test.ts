@@ -87,7 +87,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
         : path.includes("/records/") ? [] : { ...page, ...options.page });
     }) as typeof fetch;
     (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(`http://fixture.invalid${options.path ?? "/"}${options.attached ? "?chat=session" : ""}`);
-    updateSettings({ vim: false, size: 15 });
+    updateSettings({ vim: false, size: 14 });
     const { SurfaceRouter } = await import("./surface/SurfaceRouter");
     app = render(createElement(SurfaceRouter));
     await act(async () => {});
@@ -104,7 +104,7 @@ async function withApp(authority: Authority, options: Options, check: (app: Rend
     await check(app, writes, requests, emit);
     if (authority === "observer") {
       expect(writes).toEqual([]);
-      const expected = { ...oldSettings, vim: false, size: 15 };
+      const expected = { ...oldSettings, vim: false, size: 14 };
       if (options.browserPreference) Object.assign(expected, { [options.browserPreference]: getSettings()[options.browserPreference] });
       expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)).toEqual(expected);
     }
@@ -631,7 +631,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     }
   } },
   "record.add": { kind: "local-only", options: records, check: async (app, authority, writes) => {
-    const control = app.getByText("add a book", { selector: "button", exact: true });
+    const control = app.getByText("Add a book", { selector: "button", exact: true });
     const field = select(app, '.record-form input[name="title"]');
     expect(disabled(field)).toBe(authority === "observer");
     if (authority === "observer") expect(select(app, ".record-form .form-note").textContent).toContain("read-only");
@@ -695,8 +695,8 @@ const rows: Record<WriteSurfaceId, Row> = {
     await act(async () => { fireEvent.submit(form); });
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/add_book/invoke");
   } },
-  "page.chat": { kind: "visible", absent: true, options: { ...records, attached: true }, check: async (app, authority, writes) => {
-    const ask = app.queryByText("ask the chat", { selector: "button", exact: true });
+  "page.chat": { kind: "visible", absent: true, options: { page: { layout: { blocks: [{ type: "list", title: "Books", collection: "books" }] } }, attached: true }, check: async (app, authority, writes) => {
+    const ask = app.queryByText("Ask the chat", { selector: "button", exact: true });
     expect(Boolean(ask)).toBe(authority === "controller");
     if (!ask) { await keydown(select(app, '[data-part="composer"]'), "Enter"); return; }
     await click(ask);

@@ -87,12 +87,15 @@ export async function gateTranscript(
     const transcript = getComputedStyle(document.querySelector(".transcript")!);
     const prose = getComputedStyle(document.querySelector('.transcript [data-part="message"][data-format="markdown"]')!);
     const code = getComputedStyle(document.querySelector(".transcript pre code")!);
+    const timeline = document.querySelector('.transcript [data-part="timeline"]')!;
+    const cap = parseFloat(getComputedStyle(root).getPropertyValue("--g1-content-max"));
     return {
       font: transcript.fontFamily,
       proseFont: prose.fontFamily,
       proseSize: prose.fontSize,
       proseLineHeight: prose.lineHeight,
-      rowWidth: document.querySelector('.transcript [data-part="timeline"] > [data-virtual-id]')!.getBoundingClientRect().width,
+      rowWidth: timeline.querySelector("[data-virtual-id]")!.getBoundingClientRect().width,
+      expectedWidth: Math.min(cap, timeline.getBoundingClientRect().width - 48),
       size: transcript.fontSize,
       lineHeight: transcript.lineHeight,
       codeFont: code.fontFamily,
@@ -101,7 +104,7 @@ export async function gateTranscript(
   if (
     !typography.font.includes("IBM Plex Sans") || !typography.proseFont.includes("IBM Plex Sans") || typography.size !== "16px" ||
     typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono") ||
-    typography.proseSize !== "15px" || typography.proseLineHeight !== "24px" || typography.rowWidth !== 944
+    typography.proseSize !== "15px" || typography.proseLineHeight !== "24px" || Math.abs(typography.rowWidth - typography.expectedWidth) > 1
   )
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");
