@@ -327,8 +327,8 @@ function mcpAdd(): Row {
   } };
 }
 
-function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: string): Row {
-  const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: false, status: "pending trust",
+function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test", method: string): Row {
+  const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: id === "mcp.test", status: id === "mcp.test" ? "configured" : "pending trust",
     auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
   const view = (items: object[] = [fixture]) => ({ revision: "a".repeat(64), data: { items } });
   const roles: string[] = [];
@@ -336,7 +336,7 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
       requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
     mcp_server_list: ({ scope }) => ({ result: view(scope === "user" ? [] : [fixture]) }),
-    [method]: () => ({ result: { ...view(id === "mcp.remove" ? [] : [{ ...fixture, enabled: false, trusted: true }]),
+    [method]: () => id === "mcp.test" ? { result: { data: { status: "ok", tool_count: 1 } } } : ({ result: { ...view(id === "mcp.remove" ? [] : [{ ...fixture, enabled: false, trusted: true }]),
       restart: { serve: false, sessions: [], complete: true } } }),
   } }, check: async (app, authority, writes) => {
     const requestStart = roles.length;
@@ -345,7 +345,8 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: stri
     await click(trigger);
     expect(writes).toEqual([]);
     expect(roles).toHaveLength(requestStart);
-    if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
+    if (id === "mcp.test") await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+    else if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
     const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
     expect(confirm.disabled).toBe(false);
     if (id === "mcp.enabled") await click(confirm);
@@ -546,6 +547,7 @@ const rows: Record<WriteSurfaceId, Row> = {
   "mcp.add": mcpAdd(),
   "mcp.enabled": mcpWrite("mcp.enabled", "mcp_server_set_enabled"),
   "mcp.trusted": mcpWrite("mcp.trusted", "mcp_server_set_trusted"),
+  "mcp.test": mcpWrite("mcp.test", "mcp_server_test"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
     // the settings place browses as an observer; confirming the change borrows control for the one update.

@@ -28,6 +28,27 @@ type Restart = { sessions: string[]; complete: boolean };
 export type McpOutcome =
   | { status: "committed"; restart: Restart | null }
   | { status: "stale" | "busy" | "unavailable" | "invalid" | "refused" | "unsupported" | "conflict" | "changed" | "cancelled" | "unknown" };
+export const mcpTestMethod = "mcp_server_test";
+type TestTarget = Pick<McpRow, "name" | "scope" | "trusted"> & { transport: McpRow["config"]["transport"] };
+export type McpTestResult = { status: "ok" | "failed" | "untrusted" | "skipped-policy"; toolCount: number };
+type TestAttempt = { action: "test"; target: TestTarget };
+type TestReply = { status: "tested"; result: McpTestResult };
+export type McpTestOutcome = TestReply | McpOutcome;
+
+export function needsMcpTestTrust({ scope, transport, trusted }: TestTarget) {
+  return scope === "project" && transport === "stdio" && !trusted;
+}
+
+function projectTest(value: unknown): TestReply | null {
+  const data = (value as { data?: { status?: unknown; tool_count?: unknown } } | null)?.data;
+  const status = data?.status;
+  const toolCount = data?.tool_count;
+  if (status !== "ok" && status !== "failed" && status !== "untrusted" && status !== "skipped-policy") return null;
+  if (typeof toolCount !== "number" || !Number.isSafeInteger(toolCount) || toolCount < 0) return null;
+  return { status: "tested", result: { status, toolCount } };
+}
+
+const TEST_FAILED = { status: "tested", result: { status: "failed", toolCount: 0 } } as const;
 const UNKNOWN = { status: "unknown" } as const;
 const CANCELLED = { status: "cancelled" } as const;
 const BACKOFF = [500, 1_000, 2_000];
@@ -109,7 +130,7 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
   wait?: typeof waitFor;
 }) {
   const reads = createMcpReads(canRead);
-  const { run, ...forms } = createWriteForms<McpOutcome, Attempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
+  const { run, ...forms } = createWriteForms<McpTestOutcome, Attempt | TestAttempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
   const outcomes = new WeakMap<Attempt, McpOutcome>();
   const refresh = (signal?: AbortSignal) => {
     const client = live();
@@ -154,6 +175,23 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     try { return signal.aborted ? CANCELLED : await perform(client); }
     finally { await release().catch(() => {}); }
   }
+  async function sendTest(client: ZetaClient, { name, scope }: TestTarget, signal: AbortSignal): Promise<McpTestOutcome> {
+    if (live() !== client) return { status: "refused" };
+    if (!supports(client, mcpTestMethod)) return { status: "unsupported" };
+    try {
+      // Abort only stops waiting locally. Zeta owns initialize/list and transport cleanup.
+      const result = await client.request(mcpTestMethod, { name, scope }, { signal });
+      return live() === client ? projectTest(result) ?? UNKNOWN : UNKNOWN;
+    } catch (error) {
+      if (live() !== client) return UNKNOWN;
+      // Zeta returns its closed internal-error code when the transport fails before a receipt.
+      if ((error as { code?: unknown } | null)?.code === -32000) return TEST_FAILED;
+      return rpcFailure(error) ?? UNKNOWN;
+    }
+  }
+  const test = (form: string, target: TestTarget) => run(form, "mcp", JSON.stringify(target), { action: "test", target }, (signal) =>
+    needsMcpTestTrust(target) ? Promise.resolve({ status: "tested", result: { status: "untrusted", toolCount: 0 } })
+      : withAcquiredControl(signal, (client) => sendTest(client, target, signal)));
   async function execute(attempt: Attempt, signal: AbortSignal, take?: TakeMutation): Promise<McpOutcome> {
     let outcome = await withAcquiredControl(signal, (client) => send(client, attempt, signal, take));
     if (outcome.status === "unknown") outcome = await settle(attempt, signal);
@@ -167,7 +205,12 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     outcomes.set(attempt, outcome);
     return outcome;
   });
-  return { reads, ...forms, execute: (form: string, attempt: McpAttempt) => submit(form, attempt, false),
+  return { reads, ...forms, test,
+    attach: (form: string, deliver: (outcome: McpOutcome) => void) => forms.attach(form, (outcome) => {
+      if (outcome.status !== "tested") deliver(outcome);
+    }),
+    attachTest: (form: string, deliver: (outcome: McpTestOutcome) => void) => forms.attach(form, deliver),
+    execute: (form: string, attempt: McpAttempt) => submit(form, attempt, false),
     add: (form: string, attempt: McpAddAttempt, take: TakeMutation) => submit(form, attempt, false, take),
     check: (form: string, attempt: Attempt) => submit(form, attempt, true) };
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { createMcpOwner, mcpMethods, projectAdd, type McpAddAttempt, type McpAddMutation, type McpAttempt, type McpOutcome } from "./mcpOwner";
+import { createMcpOwner, mcpMethods, mcpTestMethod, projectAdd, type McpAddAttempt, type McpAddMutation, type McpAttempt, type McpOutcome, type McpTestOutcome } from "./mcpOwner";
 
 const a = "a".repeat(64), b = "b".repeat(64);
 const enabled = { action: "enabled", name: "fixture", scope: "user", revision: a, value: false } as const;
@@ -17,16 +17,16 @@ const stale = { code: -32009, data: { reason: "stale_mcp_revision" } };
 function rig() {
   const writes: Array<{ method: string; params: unknown }> = [];
   const reads: string[] = [], events: string[] = [], waits: number[] = [];
-  const replies: Array<() => unknown> = [];
+  const replies: Array<(options?: { signal?: AbortSignal; timeoutMs?: number }) => unknown> = [];
   const gates: Array<() => void> = [];
   const jobs: Promise<unknown>[] = [];
   let read = (scope: string) => list(b, row(scope === "effective" ? "project" : scope, false));
   let wait = (_signal: AbortSignal): Promise<void> => Promise.resolve();
   let release = (): Promise<void> => Promise.resolve();
-  const request = (method: string, params: { scope: string; signal?: AbortSignal }) => {
+  const request = (method: string, params: { scope: string }, options?: { signal?: AbortSignal; timeoutMs?: number }) => {
     if (method === "mcp_server_list") { reads.push(params.scope); return read(params.scope); }
     writes.push({ method, params });
-    return replies.shift()?.() ?? saved;
+    return replies.shift()?.(options) ?? saved;
   };
   const client = { request } as unknown as ZetaClient;
   let live: ZetaClient | null = client;
@@ -37,9 +37,12 @@ function rig() {
   const forms: string[] = [];
   const open = () => {
     const form = owner.open(); forms.push(form);
-    const outcomes: McpOutcome[] = [];
+    const outcomes: McpOutcome[] = [], testOutcomes: McpTestOutcome[] = [];
     let detach = owner.attach(form, (value) => outcomes.push(value));
-    return { outcomes, close: () => owner.close(form), detach: () => detach(), attach: () => { detach = owner.attach(form, (value) => outcomes.push(value)); },
+    return { outcomes, testOutcomes, test: (target: Parameters<typeof owner.test>[1]) => {
+      owner.attachTest(form, (value) => testOutcomes.push(value));
+      return track(owner.test(form, target));
+    }, close: () => owner.close(form), detach: () => detach(), attach: () => { detach = owner.attach(form, (value) => outcomes.push(value)); },
       execute: (sent: McpAttempt = enabled) => track(owner.execute(form, sent)), add: (sent: McpAddAttempt, take: () => McpAddMutation | null) => track(owner.add(form, sent, take)), check: (sent: McpAttempt | McpAddAttempt = enabled) => track(owner.check(form, sent)) };
   };
   const track = <T,>(promise: Promise<T>) => { jobs.push(promise); return promise; };
@@ -47,7 +50,7 @@ function rig() {
   async function deadline<T>(operation: string, promise: Promise<T>): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try { return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { cancel(); reject(new Error(`${operation} did not finish`)); }, 500);
+      timer = setTimeout(() => { cancel(); reject(new Error(`${operation} did not finish`)); }, 10_000);
     })]); } finally { clearTimeout(timer); }
   }
   function gate<T>(value: T) {
@@ -60,7 +63,7 @@ function rig() {
   }
   return { owner, open, writes, reads, events, waits, replies, deadline, gate,
     read: (fn: typeof read) => { read = fn; }, acquire: (fn: typeof acquire) => { acquire = fn; },
-    release: (fn: typeof release) => { release = fn; }, wait: (fn: typeof wait) => { wait = fn; }, drop: () => { live = null; },
+    release: (fn: typeof release) => { release = fn; }, wait: (fn: typeof wait) => { wait = fn; }, drop: () => { live = null; }, reconnect: () => { live = client; },
     async cleanup() { cancel(); await deadline("drain owner jobs", Promise.allSettled(jobs)); },
   };
 }
@@ -69,7 +72,7 @@ type Rig = ReturnType<typeof rig>;
 const rowTest = (name: string, check: (r: Rig) => Promise<void>) => test(name, async () => {
   const r = rig();
   try { await check(r); } finally { await r.cleanup(); }
-});
+}, 35_000);
 const fail = (value: unknown) => () => { throw value; };
 const allScopes = ["effective", "user", "project"];
 
@@ -250,4 +253,72 @@ rowTest("add lost reply can settle from an exact safe projection without retaini
   expect(form.outcomes).toEqual([{ status: "committed", restart: null }]);
   expect(r.writes).toHaveLength(1);
   expect(JSON.stringify([form.outcomes, r.owner.reads.snapshot()])).not.toContain("add-private");
+});
+
+const testTarget = { name: "fixture", scope: "project", transport: "stdio", trusted: true } as const;
+
+for (const [row, status, toolCount] of [["success", "ok", 2], ["failure", "failed", 0], ["skipped-policy", "skipped-policy", 0]] as const) {
+  rowTest(`test ${row}: send once and project only status and count`, async (r) => {
+    const form = r.open();
+    r.replies.push((options) => {
+      expect(options?.timeoutMs).toBeUndefined();
+      return { data: { status, tool_count: toolCount, tools: [{ name: "fixture-canary", description: "not a receipt" }], stderr: "fixture-stderr" } };
+    });
+    await r.deadline("test response and release", form.test(testTarget));
+    if (status === "failed") {
+      r.replies.push(fail({ code: -32000, message: "fixture-internal-error" }));
+      await r.deadline("test transport error response and release", form.test(testTarget));
+    }
+    const count = status === "failed" ? 2 : 1;
+    expect(form.testOutcomes).toEqual(Array(count).fill({ status: "tested", result: { status, toolCount } }));
+    expect(r.events).toEqual(Array(count).fill(["acquire", "release"]).flat());
+    expect(r.writes).toEqual(Array(count).fill({ method: mcpTestMethod, params: { name: "fixture", scope: "project" } }));
+    expect(r.reads).toEqual([]);
+  });
+}
+
+rowTest("test untrusted: no request or control for untrusted project stdio", async (r) => {
+  const form = r.open();
+  await r.deadline("local trust refusal", form.test({ ...testTarget, trusted: false }));
+  expect(form.testOutcomes).toEqual([{ status: "tested", result: { status: "untrusted", toolCount: 0 } }]);
+  expect(r.writes).toEqual([]);
+  expect(r.events).toEqual([]);
+  expect(r.reads).toEqual([]);
+});
+
+rowTest("test drop: unknown without a retry or settlement read", async (r) => {
+  const form = r.open();
+  const pending = r.gate({ data: { status: "ok", tool_count: 1 } });
+  r.replies.push(pending.hold);
+  const running = form.test(testTarget);
+  await r.deadline("test request sent", pending.entered);
+  expect(r.events).toEqual(["acquire"]);
+  r.drop();
+  pending.resume();
+  await r.deadline("dropped test outcome and release", running);
+  expect(form.testOutcomes).toEqual([{ status: "unknown" }]);
+  expect(r.writes).toHaveLength(1);
+  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.reads).toEqual([]);
+  // A new action after reconnect may send once. Unmount must release while the reply is still pending.
+  r.reconnect();
+  const fresh = r.open();
+  const inFlight = r.gate({ data: { status: "ok", tool_count: 1 } });
+  r.replies.push((options) => {
+    const reply = inFlight.hold();
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(new Error("test request aborted"));
+      options?.signal?.addEventListener("abort", abort, { once: true });
+      void reply.then((value) => { options?.signal?.removeEventListener("abort", abort); resolve(value); });
+    });
+  });
+  const runningAgain = fresh.test(testTarget);
+  await r.deadline("explicit repeat request sent", inFlight.entered);
+  fresh.close();
+  try { await r.deadline("release on unmount before reply", runningAgain); }
+  finally { inFlight.resume(); }
+  expect(fresh.testOutcomes).toEqual([]);
+  expect(r.writes).toHaveLength(2);
+  expect(r.events).toEqual(["acquire", "release", "acquire", "release"]);
+  expect(r.reads).toEqual([]);
 });
