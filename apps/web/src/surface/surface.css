@@ -12,8 +12,7 @@
 .surface-actions b { font-weight: 600; }
 .new-chat:not(:disabled, [aria-disabled="true"]) kbd { color: inherit; }
 .surface-search { position: relative; }
-.surface-search .chat-search { background: var(--g1-bg); }
-.surface-search .chat-search { min-height: 36px; display: flex; align-items: center; gap: 8px; padding-left: 10px; padding-right: 44px; }
+.surface-search .chat-search { background: var(--g1-bg); min-height: 36px; display: flex; align-items: center; gap: 8px; padding-left: 10px; padding-right: 44px; }
 .surface-search .chat-search kbd { display: none; }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; box-shadow: var(--g1-focus-halo); }
 .surface-search .palette-button { position: absolute; right: 0; top: 0; height: 36px; min-width: 48px; color: var(--fulcrum-muted); border-color: transparent; border-inline-start-color: var(--g1-control-border); }
