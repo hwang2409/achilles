@@ -2191,7 +2191,7 @@ with _database() as db:
   await waitFor(async () => {
     const collapsed = await rawGeometry();
     const header = await outerSummary.boundingBox();
-    return Boolean(header && collapsed.rowBox && collapsed.nextBox && !collapsed.minHeight && collapsed.rowBox.height <= header.height + 4 && collapsed.nextBox.y - (collapsed.rowBox.y + collapsed.rowBox.height) <= 32);
+    return Boolean(header && collapsed.rowBox && collapsed.nextBox && !(await owningVirtualRow.evaluate((row) => (row as HTMLElement).style.minHeight)) && collapsed.rowBox.height <= header.height + 4 && collapsed.nextBox.y - (collapsed.rowBox.y + collapsed.rowBox.height) <= 32);
   }, "outer tool collapse releases the raw disclosure space");
   await outerSummary.click();
   if (process.env.ONLY_TOOL_SUMMARY) {
