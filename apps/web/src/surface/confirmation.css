@@ -39,6 +39,8 @@
 .confirmation-body dt, .confirmation-current { color: var(--fulcrum-muted); }
 .confirmation-body dd { margin: 0; }
 .confirmation-dialog[data-proof="name"] .confirmation-body dl > div:last-child dd { color: var(--fulcrum-warn); }
+.confirmation-proof { flex: none; padding: 0 16px 8px; }
+.confirmation-proof p { margin: 0; color: var(--fulcrum-muted); }
 .confirmation-name { display: grid; gap: 8px; }
 .confirmation-name input { width: 100%; padding: 8px 12px; border: 1px solid var(--fulcrum-border); background: transparent; }
 .confirmation-scope { display: flex; gap: 10px; align-items: center; width: fit-content; cursor: pointer; }

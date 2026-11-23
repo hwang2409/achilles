@@ -25,9 +25,20 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const turnOn = row.getByRole("button", { name: "turn on telemetry", exact: true });
     await waitFor(() => turnOn.isVisible(), "settings telemetry row (off)");
     const confirmOn = async () => {
+      await tab.setViewportSize({ width: 720, height: 450 });
       await turnOn.click();
       const dialog = tab.getByRole("dialog", { name: "turn on telemetry" });
-      await dialog.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }).check();
+      const proof = dialog.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" });
+      // The effective 200% viewport must show the acknowledgement without first scrolling it into view.
+      await proof.evaluate((node) => {
+        const label = node.closest("label")!.getBoundingClientRect();
+        const footer = node.closest("dialog")!.querySelector("footer")!.getBoundingClientRect();
+        if (label.top < 0 || label.bottom > footer.top) {
+          throw new Error(`expected the telemetry acknowledgement to fit above the footer before interaction: label [${label.top}, ${label.bottom}], footer ${footer.top}`);
+        }
+      }, undefined, { timeout: 5_000 });
+      await tab.setViewportSize({ width: 1440, height: 900 });
+      await proof.check();
       await dialog.getByRole("button", { name: "turn on telemetry", exact: true }).click();
       return dialog;
     };

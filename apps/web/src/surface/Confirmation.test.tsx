@@ -70,7 +70,7 @@ test("inline pending locks only its row; success uses the returned value and tim
   expect(ui.getByText("saving…")).toBeTruthy();
   expect(ui.getByText("on")).toBeTruthy();
   await settle("deliver inline receipt", () => { pending.resolve({ status: "committed", value: text("off for new sessions"), receipt: text("github turned off") }); });
-  expect(document.activeElement?.textContent).toMatch(/^github turned off at/);
+  expect(document.activeElement).toBe(opener);
   expect(ui.getByText("off for new sessions")).toBeTruthy();
   expect(ui.getByText(/github turned off at/).querySelector("time")?.dateTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 });
@@ -132,12 +132,10 @@ test("pending and unknown lock dismissal and duplicate submit; only a read confi
   expect(checkResult).toHaveBeenCalledTimes(1);
   expect(execute).toHaveBeenCalledTimes(1);
   expect(modal.isConnected).toBe(false);
-  const receipt = activity.getByText(/paper cancelled at/);
-  expect(document.activeElement === receipt).toBe(true);
-  expect(receipt.querySelector("time")).toBeTruthy();
+  expect(document.activeElement).toBe(opener);
+  expect(activity.getByText(/paper cancelled at/).querySelector("time")).toBeTruthy();
   fireEvent.click(activity.getByRole("button", { name: "dismiss receipt" }));
   expect(activity.queryByText(/paper cancelled/)).toBeNull();
-  expect(document.activeElement).toBe(opener);
 });
 
 test("scope proof gates submit; a known failure leaves a recoverable dialog open", async () => {
@@ -148,7 +146,9 @@ test("scope proof gates submit; a known failure leaves a recoverable dialog open
   expect(document.activeElement).toBe(scope);
   expect(dialog.queryByRole("textbox")).toBeNull();
   expect(submit.hasAttribute("disabled")).toBe(true);
+  expect(dialog.getByText("check the box to continue.").id).toBe(submit.getAttribute("aria-describedby"));
   fireEvent.click(scope);
+  expect(dialog.queryByText("check the box to continue.")).toBeNull();
   await click(submit);
   expect(execute).toHaveBeenCalledTimes(1);
   expect(modal.isConnected).toBe(true);

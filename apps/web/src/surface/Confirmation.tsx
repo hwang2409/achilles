@@ -53,11 +53,6 @@ export type ConfirmationProps = Inline | Review;
 type Phase = "idle" | "review" | "pending" | "unknown" | "checking";
 type Receipt = { text: ReviewText; at: Date };
 
-export function focusConfirmationResult(result: HTMLElement | null, context = result) {
-  result?.focus({ preventScroll: true });
-  context?.scrollIntoView({ block: "nearest" });
-}
-
 export function Confirmation(props: ConfirmationProps) {
   const id = useId();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -71,7 +66,6 @@ export function Confirmation(props: ConfirmationProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const initial = useRef<HTMLElement | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
-  const receiptText = useRef<HTMLParagraphElement>(null);
   const returnFocus = useRef(false);
   const open = phase !== "idle";
   const locked = open && phase !== "review";
@@ -81,7 +75,7 @@ export function Confirmation(props: ConfirmationProps) {
 
   useLayoutEffect(() => {
     if (!open) {
-      if (returnFocus.current && !failure && !receipt) opener.current?.focus();
+      if (returnFocus.current && !failure) opener.current?.focus();
       returnFocus.current = false;
       return;
     }
@@ -94,9 +88,11 @@ export function Confirmation(props: ConfirmationProps) {
 
   useLayoutEffect(() => {
     if (phase === "pending" || phase === "checking") status.current?.focus();
-    if (phase === "unknown" || failure) focusConfirmationResult(status.current);
-    if (receipt) focusConfirmationResult(receiptText.current);
-  }, [phase, failure, receipt]);
+    if (phase === "unknown" || failure) {
+      status.current?.focus({ preventScroll: true });
+      status.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [phase, failure]);
 
   const start = () => {
     setAttempt(props);
@@ -138,10 +134,11 @@ export function Confirmation(props: ConfirmationProps) {
         : failure ? failure.message ?? failureCopy[failure.reason] : null}
     </p>;
   const checkButton = phase === "unknown" && <button type="button" onClick={() => void run(true)}>check now</button>;
+  const proofHint = attempt.level === 2 && !locked && !proved ? `${id}-proof-hint` : undefined;
   const confirmButton = <button ref={node => { if (attempt.level === 1) initial.current = node; }} type={attempt.level === 1 ? "button" : "submit"} onClick={attempt.level === 1 ? () => void run(false) : undefined}
-    className="confirmation-primary" disabled={locked || !proved || failure?.final}>{attempt.action}</button>;
+    className="confirmation-primary" aria-describedby={proofHint} disabled={locked || !proved || failure?.final}>{attempt.action}</button>;
   const notice = <div className="confirmation-activity">
-    <div role="status">{receipt && <p ref={receiptText} tabIndex={-1}>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
+    <div role="status">{receipt && <p>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
       {receipt.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></p>}</div>
     {receipt && props.level === 2 && <button type="button" onClick={() => { setReceipt(null); opener.current?.focus(); }}>dismiss receipt</button>}
   </div>;
@@ -197,6 +194,8 @@ export function Confirmation(props: ConfirmationProps) {
               <dd>{typeof value === "string" ? value : value.provided ? "provided" : "not provided"}</dd></div>)}
             <div><dt>undo</dt><dd id={`${id}-undo`}>{attempt.undo}</dd></div>
           </dl>
+        </div>
+        <div className="confirmation-proof">
           {attempt.proof.kind === "name" ? <label className="confirmation-name">
             <span>type <strong>{attempt.proof.name}</strong> to confirm</span>
             <input ref={node => { initial.current = node; }} type="text" value={proof} onChange={event => setProof(event.currentTarget.value)}
@@ -206,6 +205,7 @@ export function Confirmation(props: ConfirmationProps) {
               onChange={event => setProof(event.currentTarget.checked ? "checked" : "")} disabled={locked} />
             {attempt.proof.label ?? "i reviewed the scope"}
           </label>}
+          {proofHint && <p id={proofHint}>{attempt.proof.kind === "scope" ? "check the box to continue." : "type the name exactly to continue."}</p>}
         </div>
         {feedback}
         <footer className="confirmation-actions">

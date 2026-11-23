@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { DisplaySettings } from "../AppShell";
-import { Confirmation, focusConfirmationResult, reviewText, type ReviewText } from "../surface/Confirmation";
+import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
 import { ModuleFrame } from "../surface/ModuleState";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
@@ -108,7 +108,8 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   }, [load.kind]);
   useEffect(() => {
     if (!change) return;
-    focusConfirmationResult(status.current, status.current?.parentElement);
+    status.current?.focus({ preventScroll: true });
+    status.current?.parentElement?.scrollIntoView({ block: "nearest" });
   }, [change]);
   useLayoutEffect(() => {
     if (load.kind !== "ready" || landing.current === null) return;
