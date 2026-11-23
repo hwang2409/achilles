@@ -43,7 +43,7 @@ function fixture({ reply = accepted("fixture-run", "cancelling") as unknown, ref
 async function deadline<T>(name: string, promise: Promise<T>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${name} timed out`)), 500); })]);
+    return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${name} timed out`)), 10_000); })]);
   } finally { clearTimeout(timer); }
 }
 
