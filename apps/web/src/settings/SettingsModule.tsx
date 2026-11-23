@@ -3,7 +3,7 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { DisplaySettings } from "../AppShell";
 import { Confirmation, reviewText, type ReviewText } from "../surface/Confirmation";
 import { ModuleFrame } from "../surface/ModuleState";
-import { surfaceHref } from "../surface/routes";
+import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import { supportsFeature } from "../zeta";
 import { HOME_SETTINGS_FEATURE, NEEDS_OTEL, plain, readHomeSettings, receipt, STALE, telemetryChange, type HomeSettings, type Restart, type TelemetryState } from "./homeSettings";
@@ -29,7 +29,7 @@ export function SettingsModule(props: Props) {
         {section("browser", "this browser")}
         {section("zeta-defaults", "zeta defaults")}
         <a href={surfaceHref("/accounts")}>accounts <span aria-hidden="true">→</span></a>
-        <a href={surfaceHref("/mcp")}>mcp connections <span aria-hidden="true">→</span></a>
+        <a href={surfaceHref(connectionsRoute.path)}>mcp connections <span aria-hidden="true">→</span></a>
       </nav>
       <div className="sp-content">
         <section id="browser" aria-labelledby="settings-browser">
