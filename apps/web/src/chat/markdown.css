@@ -85,3 +85,7 @@
 }
 [data-part="message"] [data-part="md-table"] th { background: var(--fulcrum-surface); font-weight: 700; }
 [data-part="message"] [data-part="md-table"] :is(th, td)[align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  [data-part="message"] [data-part="code-fence-head"] button { min-width: 44px; min-height: 44px; }
+}

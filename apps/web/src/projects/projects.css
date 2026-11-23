@@ -45,7 +45,6 @@
 @media (max-width: 760px), (max-height: 500px) {
   .projects { padding: var(--g1-space-4); }
   .projects-list a { grid-template-columns: minmax(0, 1fr); }
-  .projects :is(button, .projects-bar > a, .projects-bar nav a) { min-height: 44px; }
 }
 
 .projects-selection, .projects-memory-row, .projects-entry-action { display: flex; align-items: center; gap: 8px; }
@@ -58,6 +57,7 @@
 .projects-select-entry input { flex: none; width: 18px; height: 18px; accent-color: var(--fulcrum-accent); }
 .projects-select-entry input:focus-visible, .projects [data-memory-feedback]:focus-visible, .projects [data-memory-tab]:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .projects-entry-action { margin-inline-start: auto; flex-wrap: wrap; }
-@media (max-width: 760px), (max-height: 500px) {
-  .projects-select-entry { min-height: 44px; }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .projects :is(button, .projects-bar > a, .projects-bar nav a, .projects-select-entry) { min-width: 44px; min-height: 44px; }
 }

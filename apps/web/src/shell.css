@@ -289,3 +289,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
   .page-chat-docked .transcript [data-part="timeline"] > :is([data-virtual-id], [data-id]) { width: calc(100% - 32px); margin-inline: 16px; }
   .main-pane .page-chat-docked [data-part="composer"] { margin-bottom: 16px; }
 }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .header-menu :is(.approval-mode, button) { min-width: 44px; min-height: 44px; }
+}

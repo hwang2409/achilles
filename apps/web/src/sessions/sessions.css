@@ -77,3 +77,7 @@
   .sessions-detail { padding: var(--g1-space-4); }
   .sessions-fields > div { grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr); }
 }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .sessions-frame :is(button, .sessions-filters input, .sessions-back, .sessions-transcript-action) { min-width: 44px; min-height: 44px; }
+}

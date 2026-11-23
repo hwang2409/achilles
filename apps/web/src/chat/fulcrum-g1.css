@@ -87,3 +87,7 @@
 @media (width > 760px) and (height > 500px) {
   .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-transcript-width)) / 2)); }
 }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  summary[data-part="tool-header"] { min-height: 44px; }
+}

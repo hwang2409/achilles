@@ -240,3 +240,7 @@
 @media (prefers-reduced-motion: reduce) {
   .telemetry-module * { transition: none !important; animation-duration: 0s !important; }
 }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .tm-button, .tm-toggle button { min-width: 44px; min-height: 44px; }
+}

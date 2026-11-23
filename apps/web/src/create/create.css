@@ -48,10 +48,9 @@
   .create-split button { min-width: 44px; }
   .create-split button span { display: none; }
   .create-heading { min-height: 48px; padding-inline: 16px; }
-  .create-heading a { min-height: 40px; display: flex; align-items: center; }
+  .create-heading a { display: flex; align-items: center; }
   .create-landing { padding: var(--g1-space-4); }
   .create-landing textarea { font-size: 16px; }
-  .create-landing button { min-height: 44px; }
 }
 
 .build-status { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; }
@@ -87,7 +86,6 @@
 .create-landing .build-results li { border: 0; }
 .create-landing .build-results a { display: inline-block; padding: 2px 0; color: var(--fulcrum-muted); font-size: 12px; }
 @media (max-width: 760px), (max-height: 500px) {
-  .build-receipt .build-open, .build-receipt button, .build-status a { min-height: 40px; }
   .build-status a { display: inline-flex; align-items: center; }
   .create-split:has(button) > .place-link { min-height: 44px; }
   /* the drawer's summary takes its own full row under "new chat" and create, so it never squeezes either */
@@ -98,4 +96,8 @@
   .create-split:has(.build-status-nav) > button { border-left-width: 0; }
   .create-split:is([data-mode="on"], :has([aria-current="page"])):has(.build-status-nav) > :is(.place-link, button) { border-color: var(--fulcrum-accent); }
   .create-split .build-status-nav { order: 1; flex-basis: 100%; min-height: 40px; border: 1px solid var(--fulcrum-border); }
+}
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .create-landing button, .create-heading a, .build-receipt :is(.build-open, button), .build-status a { min-width: 44px; min-height: 44px; }
 }

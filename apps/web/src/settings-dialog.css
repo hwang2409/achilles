@@ -50,15 +50,6 @@
   #settings-lock-note { margin-inline: 14px; }
   .settings-titlebar, .settings-session > footer, .settings-content { padding-left: 14px; padding-right: 14px; }
   .settings-titlebar > div:last-child > span { display: none; }
-  .theme-options button, .settings-segments button, .settings-titlebar button, .settings-link { min-height: 40px; }
-  .settings-segments button { min-width: 40px; }
-  .settings-toggle { position: relative; flex-basis: 40px; width: 40px; min-width: 40px; max-width: 40px; height: 40px; padding: 0; border: 0; background: transparent; }
-  .settings-toggle::before { inset: -2px; }
-  .settings-toggle span { width: 38px; height: 24px; padding: 4px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); background: var(--g1-surface); transform: none; }
-  .settings-toggle span::after { display: block; width: 14px; height: 14px; content: ""; background: var(--g1-muted); border-radius: var(--g1-radius-control); transition: transform 100ms ease; }
-  .settings-toggle[aria-checked="true"] { background: transparent; }
-  .settings-toggle[aria-checked="true"] span { background: var(--g1-accent); border-color: var(--g1-accent); transform: none; }
-  .settings-toggle[aria-checked="true"] span::after { background: var(--g1-bg); transform: translateX(14px); }
   .font-options { grid-template-columns: 1fr; row-gap: 6px; }
   .font-options .settings-segments { flex-direction: column; width: 100%; }
   .font-options .settings-segments button { width: 100%; margin: 0 0 -1px; }
@@ -68,3 +59,14 @@
   .settings-toggle span, .settings-toggle span::after { transition: none; }
 }
 .theme-options button:not([data-selected]):hover, .settings-segments button[aria-pressed="false"]:hover { background: var(--g1-hover); }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .theme-options button, .settings-segments button, .settings-titlebar button, .settings-link { min-width: 44px; min-height: 44px; }
+  .settings-toggle { flex-basis: 44px; width: 44px; min-width: 44px; max-width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
+  .settings-toggle::before { content: none; }
+  .settings-toggle span { width: 38px; height: 24px; padding: 4px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); background: var(--g1-surface); transform: none; }
+  .settings-toggle span::after { display: block; width: 14px; height: 14px; content: ""; background: var(--g1-muted); border-radius: var(--g1-radius-control); transition: transform 100ms ease; }
+  .settings-toggle[aria-checked="true"] { background: transparent; }
+  .settings-toggle[aria-checked="true"] span { background: var(--g1-accent); border-color: var(--g1-accent); transform: none; }
+  .settings-toggle[aria-checked="true"] span::after { background: var(--g1-bg); transform: translateX(14px); }
+}
