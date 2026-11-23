@@ -115,9 +115,11 @@ export function Confirmation(props: ConfirmationProps) {
     if (check ? phaseRef.current !== "unknown" : phaseRef.current !== "review" || !proved || failure?.final) return;
     transition(check ? "checking" : "pending");
     setFailure(null);
-    const resolve = <C extends Committed>(op: Operation<C>) =>
-      Promise.resolve().then(() => check ? op.checkResult() : op.execute())
-        .catch((): Result<C> => ({ status: "unknown" }));
+    // A reviewed operation can require the confirm click’s browser activation.
+    const resolve = async <C extends Committed>(op: Operation<C>): Promise<Result<C>> => {
+      try { return await (check ? op.checkResult() : op.execute()); }
+      catch { return { status: "unknown" }; }
+    };
     const result = attempt.level === 1 ? await resolve(attempt).then(result => {
       if (result.status === "committed") attempt.onCommitted(result.value);
       return result;

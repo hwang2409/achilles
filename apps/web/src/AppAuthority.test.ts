@@ -1,5 +1,5 @@
 import "./test-dom";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { act, createElement } from "react";
 import type { RenderResult } from "@testing-library/react";
 
@@ -278,7 +278,57 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "vi
   }
 } });
 
+const browserLogin = (cancel: boolean): Row => {
+  const sentinel = "https://signin.invalid/browser-only-fixture";
+  return { kind: "visible", options: { path: "/accounts", observerBanner: false, rpc: {
+    account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [] } } }),
+    login_start: () => ({ result: { state: "pending", authorization_url: sentinel } }),
+    login_status: () => ({ result: { state: "pending" } }),
+    login_cancel: () => ({ result: { state: "succeeded" } }),
+  } }, check: async (app, authority, writes, requests) => {
+    expect(requests).not.toContain("account_list");
+    await click(app.getByRole("button", { name: "show accounts" }));
+    if (authority === "observer") {
+      expect(app.getByText(/a chat tab keeps it while it is open/)).toBeTruthy();
+      expect(requests).not.toContain("account_list");
+      expect(app.container.querySelector(tag("accounts.login"))).toBeNull();
+      expect(app.container.querySelector(tag("accounts.login-cancel"))).toBeNull();
+      return;
+    }
+    const originalOpen = window.open;
+    const consoleCalls = ["log", "warn", "error", "debug", "info"].map(method => spyOn(console, method as "log"));
+    const locations: string[] = [];
+    window.open = (() => ({ opener: window, closed: false, close() {}, location: { replace: (url: string) => locations.push(url) } })) as typeof window.open;
+    try {
+      await click(app.getByRole("button", { name: "sign in to claude" }));
+      const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
+      expect(writes).toEqual([]);
+      expect(disabled(dialog.querySelector('button[type="submit"]')!)).toBe(true);
+      await click(dialog.querySelector('input[type="checkbox"]')!);
+      await click(dialog.querySelector('button[type="submit"]')!);
+      didWrite(writes, "login_start");
+      expect(app.getByText("waiting for your browser")).toBeTruthy();
+      expect(locations).toEqual([sentinel]);
+      if (cancel) {
+        await click(select(app, tag("accounts.login-cancel")));
+        expect(writes).toEqual(["login_start"]);
+        await click(app.getByRole("group").querySelector(".confirmation-primary")!);
+        expect(writes).toEqual(["login_start", "login_cancel"]);
+        expect(app.getByText(/^signed in at/)).toBeTruthy();
+        expect(requests.filter(method => method === "account_list")).toHaveLength(2);
+        expect(requests.at(-1)).toBe("hello");
+      }
+      const contents = [document.documentElement.outerHTML, location.href, history.state,
+        ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => [store.key(i), store.getItem(store.key(i)!)])),
+        ...consoleCalls.flatMap(spy => spy.mock.calls)];
+      expect(JSON.stringify(contents)).not.toContain(sentinel);
+    } finally { window.open = originalOpen; consoleCalls.forEach(spy => spy.mockRestore()); }
+  } };
+};
+
 const rows: Record<WriteSurfaceId, Row> = {
+  "accounts.login": browserLogin(false),
+  "accounts.login-cancel": browserLogin(true),
   "create.retry": creationAction("retry"),
   "create.discard": creationAction("discard"),
   "busy.retry": { kind: "visible", absent: true, options: { rpc: { status: (_params, requests) => ({ result: requests.filter((request) => request === "status").length <= 2 ? { state: "running", session: { session_id: "other" } } : { state: "idle" } }) } }, check: async (app, authority, writes) => {
