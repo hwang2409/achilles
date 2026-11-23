@@ -1366,7 +1366,7 @@ with _database() as db:
     const oauth = oauthFixture();
     try {
       await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify(oauth.config));
-      await refuseMcpOAuth(page, origin);
+      await refuseMcpOAuth(browser, origin);
     } finally {
       oauth.stop();
       await rm(join(zetaHome, "mcp.json"), { force: true });

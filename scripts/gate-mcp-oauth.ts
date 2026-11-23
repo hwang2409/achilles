@@ -167,16 +167,17 @@ async function settleDrop(tab: Page, wire: ReturnType<typeof observeWire>) {
   } finally { wire.resume(); await child.close(); }
 }
 
-export async function refuseMcpOAuth(page: Page, origin: string) {
-  const tab = await page.context().newPage();
+export async function refuseMcpOAuth(browser: Browser, origin: string) {
+  const context = await browser.newContext();
   const wire = observeWire();
   try {
+    const tab = await context.newPage();
     await wire.install(tab);
     await tab.goto(`${origin}${oauthPath}`, options);
     await (await startReview(tab)).click(options);
     await tab.getByRole("alert").filter({ hasText: "a chat tab keeps control" }).waitFor(options);
     if (wire.mutations.length) throw new Error("OAuth sent while a chat held control");
-  } finally { await tab.close(); }
+  } finally { await context.close(); }
 }
 
 async function complete(tab: Page, fixture: ReturnType<typeof oauthFixture>, wire: ReturnType<typeof observeWire>, dir: string | undefined, logged: string[]) {
