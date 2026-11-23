@@ -255,11 +255,14 @@ rowTest("add lost reply can settle from an exact safe projection without retaini
   expect(JSON.stringify([form.outcomes, r.owner.reads.snapshot()])).not.toContain("add-private");
 });
 
-const testTarget = { name: "fixture", scope: "project", transport: "stdio", trusted: true } as const;
+const testTarget = { name: "fixture", scope: "project", revision: a, trusted: true,
+  config: projectAdd({ name: "fixture", scope: "project", enabled: true, command: "fixture", args: [], env: {} }) } as const;
+const readReviewedTest = (scope: string) => list(a, row(scope, true));
 
 for (const [row, status, toolCount] of [["success", "ok", 2], ["failure", "failed", 0], ["skipped-policy", "skipped-policy", 0]] as const) {
   rowTest(`test ${row}: send once and project only status and count`, async (r) => {
     const form = r.open();
+    r.read(readReviewedTest);
     r.replies.push((options) => {
       expect(options?.timeoutMs).toBeUndefined();
       return { data: { status, tool_count: toolCount, tools: [{ name: "fixture-canary", description: "not a receipt" }], stderr: "fixture-stderr" } };
@@ -273,7 +276,7 @@ for (const [row, status, toolCount] of [["success", "ok", 2], ["failure", "faile
     expect(form.testOutcomes).toEqual(Array(count).fill({ status: "tested", result: { status, toolCount } }));
     expect(r.events).toEqual(Array(count).fill(["acquire", "release"]).flat());
     expect(r.writes).toEqual(Array(count).fill({ method: mcpTestMethod, params: { name: "fixture", scope: "project" } }));
-    expect(r.reads).toEqual([]);
+    expect(r.reads).toEqual(Array(count).fill("project"));
   });
 }
 
@@ -288,6 +291,7 @@ rowTest("test untrusted: no request or control for untrusted project stdio", asy
 
 rowTest("test drop: unknown without a retry or settlement read", async (r) => {
   const form = r.open();
+  r.read(readReviewedTest);
   const pending = r.gate({ data: { status: "ok", tool_count: 1 } });
   r.replies.push(pending.hold);
   const running = form.test(testTarget);
@@ -299,7 +303,7 @@ rowTest("test drop: unknown without a retry or settlement read", async (r) => {
   expect(form.testOutcomes).toEqual([{ status: "unknown" }]);
   expect(r.writes).toHaveLength(1);
   expect(r.events).toEqual(["acquire", "release"]);
-  expect(r.reads).toEqual([]);
+  expect(r.reads).toEqual(["project"]);
   // A new action after reconnect may send once. Unmount must release while the reply is still pending.
   r.reconnect();
   const fresh = r.open();
@@ -320,5 +324,18 @@ rowTest("test drop: unknown without a retry or settlement read", async (r) => {
   expect(fresh.testOutcomes).toEqual([]);
   expect(r.writes).toHaveLength(2);
   expect(r.events).toEqual(["acquire", "release", "acquire", "release"]);
-  expect(r.reads).toEqual([]);
+  expect(r.reads).toEqual(["project", "project"]);
+});
+
+rowTest("test stale review: a changed definition sends no test request", async (r) => {
+  const form = r.open();
+  const changed = { ...row("project", true), config: { transport: "streamable-http", url: "<redacted-url>" } };
+  r.read((scope) => list(b, ...(scope === "user" ? [] : [changed])));
+  r.replies.push(() => ({ data: { status: "ok", tool_count: 1 } }));
+  await r.deadline("confirm stale test review and release", form.test(testTarget));
+  expect(r.writes.filter(({ method }) => method === mcpTestMethod)).toHaveLength(0);
+  expect(form.testOutcomes).toEqual([{ status: "stale" }]);
+  expect(r.events).toEqual(["acquire", "release"]);
+  expect(r.reads).toEqual(["project", "effective", "user", "project"]);
+  expect(r.owner.reads.snapshot()?.project).toMatchObject({ revision: b, rows: [{ config: { transport: "streamable-http" } }] });
 });
