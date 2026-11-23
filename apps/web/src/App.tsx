@@ -51,7 +51,13 @@ function ErrorRow({ id }: { id: string }) {
   const code = item?.type === "error" && item.event.type === "error" ? item.event.error.code : undefined;
   return recovery?.id === id ? <AuthErrorRecovery key={`${recovery.sessionId}:${id}:${recovery.canWrite}`} {...recovery} code={code} /> : <Fallback id={id} />;
 }
-const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow };
+function UnknownRow({ id }: { id: string }) {
+  const item = useItem(id);
+  // The end of a replay subscription is control metadata, not chat activity.
+  if (item?.type === "unknown" && item.event.type === "unknown" && item.event.name === "replay_stream_ended") return null;
+  return <Fallback id={id} />;
+}
+const renderers: Renderers = { message: ({ id }) => <Message id={id} markdown={RichMarkdown} />, tool: ({ id }) => <ToolCall id={id} summary={toolArgumentSummary} body={ToolSummaryBody} />, error: ErrorRow, unknown: UnknownRow };
 // a steer zeta accepted but has not delivered yet shows once: in the composer with its "queued" status, not as a bubble
 // inside the reply that is still streaming. it shows here once delivery settles.
 function UserRow({ id, queued }: { id: string; queued: ReadonlySet<string> }) {
