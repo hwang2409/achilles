@@ -170,3 +170,37 @@ test("a refused failure says another tab has control, keeps the dialog open, and
   expect(dialog.getByRole("alert").textContent).toBe("not changed. zeta refused this change: fixture");
   expect(execute).toHaveBeenCalledTimes(2);
 });
+
+const focusCases = ([1, 2] as const).flatMap(level => ([
+  "success", "refusal", "unknown", "keep", "Escape", "refusal then keep", "refusal then Escape",
+] as const).map(path => ({ level, path })));
+
+test.each(focusCases)("level $level focus: $path", async ({ level, path }: (typeof focusCases)[number]) => {
+  const execute: Inline["execute"] = async () => path === "success"
+    ? { status: "committed", value: text("off"), receipt: text("done") }
+    : path === "unknown" ? { status: "unknown" } : { status: "failed", reason: "denied" };
+  const action = level === 1 ? "turn off" : "cancel run";
+  const ui = level === 1 ? render(<Row execute={execute} />) : null;
+  const modal = level === 2 ? review(execute) : null;
+  const opener = modal?.opener ?? ui!.getByRole("button", { name: action });
+  if (ui) fireEvent.click(opener);
+  const surface = modal?.modal ?? ui!.getByRole("group");
+  const confirm = within(surface).getByRole("button", { name: action });
+  if (modal) fireEvent.change(modal.dialog.getByRole("textbox"), { target: { value: "paper" } });
+  if (path !== "keep" && path !== "Escape") await click(confirm);
+  // A level 1 refusal already closed the bar. Reopen it to exercise subsequent dismissal.
+  if (path.startsWith("refusal then") && level === 1) fireEvent.click(opener);
+  if (path.endsWith("keep")) {
+    const host = modal?.modal ?? ui!.getByRole("group");
+    const button = within(host).getByRole("button", { name: "keep current" });
+    button.focus();
+    fireEvent.click(button);
+  }
+  if (path.endsWith("Escape")) {
+    if (modal) cancel(modal.modal); // Native dialog Escape dispatches cancel.
+    else fireEvent.keyDown(ui!.getByRole("group"), { key: "Escape" });
+  }
+  const target = path === "refusal" ? within(modal?.modal ?? ui!.container).getByRole("alert")
+    : path === "unknown" ? within(surface).getByText(/^result unknown\./) : opener;
+  expect(document.activeElement === target).toBe(true);
+});

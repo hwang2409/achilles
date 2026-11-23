@@ -53,6 +53,13 @@ export type ConfirmationProps = Inline | Review;
 
 type Phase = "idle" | "review" | "pending" | "unknown" | "checking";
 type Receipt = { text: ReviewText; at: Date };
+type Outcome = "success" | "refusal" | "unknown" | "none";
+type Cause = "keep" | "Escape" | "cancel" | "confirm";
+
+function focusDestination(mode: "inline" | "dialog" | "external-dialog", outcome: Outcome, cause: Cause) {
+  if (cause !== "confirm" || outcome === "success") return mode === "external-dialog" ? "stay" : "opener";
+  return "result";
+}
 
 export function Confirmation(props: ConfirmationProps) {
   const id = useId();
@@ -67,7 +74,7 @@ export function Confirmation(props: ConfirmationProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const initial = useRef<HTMLElement | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
-  const returnFocus = useRef(false);
+  const nextFocus = useRef<{ outcome: Outcome; cause: Cause } | null>(null);
   const open = phase !== "idle";
   const locked = open && phase !== "review";
   const proved = attempt.level === 1 || (attempt.proof.kind === "name"
@@ -75,11 +82,7 @@ export function Confirmation(props: ConfirmationProps) {
     : proof === "checked");
 
   useLayoutEffect(() => {
-    if (!open) {
-      if (returnFocus.current && !failure) opener.current?.focus();
-      returnFocus.current = false;
-      return;
-    }
+    if (!open) return;
     const node = dialog.current;
     node?.showModal();
     // a review keeps its body at the top, so the warning shows before the proof field
@@ -88,28 +91,34 @@ export function Confirmation(props: ConfirmationProps) {
   }, [open]);
 
   useLayoutEffect(() => {
-    if (phase === "pending" || phase === "checking") status.current?.focus();
-    if (phase === "unknown" || failure) {
+    const request = nextFocus.current;
+    if (!request) return;
+    nextFocus.current = null;
+    const mode = attempt.level === 1 ? "inline" : attempt.external ? "external-dialog" : "dialog";
+    const target = focusDestination(mode, request.outcome, request.cause);
+    if (target === "opener") opener.current?.focus();
+    if (target === "result") {
       status.current?.focus({ preventScroll: true });
       status.current?.scrollIntoView({ block: "nearest" });
     }
-  }, [phase, failure]);
+  });
 
   const start = () => {
     setAttempt(props);
     setProof("");
     setFailure(null);
     setReceipt(null);
-    returnFocus.current = true;
     transition("review");
   };
-  const keep = () => {
+  const keep = (cause: Exclude<Cause, "confirm">) => {
     if (phaseRef.current !== "review") return;
+    nextFocus.current = { outcome: failure ? "refusal" : "none", cause };
     transition("idle");
     if (attempt.level === 2) attempt.external?.onKeep();
   };
   const run = async (check: boolean) => {
     if (check ? phaseRef.current !== "unknown" : phaseRef.current !== "review" || !proved || failure?.final) return;
+    nextFocus.current = { outcome: "none", cause: "confirm" };
     transition(check ? "checking" : "pending");
     setFailure(null);
     const resolve = <C extends Committed>(op: Operation<C>) =>
@@ -119,6 +128,7 @@ export function Confirmation(props: ConfirmationProps) {
       if (result.status === "committed") attempt.onCommitted(result.value);
       return result;
     }) : await resolve(attempt);
+    nextFocus.current = { outcome: result.status === "committed" ? "success" : result.status === "failed" ? "refusal" : "unknown", cause: "confirm" };
     if (result.status === "unknown") {
       transition("unknown");
     } else if (result.status === "failed") {
@@ -143,7 +153,7 @@ export function Confirmation(props: ConfirmationProps) {
   const notice = <div className="confirmation-activity">
     <div role="status">{receipt && <p>{receipt.text} at <time dateTime={receipt.at.toISOString()}>
       {receipt.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></p>}</div>
-    {receipt && props.level === 2 && <button type="button" onClick={() => { setReceipt(null); opener.current?.focus(); }}>dismiss receipt</button>}
+    {receipt && props.level === 2 && <button type="button" onClick={() => { nextFocus.current = { outcome: "success", cause: "keep" }; setReceipt(null); }}>dismiss receipt</button>}
   </div>;
 
   if (props.level === 1 && attempt.level === 1) return <section className="confirmation-inline" aria-labelledby={`${id}-label`}>
@@ -153,11 +163,11 @@ export function Confirmation(props: ConfirmationProps) {
       <button ref={opener} type="button" data-write-surface={props.surface} disabled={open} onClick={start}>{props.action}</button>
     </div>
     {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
-      onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep(); } }}>
+      onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep("Escape"); } }}>
       <p id={`${id}-effect`}>{attempt.effect}</p>
       {!locked && <div className="confirmation-actions">
         {confirmButton}
-        <button type="button" onClick={keep}>{attempt.keep}</button>
+        <button type="button" onClick={() => keep("keep")}>{attempt.keep}</button>
       </div>}
       {feedback}
       {checkButton}
@@ -173,7 +183,7 @@ export function Confirmation(props: ConfirmationProps) {
     {!props.external && <button ref={opener} className="confirmation-trigger" type="button" data-write-surface={props.surface} onClick={start}>{props.action}</button>}
     {open && createPortal(<dialog ref={dialog} className="confirmation-dialog" data-proof={attempt.proof.kind}
       aria-labelledby={`${id}-title`} aria-describedby={`${id}-effect ${id}-undo`}
-      onCancel={event => { event.preventDefault(); event.stopPropagation(); keep(); }}
+      onCancel={event => { event.preventDefault(); event.stopPropagation(); keep("cancel"); }}
       onKeyDown={event => {
         if (event.key === "Escape") event.stopPropagation();
         if (event.key !== "Tab") return;
@@ -185,7 +195,7 @@ export function Confirmation(props: ConfirmationProps) {
           <h2 id={`${id}-title`}>{attempt.title}</h2>
           <div className="confirmation-heading-actions">
             <span>{step}</span>
-            <button type="button" className="confirmation-close" aria-label="close confirmation" disabled={locked} onClick={keep}>×</button>
+            <button type="button" className="confirmation-close" aria-label="close confirmation" disabled={locked} onClick={() => keep("cancel")}>×</button>
           </div>
         </header>
         <div className="confirmation-body">
@@ -212,7 +222,7 @@ export function Confirmation(props: ConfirmationProps) {
         </div>
         {feedback}
         <footer className="confirmation-actions">
-          {locked ? checkButton : <button type="button" onClick={keep}>{attempt.keep}</button>}
+          {locked ? checkButton : <button type="button" onClick={() => keep("keep")}>{attempt.keep}</button>}
           {confirmButton}
         </footer>
       </form>
