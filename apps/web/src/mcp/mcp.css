@@ -69,3 +69,10 @@
 .mcp-test button { min-height: 44px; padding-inline: 12px; }
 .mcp-test p { margin: 0; font-variant-numeric: tabular-nums; }
 .mcp-test [data-test-result]:not([data-test-result="ok"]) { color: var(--fulcrum-warn); }
+
+.mcp-auth { display: grid; gap: 8px; margin-block: 16px; padding-block: 12px; border-block: 1px solid var(--fulcrum-border); }
+.mcp-auth p { margin: 0; text-wrap: pretty; }
+.mcp-auth-buttons, .mcp-auth-global { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.mcp-auth button, .mcp-auth-global button { min-height: 44px; padding-inline: 12px; }
+.mcp-auth-global { padding: 8px 16px; border-bottom: 1px solid var(--fulcrum-border); }
+.mcp-auth [data-auth-state]:is([data-auth-state="failed"], [data-auth-state="unknown"]) { color: var(--fulcrum-warn); }

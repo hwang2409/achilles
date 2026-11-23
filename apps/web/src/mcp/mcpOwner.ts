@@ -1,6 +1,7 @@
 import type { ZetaClient } from "@fulcrum/zeta";
 import { createWriteForms } from "../writeForms";
 import { supportsRequest } from "../zeta";
+import { createMcpAuth, type AuthAttempt, type AuthOutcome } from "./mcpAuth";
 import { createMcpReads, projectMcpSnapshot, type McpRow } from "./mcpReads";
 
 export const mcpMethods = { add: "mcp_server_add", enabled: "mcp_server_set_enabled", trusted: "mcp_server_set_trusted", remove: "mcp_server_remove" } as const;
@@ -121,8 +122,9 @@ async function requestWrite(client: ZetaClient, method: typeof mcpMethods[McpAct
 }
 
 /** One global flight: the revision spans user, project, and trust. A new socket is only used to read, never to retry a write. */
-export function createMcpOwner({ live, acquire, release, supports = supportsRequest, canRead, wait = waitFor }: {
+export function createMcpOwner({ live, acquire, release, supports = supportsRequest, canRead, wait = waitFor, liveObserver = live }: {
   live: () => ZetaClient | null;
+  liveObserver?: () => ZetaClient | null;
   acquire: () => Promise<ZetaClient | null>;
   release: () => Promise<void>;
   supports?: typeof supportsRequest;
@@ -130,7 +132,7 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
   wait?: typeof waitFor;
 }) {
   const reads = createMcpReads(canRead);
-  const { run, ...forms } = createWriteForms<McpTestOutcome, Attempt | TestAttempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
+  const { run, ...forms } = createWriteForms<McpTestOutcome | AuthOutcome, Attempt | TestAttempt | AuthAttempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
   const outcomes = new WeakMap<Attempt, McpOutcome>();
   const refresh = (signal?: AbortSignal) => {
     const client = live();
@@ -175,6 +177,7 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     try { return signal.aborted ? CANCELLED : await perform(client); }
     finally { await release().catch(() => {}); }
   }
+  const auth = createMcpAuth({ withControl: withAcquiredControl, supports, failure: rpcFailure, liveObserver });
   async function sendTest(client: ZetaClient, { name, scope }: TestTarget, signal: AbortSignal): Promise<McpTestOutcome> {
     if (live() !== client) return { status: "refused" };
     if (!supports(client, mcpTestMethod)) return { status: "unsupported" };
@@ -205,11 +208,17 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     outcomes.set(attempt, outcome);
     return outcome;
   });
-  return { reads, ...forms, test,
+  return { reads, ...forms, test, auth,
+    authAction: (form: string, attempt: AuthAttempt, check: boolean, deliver: (value: AuthOutcome) => void) => {
+      forms.attach(form, (outcome) => { if (outcome.status !== "tested") deliver(outcome); });
+      return run(form, "mcp", JSON.stringify(attempt), attempt, (signal) => auth.run(attempt, check, signal));
+    },
     attach: (form: string, deliver: (outcome: McpOutcome) => void) => forms.attach(form, (outcome) => {
-      if (outcome.status !== "tested") deliver(outcome);
+      if (outcome.status !== "tested" && outcome.status !== "auth" && outcome.status !== "popup-blocked") deliver(outcome);
     }),
-    attachTest: (form: string, deliver: (outcome: McpTestOutcome) => void) => forms.attach(form, deliver),
+    attachTest: (form: string, deliver: (outcome: McpTestOutcome) => void) => forms.attach(form, (outcome) => {
+      if (outcome.status !== "auth" && outcome.status !== "popup-blocked") deliver(outcome);
+    }),
     execute: (form: string, attempt: McpAttempt) => submit(form, attempt, false),
     add: (form: string, attempt: McpAddAttempt, take: TakeMutation) => submit(form, attempt, false, take),
     check: (form: string, attempt: Attempt) => submit(form, attempt, true) };

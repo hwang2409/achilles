@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "agent_run_catalog", "list_sessions"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "mcp_auth_status", "agent_run_catalog", "list_sessions"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -410,6 +410,75 @@ function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove" | "mcp.test",
   } };
 }
 
+function mcpOAuth(action: "start" | "cancel" | "logout"): Row {
+  const name = "fixture-oauth";
+  const sentinel = "http://127.0.0.1:31234/launch/browser-only-fixture";
+  const roles: string[] = [];
+  const fixture = { name, scope: "user", enabled: true, trusted: true, status: "configured", auth: "none", tool_count: 0,
+    config: { transport: "streamable-http", url: "<redacted-url>", auth: { type: "oauth" } } };
+  return { kind: "visible", options: { path: `/connections/user/${name}`, observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["mcp_server_list", "mcp_auth_status", ...(params.role === "controller" ? ["mcp_auth_start", "mcp_auth_cancel", "mcp_auth_logout"] : [])] } } }),
+    mcp_server_list: ({ scope }) => ({ result: { revision: "a".repeat(64), data: { items: scope === "project" ? [] : [fixture] } } }),
+    mcp_auth_start: () => ({ result: { data: { state: "pending", authorization_url: sentinel } } }),
+    mcp_auth_status: () => ({ result: { data: { state: "pending" } } }),
+    mcp_auth_cancel: () => ({ result: { data: { state: "cancelled" } } }),
+    mcp_auth_logout: () => ({ result: { data: { state: "unauthorized" } } }),
+  } }, check: async (app, authority, writes) => {
+    const replacements: string[] = [];
+    const popup = { opener: window as Window | null, closed: false, close() { this.closed = true; }, location: {
+      replace(url: string) { expect(popup.opener).toBeNull(); replacements.push(url); },
+    } };
+    const open = spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    const consoleCalls = ["log", "warn", "error", "debug", "info"].map(method => spyOn(console, method as "log"));
+    try {
+      const startReview = async () => {
+        await click(select(app, tag("mcp.auth-start")));
+        const dialog = app.getByRole("dialog", { name: "review OAuth sign-in" });
+        expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
+        await click(app.getByRole("checkbox", { name: "i reviewed the scope" }));
+        await act(async () => {
+          fireEvent.submit(dialog.querySelector("form")!);
+          expect(open).toHaveBeenCalledTimes(1);
+        });
+      };
+      const initial = roles.length;
+      if (action === "logout") {
+        await click(select(app, tag("mcp.auth-logout")));
+        const dialog = app.getByRole("dialog", { name: "review saved sign-in deletion" });
+        const proof = app.getByRole("textbox", { name: `type ${name} to confirm` });
+        await change(proof, "not-the-name");
+        expect(disabled(dialog.querySelector("button[type=submit]")!)).toBe(true);
+        await change(proof, name);
+        expect(roles).toHaveLength(initial);
+        await act(async () => { fireEvent.submit(dialog.querySelector("form")!); });
+      } else {
+        expect(app.container.querySelector(tag("mcp.auth-cancel"))).toBeNull();
+        await startReview();
+      }
+      if (authority === "observer") {
+        expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+        expect(roles.slice(initial)).toEqual(["controller"]);
+        expect(writes).toEqual([]);
+        expect(replacements).toEqual([]);
+        return;
+      }
+      if (action === "cancel") {
+        await click(select(app, tag("mcp.auth-cancel")));
+        const group = app.getByRole("group", { name: /started saving the credential/ });
+        expect(writes).toEqual(["mcp_auth_start"]);
+        await click(group.querySelector(".confirmation-primary")!);
+      }
+      expect(writes).toEqual(action === "cancel" ? ["mcp_auth_start", "mcp_auth_cancel"] : [`mcp_auth_${action}`]);
+      expect(roles.slice(initial)).toEqual(action === "cancel" ? ["controller", "observer", "controller", "observer"] : ["controller", "observer"]);
+      expect(replacements).toEqual(action === "logout" ? [] : [sentinel]);
+      expect(JSON.stringify([document.documentElement.outerHTML, location.href, history.state,
+        ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => store.getItem(store.key(i)!))),
+        ...consoleCalls.flatMap(spy => spy.mock.calls)])).not.toContain(sentinel);
+    } finally { open.mockRestore(); consoleCalls.forEach(spy => spy.mockRestore()); }
+  } };
+}
+
 const rows: Record<WriteSurfaceId, Row> = {
   "accounts.login": browserLogin(false),
   "accounts.login-cancel": browserLogin(true),
@@ -598,6 +667,9 @@ const rows: Record<WriteSurfaceId, Row> = {
   "mcp.enabled": mcpWrite("mcp.enabled", "mcp_server_set_enabled"),
   "mcp.trusted": mcpWrite("mcp.trusted", "mcp_server_set_trusted"),
   "mcp.test": mcpWrite("mcp.test", "mcp_server_test"),
+  "mcp.auth-start": mcpOAuth("start"),
+  "mcp.auth-cancel": mcpOAuth("cancel"),
+  "mcp.auth-logout": mcpOAuth("logout"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
     // the settings place browses as an observer; confirming the change borrows control for the one update.

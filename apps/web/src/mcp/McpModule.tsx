@@ -7,6 +7,7 @@ import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { canReadMcp, mcpScopes, type McpRow, type McpScope } from "./mcpReads";
 import { ConnectionDetail, ConnectionList, FailedRead, type Failure } from "./McpViews";
 import { McpAdd } from "./McpAdd";
+import { McpAuth, McpPendingElsewhere } from "./McpAuthActions";
 import { McpActions } from "./McpActions";
 import { needsMcpTestTrust, type McpOwner, type McpTestOutcome, type McpTestResult } from "./mcpOwner";
 import "./mcp.css";
@@ -19,8 +20,8 @@ const detailOf = (path: string) => {
   catch { return null; }
 };
 
-export function McpModule({ client, owner, pathname, connecting, retryConnection }: {
-  client: ZetaClient | null; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
+export function McpModule({ client, observer, owner, pathname, connecting, retryConnection }: {
+  client: ZetaClient | null; observer: boolean; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
 }) {
   const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
@@ -33,6 +34,13 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
   const activeScope = useRef<HTMLButtonElement>(null);
   const connected = client !== null;
   const supported = client !== null && canReadMcp(client);
+  useLayoutEffect(() => {
+    const update = () => owner.auth.observe(observer ? client : null, !document.hidden, Boolean(client));
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, [owner, client, observer]);
+  useLayoutEffect(() => () => owner.auth.observe(null, false, false), [owner]);
   useEffect(() => {
     if (!client) return;
     const abort = new AbortController();
@@ -96,12 +104,14 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
           {retained && <p className="mcp-offline" role="status">connection lost · showing the last read from disk · retrying automatically</p>}
           <McpAdd owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
             reviewTrust={(name) => { setScope("project"); navigate(`${LIST}/project/${encodeURIComponent(name)}`); }} />
+          <McpPendingElsewhere owner={owner} row={detailOpen ? row : undefined} online={supported} />
           <div className="mcp-grid" data-detail={detailOpen} data-retained={Boolean(retained)}>
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
               activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
               detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
               {row?.config.transport && <McpTest key={JSON.stringify([row.scope, row.name])} owner={owner} row={row} online={supported} heading={detailHeading} />}
+              {row?.config.oauth && <McpAuth key={JSON.stringify(["auth", row.scope, row.name])} owner={owner} row={row} online={supported} heading={detailHeading} />}
               <McpActions key={`${path}:${scope}`} owner={owner} heading={detailHeading} row={row ?? null} revision={revision} online={supported} />
             </ConnectionDetail>
           </div>
