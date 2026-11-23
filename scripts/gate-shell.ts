@@ -9,7 +9,7 @@ export async function gateShell(
 ) {
   const capture = async (name: string) => { if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${name}`, fullPage: true }); };
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => { const url = new URL(location.href); url.searchParams.set("theme", "gruvbox-light"); history.replaceState({}, "", url); });
+  await page.evaluate(() => { const url = new URL(location.href); url.searchParams.set("theme", "g1-light"); history.replaceState({}, "", url); });
   const places = page.getByRole("navigation", { name: "places" });
   const grouped = await places.locator("section").evaluateAll((sections) => sections.map((section) => [section.getAttribute("aria-label"), [...section.querySelectorAll("a")].map((link) => link.querySelector("span")?.textContent)]));
   const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "mcp connections"]]];
@@ -36,7 +36,7 @@ export async function gateShell(
   const selectedUrl = new URL(page.url());
   if (!secondSessionId || selectedUrl.searchParams.get("chat") !== secondSessionId)
     throw new Error("new chat did not become the selected URL chat");
-  if (selectedUrl.searchParams.get("theme") !== "gruvbox-light")
+  if (selectedUrl.searchParams.get("theme") !== "g1-light")
     throw new Error("new chat navigation discarded the theme query");
   await waitFor(async () => await page.locator(".chat-row").count() === chatsBefore + 1, "second home chat in sidebar");
   await capture("02-new-chat-review-1440x900.png");
@@ -68,15 +68,15 @@ export async function gateShell(
     throw new Error("search enter did not open the active result");
   await search.press("Escape");
   if (await search.inputValue()) throw new Error("escape did not clear chat search");
-  if (new URL(page.url()).searchParams.get("theme") !== "gruvbox-light")
+  if (new URL(page.url()).searchParams.get("theme") !== "g1-light")
     throw new Error("chat selection discarded the theme query");
 
-  await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=foreign-session`);
+  await page.goto(`${new URL(page.url()).origin}/?theme=g1-light&chat=foreign-session`);
   await gateWait.playwright(page.getByRole("alert").filter({ hasText: "this chat no longer exists" }), "waitFor", { timeout: 20_000 });
   await gateWait.playwright(page.getByRole("main").getByRole("button", { name: "new chat", exact: true }), "waitFor", { timeout: 20_000 });
   if (new URL(page.url()).searchParams.get("chat") !== "foreign-session")
     throw new Error("missing chat state discarded the selected chat query");
-  await page.goto(`${new URL(page.url()).origin}/?theme=gruvbox-light&chat=${firstSessionId}`);
+  await page.goto(`${new URL(page.url()).origin}/?theme=g1-light&chat=${firstSessionId}`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
 
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -178,7 +178,7 @@ export async function gateShell(
 export async function gateStablePlace(tab: Page, origin: string, gateWait: GateWait) {
   let sockets = 0;
   tab.on("websocket", () => { sockets += 1; });
-  await tab.goto(`${origin}/agents?theme=gruvbox-dark`);
+  await tab.goto(`${origin}/agents?theme=g1-dark`);
   const frame = tab.locator(".module-frame");
   await gateWait.playwright(frame.getByRole("heading", { name: "agents", exact: true, level: 1 }), "waitFor");
   await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
@@ -187,7 +187,7 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
   if (await tab.locator('.place-nav [aria-current="page"]').innerText() !== "agents") throw new Error("agents route did not select agents");
   if (!process.env.SCREENSHOT_DIR) return;
   for (const theme of ["dark", "light"]) {
-    if (theme === "light") await tab.goto(`${origin}/agents?theme=gruvbox-light`);
+    if (theme === "light") await tab.goto(`${origin}/agents?theme=g1-light`);
     await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
     await gateWait.playwright(tab.locator('.chat-list[data-list-state="ready"]'), "waitFor");
     for (const width of [390, 1280, 1440, 1920]) {
@@ -213,7 +213,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
   const capture = async (state: string, width: number, height = width === 390 ? 844 : 900) => {
     if (process.env.SCREENSHOT_DIR) await tab.screenshot({ path: `${process.env.SCREENSHOT_DIR}/v5-create-${state}-${width}x${height}.png`, animations: "disabled" });
   };
-  const theme = "?theme=gruvbox-dark";
+  const theme = "?theme=g1-dark";
   const landingUrl = `${origin}/create${theme}`;
   const readHome = async () => {
     const response = await tab.request.get(`${origin}/api/pages/home`);

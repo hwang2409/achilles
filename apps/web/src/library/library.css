@@ -73,7 +73,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-text { margin-top: 24px; }
 .library-untrusted, .library-flag { margin: 0 0 12px; font-size: 13px; color: var(--fulcrum-muted); }
 .library-flag { color: var(--fulcrum-warn); }
-.library-body { margin: 0; padding: 12px; font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); }
+.library-body { margin: 0; padding: 12px; font-family: var(--achilles-code-font, var(--g1-font-mono)); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); }
 .library-body + .library-flag { margin: 8px 0 0; }
 .library-group button .library-warning { color: var(--fulcrum-warn); }
 .library-skipped { margin: 12px 16px; font-size: 12px; color: var(--fulcrum-muted); }
@@ -106,7 +106,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 .library-editor-row small[data-invalid] { color: var(--fulcrum-danger); }
 .library-editor :where(input:not([type="radio"]), textarea) { min-height: 36px; padding: 6px 10px; color: inherit; font: inherit; background: transparent; border: 1px solid var(--fulcrum-border); }
 .library-editor input:disabled { color: var(--fulcrum-muted); }
-.library-editor textarea { min-height: 16lh; resize: vertical; font-family: var(--achilles-code-font, "JetBrains Mono", ui-monospace, monospace); font-size: 13px; font-variant-ligatures: none; }
+.library-editor textarea { min-height: 16lh; resize: vertical; font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: 13px; font-variant-ligatures: none; }
 .library-editor :is(input, textarea, button):focus-visible, .library-editor-status:focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
 .library-editor-status:empty, .library-editor-saved:empty { display: none; }
 .library-editor-saved { margin: 0; font-size: 13px; }
