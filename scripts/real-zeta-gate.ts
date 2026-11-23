@@ -2186,6 +2186,14 @@ with _database() as db:
   if (!rawBox || !rowBox || !nextBox || !geometry.nextText.includes("layout updated") || nextBox.y < rawBox.y + rawBox.height)
     throw new Error(`raw disclosure overlaps next transcript row: ${JSON.stringify(geometry)}`);
   if (screenshotDir) await page.screenshot({ path: join(screenshotDir, "tool-summary-raw-open-1440.png"), fullPage: true });
+  const outerSummary = toolRow.locator('[data-part="tool-header"]');
+  await outerSummary.click();
+  await waitFor(async () => {
+    const collapsed = await rawGeometry();
+    const header = await outerSummary.boundingBox();
+    return Boolean(header && collapsed.rowBox && collapsed.nextBox && !collapsed.minHeight && collapsed.rowBox.height <= header.height + 4 && collapsed.nextBox.y - (collapsed.rowBox.y + collapsed.rowBox.height) <= 32);
+  }, "outer tool collapse releases the raw disclosure space");
+  await outerSummary.click();
   if (process.env.ONLY_TOOL_SUMMARY) {
     const rawSummary = toolRow.locator('[data-part="tool-raw"] summary');
     await rawSummary.click();
