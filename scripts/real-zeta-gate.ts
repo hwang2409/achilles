@@ -324,9 +324,12 @@ try {
     const login = authPage.getByRole("dialog", { name: "review browser sign-in" });
     await login.getByRole("checkbox").check();
     const popupEvent = authPage.waitForEvent("popup", { timeout: 10_000 });
-    const [popup] = await Promise.all([popupEvent, login.getByRole("button", { name: "sign in again", exact: true }).click()]);
-    try { await popup.waitForURL(sentinel, { timeout: 10_000 }); }
-    finally { await popup.close(); }
+    const [popup, confirmed] = await Promise.allSettled([popupEvent, login.getByRole("button", { name: "sign in again", exact: true }).click()]);
+    if (popup.status === "rejected") throw new Error("named sign-in popup did not open", { cause: popup.reason });
+    try {
+      if (confirmed.status === "rejected") throw confirmed.reason;
+      await popup.value.waitForURL(sentinel, { timeout: 10_000 });
+    } finally { await popup.value.close(); }
     await authPage.getByText(/^signed in at/).waitFor();
     const pageData = await authPage.evaluate(() => JSON.stringify([document.documentElement.outerHTML, location.href, history.state,
       ...[localStorage, sessionStorage].map(store => Object.entries(store))]));

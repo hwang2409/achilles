@@ -29,7 +29,7 @@ export function AccountSwitchProvider({ connection, children }: { connection: Co
       title={reviewText("review chat account switch")} action={reviewText("switch chat account")} keep={reviewText("keep current account")}
       scope={`chat: ${chat.title}` as ReviewText} current={(from ?? "no selected account for this provider") as ReviewText} after={to as ReviewText}
       fields={[{ label: reviewText("provider"), value: to.startsWith("anthropic:") ? reviewText("anthropic") : reviewText("codex") }]}
-      effect={`future model calls in this chat use ${to}; the failed request is not retried.` as ReviewText}
+      effect={`future model calls to this provider in this chat use ${to}; the failed request is not retried.` as ReviewText}
       undo={reviewText("switch back with another review if the old account is available")}
       proof={{ kind: "name", name: to as ReviewText }} {...review.operation} />}
   </SwitchReview.Provider>;

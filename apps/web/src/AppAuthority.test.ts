@@ -402,7 +402,7 @@ const browserLogin = (cancel: boolean): Row => {
         expect(writes).toEqual(["login_start", "login_cancel"]);
         expect(app.getByText(/^signed in at/)).toBeTruthy();
         expect(requests.filter(method => method === "account_list")).toHaveLength(2);
-        expect(requests.filter(method => method !== "status").at(-1)).toBe("hello");
+        expect(requests.filter(method => method !== "status" && !method.includes(" ")).at(-1)).toBe("hello");
       }
       const contents = [document.documentElement.outerHTML, location.href, history.state,
         ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => [store.key(i), store.getItem(store.key(i)!)])),

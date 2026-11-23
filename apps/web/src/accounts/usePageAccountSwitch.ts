@@ -22,7 +22,7 @@ export function usePageAccountSwitch(client: ZetaClient | null, rows: Account[],
   const [chat, setChat] = useState<ChatDestination | null>();
   const [refusal, refuse] = useState<string | null>(null);
   const openSwitch = useAccountSwitch();
-  
+
   useEffect(() => {
     if (!client) return;
     let current = true;
