@@ -32,6 +32,14 @@ export async function readControlParent(client: ZetaClient, signal: AbortSignal)
 
 type Intent = { kind: "spawn"; parent: ControlParent; profile: Profile; task: string }
   | { kind: "cancel"; row: AgentRun };
+function reviewedIdentity(intent: Intent, root: string): string {
+  if (intent.kind === "spawn") {
+    const { parent, profile, task } = intent;
+    return JSON.stringify([intent.kind, root, parent.cwd, profile.name, profile.description, profile.tools, task]);
+  }
+  const { parentRunId, agentType, description, runId } = intent.row;
+  return JSON.stringify([intent.kind, root, parentRunId, agentType, description, runId]);
+}
 type Outcome = Result<{ status: "committed"; receipt: ReviewText }>;
 const unknown: Outcome = { status: "unknown" };
 const fail = (reason: "changed" | "denied" | "not-applied" | "refused", message?: ReviewText, final?: true): Outcome =>
@@ -53,14 +61,24 @@ function refusal(code: unknown) {
   }
 }
 
+function parseReply(intent: Intent, reply: unknown): Outcome {
+  const data = object(reply) ? reply.data : null;
+  if (!object(data) || data.accepted !== true || !text(data.run_id)) return unknown;
+  if (intent.kind === "spawn") return spawned(intent.profile.name, data.run_id);
+  if (data.run_id !== intent.row.runId) return unknown;
+  if (data.state === "cancelling") return committed(reviewText("cancellation requested."));
+  return isTerminal(data.state) ? committed(displayControl(`this run was already ${data.state}.`)) : unknown;
+}
+
 /** Owns unresolved attempts across view and socket replacement. Checks are read-only. */
 export function createChildControls(connection: Pick<Connection, "client" | "withControl">, advertised = supportsRequest) {
-  type Attempt = { run: Promise<Outcome>; check: () => Promise<Outcome>; checking?: Promise<Outcome> };
+  type Attempt = { readonly identity: string; run: Promise<Outcome>; check: () => Promise<Outcome>; checking?: Promise<Outcome> };
   const attempts = new Map<string, Attempt>();
   return {
     operation(intent: Intent, refresh: () => void) {
       const root = intent.kind === "spawn" ? intent.parent.id : intent.row.sessionId;
       const key = intent.kind === "spawn" ? rowKey(root, "") : rowKey(root, intent.row.runId);
+      const identity = reviewedIdentity(intent, root);
       const method = intent.kind === "spawn" ? "child_run_spawn" : "child_run_cancel";
       let before: Set<string> | undefined;
       let current: Attempt | undefined;
@@ -97,13 +115,7 @@ export function createChildControls(connection: Pick<Connection, "client" | "wit
             const params = intent.kind === "spawn" ? { session_id: root, agent_type: intent.profile.name, task: intent.task, background: true }
               : { session_id: root, run_id: intent.row.runId, reason: "user_cancelled" };
             dispatched = true;
-            const reply: unknown = await client.request(method, params, { signal, timeoutMs: 10_000 });
-            const data = object(reply) ? reply.data : null;
-            if (!object(data) || data.accepted !== true || !text(data.run_id)) return unknown;
-            if (intent.kind === "spawn") return spawned(intent.profile.name, data.run_id);
-            if (data.run_id !== intent.row.runId) return unknown;
-            if (data.state === "cancelling") return committed(reviewText("cancellation requested."));
-            return isTerminal(data.state) ? committed(displayControl(`this run was already ${data.state}.`)) : unknown;
+            return parseReply(intent, await client.request(method, params, { signal, timeoutMs: 10_000 }));
           });
           if ("refused" in result) return fail("refused", displayControl(result.refused));
           if (result.value.status === "committed") refresh();
@@ -117,8 +129,14 @@ export function createChildControls(connection: Pick<Connection, "client" | "wit
       return {
         execute() {
           const existing = attempts.get(key);
-          if (existing) { current = existing; return existing.run; }
-          const entry: Attempt = { check, run: send().then((result) => {
+          if (existing) {
+            if (existing.identity !== identity) return Promise.resolve(fail("not-applied", intent.kind === "spawn"
+              ? reviewText("not sent. the result of an earlier spawn is still pending or unknown. check it in its original review before trying again.")
+              : reviewText("not sent. the result of an earlier cancel is still pending or unknown. check it in its original review before trying again.")));
+            current = existing;
+            return existing.run;
+          }
+          const entry: Attempt = { identity, check, run: send().then((result) => {
             if (result.status !== "unknown") attempts.delete(key);
             return result;
           }) };
@@ -128,11 +146,11 @@ export function createChildControls(connection: Pick<Connection, "client" | "wit
         },
         checkResult() {
           const entry = current ?? attempts.get(key);
-          if (!entry || attempts.get(key) !== entry) return Promise.resolve(unknown);
+          if (!entry || entry.identity !== identity || attempts.get(key) !== entry) return Promise.resolve(unknown);
           return entry.checking ??= entry.run.then((result) => result.status === "unknown" ? entry.check() : result)
             .catch(() => unknown).then((result) => {
               entry.checking = undefined;
-              if (result.status !== "unknown") attempts.delete(key);
+              if (result.status !== "unknown" && attempts.get(key) === entry) attempts.delete(key);
               return result;
             });
         },

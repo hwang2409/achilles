@@ -5,7 +5,8 @@ import type { AgentRun } from "./reads";
 
 const row: AgentRun = { sessionId: "root", runId: "fixture-run", parentRunId: null, agentType: "fixture", description: "fixture task", status: "idle" };
 const profile = { name: "fixture", description: "fixture profile", tools: ["read"] };
-const parent = { id: "root", cwd: "/fixture", profiles: [profile], idle: true };
+const otherProfile = { ...profile, name: "other-profile" };
+const parent = { id: "root", cwd: "/fixture", profiles: [profile, otherProfile], idle: true };
 const spawn = { kind: "spawn", parent, profile, task: "fixture task" } as const;
 const cancel = { kind: "cancel", row } as const;
 const stored = (id: string, status = "idle", description = row.description, root = "root", ancestor: string | null = null) => ({
@@ -23,17 +24,17 @@ function fixture({ reply = accepted("fixture-run", "cancelling") as unknown, ref
   const reads: { role: string; params: unknown }[] = [];
   const record = { borrows: 0, refreshes: 0, catalog: [stored(row.runId)], reply, hold: undefined as Promise<unknown> | undefined };
   const make = (role: "observer" | "controller") => ({ features: feature ? [controlFeature] : [], async request(method: string, params: object) {
-    if (method === "status") return { state, session: { session_id: session, cwd, agent_catalog: [profile] } };
+    if (method === "status") return { state, session: { session_id: session, cwd, agent_catalog: parent.profiles } };
     if (method === "agent_run_catalog") { reads.push({ role, params }); return { revision: "1", data: { items: record.catalog } }; }
     expect(role).toBe("controller");
     writes.push([method, params]);
-    if (record.hold) return record.hold;
+    if (record.hold) return deadline(`reply to ${method}`, record.hold);
     if (record.reply instanceof Error) throw record.reply;
     return record.reply;
   } }) as unknown as ZetaClient;
   const connection = { client: make("observer") as ZetaClient | null, async withControl<T>(run: (client: ZetaClient) => Promise<T>) {
     record.borrows++;
-    return refused ? { refused: "fixture observer refusal" } : { value: await run(make("controller")) };
+    return refused ? { refused: "fixture observer refusal" } : { value: await deadline("borrowed controller operation", run(make("controller"))) };
   } };
   const owner = createChildControls(connection, () => method);
   return { connection, owner, writes, reads, record, make, open: (intent: typeof spawn | typeof cancel) => owner.operation(intent, () => { record.refreshes++; }) };
@@ -85,15 +86,16 @@ test("double submit joins across remount and drains the pending write", async ()
 });
 
 test.each([
-  ["one exact new direct run", spawn, [stored(row.runId), stored("new-run"), stored("nested", "idle", row.description, "root", "a"), stored("different", "idle", "another task")], "committed"],
-  ["multiple exact new runs", spawn, [stored("second"), stored("third")], "unknown"],
-  ["only the original matching run", spawn, [stored(row.runId)], "unknown"],
-  ["only a nested matching run", spawn, [stored("nested", "idle", row.description, "root", "a")], "unknown"],
-  ["other root is not authoritative", cancel, [stored(row.runId, "canceled", row.description, "other")], "unknown"],
-  ["the exact child ended", cancel, [stored(row.runId, "canceled")], "committed"],
-  ["the exact child completed instead", cancel, [stored(row.runId, "completed")], "committed"],
-  ["the exact child still runs", cancel, [stored(row.runId, "running"), stored("other", "canceled")], "unknown"],
-] as const)("lost reply: %s", async (name, intent, catalog, status) => {
+  ["one exact new direct run", spawn, [stored(row.runId), stored("new-run"), stored("nested", "idle", row.description, "root", "a"), stored("different", "idle", "another task")], "committed", undefined],
+  ["different review after remount cannot settle the earlier spawn", spawn, [stored(row.runId), stored("new-run")], "unknown", { ...spawn, profile: otherProfile, task: "another task" }],
+  ["multiple exact new runs", spawn, [stored("second"), stored("third")], "unknown", undefined],
+  ["only the original matching run", spawn, [stored(row.runId)], "unknown", undefined],
+  ["only a nested matching run", spawn, [stored("nested", "idle", row.description, "root", "a")], "unknown", undefined],
+  ["other root is not authoritative", cancel, [stored(row.runId, "canceled", row.description, "other")], "unknown", undefined],
+  ["the exact child ended", cancel, [stored(row.runId, "canceled")], "committed", undefined],
+  ["the exact child completed instead", cancel, [stored(row.runId, "completed")], "committed", undefined],
+  ["the exact child still runs", cancel, [stored(row.runId, "running"), stored("other", "canceled")], "unknown", undefined],
+] as const)("lost reply: %s", async (name, intent, catalog, status, otherReview) => {
   const f = fixture({ reply: new Error("socket lost") });
   const original = f.open(intent);
   expect(await deadline(`${name}: original attempt`, original.execute())).toEqual({ status: "unknown" });
@@ -101,9 +103,15 @@ test.each([
   expect(await deadline(`${name}: offline check`, original.checkResult())).toEqual({ status: "unknown" });
   f.connection.client = f.make("observer");
   f.record.catalog = [...catalog];
-  const reopened = f.open(intent);
-  expect(await deadline(`${name}: reattach earlier attempt`, reopened.execute())).toEqual({ status: "unknown" });
+  const reopened = f.open(otherReview ?? intent);
+  const result = await deadline(`${name}: execute reopened review`, reopened.execute());
   expect(await deadline(`${name}: check`, reopened.checkResult())).toMatchObject({ status });
+  if (otherReview) {
+    expect(result).toMatchObject({ status: "failed", reason: "not-applied", message: expect.stringContaining("earlier spawn") });
+    expect(await deadline(`${name}: check the original review`, f.open(intent).checkResult())).toMatchObject({ status: "committed" });
+  } else {
+    expect(result).toEqual({ status: "unknown" });
+  }
   expect(f.writes).toHaveLength(1);
   expect(f.record.borrows).toBe(1);
   expect(f.reads.at(-1)).toEqual({ role: "observer", params: { root_session_id: "root", limit: 100 } });
