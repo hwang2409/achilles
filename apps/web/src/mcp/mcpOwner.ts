@@ -76,26 +76,29 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     if (!supports(client, method)) return { status: "unsupported" };
     const mutation = action === "trusted" ? { name, trusted: attempt.value }
       : action === "enabled" ? { name, scope, enabled: attempt.value } : { name, scope };
+    const response = await write(client, method, revision, mutation, signal);
+    if ("status" in response) return response;
+    const next = projectMcpSnapshot(response.result, scope);
+    const restart = projectRestart(response.result);
+    if (!next || !restart || !matches(attempt, next.rows)) return UNKNOWN;
+    reads.apply(scope, next);
+    return { status: "committed", restart };
+  }
+  async function write(client: ZetaClient, method: typeof mcpMethods[McpAction], revision: string,
+    mutation: Record<string, unknown>, signal: AbortSignal): Promise<McpOutcome | { result: unknown }> {
     for (let retry = 0; ; retry++) {
       if (signal.aborted) return CANCELLED;
       if (live() !== client) return { status: "refused" };
-      let result: unknown;
       try {
         // Do not abort a sent write: closing the review does not undo it.
-        result = await client.request(method, { revision, mutation }, { timeoutMs: 5_000 });
+        return { result: await client.request(method, { revision, mutation }, { timeoutMs: 5_000 }) };
       } catch (error) {
         const failure = rpcFailure(error);
         if (!failure) return UNKNOWN;
         if (failure.status !== "busy" || retry === BACKOFF.length) return failure;
         if (signal.aborted) return CANCELLED;
         await wait(BACKOFF[retry]!, signal);
-        continue;
       }
-      const next = projectMcpSnapshot(result, scope);
-      const restart = projectRestart(result);
-      if (!next || !restart || !matches(attempt, next.rows)) return UNKNOWN;
-      reads.apply(scope, next);
-      return { status: "committed", restart };
     }
   }
   async function execute(attempt: McpAttempt, signal: AbortSignal): Promise<McpOutcome> {
