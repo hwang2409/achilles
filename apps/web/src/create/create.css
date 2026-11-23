@@ -13,6 +13,7 @@
 .create-landing p { margin: 0 0 16px; color: var(--fulcrum-muted); text-wrap: pretty; }
 .create-landing form { border: 1px solid var(--g1-control-border); background: var(--g1-bg-subtle); padding: 10px 12px 0; }
 .create-landing textarea { display: block; width: 100%; resize: vertical; min-height: 56px; padding: 4px; color: inherit; background: transparent; border: 0; font: inherit; }
+.create-landing textarea::placeholder { color: var(--g1-fg-3); opacity: 1; }
 .create-landing textarea:focus-visible { outline: var(--g1-focus-ring); }
 .create-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
 .create-form-actions span, .create-build-status { color: var(--fulcrum-muted); font-size: 12px; }
@@ -21,7 +22,7 @@
 .create-build-status { min-height: 24px; padding-top: 4px; }
 .create-build-status[role="alert"] { color: var(--fulcrum-danger); }
 .create-starters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.create-starters button { min-height: 36px; padding: 4px 12px; font-size: 12px; }
+.create-starters button { border-color: var(--g1-control-border); min-height: 36px; padding: 4px 12px; font-size: 12px; }
 .create-landing section { margin-top: 32px; }
 .create-landing section header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
 .create-landing section header :is(a, span), .create-landing small { color: var(--fulcrum-muted); font-size: 12px; }

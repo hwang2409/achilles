@@ -10,6 +10,7 @@
 .agents-filters input, .agents-filters select, .agents-frame :is(.agents-catalog, .agents-detail-scroll) button:not(.agents-timeline *) { min-height: 40px; padding-inline: 8px; border: 1px solid var(--g1-control-border); background: var(--fulcrum-bg); color: var(--fulcrum-fg); font: inherit; }
 .agents-filters select { display: block; max-width: min(18ch, 100%); }
 .agents-filters input { width: 100%; }
+.agents-filters input::placeholder { color: var(--g1-fg-3); opacity: 1; }
 .agents-filters button { margin-inline-start: auto; font-size: .85em; }
 .agents-frame :is(.agents-catalog, .agents-detail-scroll) button:not(:disabled, .agents-timeline *):hover { background: var(--g1-hover); }
 .agents-frame button:disabled:not(.agents-timeline *) { color: var(--fulcrum-muted); }
@@ -70,7 +71,7 @@
 .agents-detail { display: flex; flex-direction: column; overflow: hidden; }
 .agents-detail-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
 .agents-composer { margin: 8px 24px 16px; padding: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); }
-.agents-composer textarea { display: block; width: 100%; min-height: 44px; max-height: 20dvh; padding: 8px; resize: vertical; border: 0; color: var(--fulcrum-text); background: var(--fulcrum-surface); font: inherit; }
+.agents-composer textarea { display: block; width: 100%; min-height: 44px; max-height: 20dvh; padding: 8px; resize: vertical; border: 0; color: var(--fulcrum-fg); background: var(--fulcrum-surface); font: inherit; }
 .agents-composer textarea::placeholder { color: var(--fulcrum-muted); }
 .agents-composer textarea:focus-visible { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
 .agents-composer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; }

@@ -17,6 +17,7 @@
 .library-list { border-right: 1px solid var(--fulcrum-border); min-width: 0; }
 .library-filter { padding: 12px 16px; border-bottom: 1px solid var(--g1-rule); }
 .library-filter input { flex: 1; min-width: 0; padding: 0 10px; min-height: 40px; color: inherit; font: inherit; background: transparent; border: 1px solid var(--g1-control-border); }
+.library-filter input::placeholder { color: var(--g1-fg-3); opacity: 1; }
 .library-filter span { white-space: nowrap; font-size: 12px; color: var(--fulcrum-muted); }
 .library-group h2 { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; margin: 0; padding: 12px 16px 6px; font-size: 12px; font-weight: 500; color: var(--fulcrum-muted); }
 .library-group h2 small, .library-filter span { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-variant-numeric: tabular-nums; }
@@ -91,7 +92,7 @@ div.library-text-region:has(> .library-error) { padding: 4px 8px; }
 @media (pointer: coarse) {
   .library :is(.library-text button, .library-more button, .library-skipped summary) { min-height: 44px; }
 }
-.library-snapshot .library-new { border: 1px solid var(--fulcrum-border); white-space: nowrap; }
+.library-snapshot .library-new { border: 1px solid var(--g1-control-border); white-space: nowrap; }
 .library-control { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--fulcrum-warn); text-align: right; }
 .library-saved { padding: 10px 24px; border-bottom: 1px solid var(--g1-rule); font-size: 13px; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
 .library-saved p { margin: 0; grid-column: 1; overflow-wrap: anywhere; }

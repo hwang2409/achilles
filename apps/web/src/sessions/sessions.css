@@ -11,6 +11,7 @@
 .sessions-catalog { border-right: 1px solid var(--fulcrum-border); }
 .sessions-filters { padding: 14px 16px 12px; border-bottom: 1px solid var(--g1-rule); }
 .sessions-filters input { width: 100%; min-height: 40px; padding: 0 10px; border: 1px solid var(--g1-control-border); background: var(--g1-bg); }
+.sessions-filters input::placeholder { color: var(--g1-fg-3); opacity: 1; }
 .sessions-filters > div { margin-top: 8px; display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
 .sessions-filters > div > span { margin-left: auto; padding: 8px 0; }
 .sessions-filters .enum-listbox { flex: 0 1 130px; }
@@ -50,7 +51,7 @@
 .sessions-fields > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.75fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--g1-rule); }
 .sessions-fields dt { color: var(--fulcrum-muted); }
 .sessions-fields dd { margin: 0; white-space: pre-wrap; }
-.sessions-copy { margin-block: -7px; min-height: 40px; border-color: transparent; color: var(--fulcrum-accent); }
+.sessions-fields .sessions-copy { margin-block: -7px; min-height: 40px; border: 0; color: var(--fulcrum-accent); }
 .sessions-fields dd > [role="status"] { margin-left: 6px; color: var(--fulcrum-muted); }
 .sessions-transcript-action { display: inline-flex; align-items: center; padding: 0 14px; min-height: 42px; border: 1px solid var(--g1-primary); background: var(--g1-primary); color: var(--g1-primary-text); }
 .sessions-transcript-action:disabled { border: 1px dashed var(--fulcrum-border); background: transparent; }
