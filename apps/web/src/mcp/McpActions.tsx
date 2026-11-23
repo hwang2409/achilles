@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { Confirmation, reviewText, type ReviewText, type Result } from "../surface/Confirmation";
 import { WRITE_SURFACE } from "../writeSurfaces";
 import type { McpAttempt, McpOutcome, McpOwner } from "./mcpOwner";
@@ -47,24 +47,18 @@ function operation(owner: McpOwner, reviewed: McpAttempt) {
   return { execute: () => { sent = { ...reviewed }; return perform(false); }, checkResult: () => perform(true) };
 }
 
-type Review = { sent: McpAttempt; origin: HTMLButtonElement };
-export function McpActions({ owner, row, revision, online }: { owner: McpOwner; row: McpRow | null; revision?: string; online: boolean }) {
+type Review = { id: number; sent: McpAttempt; origin: HTMLButtonElement };
+export function McpActions({ owner, row, revision, online, heading }: {
+  owner: McpOwner; row: McpRow | null; revision?: string; online: boolean; heading: RefObject<HTMLHeadingElement | null>;
+}) {
   const [review, setReview] = useState<Review | null>(null);
-  const [notice, setNotice] = useState<ReviewText | null>(null);
+  const [activity, setActivity] = useState<HTMLDivElement | null>(null);
   const available = online && !!revision;
   const start = (origin: HTMLButtonElement, action: "trusted" | "remove") => {
     if (!available || !row || !revision) return;
     const target = { name: row.name, scope: row.scope, revision };
-    setReview({ origin, sent: action === "remove" ? { ...target, action } : { ...target, action, value: !row.trusted } });
-    setNotice(null);
-  };
-  const close = (attempt: Review, text?: ReviewText) => {
-    setReview(null);
-    if (text) setNotice(text);
-    requestAnimationFrame(() => {
-      const next = attempt.origin.isConnected ? attempt.origin : document.querySelector<HTMLElement>(".mcp-detail h2");
-      next?.focus();
-    });
+    setReview((prior) => ({ id: (prior?.id ?? 0) + 1, origin,
+      sent: action === "remove" ? { ...target, action } : { ...target, action, value: !row.trusted } }));
   };
   const enable = row && revision && { action: "enabled", name: row.name, scope: row.scope, revision, value: !row.enabled } as const;
   return <>
@@ -80,29 +74,26 @@ export function McpActions({ owner, row, revision, online }: { owner: McpOwner; 
         <button type="button" disabled={!available} data-write-surface={WRITE_SURFACE.mcpRemove} onClick={(event) => start(event.currentTarget, "remove")}>{labels.remove}</button>
       </div>
     </section>}
-    {notice && <p className="mcp-receipt" role="status">{notice}</p>}
-    {review && <McpReview owner={owner} review={review} close={(text) => close(review, text)} />}
+    <div ref={setActivity} />
+    {review && <McpReview key={review.id} owner={owner} sent={review.sent} activity={activity ?? undefined}
+      opener={() => review.origin.isConnected && !review.origin.disabled ? review.origin : heading.current} />}
   </>;
 }
 
-function McpReview({ owner, review: { sent }, close }: { owner: McpOwner; review: Review; close: (text?: ReviewText) => void }) {
-  const ops = operation(owner, sent);
+function McpReview({ owner, sent, activity, opener }: {
+  owner: McpOwner; sent: McpAttempt; activity?: HTMLElement; opener: () => HTMLElement | null;
+}) {
   const remove = sent.action === "remove";
   const trust = sent.action === "trusted" && sent.value;
-  const perform = async (run: typeof ops.execute) => {
-    const result = await run();
-    if (result.status === "committed") close(result.receipt);
-    return result;
-  };
   const action = remove ? labels.remove : trust ? labels.trust : labels.untrust;
   // The read projection guarantees a display-safe, round-tripping name; proof must be exact.
   const name = sent.name as ReviewText;
-  return <Confirmation level={2} external={{ onKeep: () => close() }} title={reviewText(`review ${action}`)} action={action} keep={keep}
+  return <Confirmation level={2} external={{ opener }} activity={activity} title={reviewText(`review ${action}`)} action={action} keep={keep}
     scope={reviewText(sent.scope)} proof={{ kind: "name", name }}
     current={remove ? reviewText("configuration on disk") : trust ? reviewText("not trusted") : reviewText("trusted")}
     after={remove ? reviewText("configuration deleted") : trust ? reviewText("trusted for new sessions") : reviewText("not trusted for new sessions")}
     effect={remove ? reviewText(`the configuration is deleted from this scope. ${running} any OAuth credential is not deleted.`)
       : reviewText(`trust changes apply to new sessions. ${running}`)}
     undo={remove ? reviewText("this removal cannot be undone here.") : trustEffect}
-    execute={() => perform(ops.execute)} checkResult={() => perform(ops.checkResult)} />;
+    {...operation(owner, sent)} />;
 }

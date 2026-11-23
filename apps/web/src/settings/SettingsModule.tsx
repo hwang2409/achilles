@@ -181,7 +181,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
   return <Row id="telemetry" title="telemetry" detail={RECORDS}>
     {control}
     <div ref={setActivity} className="sp-activity" />
-    {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role="status">{note}</p>}
+    {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role={stale ? "alert" : "status"}>{note}</p>}
     {/* another tab turned it on: no receipt, this tab wrote nothing and no zeta checked this install */}
     {note && stale && load.kind === "ready" && load.settings.telemetry === "on" && <p className="sp-note sp-result">{NEEDS_OTEL}</p>}
     {change && <div className="sp-receipt">

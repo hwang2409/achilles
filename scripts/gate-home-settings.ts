@@ -25,9 +25,20 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const turnOn = row.getByRole("button", { name: "turn on telemetry", exact: true });
     await waitFor(() => turnOn.isVisible(), "settings telemetry row (off)");
     const confirmOn = async () => {
+      await tab.setViewportSize({ width: 720, height: 450 });
       await turnOn.click();
       const dialog = tab.getByRole("dialog", { name: "turn on telemetry" });
-      await dialog.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" }).check();
+      const proof = dialog.getByRole("checkbox", { name: "i understand this applies to every zeta on this computer" });
+      // The effective 200% viewport must show the acknowledgement without first scrolling it into view.
+      await proof.evaluate((node) => {
+        const label = node.closest("label")!.getBoundingClientRect();
+        const footer = node.closest("dialog")!.querySelector("footer")!.getBoundingClientRect();
+        if (label.top < 0 || label.bottom > footer.top) {
+          throw new Error(`expected the telemetry acknowledgement to fit above the footer before interaction: label [${label.top}, ${label.bottom}], footer ${footer.top}`);
+        }
+      }, undefined, { timeout: 5_000 });
+      await tab.setViewportSize({ width: 1440, height: 900 });
+      await proof.check();
       await dialog.getByRole("button", { name: "turn on telemetry", exact: true }).click();
       return dialog;
     };
@@ -36,12 +47,19 @@ export async function gateHomeSettings(browser: Browser, origin: string, zetaHom
     const refused = `not changed. zeta cannot record telemetry on this computer: ${MISSING_OTEL}`;
     await waitFor(async () => await refusal.textContent().catch(() => "") === refused, "telemetry on refused with zeta's start error");
     if ((await bytes()) !== seeded) throw new Error("a refused telemetry change wrote settings.toml");
-    if (screenshotDir) {
-      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-1440x900.png") });
-      await tab.setViewportSize({ width: 390, height: 844 });
-      await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
-      await tab.setViewportSize({ width: 1440, height: 900 });
-    }
+    if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-1440x900.png") });
+    // Resize after the result arrives: focus alone does not keep a scroll target in view after reflow.
+    await tab.setViewportSize({ width: 390, height: 844 });
+    await refusal.evaluate((node) => {
+      const footer = node.closest("dialog")!.querySelector("footer")!;
+      const alert = node.getBoundingClientRect();
+      const footerTop = footer.getBoundingClientRect().top;
+      if (document.activeElement !== node || alert.top < 0 || alert.bottom > footerTop || node.scrollHeight > node.clientHeight) {
+        throw new Error(`expected the focused telemetry refusal to fit above the footer after resize: alert [${alert.top}, ${alert.bottom}], footer ${footerTop}`);
+      }
+    }, undefined, { timeout: 5_000 });
+    if (screenshotDir) await tab.screenshot({ path: join(screenshotDir, "settings-telemetry-refused-390x844.png") });
+    await tab.setViewportSize({ width: 1440, height: 900 });
     await dialog.getByRole("button", { name: "keep it off", exact: true }).click();
     if (!await turnOn.isVisible()) throw new Error("a refused telemetry change did not keep the row off");
     const sha = createHash("sha256").update(seeded).digest("hex");

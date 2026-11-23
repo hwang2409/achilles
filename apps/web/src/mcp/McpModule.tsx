@@ -96,7 +96,7 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
               activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
               detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
-              <McpActions key={path} owner={owner} row={row ?? null} revision={revision} online={supported} />
+              <McpActions key={`${path}:${scope}`} owner={owner} heading={detailHeading} row={row ?? null} revision={revision} online={supported} />
             </ConnectionDetail>
           </div>
         </>}
