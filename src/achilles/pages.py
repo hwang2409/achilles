@@ -215,6 +215,7 @@ _RESERVED_PAGE_ROUTE_SEGMENTS = (
     "settings",
     "accounts",
     "mcp",
+    "connections",
     "create",
     "api",
     "assets",
