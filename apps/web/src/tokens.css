@@ -13,19 +13,17 @@
   --g1-fg-2: #27272A;
   --g1-fg-3: #3F3F46;
   --g1-muted: #5E5E66;
-  --g1-accent: #1F45D6;
-  --g1-accent-tint: #EEF2FD;
-  --g1-accent-ink: #1A3AB8;
+  --g1-link: #385C86;
+  --g1-panel: var(--g1-bg);
   --g1-primary: #111113;
   --g1-primary-text: #FFFFFF;
-  --g1-ok: #15803D;
-  --g1-warn-fill: #B45309;
+  --g1-ok: var(--g1-muted);
+  --g1-warn-fill: #845C29;
   --g1-warn-text-on-fill: #FFFFFF;
-  --g1-warn: #9A3F07;
-  --g1-danger-mark: #C81E1E;
-  --g1-danger: #B91C1C;
+  --g1-warn: #795224;
+  --g1-danger-mark: #A64C4C;
+  --g1-danger: #9D4242;
   --g1-selection: #111113;
-  --g1-focus-glow: rgb(31 69 214 / .18);
 }
 
 :root, [data-achilles-theme] {
@@ -50,6 +48,9 @@
   --g1-selection-width: 2px;
   --g1-shadow-rest: none;
   --g1-shadow-overlay: 0 8px 24px -8px rgb(17 17 19 / .18);
+  --g1-accent: var(--g1-fg-3);
+  --g1-accent-tint: var(--g1-hover);
+  --g1-focus-glow: color-mix(in srgb, var(--g1-fg) 14%, transparent);
   --g1-focus-ring: 2px solid var(--g1-accent);
   --g1-focus-halo: 0 0 0 3px var(--g1-focus-glow);
   --g1-space-1: 4px;
@@ -81,19 +82,17 @@
   --g1-fg-2: #D4D4D8;
   --g1-fg-3: #D4D4D8;
   --g1-muted: #A1A1AA;
-  --g1-accent: #8B9DFF;
-  --g1-accent-tint: #172040;
-  --g1-accent-ink: var(--g1-accent);
+  --g1-link: #9FB9D6;
+  --g1-panel: var(--g1-surface);
   --g1-primary: #F4F4F5;
   --g1-primary-text: #0B0B0D;
-  --g1-ok: #4ADE80;
-  --g1-warn-fill: #FBBF24;
+  --g1-ok: var(--g1-muted);
+  --g1-warn-fill: #C7A773;
   --g1-warn-text-on-fill: #0B0B0D;
   --g1-warn: var(--g1-warn-fill);
-  --g1-danger-mark: #F87171;
+  --g1-danger-mark: #D99292;
   --g1-danger: var(--g1-danger-mark);
   --g1-selection: #FAFAFA;
-  --g1-focus-glow: color-mix(in srgb, var(--g1-accent) 24%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -111,19 +110,17 @@
     --g1-fg-2: #D4D4D8;
     --g1-fg-3: #D4D4D8;
     --g1-muted: #A1A1AA;
-    --g1-accent: #8B9DFF;
-    --g1-accent-tint: #172040;
-    --g1-accent-ink: var(--g1-accent);
+    --g1-link: #9FB9D6;
+    --g1-panel: var(--g1-surface);
     --g1-primary: #F4F4F5;
     --g1-primary-text: #0B0B0D;
-    --g1-ok: #4ADE80;
-    --g1-warn-fill: #FBBF24;
+    --g1-ok: var(--g1-muted);
+    --g1-warn-fill: #C7A773;
     --g1-warn-text-on-fill: #0B0B0D;
     --g1-warn: var(--g1-warn-fill);
-    --g1-danger-mark: #F87171;
+    --g1-danger-mark: #D99292;
     --g1-danger: var(--g1-danger-mark);
     --g1-selection: #FAFAFA;
-    --g1-focus-glow: color-mix(in srgb, var(--g1-accent) 24%, transparent);
   }
 }
 

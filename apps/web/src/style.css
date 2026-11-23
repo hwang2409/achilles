@@ -17,10 +17,10 @@ body button { background: transparent; border: var(--g1-border-width) solid var(
   border: var(--g1-border-width) solid var(--g1-control-border);
 }
 button:where(:not(:disabled, [aria-disabled="true"])):hover { background-color: var(--g1-hover); }
-[data-part="composer"] { border-radius: var(--g1-radius-control); border-color: var(--g1-control-border); border-left-color: var(--rail); }
-[data-part="composer"]:focus-within { box-shadow: var(--g1-focus-halo); }
+[data-part="composer"] { border: var(--g1-border-width) solid var(--g1-border); border-radius: var(--g1-radius-control); }
+[data-part="composer"]:focus-within { border-color: var(--g1-control-border); }
 [data-part="composer"] [data-part="composer-field"] textarea:focus-visible,
-[data-part="composer"] .cm-content:focus-visible { outline: var(--g1-focus-ring); outline-offset: -2px; box-shadow: none; }
+[data-part="composer"] .cm-content:focus-visible { outline: none; box-shadow: none; }
 :where(button, input, textarea, select):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: .65; }
 :focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 :is(input:not([type="checkbox"], [type="radio"]), textarea, select):focus-visible {

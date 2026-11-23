@@ -50,15 +50,13 @@
   min-width: 62px;
   height: 20px;
   padding: 0 8px;
-  color: var(--g1-fg);
-  border: 1px solid currentColor;
+  color: var(--g1-fg-3);
+  border: 1px solid var(--g1-control-border);
   border-radius: var(--g1-radius-chip);
   font: 700 var(--g1-type-kbd)/18px var(--achilles-code-font, var(--g1-font-mono));
   text-align: center;
 }
-.vim-mode-chip[data-mode="insert"] { color: var(--g1-ok); }
-.vim-mode-chip:is([data-mode="normal"], [data-mode="visual"]) { color: var(--g1-accent-ink); background: var(--g1-accent-tint); }
-.vim-composer:not([data-focused]) { --rail: var(--fulcrum-muted); }
+.vim-mode-chip:is([data-mode="normal"], [data-mode="visual"]) { background: var(--g1-selected); }
 .vim-composer:not([data-focused]) .cm-fat-cursor,
 .vim-composer:not([data-focused]) .cm-cursor { display: none; }
 .vim-composer:not([data-focused]) .vim-mode-chip {
