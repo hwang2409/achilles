@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
-import { gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
+import { gateAccountsPlace, gateCreatePlace, gateShell, gateStablePlace } from "./gate-shell";
 import { gateReloadMidTurn, gateTranscript, waitForIdleTurn } from "./gate-transcript";
 import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, gateSettings } from "./gate-settings";
 import { gatePalette } from "./gate-palette";
@@ -200,8 +200,13 @@ try {
     child.kill("SIGTERM");
     if (!await waitForExit(child, 15_000)) throw new Error("switch-then-reply process did not exit");
   };
+  await mkdir(authAccounts, { recursive: true, mode: 0o700 });
   const authApp = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], authEnv);
   let authZeta = await serveAuth(false);
+  await waitFor(async () => await fetch(origin).then(r => r.ok, () => false), "idle accounts achilles");
+  const accountsPage = await browser.newPage();
+  try { await gateAccountsPlace(accountsPage, origin); }
+  finally { await accountsPage.close(); }
   await writeFile(join(authAccounts, "accounts.json"), JSON.stringify({
     version: 1,
     accounts: {

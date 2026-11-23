@@ -255,10 +255,10 @@ const accountFixture: Options = {
     hello: (params) => params.role === "observer"
       ? { result: { protocol_version: "1.2", capabilities: { features: params.features } } }
       : { result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["account_list", "account_switch", "login_start", "login_status"] } } },
-    account_list: () => ({ result: { accounts: [
-      { account: "anthropic:default", current: true, available: true },
-      { account: "anthropic:personal", current: false, available: true },
-    ] } }),
+    account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [
+      { account: "anthropic:default", label: "default", current: true, available: true, default: true, detail: null, usage: { freshness: "usage unknown", error: null, snapshot: null } },
+      { account: "anthropic:personal", label: "personal", current: false, available: true, default: false, detail: null, usage: { freshness: "usage unknown", error: null, snapshot: null } },
+    ] } } }),
     login_start: (params) => ({ result: params.provider === "claude" ? { state: "succeeded" } : { state: "failed" } }),
   },
 };
