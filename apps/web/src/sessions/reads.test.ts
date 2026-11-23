@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ZetaClient } from "@fulcrum/zeta";
-import { createSessionsReader } from "./reads";
+import { createSessionsReader, readError } from "./reads";
 
 const signal = () => new AbortController().signal;
 const row = (id: string, project_id: string | null = null) => ({ session_id: id, name: `session ${id}`, project_id });
@@ -72,22 +72,23 @@ test("detail collection restarts once and does not accept a different session's 
 test.each([
   { name: "attached", attached: row("a"), method: "session_history" },
   { name: "other in the same project (both null)", attached: row("b"), method: "session_history_read" },
-  { name: "other project", attached: row("b", "elsewhere"), error: "attached session’s project" },
-  { name: "project unknown", attached: { session_id: "b" }, error: "attached session’s project" },
-  { name: "no attached session", attached: null, error: "no attached session" },
-  { name: "method not implemented", attached: row("b"), method: "session_history_read", missing: true, error: "needs a newer zeta" },
-])("transcript access: $name", async ({ attached, method, error, missing }) => {
+  { name: "idle scope allows the read", attached: null, method: "session_history_read" },
+  { name: "session outside the read scope", attached: null, method: "session_history_read", failure: { code: -32602, data: { code: "session_not_found" } }, error: "the transcript is not available" },
+  { name: "invalid parameters are not session_not_found", attached: null, method: "session_history_read", failure: { code: -32602, data: { code: "invalid_params" } }, error: "could not read from zeta" },
+  { name: "serve cannot read while idle", attached: null, method: "session_history_read", failure: { code: -32005, data: { code: "state_unavailable" } }, error: "zeta could not read this data right now" },
+  { name: "method not implemented", attached: row("b"), method: "session_history_read", failure: { code: -32601 }, error: "needs a newer zeta to read this transcript without opening the session" },
+])("transcript access: $name", async ({ attached, method, error, failure }) => {
   const { reader, calls } = serve((name) => {
     if (name === "list_sessions") return { sessions: [row("a")], next_offset: null };
     if (name === "state_sessions") return { items: [], next_cursor: null };
     if (name === "status") return { session: attached };
-    if (missing) throw { code: -32601 };
+    if (failure) throw failure;
     return { messages: [{ id: "message", role: "user", content: [] }, { id: "broken", role: "assistant", content: [{ type: "tool_use" }] }], next_cursor: null, next_offset: null };
   });
   const [session] = (await reader.catalog(signal())).items;
   calls.length = 0;
   const read = reader.transcript(session!, undefined, signal());
-  if (error) await expect(read).rejects.toThrow(error);
+  if (error) expect(await read.then(() => "read succeeded", readError)).toBe(error);
   else expect((await read).rows).toEqual([{ id: "message", role: "user", content: [] }]);
   expect(calls.map(([name]) => name)).toEqual(["status", ...(method ? [method] : [])]);
 });

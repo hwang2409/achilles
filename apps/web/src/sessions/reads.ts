@@ -7,7 +7,6 @@ const stateRead = "state_read_v1";
 const backward = "session_history_backward";
 const oldState = "session state needs a newer zeta";
 const oldHistory = "needs a newer zeta to read this transcript without opening the session";
-const projectLimit = "zeta can only read other top-level transcripts in the attached session’s project";
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const nonempty = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const text = (v: unknown) => nonempty(v) ? v : undefined;
@@ -164,15 +163,12 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
   const history = historyReaders(client, request);
   const transcriptMode = async (row: SessionRow, signal: AbortSignal) => {
     const status = await request("status", {}, signal);
-    if (!isObject(status) || (status.session !== null && !isObject(status.session))) throw invalid();
+    if (!isObject(status)) throw invalid();
     const attached = status.session;
-    if (!isObject(attached) || !nonempty(attached.session_id)) throw new ReadLimit("zeta has no attached session · open a chat to read other transcripts");
-    const active = attached.session_id === row.id;
-    if (!active) {
-      if (!grant(HISTORY_READ_FEATURE, "session_history_read")) throw new ReadLimit(oldHistory);
-      if (row.project === undefined || row.project !== project(attached.project_id)) throw new ReadLimit(projectLimit);
-    }
-    return !active ? "other" : supportsFeature(client, backward) ? "backward" : "forward";
+    if (attached !== null && (!isObject(attached) || !nonempty(attached.session_id))) throw invalid();
+    if (attached?.session_id === row.id) return supportsFeature(client, backward) ? "backward" : "forward";
+    if (!grant(HISTORY_READ_FEATURE, "session_history_read")) throw new ReadLimit(oldHistory);
+    return "other";
   };
   let generation = 0;
   let lastOverlay: { items: Map<string, SessionState>; reportedAt: number } | undefined;
@@ -238,7 +234,8 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
         } catch (error) {
           if (rpcCode(error) === -32009 && attempt === 0) { prior = undefined; continue; }
           if (rpcCode(error) === -32601 && kind === "other") throw new ReadLimit(oldHistory);
-          if (rpcCode(error) === -32602 && kind === "other") throw new ReadLimit(`${projectLimit} · the transcript is not available`);
+          if (rpcCode(error) === -32602 && kind === "other" && isObject(error) && isObject(error.data) &&
+              error.data.code === "session_not_found") throw new ReadLimit("the transcript is not available");
           throw error;
         }
       }
