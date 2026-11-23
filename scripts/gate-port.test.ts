@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { freeGatePort } from "./gate-port";
 
 // Chromium's restricted ports: https://chromium.googlesource.com/chromium/src/+/main/net/base/port_util.cc
 const restrictedPorts = new Set([
@@ -11,15 +12,8 @@ const restrictedPorts = new Set([
 ]);
 
 test("the real zeta gate never picks a Chromium-restricted port", async () => {
-  // Evaluate just the port choice; importing the gate would start the stack.
-  const source = await Bun.file(new URL("./real-zeta-gate.ts", import.meta.url)).text();
-  const expression = source.match(/^const port = (.+);$/m)?.[1];
-  if (!expression) throw new Error("could not find the gate's port expression");
-  const pickPort = new Function("Math", `return ${expression}`);
-  const blocked = new Set<number>();
-  for (let step = 0; step < 10000; step++) {
-    const port = pickPort({ floor: Math.floor, random: () => step / 10000 });
-    if (restrictedPorts.has(port)) blocked.add(port);
-  }
-  expect([...blocked]).toEqual([]);
+  const port = await freeGatePort();
+  expect(port).toBeGreaterThanOrEqual(5200);
+  expect(port).toBeLessThan(6000);
+  expect(restrictedPorts.has(port)).toBe(false);
 });

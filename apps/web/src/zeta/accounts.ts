@@ -54,6 +54,8 @@ function usage(value: unknown): NonNullable<Account["usage"]> {
 
 const safeSlug = (value: string) => /^[a-z0-9_-]{1,32}$/.test(value) && !/^(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)/.test(value);
 
+export const safeAccountId = (value: string) => /^(?:anthropic|codex):/.test(value) && safeSlug(value.slice(value.indexOf(":") + 1));
+
 function catalog(wire: unknown, idle: boolean): AccountCatalog {
   const result = record(wire);
   const revision = idle ? result.revision : null;
@@ -63,7 +65,7 @@ function catalog(wire: unknown, idle: boolean): AccountCatalog {
   const seen = new Set<string>();
   return { revision: typeof revision === "string" ? revision : null, accounts: accounts.map((value): Account => {
     const { account, label, detail, available, current, default: isDefault, usage: rawUsage } = record(value);
-    if (typeof account !== "string" || !/^(?:anthropic|codex):/.test(account) || !safeSlug(account.slice(account.indexOf(":") + 1)) || seen.has(account)) throw unreadable();
+    if (typeof account !== "string" || !safeAccountId(account) || seen.has(account)) throw unreadable();
     if (typeof label !== "string" || !safeSlug(label) || (idle && detail !== null)) throw unreadable();
     if (typeof available !== "boolean" || typeof current !== "boolean" || typeof isDefault !== "boolean") throw unreadable();
     seen.add(account);
@@ -75,13 +77,13 @@ function catalog(wire: unknown, idle: boolean): AccountCatalog {
 type AccountClient = Pick<ZetaClient, "request" | "features"> & { authority?: "controller" | "observer" };
 const observerRefusal = () => new AccountReadError("another tab controls zeta. try again after it releases control.");
 
-export async function readAccounts(client: AccountClient, sessionId?: string): Promise<AccountCatalog> {
+export async function readAccounts(client: AccountClient, sessionId?: string, options?: Parameters<ZetaClient["request"]>[2]): Promise<AccountCatalog> {
   if (client.authority === "observer") throw observerRefusal();
   const idle = client.features.includes(ACCOUNT_LIST_IDLE_FEATURE);
   if (!idle && !sessionId) throw new AccountReadError("start a chat before reading accounts on this zeta.");
   let result: unknown;
   try {
-    result = await client.request("account_list", idle ? {} : { session_id: sessionId });
+    result = await client.request("account_list", idle ? {} : { session_id: sessionId }, options);
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
     if (code === -32008) throw observerRefusal();

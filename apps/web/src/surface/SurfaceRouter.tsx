@@ -14,6 +14,7 @@ import { SessionsModule } from "../sessions/SessionsModule";
 import { continuationHref, mappingFailed } from "../sessions/continueChat";
 import { McpModule } from "../mcp/McpModule";
 import { createMcpOwner } from "../mcp/mcpOwner";
+import { createAccountLogin } from "../accounts/accountLogin";
 import { AccountsModule } from "../accounts/AccountsModule";
 import { SettingsModule } from "../settings/SettingsModule";
 import { HOME_SETTINGS_FEATURE } from "../settings/homeSettings";
@@ -39,7 +40,8 @@ export function SurfaceRouter() {
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
   const client = connection.client;
-  useEffect(() => () => connection.stop(), [connection]);
+  const [accountLogin] = useState(() => createAccountLogin(connection));
+  useEffect(() => () => { accountLogin.stop(); connection.stop(); }, [accountLogin, connection]);
   const phase = connectionState.phase;
   const connectionStatus = { connected: phase === "connected", label: connectionLabels[phase] ?? "zeta is disconnected" };
   const observer = isObserverPresentation(connectionState, connection.observerPresentation);
@@ -121,7 +123,7 @@ export function SurfaceRouter() {
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id === "accounts") {
-    content = <AccountsModule client={client} connecting={connecting} connection={connection} />;
+    content = <AccountsModule login={accountLogin} client={client} connecting={connecting} connection={connection} />;
   } else if (route.id !== "pages") {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
