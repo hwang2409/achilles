@@ -75,11 +75,10 @@ a.mcp-row:hover { background: var(--g1-hover); }
 .mcp-add :is(button, input, select):focus-visible { outline-offset: 2px; }
 .mcp-add-limits { font-size: var(--g1-type-small); }
 
-.mcp-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-block: 0 20px; }
-.mcp-test button { min-height: 44px; padding-inline: 12px; }
+.mcp-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--g1-space-2) var(--g1-space-4); margin-block: 0 var(--g1-space-5); }
+.mcp-test button { min-height: 44px; padding-inline: var(--g1-space-3); }
 .mcp-test p { margin: 0; font-variant-numeric: tabular-nums; }
 .mcp-test [data-test-result]:not([data-test-result="ok"]) { color: var(--g1-warn); }
-
 .mcp-auth { display: grid; gap: 8px; margin-block: 16px; padding-block: 12px; border-block: 1px solid var(--g1-rule); }
 .mcp-auth p { margin: 0; text-wrap: pretty; }
 .mcp-auth-buttons, .mcp-auth-global { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
