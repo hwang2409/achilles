@@ -159,13 +159,13 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .transcript > [data-part="timeline-frame"] { width: 100%; max-width: none; height: 100%; margin: 0; }
 .transcript [data-part="timeline-scroll"] { scroll-behavior: auto; }
 .transcript [data-part="timeline"] { width: 100%; max-width: none; margin: 0; padding: 32px 0 16px; }
-.transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: min(880px, calc(100% - 48px)); margin-inline: auto; }
+.transcript [data-part="timeline"] > [data-virtual-id], .transcript [data-part="timeline"] > [data-id] { width: min(var(--g1-content-max), calc(100% - 48px)); margin-inline: auto; }
 .main-pane .chat-row { scroll-margin-top: 72px; }
 
 /* fills the transcript's box exactly (never taller) and scrolls its own content, so a tall
    page above it or a short viewport never pushes starters under the composer;
    see minor-7 and A-2/A-4 in firstrun-c028cdd.md and firstrun-e797f07.md. */
-.empty-chat { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; padding: min(20vh, 180px) max(24px, calc((100% - 880px) / 2)) 32px; }
+.empty-chat { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; padding: min(20vh, 180px) max(24px, calc((100% - var(--g1-content-max)) / 2)) 32px; }
 .empty-chat h1 { display: -webkit-box; overflow: hidden; margin: 0 0 14px; max-width: 34ch; font-size: 24px; line-height: 32px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .empty-chat p { max-width: 68ch; color: var(--fulcrum-muted); line-height: 1.7; }
 .chat-starters { margin-top: 30px; border-top: 1px solid var(--fulcrum-border); }
@@ -174,7 +174,7 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .chat-starters span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-starters i { color: var(--fulcrum-muted); font-style: normal; font-size: 12px; }
 .main-pane [data-part="composer"] {
-  width: min(880px, calc(100% - 32px));
+  width: min(var(--g1-content-max), calc(100% - 48px));
   margin: 0 auto 24px;
   container-type: inline-size;
 }

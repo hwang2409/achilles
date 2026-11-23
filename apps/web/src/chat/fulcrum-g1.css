@@ -1,9 +1,6 @@
 /* Host skin for Fulcrum's public parts. Keep its scroll roots, cursor gutter and state text. */
-.transcript [data-part="timeline"] > :is([data-virtual-id], [data-id]) {
-  max-width: var(--g1-transcript-width);
-}
 [data-part="message"] {
-  --fulcrum-measure: var(--g1-transcript-width);
+  --fulcrum-measure: var(--g1-content-max);
 }
 [data-part="message"], [data-part="item"][data-kind="user"] {
   font-size: var(--g1-type-chat);
@@ -68,7 +65,6 @@
 [data-part="approval-actions"] button:focus-visible { outline: var(--g1-focus-ring); }
 
 .main-pane [data-part="composer"] {
-  max-width: var(--g1-transcript-width);
   background: var(--g1-bg);
 }
 .main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
@@ -93,7 +89,7 @@
   background: var(--g1-bg-subtle);
 }
 @media (width > 760px) and (height > 500px) {
-  .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-transcript-width)) / 2)); }
+  .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-content-max)) / 2)); }
 }
 
 @media (max-width: 760px), (max-height: 500px), (pointer: coarse) {

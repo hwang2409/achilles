@@ -24,7 +24,7 @@
   min-height: 48px;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 max(12px, calc((100% - var(--g1-transcript-width)) / 2));
+  padding: 0 max(12px, calc((100% - var(--g1-content-max)) / 2));
 }
 .transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"] {
   padding: 8px 12px;

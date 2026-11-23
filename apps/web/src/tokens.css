@@ -65,7 +65,8 @@
   --g1-sidebar-padding: var(--g1-space-3);
   --g1-nav-row-height: var(--g1-space-8);
   --g1-page-padding: var(--g1-space-7) var(--g1-space-10);
-  --g1-transcript-width: 720px;
+  --g1-content-max: 944px;
+  --g1-page-max: calc(var(--g1-content-max) + 336px);
 }
 
 [data-achilles-theme="g1-dark"] {

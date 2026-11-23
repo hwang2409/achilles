@@ -40,6 +40,7 @@
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; border-bottom: 1px solid var(--g1-border); padding: 0 var(--g1-space-7); }
 .module-frame h1 { margin: 0; font-size: 16px; font-weight: 600; }
+.module-body > :not(.module-state), .agents-split { width: 100%; max-width: var(--g1-page-max); }
 .module-body { flex: 1; min-height: 0; overflow: auto; }
 .module-state { max-width: 56rem; padding: var(--g1-space-4); border: 1px dashed var(--g1-border); background: var(--g1-bg-subtle); }
 .module-state h2 { font-size: var(--g1-type-ui); margin: 0; }

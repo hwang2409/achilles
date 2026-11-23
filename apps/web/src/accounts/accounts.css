@@ -1,4 +1,4 @@
-.accounts-place { max-width: 64rem; padding: var(--g1-page-padding); container-type: inline-size; }
+.accounts-place { padding: var(--g1-page-padding); container-type: inline-size; }
 .accounts-place > h2 { font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); margin: 0; text-wrap: balance; }
 .account-intro { color: var(--fulcrum-muted); margin: 8px 0 24px; max-width: 72ch; text-wrap: pretty; }
 .accounts-place .module-state { padding: 24px 0; border-top: 1px solid var(--fulcrum-border); }
