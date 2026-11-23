@@ -1,5 +1,5 @@
 /* design-v4 shell: the transcript and composer own the center pane's scroll boundary. */
-.app-shell { height: 100%; display: grid; grid-template-columns: 264px minmax(0, 1fr); background: var(--fulcrum-bg); }
+.app-shell { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: 264px minmax(0, 1fr); background: var(--fulcrum-bg); }
 .brand-mark { position: relative; width: 20px; height: 20px; flex: none; background: var(--g1-primary); }
 
 .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--g1-border); background: var(--g1-bg-subtle); overflow: hidden; z-index: 4; }
@@ -75,7 +75,7 @@
    visually overlap .chat-actions; ellipsis alone keeps the title readable at whatever room remains. */
 .chat-heading strong { order: 1; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .chat-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: 14px; }
-.chat-actions button { min-height: 30px; padding: var(--g1-space-1) var(--g1-space-2); border-color: transparent; color: var(--g1-muted); font-size: var(--g1-type-meta); }
+.chat-actions button { min-height: var(--g1-icon-height); color: var(--g1-muted); font-size: var(--g1-type-meta); }
 .approval-mode { color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 .approval-mode::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
 .approval-mode.mode-ask::before { background: var(--fulcrum-muted); }
@@ -190,8 +190,8 @@ html[data-density="compact"] .transcript { line-height: 1.35; }
 .main-pane [data-part="composer-hint"] { display: block; white-space: nowrap; font-size: max(14px, calc(var(--achilles-ui-size, 14px) - 1px)); }
 .main-pane [data-part="composer-submit"],
 .main-pane [data-part="composer-stop"] { min-height: 32px; padding: 0 12px; font-size: 13px; }
-.main-pane [data-part="composer-submit"] { color: var(--g1-fg-3); background: transparent; border-color: var(--g1-control-border); }
-.main-pane [data-part="composer-submit"][aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; border-color: var(--fulcrum-border); }
+.main-pane [data-part="composer-submit"] { color: var(--g1-fg-3); background: transparent; }
+.main-pane [data-part="composer-submit"][aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; }
 .main-pane [data-part="composer-stop"] { color: var(--fulcrum-warn); border-color: var(--fulcrum-warn); }
 .main-pane [data-part="composer-reason"] { margin: 0; padding: 12px 14px; color: var(--fulcrum-muted); }
 .main-pane .vim-composer { --inset: 12px; }
