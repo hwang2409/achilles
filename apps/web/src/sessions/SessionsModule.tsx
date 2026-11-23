@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { createRunStore } from "@fulcrum/core";
 import { RunProvider, Timeline } from "@fulcrum/react";
 import { fromZetaHistory, type ZetaClient } from "@fulcrum/zeta";
@@ -64,9 +64,6 @@ export function SessionsModule({ client, connecting, retry, newChat, chats }: {
   const reader = useMemo(() => client ? createSessionsReader(client) : undefined, [client]);
   const { data, error, refreshing, refresh } = useRead(reader?.catalog, 30000);
   const [{ id, transcript, invalid }, setSelection] = useState(selection);
-  const [query, setQuery] = useState("");
-  const [projectFilter, setProject] = useState("any");
-  const [statusFilter, setStatus] = useState("any");
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const search = useRef<HTMLInputElement>(null);
   const detail = useRef<HTMLElement>(null);
@@ -96,16 +93,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats }: {
 
   const rows = data?.items ?? [];
   const row = rows.find((one) => one.id === id);
-  const projectName = (value: SessionRow["project"]) => value === null ? "no project" : value;
-  const projects = [...new Set(rows.map((one) => projectName(one.project)).filter((p): p is string => p !== undefined))].sort();
-  const states = [...new Set(rows.filter((one) => one.state).map((one) => one.status === "approval" ? "needs you" : one.status))].sort();
-  const filter = query.trim().toLowerCase();
-  const shown = rows.filter((one) => (!filter || one.title.toLowerCase().includes(filter) || one.preview?.toLowerCase().includes(filter) || one.id.toLowerCase() === filter) &&
-    (projectFilter === "any" || projectName(one.project) === projectFilter) &&
-    (statusFilter === "any" || (one.status === "approval" ? "needs you" : one.status) === statusFilter));
   const owned = new Set(chats.map((chat) => chat.session_id));
-  const detailHref = href(id);
-  const catalogHref = href();
   const continuationLabel = data?.complete ? "" : " loaded";
   return <section className="module-frame sessions-frame">
     <header className="sessions-head">
@@ -121,43 +109,74 @@ export function SessionsModule({ client, connecting, retry, newChat, chats }: {
     </div> : <>
       {!client && <p className="sessions-notice" role="status">zeta is offline · showing data from {stamp(data.reportedAt)} <button type="button" onClick={retry}>retry now</button></p>}
       <div className="sessions-split" data-detail={!!id || invalid}>
-        <section className="sessions-catalog" aria-label="session catalog">
-          <div className="sessions-filters">
-            <input ref={search} type="search" aria-label="search sessions by title, first message or id" placeholder="⌕ title, first message or id" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <div>
-              {!!projects.length && <EnumListbox label="project" value={projectFilter} options={["any", ...projects]} onChange={setProject} />}
-              {!!states.length && <EnumListbox label="state" value={statusFilter} options={["any", ...states]} onChange={setStatus} />}
-              <button type="button" disabled={!client || refreshing} onClick={refresh}>refresh now</button>
-              <span>{shown.length} of {rows.length}{continuationLabel}</span>
-            </div>
-          </div>
-          {client && (refreshing || !!error) && <p className="sessions-notice" role="status">{refreshing ? "refreshing…" : `showing data from ${stamp(data.reportedAt)} · refresh failed · ${readError(error)}`}</p>}
-          {data.warnings.map((warning) => <p key={warning} className="sessions-notice" role="status">{data.staleState !== undefined ? `showing state from ${stamp(data.staleState)} · refresh failed · ` : ""}{warning}</p>)}
-          {data.omitted > 0 && <p className="sessions-notice" role="status">{data.omitted} malformed {data.omitted === 1 ? "row" : "rows"} omitted</p>}
-          {!shown.length ? <ModuleState kind="empty" title={rows.length ? "no matching sessions" : data.complete ? "no sessions yet" : "no sessions in this view"}
-            detail={rows.length ? "search for a title, first message or full id, or clear the filters." : data.complete ? "sessions appear here after zeta saves them." : "the catalog is incomplete."}
-            action={rows.length ? { label: "clear filters", run: () => { setQuery(""); setProject("any"); setStatus("any"); search.current?.focus(); } } : undefined} /> : <>
-            <div className="sessions-row sessions-labels" aria-hidden="true"><span>session</span><span>from</span><span>state</span><span>last</span></div>
-            <ul className="sessions-rows">{shown.map((one) => <li key={one.id}>
-              <a className="sessions-row" ref={(node) => { if (node) rowRefs.current.set(one.id, node); else rowRefs.current.delete(one.id); }}
-                href={href(one.id)} aria-current={one.id === id ? "page" : undefined} onClick={(event) => follow(event, href(one.id))}>
-                <span><strong title={one.title}>{one.title}</strong><small>{[one.project, short(one.id)].filter(Boolean).join(" · ")}</small></span>
-                <span>{owned.has(one.id) ? "achilles" : ""}</span><StateTag state={one.status} />
-                <span>{one.updated && <time dateTime={one.updated}>{timeLabel(one.updated)}</time>}</span>
-              </a>
-            </li>)}</ul>
-          </>}
-        </section>
-        <section className="sessions-detail" ref={detail} tabIndex={-1} aria-label={transcript ? "session transcript" : "session detail"}>
-          {(id || invalid) && <a className="sessions-back" href={transcript ? detailHref : catalogHref} onClick={(event) => follow(event, transcript ? detailHref : catalogHref)}>
-            {transcript ? "← session detail" : "← sessions"}
-          </a>}
-          {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} transcript={transcript}
-            owned={owned.has(row.id)} follow={follow} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={data.complete ? "it may have been removed." : "the catalog is incomplete."} />
-            : <ModuleState kind="empty" title="select a session" detail="read session details and transcripts without changing the session open in zeta." />}
-        </section>
+        <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} search={search} rowRefs={rowRefs} follow={follow} />
+        <DetailPane id={id} row={row} transcript={transcript} invalid={invalid} complete={data.complete} reader={reader}
+          owned={!!row && owned.has(row.id)} detail={detail} follow={follow} />
       </div>
     </>}
+  </section>;
+}
+
+type Follow = (event: MouseEvent<HTMLAnchorElement>, url: string) => void;
+type CatalogResult = ReturnType<typeof useRead<Awaited<ReturnType<SessionsReader["catalog"]>>>>;
+function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: {
+  result: CatalogResult & { data: NonNullable<CatalogResult["data"]> }; online: boolean; id?: string; owned: Set<string>;
+  search: RefObject<HTMLInputElement | null>; rowRefs: RefObject<Map<string, HTMLAnchorElement>>; follow: Follow;
+}) {
+  const { data, error, refreshing, refresh } = result;
+  const rows = data.items;
+  const continuationLabel = data.complete ? "" : " loaded";
+  const [query, setQuery] = useState("");
+  const [projectFilter, setProject] = useState("any");
+  const [statusFilter, setStatus] = useState("any");
+  const projectName = (value: SessionRow["project"]) => value === null ? "no project" : value;
+  const projects = [...new Set(rows.map((one) => projectName(one.project)).filter((p): p is string => p !== undefined))].sort();
+  const states = [...new Set(rows.filter((one) => one.state).map((one) => one.status === "approval" ? "needs you" : one.status))].sort();
+  const filter = query.trim().toLowerCase();
+  const shown = rows.filter((one) => (!filter || one.title.toLowerCase().includes(filter) || one.preview?.toLowerCase().includes(filter) || one.id.toLowerCase() === filter) &&
+    (projectFilter === "any" || projectName(one.project) === projectFilter) &&
+    (statusFilter === "any" || (one.status === "approval" ? "needs you" : one.status) === statusFilter));
+  return <section className="sessions-catalog" aria-label="session catalog">
+    <div className="sessions-filters">
+      <input ref={search} type="search" aria-label="search sessions by title, first message or id" placeholder="⌕ title, first message or id" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <div>
+        {!!projects.length && <EnumListbox label="project" value={projectFilter} options={["any", ...projects]} onChange={setProject} />}
+        {!!states.length && <EnumListbox label="state" value={statusFilter} options={["any", ...states]} onChange={setStatus} />}
+        <button type="button" disabled={!online || refreshing} onClick={refresh}>refresh now</button>
+        <span>{shown.length} of {rows.length}{continuationLabel}</span>
+      </div>
+    </div>
+    {online && (refreshing || !!error) && <p className="sessions-notice" role="status">{refreshing ? "refreshing…" : `showing data from ${stamp(data.reportedAt)} · refresh failed · ${readError(error)}`}</p>}
+    {data.warnings.map((warning) => <p key={warning} className="sessions-notice" role="status">{data.staleState !== undefined ? `showing state from ${stamp(data.staleState)} · refresh failed · ` : ""}{warning}</p>)}
+    {data.omitted > 0 && <p className="sessions-notice" role="status">{data.omitted} malformed {data.omitted === 1 ? "row" : "rows"} omitted</p>}
+    {!shown.length ? <ModuleState kind="empty" title={rows.length ? "no matching sessions" : data.complete ? "no sessions yet" : "no sessions in this view"}
+      detail={rows.length ? "search for a title, first message or full id, or clear the filters." : data.complete ? "sessions appear here after zeta saves them." : "the catalog is incomplete."}
+      action={rows.length ? { label: "clear filters", run: () => { setQuery(""); setProject("any"); setStatus("any"); search.current?.focus(); } } : undefined} /> : <>
+      <div className="sessions-row sessions-labels" aria-hidden="true"><span>session</span><span>from</span><span>state</span><span>last</span></div>
+      <ul className="sessions-rows">{shown.map((one) => <li key={one.id}>
+        <a className="sessions-row" ref={(node) => { if (node) rowRefs.current.set(one.id, node); else rowRefs.current.delete(one.id); }}
+          href={href(one.id)} aria-current={one.id === id ? "page" : undefined} onClick={(event) => follow(event, href(one.id))}>
+          <span><strong title={one.title}>{one.title}</strong><small>{[one.project, short(one.id)].filter(Boolean).join(" · ")}</small></span>
+          <span>{owned.has(one.id) ? "achilles" : ""}</span><StateTag state={one.status} />
+          <span>{one.updated && <time dateTime={one.updated}>{timeLabel(one.updated)}</time>}</span>
+        </a>
+      </li>)}</ul>
+    </>}
+  </section>;
+}
+
+function DetailPane({ id, row, transcript, invalid, complete, reader, owned, detail, follow }: {
+  id?: string; row?: SessionRow; transcript: boolean; invalid: boolean; complete: boolean; reader?: SessionsReader;
+  owned: boolean; detail: RefObject<HTMLElement | null>; follow: Follow;
+}) {
+  const back = transcript ? href(id) : href();
+  return <section className="sessions-detail" ref={detail} tabIndex={-1} aria-label={transcript ? "session transcript" : "session detail"}>
+    {(id || invalid) && <a className="sessions-back" href={back} onClick={(event) => follow(event, back)}>
+      {transcript ? "← session detail" : "← sessions"}
+    </a>}
+    {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} transcript={transcript}
+      owned={owned} follow={follow} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
+      : <ModuleState kind="empty" title="select a session" detail="read session details and transcripts without changing the session open in zeta." />}
   </section>;
 }
 
@@ -228,6 +247,7 @@ function SessionTranscript({ row, reader }: { row: SessionRow; reader?: Sessions
     {data && <>
       {!refreshing && (!reader || !!error) && <p className="sessions-notice" role="status">showing data from {stamp(data.reportedAt)} · {reader ? `read failed · ${readError(error)}` : "zeta is offline"}</p>}
       {refreshing && <p className="sessions-notice" role="status">reading transcript…</p>}
+      {data.omitted > 0 && <p className="sessions-notice" role="status">{data.omitted} malformed {data.omitted === 1 ? "row" : "rows"} omitted</p>}
       {data.restarted && <p className="sessions-notice" role="status">transcript changed · started from a new snapshot</p>}
       {!!data.next && <button className="sessions-more" type="button" disabled={!reader || refreshing} onClick={() => previous === data ? refresh() : setPrevious(data)}>{data.next.kind === "forward" ? "load more messages" : "load older messages"}</button>}
       {data.rows.length ? <div className="transcript sessions-timeline"><RunProvider store={store}><Timeline /></RunProvider></div> : <ModuleState kind="empty" title="no messages" />}

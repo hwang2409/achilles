@@ -83,13 +83,13 @@ test.each([
     if (name === "state_sessions") return { items: [], next_cursor: null };
     if (name === "status") return { session: attached };
     if (missing) throw { code: -32601 };
-    return { messages: [{ role: "user", content: [] }], next_cursor: null, next_offset: null };
+    return { messages: [{ id: "message", role: "user", content: [] }, { id: "broken", role: "assistant", content: [{ type: "tool_use" }] }], next_cursor: null, next_offset: null };
   });
   const [session] = (await reader.catalog(signal())).items;
   calls.length = 0;
   const read = reader.transcript(session!, undefined, signal());
   if (error) await expect(read).rejects.toThrow(error);
-  else expect((await read).rows).toEqual([{ role: "user", content: [] }]);
+  else expect((await read).rows).toEqual([{ id: "message", role: "user", content: [] }]);
   expect(calls.map(([name]) => name)).toEqual(["status", ...(method ? [method] : [])]);
 });
 
@@ -100,12 +100,12 @@ test("a stale history cursor discards the partial walk and retries the head only
     if (name === "state_sessions") return { items: [], next_cursor: null };
     if (name === "status") return { session: row("b") };
     if (p.cursor || ++heads > 2) throw { code: -32009 };
-    return { messages: [{ role: "user", content: [`snapshot ${heads}`] }], next_cursor: "cursor" };
+    return { messages: [{ role: "user", id: `message-${heads}`, content: [{ type: "text", text: `snapshot ${heads}` }] }], next_cursor: "cursor" };
   });
   const [session] = (await reader.catalog(signal())).items;
   const first = await reader.transcript(session!, undefined, signal());
   const second = await reader.transcript(session!, first, signal());
-  expect([second.rows, second.restarted]).toEqual([[{ role: "user", content: ["snapshot 2"] }], true]);
+  expect([second.rows, second.restarted]).toEqual([[{ role: "user", id: "message-2", content: [{ type: "text", text: "snapshot 2" }] }], true]);
   await expect(reader.transcript(session!, second, signal())).rejects.toEqual({ code: -32009 });
   expect(calls.filter(([name]) => name === "session_history_read").map(([, p]) => p.cursor)).toEqual([undefined, "cursor", undefined, "cursor", undefined]);
   expect(calls.some(([name]) => name === "resume")).toBe(false);

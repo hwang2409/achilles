@@ -1,4 +1,4 @@
-import type { ZetaClient } from "@fulcrum/zeta";
+import { fromZetaHistory, type ZetaClient } from "@fulcrum/zeta";
 import { supportsFeature, supportsRequest } from "../zeta/connection";
 import { HISTORY_READ_FEATURE, readOtherHistory, rpcCode } from "../zeta/historyRead";
 
@@ -94,9 +94,46 @@ function cursorPage(v: unknown) {
   return { rows: v.items as unknown[], next: v.next_cursor };
 }
 
-type TranscriptCursor = { kind: "other"; cursor: string } | { kind: "forward"; cursor: number } |
-  { kind: "backward"; cursor: number; validator: Record<string, unknown> };
-export type Transcript = { id: string; rows: readonly unknown[]; next: TranscriptCursor | null; reportedAt: number; restarted: boolean };
+type Cursors = { other: string; forward: number; backward: { before: number; validator: Record<string, unknown> } };
+type Mode = keyof Cursors;
+type TranscriptCursor = { [K in Mode]: { kind: K; cursor: Cursors[K] } }[Mode];
+export type Transcript = { id: string; rows: readonly unknown[]; omitted: number; next: TranscriptCursor | null; reportedAt: number; restarted: boolean };
+
+function historyPage(v: unknown, next: TranscriptCursor | null) {
+  if (!isObject(v) || !Array.isArray(v.messages)) throw invalid();
+  // Validate one row at a time, then project the retained rows together so calls and results stay linked.
+  const rows = v.messages.filter((row) => !fromZetaHistory([row]).some((e) => e.type === "error" && e.error.code === "adapter_invalid_payload"));
+  return { rows, omitted: v.messages.length - rows.length, next };
+}
+
+type HistoryRequest = (method: string, params: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
+function historyReaders(client: ZetaClient, request: HistoryRequest) {
+  return {
+    async other(id: string, next: TranscriptCursor | undefined, signal: AbortSignal) {
+      const cursor = next?.kind === "other" ? next.cursor : undefined;
+      const v = await readOtherHistory(client, { session_id: id, limit: 64, ...(cursor ? { cursor } : {}) }, { signal });
+      signal.throwIfAborted();
+      if (!isObject(v) || (v.next_cursor !== null && (!nonempty(v.next_cursor) || v.next_cursor === cursor))) throw invalid();
+      return historyPage(v, v.next_cursor === null ? null : { kind: "other", cursor: v.next_cursor });
+    },
+    async forward(id: string, next: TranscriptCursor | undefined, signal: AbortSignal) {
+      const offset = next?.kind === "forward" ? next.cursor : 0;
+      const v = await request("session_history", { session_id: id, offset }, signal);
+      if (!isObject(v) || (v.next_offset !== null && (!count(v.next_offset) || v.next_offset <= offset))) throw invalid();
+      return historyPage(v, v.next_offset === null ? null : { kind: "forward", cursor: v.next_offset });
+    },
+    async backward(id: string, next: TranscriptCursor | undefined, signal: AbortSignal) {
+      const cursor = next?.kind === "backward" ? next.cursor : undefined;
+      const v = await request("session_history", { session_id: id, before: cursor?.before ?? null, ...(cursor ? { history_validator: cursor.validator } : {}) }, signal);
+      if (!isObject(v)) throw invalid();
+      const validator = v.history_validator;
+      if (!isObject(validator) || !count(validator.end) || (validator.entry_id !== null && !nonempty(validator.entry_id))) throw invalid();
+      if (cursor && ["end", "entry_id", "repair_generation"].some((key) => validator[key] !== cursor.validator[key])) throw invalid();
+      if (v.next_before !== null && (!count(v.next_before) || v.next_before >= (cursor?.before ?? validator.end))) throw invalid();
+      return historyPage(v, v.next_before === null ? null : { kind: "backward", cursor: { before: v.next_before, validator } });
+    },
+  };
+}
 
 export function createSessionsReader(client: ZetaClient, advertised = (method: string) => supportsRequest(client, method)) {
   const grant = (feature: string, method: string) => supportsFeature(client, feature) && advertised(method);
@@ -106,6 +143,7 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
     signal.throwIfAborted();
     return result;
   };
+  const history = historyReaders(client, request);
   const transcriptMode = async (row: SessionRow, signal: AbortSignal) => {
     const status = await request("status", {}, signal);
     if (!isObject(status) || (status.session !== null && !isObject(status.session))) throw invalid();
@@ -172,36 +210,16 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
       let prior = previous?.id === row.id ? previous : undefined;
       for (let attempt = 0; ; attempt++) {
         const kind = await transcriptMode(row, signal);
-        const active = kind !== "other";
         const next = prior?.next?.kind === kind ? prior.next : undefined;
         try {
-          const v = kind === "other" ? await readOtherHistory(client, { session_id: row.id, limit: 64,
-            ...(next?.kind === "other" ? { cursor: next.cursor } : {}) }, { signal })
-            : await request("session_history", { session_id: row.id, ...(kind === "forward" ? { offset: next?.cursor ?? 0 }
-              : { before: next?.cursor ?? null, ...(next?.kind === "backward" ? { history_validator: next.validator } : {}) }) }, signal);
-          signal.throwIfAborted();
-          if (!isObject(v) || !Array.isArray(v.messages)) throw invalid();
-          let continuation: TranscriptCursor | null = null;
-          if (kind === "other") {
-            if (v.next_cursor !== null && (!nonempty(v.next_cursor) || v.next_cursor === next?.cursor)) throw invalid();
-            if (v.next_cursor !== null) continuation = { kind, cursor: v.next_cursor };
-          } else if (kind === "forward") {
-            if (v.next_offset !== null && (!count(v.next_offset) || v.next_offset <= Number(next?.cursor ?? 0))) throw invalid();
-            if (v.next_offset !== null) continuation = { kind, cursor: v.next_offset };
-          } else {
-            const validator = v.history_validator;
-            if (!isObject(validator) || !count(validator.end) || (validator.entry_id !== null && !nonempty(validator.entry_id)) ||
-                (next?.kind === "backward" && (validator.end !== next.validator.end || validator.entry_id !== next.validator.entry_id || validator.repair_generation !== next.validator.repair_generation)) ||
-                (v.next_before !== null && (!count(v.next_before) || v.next_before >= Number(next?.cursor ?? validator.end)))) throw invalid();
-            if (v.next_before !== null) continuation = { kind, cursor: v.next_before, validator };
-          }
+          const page = await history[kind](row.id, next, signal);
           const retained = next ? prior!.rows : [];
-          return { id: row.id, rows: kind === "forward" ? [...retained, ...v.messages] : [...v.messages, ...retained],
-            next: continuation, reportedAt: Date.now(), restarted: attempt > 0 || (!!prior && !next) };
+          return { id: row.id, rows: kind === "forward" ? [...retained, ...page.rows] : [...page.rows, ...retained],
+            omitted: page.omitted + (next ? prior!.omitted : 0), next: page.next, reportedAt: Date.now(), restarted: attempt > 0 || (!!prior && !next) };
         } catch (error) {
           if (rpcCode(error) === -32009 && attempt === 0) { prior = undefined; continue; }
-          if (rpcCode(error) === -32601 && !active) throw new ReadLimit(oldHistory);
-          if (rpcCode(error) === -32602 && !active) throw new ReadLimit(`${projectLimit} · the transcript is not available`);
+          if (rpcCode(error) === -32601 && kind === "other") throw new ReadLimit(oldHistory);
+          if (rpcCode(error) === -32602 && kind === "other") throw new ReadLimit(`${projectLimit} · the transcript is not available`);
           throw error;
         }
       }
