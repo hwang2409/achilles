@@ -107,6 +107,20 @@ test("name proof is exact, including case and whitespace; Escape before submit r
   expect(document.activeElement).toBe(opener);
 });
 
+test("review invokes execute before confirm dispatch returns and maps a synchronous throw to unknown", async () => {
+  const execute = mock(() => { throw new Error("private operation failure"); });
+  const { dialog } = review(execute);
+  fireEvent.change(dialog.getByRole("textbox"), { target: { value: "paper" } });
+  const form = dialog.getByRole("button", { name: "cancel run" }).closest("form")!;
+  await settle("submit a review with a synchronous throw", () => {
+    fireEvent.submit(form);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+  expect(dialog.getByText(/^result unknown\./)).toBeTruthy();
+  await settle("resubmit the review with an unknown result", () => { fireEvent.submit(form); });
+  expect(execute).toHaveBeenCalledTimes(1);
+});
+
 test("pending and unknown lock dismissal and duplicate submit; only a read confirms success", async () => {
   const pending = deferred<Awaited<ReturnType<Inline["execute"]>>>();
   const execute = mock(() => pending.promise);

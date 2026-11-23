@@ -335,7 +335,11 @@ export function createConnection({
     async releaseControl() {
       if (readOnly !== "upgradable") return;
       holding = false;
-      if (stopped || state.phase !== "connected" || state.authority !== "controller" || !client || !liveDiscovery) return;
+      if (stopped) return;
+      if (state.phase !== "connected" || state.authority !== "controller" || !client || !liveDiscovery) {
+        roleState = transitionRole(roleState, "control_released");
+        return;
+      }
       const controller = client;
       const discovery = liveDiscovery;
       const opened = await openRole(discovery, "observer");
