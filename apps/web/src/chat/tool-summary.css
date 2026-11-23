@@ -26,3 +26,4 @@
   .transcript [data-part="tool-summary"] { grid-column: 2; grid-row: 2; }
   .transcript [data-part="tool-status"] { grid-column: 3; grid-row: 1; }
 }
+.transcript [data-part="tool-foot"] { display: none; }

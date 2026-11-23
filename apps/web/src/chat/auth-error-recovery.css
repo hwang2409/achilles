@@ -4,18 +4,18 @@
   --recovery-size: calc(var(--achilles-ui-size, 14px) + 4px);
   display: grid; gap: var(--recovery-gap); margin: 8px 0; padding: var(--recovery-inset);
   border: 1px solid var(--fulcrum-danger);
-  border-inline-start-width: 3px;
+  border-inline-start-width: var(--g1-selection-width);
   background: color-mix(in srgb, var(--fulcrum-danger) 8%, var(--fulcrum-bg));
   color: var(--fulcrum-fg); overflow-wrap: anywhere;
   font: var(--recovery-size) / 1.55 var(--achilles-ui-font, var(--g1-font-ui));
 }
 .chat-auth-error strong { font-size: calc(var(--recovery-size) + 2px); font-weight: 700; }
-.chat-auth-error strong::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 14px; background: var(--fulcrum-danger); vertical-align: 1px; }
+.chat-auth-error strong::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-right: var(--g1-space-2); background: var(--fulcrum-danger); vertical-align: 1px; }
 .chat-auth-error code { color: var(--fulcrum-fg); font: inherit; }
 .chat-auth-error p { max-width: 74ch; margin: 0; color: var(--fulcrum-muted); }
 .chat-auth-error-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--recovery-gap); }
 .chat-auth-error-actions button, .chat-auth-login-link { min-height: 52px; max-width: 100%; padding: 6px 20px; text-align: left; overflow-wrap: anywhere; }
-.chat-auth-error-actions button:first-child:not(:disabled) { background: var(--fulcrum-accent); color: var(--fulcrum-bg); border-color: var(--fulcrum-accent); font-weight: 700; }
+.chat-auth-error-actions button:first-child:not(:disabled) { background: var(--g1-primary); color: var(--g1-primary-text); border-color: var(--g1-primary); font-weight: 700; }
 .chat-auth-error-actions button:not(:disabled):hover { border-color: var(--fulcrum-fg); }
 .chat-auth-error-actions button:disabled { color: var(--fulcrum-muted); cursor: not-allowed; }
 .chat-auth-login-link { width: fit-content; display: inline-flex; align-items: center; border: 1px solid var(--fulcrum-border); color: var(--fulcrum-accent); text-decoration: underline; }

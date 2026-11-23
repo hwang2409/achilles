@@ -1,15 +1,20 @@
 .enum-listbox { position: relative; min-width: 0; }
 .enum-listbox-label { display: block; margin-bottom: 6px; color: var(--fulcrum-muted); font-size: 12px; line-height: 16px; }
-.enum-listbox-button { width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); color: var(--fulcrum-fg); text-align: left; font: inherit; cursor: pointer; }
-.enum-listbox-button:focus-visible, .enum-listbox-menu:focus-visible { outline: 1px solid var(--fulcrum-accent); outline-offset: 2px; }
+.enum-listbox-button { width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 1px solid var(--g1-control-border); background: var(--fulcrum-surface); color: var(--fulcrum-fg); text-align: left; font: inherit; cursor: pointer; }
+.enum-listbox-button:focus-visible, .enum-listbox-menu:focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .enum-listbox-button[aria-invalid="true"] { border-color: var(--fulcrum-danger); }
-.enum-listbox-button:disabled { opacity: .5; cursor: not-allowed; }
+.enum-listbox-button:disabled { color: var(--g1-muted); cursor: not-allowed; }
 .enum-listbox-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .enum-listbox-query-label { color: var(--fulcrum-muted); font-size: 12px; }
 .enum-listbox-query { font-weight: 600; }
-.enum-listbox-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; left: 0; box-sizing: border-box; max-height: 240px; overflow-y: auto; overflow-x: hidden; padding: 4px 0; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); }
-.enum-listbox-option { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 8px; border-left: 2px solid transparent; font-size: 13px; line-height: 20px; cursor: pointer; }
-.enum-listbox-option.is-active { border-left-color: var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 14%, transparent); }
-.enum-listbox-option[aria-selected="true"] { color: var(--fulcrum-accent); }
+.enum-listbox-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; left: 0; box-sizing: border-box; max-height: 240px; overflow-y: auto; overflow-x: hidden; padding: 4px 0; border: 1px solid var(--g1-control-border); background: var(--fulcrum-surface); }
+.enum-listbox-option { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 8px; border-left: var(--g1-selection-width) solid transparent; font-size: 13px; line-height: 20px; cursor: pointer; }
+.enum-listbox-option.is-active, .enum-listbox-option:hover { background: var(--g1-hover); }
+.enum-listbox-option[aria-selected="true"] { border-left-color: var(--g1-selection); background: var(--g1-selected); font-weight: 600; }
+.enum-listbox-option.is-active { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .enum-listbox-option u { text-decoration-color: var(--fulcrum-accent); text-decoration-thickness: 2px; text-underline-offset: 2px; }
 .enum-listbox-hint { padding: 6px 8px 4px; color: var(--fulcrum-muted); font-size: 11px; line-height: 14px; white-space: normal; overflow-wrap: anywhere; }
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .enum-listbox-button, .enum-listbox-option { min-width: 44px; min-height: 44px; }
+}
