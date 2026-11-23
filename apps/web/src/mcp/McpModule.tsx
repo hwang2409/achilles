@@ -4,6 +4,7 @@ import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
 import { canReadMcp, mcpScopes, type McpRow, type McpScope } from "./mcpReads";
 import { ConnectionDetail, ConnectionList, FailedRead, type Failure } from "./McpViews";
+import { McpAdd } from "./McpAdd";
 import { McpActions } from "./McpActions";
 import type { McpOwner } from "./mcpOwner";
 import "./mcp.css";
@@ -91,6 +92,8 @@ export function McpModule({ client, owner, pathname, connecting, retryConnection
         : !snapshot ? <ModuleState kind="loading" title="reading mcp configuration…" />
         : <>
           {retained && <p className="mcp-offline" role="status">connection lost · showing the last read from disk · retrying automatically</p>}
+          <McpAdd owner={owner} snapshot={snapshot} defaultScope={scope === "project" ? "project" : "user"} online={supported}
+            reviewTrust={(name) => { setScope("project"); navigate(`${LIST}/project/${encodeURIComponent(name)}`); }} />
           <div className="mcp-grid" data-detail={detailOpen} data-retained={Boolean(retained)}>
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
               activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />

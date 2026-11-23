@@ -280,6 +280,55 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "vi
   }
 } });
 
+const mcpAddCanary = "fixture-private-command";
+function mcpAdd(): Row {
+  const method = "mcp_server_add";
+  const roles: string[] = [];
+  const before = { revision: "a".repeat(64), data: { items: [] } };
+  const after = { revision: "b".repeat(64), data: { items: [{ name: "fixture-user", scope: "user", enabled: true,
+    trusted: true, status: "configured", auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } }] } };
+  let applied = false;
+  return { kind: "visible", options: { path: "/connections", observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
+    mcp_server_list: ({ scope }) => ({ result: applied && scope !== "project" ? after : before }),
+    [method]: (params) => {
+      expect(params.mutation).toMatchObject({ name: "fixture-user", scope: "user", command: mcpAddCanary });
+      expect(document.querySelector<HTMLInputElement>('input[name="command"]')?.value).toBe("");
+      applied = true;
+      return { result: { ...after, restart: { serve: false, sessions: [], complete: true } } };
+    },
+  } }, check: async (app, authority, writes) => {
+    const start = roles.length;
+    const url = location.href;
+    await click(select(app, tag("mcp.add")));
+    await change(app.getByRole("textbox", { name: "connection name" }), "fixture-user");
+    const command = app.getByLabelText("local command") as HTMLInputElement;
+    await change(command, mcpAddCanary);
+    await act(async () => { fireEvent.submit(command.form!); });
+    expect(document.body.innerHTML).not.toContain(mcpAddCanary);
+    expect(roles).toHaveLength(start);
+    expect(writes).toEqual([]);
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(true);
+    await click(app.getByRole("checkbox", { name: "i reviewed the scope for this connection" }));
+    expect(confirm.disabled).toBe(false);
+    await act(async () => { fireEvent.submit(confirm.form!); });
+    expect(command.value).toBe("");
+    expect(location.href).toBe(url);
+    expect(JSON.stringify([localStorage, sessionStorage])).not.toContain(mcpAddCanary);
+    if (authority === "observer") {
+      expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+      expect(roles.slice(start)).toEqual(["controller"]);
+      expect(writes).toEqual([]);
+    } else {
+      expect(app.getByText(/new sessions use this configuration/)).toBeTruthy();
+      expect(roles.slice(start)).toEqual(["controller", "observer"]);
+      expect(writes).toEqual([method]);
+    }
+  } };
+}
+
 function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: string): Row {
   const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: false, status: "pending trust",
     auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
@@ -547,6 +596,7 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
   } },
+  "mcp.add": mcpAdd(),
   "mcp.enabled": mcpWrite("mcp.enabled", "mcp_server_set_enabled"),
   "mcp.trusted": mcpWrite("mcp.trusted", "mcp_server_set_trusted"),
   "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
