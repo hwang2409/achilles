@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AgentSurface } from "../App";
 import { useBuildActivity, type BuildActivity } from "../create/buildActivity";
 import { AppShell, type AppShellProps } from "../AppShell";
@@ -11,6 +11,7 @@ import { createChildControls } from "../agents/childControls";
 import { createChildSendOwner } from "../agents/childSend";
 import { AgentsModule } from "../agents/AgentsModule";
 import { SessionsModule } from "../sessions/SessionsModule";
+import { continuationHref, mappingFailed } from "../sessions/continueChat";
 import { McpModule } from "../mcp/McpModule";
 import { createMcpOwner } from "../mcp/mcpOwner";
 import { AccountsModule } from "../accounts/AccountsModule";
@@ -33,7 +34,7 @@ export function SurfaceRouter() {
     const route = matchSurfaceRoute(pathname);
     const readOnly = route !== undefined && route !== chatsRoute && route !== createRoute;
     // Write-capable places browse as observers and take control only when the user asks for it.
-    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "connections" || route.id === "settings" || route.id === "accounts" || route.id === "agents" ? "upgradable" : "locked";
+    const mode = !readOnly ? undefined : route.id === "skills" || route.id === "agent-profiles" || route.id === "projects" || route.id === "connections" || route.id === "settings" || route.id === "accounts" || route.id === "agents" || route.id === "sessions" ? "upgradable" : "locked";
     return { route, pathname, connection: createConnection({ origin: location.origin, readOnly: mode }), readOnly };
   });
   const connectionState = useSyncExternalStore(connection.subscribe, () => connection.state);
@@ -71,6 +72,30 @@ export function SurfaceRouter() {
     setLibraryControl(reason);
     return reason;
   };
+  const continuing = useRef(false);
+  const continueSession = async (id: string, signal: AbortSignal): Promise<string | null> => {
+    if (continuing.current) return "opening this session in chat…";
+    continuing.current = true;
+    let granted = false;
+    let navigating = false;
+    try {
+      const reason = await connection.takeControl();
+      if (reason) return reason;
+      granted = connection.state.phase === "connected" && connection.state.authority === "controller";
+      if (!granted) return "connect to zeta to continue this session in chat.";
+      signal.throwIfAborted();
+      const href = await continuationHref(id, signal);
+      signal.throwIfAborted();
+      location.assign(href);
+      navigating = true;
+      return null;
+    } catch {
+      return mappingFailed;
+    } finally {
+      if (granted && !navigating) await connection.releaseControl();
+      continuing.current = false;
+    }
+  };
   const observerBanner = observer && route?.id !== "accounts" && <ObserverBanner connection={connection} readOnly={readOnly} />;
   const renderShell: RenderShell = (props) => <BuildShell {...props} client={client} />;
   if (!readOnly) {
@@ -101,7 +126,7 @@ export function SurfaceRouter() {
     content = <ModuleFrame title={route.label}><ModuleState kind="unsupported" title="not available in this build" /></ModuleFrame>;
   }
   return <CatalogShell renderShell={renderShell} route={route} connectionStatus={connectionStatus} banner={route.id === "telemetry" ? observerBanner : null}
-    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow() } : undefined}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
+    sessions={route.id === "sessions" ? { client, connecting, retry: () => connection.retryNow(), continueSession } : undefined}>{content}{route.id === "projects" && memoryActions.dialog}</CatalogShell>;
 }
 
 // library_read_v1 path when hello granted it; each exact method is checked, so a catalog can work without its read.
@@ -125,7 +150,7 @@ function BuildShell({ client, children, ...props }: BuildShellProps & { client: 
   return <AppShell {...props} activity={activity}>{children(activity)}</AppShell>;
 }
 
-function CatalogShell({ renderShell, route, connectionStatus, banner, children, sessions }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode; sessions?: Pick<React.ComponentProps<typeof SessionsModule>, "client" | "connecting" | "retry"> }) {
+function CatalogShell({ renderShell, route, connectionStatus, banner, children, sessions }: { renderShell: RenderShell; route: SurfaceRoute; connectionStatus: { label: string; connected: boolean }; banner?: ReactNode; children: ReactNode; sessions?: Pick<React.ComponentProps<typeof SessionsModule>, "client" | "connecting" | "retry" | "continueSession"> }) {
   const nav = useAgentNavAdapter({ sessionId: null, waiting: 0, canWrite: false, refreshKey: 0, pageRefreshKey: 0 });
   const newChat = () => location.assign(surfaceHref(chatsRoute.path) + newChatIntent);
   return renderShell({ current: route, nav, banner, connectionStatus,

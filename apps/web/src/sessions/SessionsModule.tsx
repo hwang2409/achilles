@@ -7,7 +7,11 @@ import { timeLabel, type Chat } from "../surface/AgentNavAdapter";
 import { ModuleState, ShellDockSlot } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
 import { createSessionsReader, readError, ReadLimit, type Collection, type SessionRow, type SessionsReader, type Transcript } from "./reads";
+import { sessionOwned } from "../chat/continuation";
+import { WRITE_SURFACE } from "../writeSurfaces";
 import "./sessions.css";
+
+type ContinueSession = (id: string, signal: AbortSignal) => Promise<string | null>;
 
 const stamp = (time: number) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).toLowerCase();
 const short = (id: string) => id.length > 10 ? id.slice(0, 8) + "…" : id;
@@ -58,8 +62,8 @@ function StateTag({ state }: { state: SessionRow["status"] }) {
   return <span className="sessions-state" data-status={state}>{state === "approval" ? "needs you" : state}</span>;
 }
 
-export function SessionsModule({ client, connecting, retry, newChat, chats }: {
-  client: ZetaClient | null; connecting: boolean; retry: () => void; newChat: () => void; chats: readonly Chat[];
+export function SessionsModule({ client, connecting, retry, newChat, chats, continueSession }: {
+  client: ZetaClient | null; connecting: boolean; retry: () => void; newChat: () => void; chats: readonly Chat[]; continueSession: ContinueSession;
 }) {
   const reader = useMemo(() => client ? createSessionsReader(client) : undefined, [client]);
   const { data, error, refreshing, refresh } = useRead(reader?.catalog, 30000);
@@ -111,7 +115,7 @@ export function SessionsModule({ client, connecting, retry, newChat, chats }: {
       <div className="sessions-split" data-detail={!!id || invalid}>
         <SessionCatalog result={{ data, error, refreshing, refresh }} online={!!client} id={id} owned={owned} search={search} rowRefs={rowRefs} follow={follow} />
         <DetailPane id={id} row={row} transcript={transcript} invalid={invalid} complete={data.complete} reader={reader}
-          owned={!!row && owned.has(row.id)} detail={detail} follow={follow} />
+          owned={!!row && owned.has(row.id)} detail={detail} follow={follow} continueSession={continueSession} />
       </div>
     </>}
   </section>;
@@ -165,9 +169,9 @@ function SessionCatalog({ result, online, id, owned, search, rowRefs, follow }: 
   </section>;
 }
 
-function DetailPane({ id, row, transcript, invalid, complete, reader, owned, detail, follow }: {
+function DetailPane({ id, row, transcript, invalid, complete, reader, owned, detail, follow, continueSession }: {
   id?: string; row?: SessionRow; transcript: boolean; invalid: boolean; complete: boolean; reader?: SessionsReader;
-  owned: boolean; detail: RefObject<HTMLElement | null>; follow: Follow;
+  owned: boolean; detail: RefObject<HTMLElement | null>; follow: Follow; continueSession: ContinueSession;
 }) {
   const back = transcript ? href(id) : href();
   return <section className="sessions-detail" ref={detail} tabIndex={-1} aria-label={transcript ? "session transcript" : "session detail"}>
@@ -175,13 +179,13 @@ function DetailPane({ id, row, transcript, invalid, complete, reader, owned, det
       {transcript ? "← session detail" : "← sessions"}
     </a>}
     {invalid ? <ModuleState kind="failed" title="invalid session link" /> : row ? <SessionDetail key={row.id} row={row} reader={reader} transcript={transcript}
-      owned={owned} follow={follow} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
+      owned={owned} follow={follow} continueSession={continueSession} /> : id ? <ModuleState kind="empty" title="session not in this catalog" detail={complete ? "it may have been removed." : "the catalog is incomplete."} />
       : <ModuleState kind="empty" title="select a session" detail="read session details and transcripts without changing the session open in zeta." />}
   </section>;
 }
 
-function SessionDetail({ row, reader, transcript, owned, follow }: {
-  row: SessionRow; reader?: SessionsReader; transcript: boolean; owned: boolean; follow: (event: MouseEvent<HTMLAnchorElement>, url: string) => void;
+function SessionDetail({ row, reader, transcript, owned, follow, continueSession }: {
+  row: SessionRow; reader?: SessionsReader; transcript: boolean; owned: boolean; follow: Follow; continueSession: ContinueSession;
 }) {
   const [copied, setCopied] = useState("");
   const access = useMemo(() => reader && !transcript ? (signal: AbortSignal) => reader.transcriptMode(row, signal) : undefined, [reader, row.id, row.project, transcript]);
@@ -194,6 +198,7 @@ function SessionDetail({ row, reader, transcript, owned, follow }: {
   const fields = (values: (readonly [string, ReactNode])[]) => values.filter(([, value]) => value !== undefined);
   return <>
     <div className="sessions-title"><h2>{row.title}</h2><p><StateTag state={state} />{owned && " · achilles"}{row.project && <> · project {row.project}</>}</p></div>
+    <ContinueAction row={row} online={!!reader} run={continueSession} />
     {transcript ? <SessionTranscript row={row} reader={reader} /> : <>
       <dl className="sessions-fields">{fields([
         ["session id", <><code title={row.id}>{short(row.id)}</code> <button className="sessions-copy" type="button" onClick={async () => {
@@ -204,12 +209,42 @@ function SessionDetail({ row, reader, transcript, owned, follow }: {
         ["started · last", [row.created, row.updated].filter((v): v is string => !!v).map((v) => timeLabel(v)).join(" · ") || undefined],
         ["child agents", snapshot?.children], ["background tasks", snapshot?.tasks], ["attention", snapshot?.attention], ["first message", row.preview],
       ]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-      {reader && mode.data && !mode.error ? <a className="sessions-transcript-action" href={transcriptHref} onClick={(event) => follow(event, transcriptHref)}>read transcript</a>
+      {reader && mode.data && !mode.error ? <a className="sessions-transcript-action sessions-transcript-secondary" href={transcriptHref} onClick={(event) => follow(event, transcriptHref)}>read transcript</a>
         : <><button type="button" className="sessions-transcript-action" disabled>read transcript</button>
           <p className="sessions-help" role="status">{!reader ? "connect to zeta to read the transcript" : mode.error ? readError(mode.error) : "checking transcript access…"}</p></>}
       <div className="sessions-collections"><CollectionView label="child agents" result={agents} /><CollectionView label="background tasks" result={tasks} /></div>
     </>}
   </>;
+}
+
+function ContinueAction({ row, online, run }: { row: SessionRow; online: boolean; run: ContinueSession }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const attempt = useRef<AbortController | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => () => attempt.current?.abort(), []);
+  const reason = pending ? "opening this session in chat…" : row.parent != null
+    ? "child sessions cannot continue as top-level chats. open the parent session instead."
+    : row.inUse ? sessionOwned : !online ? "connect to zeta to continue this session in chat." : null;
+  const start = async () => {
+    if (reason || attempt.current) return;
+    const current = new AbortController();
+    attempt.current = current;
+    setPending(true);
+    setError(null);
+    const failure = await run(row.id, current.signal);
+    if (current.signal.aborted || !failure) return;
+    attempt.current = null;
+    setPending(false);
+    setError(failure);
+    button.current?.focus();
+  };
+  return <div className="sessions-continue">
+    <button ref={button} type="button" className="sessions-transcript-action" data-write-surface={WRITE_SURFACE.sessionsContinue}
+      disabled={!!reason && !pending} aria-disabled={pending || undefined} aria-describedby={reason || error ? "sessions-continue-status" : undefined}
+      onClick={() => void start()}>{pending ? "continuing…" : "continue in chat"}</button>
+    <p className="sessions-help" id="sessions-continue-status" role="status">{reason ?? error}</p>
+  </div>;
 }
 
 function useCollection(reader: SessionsReader | undefined, row: SessionRow, kind: Collection, visible: boolean) {
