@@ -1,16 +1,25 @@
 import { expect, test } from "bun:test";
-import { projectInbox, projectKindText, projectMemory, projectMessage, projectProjects } from "./reads";
+import { canAcceptMemory, projectInbox, projectKindText, projectMemory, projectMemoryRevision, projectMessage, projectProjects } from "./reads";
 
 // Synthetic zeta replies with extra fields the projection must drop.
 const project = { project_id: "p_fixture", name: "cards", path: "/fixture/cards", session_count: 2, memory_count: 3, inbox: { new: 1, claimed: 0, done: 4, extra: 1 }, updated_ns: 1, extra: "x" };
 const safeProject = { id: "p_fixture", name: "cards", path: "/fixture/cards", sessions: 2, memory: 3, inbox: { new: 1, claimed: 0, done: 4 } };
 const memory = { memory_id: "m_1", project_id: "p_fixture", kind: "decision", automatic: true, summary: "Use plain cards.", created_ns: 1, updated_ns: 2, source_session_id: "s", has_body: true, body: "leak" };
-const safeMemory = { id: "m_1", kind: "decision", automatic: true, summary: "Use plain cards." };
+const safeMemory = { id: "m_1", kind: "decision", automatic: true, accepted: null, summary: "Use plain cards.", sourceSession: "s" };
 const message = { message_id: "a1", project_id: "p_fixture", kind: "change_request", status: "new", sender: "p_other", summary: "Sort the cards", created_ns: 5, updated_ns: 5, trusted_assignment: true, has_body: true, body: "leak" };
 const safeMessage = { id: "a1", kind: "change_request", status: "new", sender: "p_other", summary: "Sort the cards", createdNs: 5, trusted: true, hasBody: true };
 const page = (items: unknown[], next_cursor: unknown = null) => ({ items, next_cursor, as_of_ns: 9 });
 
+const revision = { digest: "a".repeat(64), version_id: "v", schema_version: 1,
+  kinds: [{ key: "brief", rendered: "not retained", rendered_truncated: false }], extra: "not retained" };
 const rows = [
+  { label: "memory preserves null source", read: () => projectMemory(page([{ ...memory, source_session_id: null }])),
+    expected: { rows: [{ ...safeMemory, sourceSession: null }], nextCursor: null, oldFormat: false } },
+  { label: "memory rejects a non-string source", read: () => projectMemory(page([{ ...memory, source_session_id: {} }])), expected: null },
+  { label: "revision drops rendered text", read: () => projectMemoryRevision({ memory: revision }), expected: { digest: revision.digest, versionId: "v" } },
+  { label: "revision rejects format 1", read: () => projectMemoryRevision({ memory: { digest: revision.digest, files: [] } }), expected: null },
+  { label: "revision rejects malformed kind", read: () => projectMemoryRevision({ memory: { ...revision, kinds: [{ key: "brief", rendered: {} }] } }), expected: null },
+  { label: "revision rejects malformed digest", read: () => projectMemoryRevision({ memory: { ...revision, digest: revision.digest + "\n" } }), expected: null },
   { label: "project page", read: () => projectProjects(page([project], "c2")), expected: { rows: [safeProject], nextCursor: "c2" } },
   { label: "project without a folder", read: () => projectProjects(page([{ ...project, path: null }])), expected: { rows: [{ ...safeProject, path: null }], nextCursor: null } },
   { label: "project with a negative count", read: () => projectProjects(page([{ ...project, session_count: -1 }])), expected: null },
@@ -33,4 +42,15 @@ const rows = [
 
 test.each(rows)("projects $label without retaining unlisted fields", ({ read, expected }) => {
   expect(read()).toStrictEqual(expected);
+});
+
+// Both the button and the write owner use the same eligibility rule on projected input.
+test.each([
+  { label: "absent", accepted: undefined, projected: null, eligible: false },
+  { label: "already accepted", accepted: true, projected: true, eligible: false },
+  { label: "unaccepted", accepted: false, projected: false, eligible: true },
+])("memory accept eligibility: $label", ({ accepted, projected, eligible }) => {
+  const [row] = projectMemory(page([{ ...memory, accepted }]))!.rows;
+  expect(row?.accepted).toBe(projected);
+  expect(canAcceptMemory(row!)).toBe(eligible);
 });
