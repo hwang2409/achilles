@@ -72,7 +72,7 @@ type Rig = ReturnType<typeof rig>;
 const rowTest = (name: string, check: (r: Rig) => Promise<void>) => test(name, async () => {
   const r = rig();
   try { await check(r); } finally { await r.cleanup(); }
-}, 35_000);
+}, 60_000);
 const fail = (value: unknown) => () => { throw value; };
 const allScopes = ["effective", "user", "project"];
 

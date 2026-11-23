@@ -7,7 +7,7 @@
   border-inline-start-width: 3px;
   background: color-mix(in srgb, var(--fulcrum-danger) 8%, var(--fulcrum-bg));
   color: var(--fulcrum-fg); overflow-wrap: anywhere;
-  font: var(--recovery-size) / 1.55 var(--achilles-ui-font, "JetBrains Mono", monospace);
+  font: var(--recovery-size) / 1.55 var(--achilles-ui-font, var(--g1-font-ui));
 }
 .chat-auth-error strong { font-size: calc(var(--recovery-size) + 2px); font-weight: 700; }
 .chat-auth-error strong::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 14px; background: var(--fulcrum-danger); vertical-align: 1px; }

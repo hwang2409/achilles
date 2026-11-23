@@ -95,7 +95,6 @@ function ConnectionFields({ row, shadows, heading }: { row: McpRow; shadows: str
       <dt>trust</dt><dd>{row.trusted ? "trusted" : "not trusted"}</dd>
       {config.oauth && <>
         <dt>auth</dt><dd>oauth configured · sign-in state not checked</dd>
-        <dt>client id</dt><dd>not reported</dd>
         <dt>client secret</dt><dd>{config.oauth.secretProvided ? "provided · redacted" : "not provided"}</dd>
       </>}
     </dl>
