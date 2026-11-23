@@ -14,7 +14,7 @@ export const surfaceRoutes = ([
   { id: "chats", label: "chats", group: "work", capability: "agent", icon: "M3 3h10v8H7l-3 2v-2H3z" },
   { id: "pages", label: "pages", group: "work", capability: "agent", icon: "M4 2h5l3 3v9H4z M9 2v4h3" },
   { id: "agents", label: "agents", group: "work", capability: "read", icon: "M6 2h4v4H6z M2 10h4v4H2z M10 10h4v4h-4z M8 6v2 M4 10V8h8v2" },
-  { id: "sessions", label: "sessions", group: "work", capability: "read", icon: "M3 4h10 M3 8h10 M3 12h7" },
+  { id: "sessions", label: "sessions", group: "work", capability: "read", icon: "M3 4h10 M3 8h10 M3 12h7", children: true },
   { id: "projects", label: "projects", group: "work", capability: "read", icon: "M2 4h5l2 2h5v7H2z", children: true },
   { id: "telemetry", label: "telemetry", group: "work", capability: "read", icon: "M1 8h3l2-4 3 8 2-4h4", children: true },
   { id: "skills", label: "skills", group: "library", capability: "read", icon: "M3 3h10v10H3z M6 3v10" },
