@@ -3,6 +3,7 @@ import { titleOf, type Chat, type PageLink } from "../surface/AgentNavAdapter";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { onRunEnd } from "../zeta/turnEnd";
 import { supportsFeature } from "../zeta/connection";
+import { HISTORY_READ_FEATURE, readOtherHistory } from "../zeta/historyRead";
 
 // The one owner of displayed page-build state. Nothing else reads chat.last_state for page_build chats.
 export type BuildState = "building" | "needs you" | "done" | "unfinished" | "failed";
@@ -158,8 +159,6 @@ type Memory = ReturnType<typeof buildMemory>;
 type Request = ZetaClient["request"];
 const POLL_MS = 2000;
 const RETRY_MS = [2000, 5000, 10000];
-const READ_FEATURE = "session_history_read_v1";
-const BUSY_TRIES = 3;
 // At most this many builds wait in the queue: one tab holds zeta's one read slot for about this many reads at a time.
 const QUEUE_MAX = 10;
 const errorCode = (error: unknown) => object(error)?.code;
@@ -192,8 +191,6 @@ async function readLive(chats: readonly Chat[], request: Request, signal: AbortS
 // builds that are not current, on demand only: a row on screen (newest first), a new turn (updated_at moved), its run end,
 // a manual refresh. The views only say which build rows are on screen; this queue decides what to read.
 // A trigger during a pass runs one more pass after it; only a client change or unmount aborts.
-// shortcut: this is the only session_history_read caller; a second caller must move the queue to one per-client owner, so
-// the server's one-read-in-flight budget stays in one place.
 function createBuildReader(memory: Memory, publish: (live: Live) => void, reloadPages: (routes: string[]) => void, changed: () => void) {
   let generation = 0;
   let misses = 0;
@@ -212,14 +209,10 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   let reads = true;
   let queue: string[] = [];
   let inFlight: { id: string; epoch: number; stamp?: number; at?: string } | undefined;
-  // The build whose -32004 wait holds the queue.
-  let waiting: string | undefined;
-  let busyTimer: ReturnType<typeof setTimeout> | undefined;
   const readKeys = new Map<string, string | undefined>();
-  const busyTries = new Map<string, number>();
   // Build rows on screen, counted per view (the nav, the switcher, and /create can show one build at once).
   const shownCount = new Map<string, number>();
-  // Builds the queue gave up on after BUSY_TRIES: unknown until the next demand, never retried on a timer.
+  // Builds the queue gave up on after repeated busy replies: unknown until the next demand, never retried on a timer.
   const dropped = new Set<string>();
   // Builds queued by a run end: they stay queued when their row leaves the screen.
   const forcedIds = new Set<string>();
@@ -251,7 +244,7 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   };
   // A demand (a chat-list change, a row scrolled into view, a run end, a refresh) asks again for dropped builds.
   const demand = () => { dropped.forEach((id) => readKeys.delete(id)); dropped.clear(); };
-  const readable = () => !!latest.client && reads && supportsFeature(latest.client, READ_FEATURE);
+  const readable = () => !!latest.client && reads && supportsFeature(latest.client, HISTORY_READ_FEATURE);
   // Wanted: a build on screen, or one this tab last knew as active.
   const wanted = (id: string) => shownCount.has(id) || active(memory.observed(id)?.state ?? "done");
   // A wanted build with no read for its updated_at yet.
@@ -266,7 +259,6 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
       // A run end marks the build forced even when its row already queued it.
       if (forced.includes(id)) forcedIds.add(id);
       if (queue.includes(id) || (!forced.includes(id) && !(queue.length < QUEUE_MAX && owed(chat)))) continue;
-      busyTries.delete(id); // each demand gets its own tries
       queue.push(id);
       added = true;
     }
@@ -275,12 +267,19 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
   };
   const pump = () => {
     const { client } = latest;
-    if (inFlight || busyTimer || !client) return;
+    if (inFlight || !client) return;
     const id = queue.shift();
     if (id === undefined) return;
     const sent = inFlight = { id, epoch, stamp: liveSeen.get(id), at: updatedAt(id) };
     readKeys.set(id, sent.at);
-    client.request("session_history_read", { session_id: id, limit: 128 }, { signal: controller.signal, timeoutMs: 12000 })
+    readOtherHistory(client, { session_id: id, limit: 128 }, { signal: controller.signal,
+      current: () => epoch === sent.epoch, wanted: () => {
+        if (!forcedIds.has(id) && !wanted(id)) return false;
+        queue = queue.filter((queued) => queued !== id);
+        sent.at = updatedAt(id);
+        readKeys.set(id, sent.at);
+        return true;
+      } })
       .then((page) => settle(sent, page), (error) => settle(sent, undefined, error ?? Error("read failed")));
   };
   const settle = (sent: NonNullable<typeof inFlight>, page: unknown, error?: unknown) => {
@@ -288,32 +287,22 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     inFlight = undefined;
     const { id } = sent;
     const code = errorCode(error);
-    if (code !== -32004 || sent.epoch !== epoch) forcedIds.delete(id);
+    forcedIds.delete(id);
     if (sent.epoch !== epoch) { /* a manual refresh cleared the keys: the next pass asks again */ }
     else if (error === undefined) {
       // A stale read: the live pass saw this session current since it was sent. The next pass asks again.
       if (id === current || liveSeen.get(id) !== sent.stamp) readKeys.delete(id);
       else {
-        busyTries.delete(id);
         dropped.delete(id); // a refresh during the last busy wait can leave it dropped
         try { prove(id, fromHistory(null, page, "next_cursor"), sent.at); } catch { /* an unknown reply is no claim */ }
       }
     } else if (code === -32004) {
-      // Another read is in flight on this serve (another tab or client): wait at least what zeta asks, with jitter,
-      // before the next read. After the last try the wait still holds, then the queue moves on without this build.
-      const tries = (busyTries.get(id) ?? 0) + 1;
-      busyTries.set(id, tries);
-      const wait = Math.max(2000, Number(errorData(error)?.retry_after_ms) || 0) + Math.random() * 500;
-      waiting = id;
-      busyTimer = setTimeout(() => {
-        busyTimer = waiting = undefined;
-        // A row that left the screen during the wait loses its read key, so it is owed again when it is back.
-        if (tries < BUSY_TRIES) { if (forcedIds.has(id) || wanted(id)) { if (!queue.includes(id)) queue.unshift(id); } else readKeys.delete(id); }
-        else { dropped.add(id); forcedIds.delete(id); }
-        enqueue();
-        changed();
-      }, wait);
-    } else if (code === -32601) { reads = false; queue = []; forcedIds.clear(); }
+      dropped.add(id);
+      queue = queue.filter((queued) => queued !== id);
+      readKeys.set(id, updatedAt(id));
+    }
+    else if (error instanceof DOMException && error.name === "AbortError") readKeys.delete(id);
+    else if (code === -32601) { reads = false; queue = []; forcedIds.clear(); }
     // The build became zeta's attached session (plain invalid_params): the live pass reads it now. Every other -32602
     // (session_not_found: absent, another project, project versus none, a child id) is no claim, like -32005.
     else if (code === -32602 && errorData(error)?.code === "invalid_params") run();
@@ -367,14 +356,11 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     ranHere.clear();
     refreshed = false;
     clearTimeout(timer);
-    clearTimeout(busyTimer);
-    busyTimer = waiting = undefined;
     controller.abort();
     controller = new AbortController();
     queue = [];
     inFlight = undefined;
     readKeys.clear();
-    busyTries.clear();
     dropped.clear();
     forcedIds.clear();
     reads = true;
@@ -399,14 +385,14 @@ function createBuildReader(memory: Memory, publish: (live: Live) => void, reload
     stop,
     // Builds a read will answer soon: queued, in flight, waiting out a busy reply, or on screen and owed a read.
     pending: (id: string) => {
-      if (queue.includes(id) || inFlight?.id === id || waiting === id) return true;
+      if (queue.includes(id) || inFlight?.id === id) return true;
       const chat = latest.chats.find((one) => one.session_id === id);
       return !!chat && shownCount.has(id) && readable() && !dropped.has(id) && owed(chat);
     },
     // A build row on screen that the queue gave up on: its state is unknown until the next demand.
     stale: () => [...dropped].some((id) => shownCount.has(id)),
     // A manual refresh: every wanted build is read again (one at a time).
-    forget: () => { epoch++; refreshed = true; readKeys.clear(); busyTries.clear(); dropped.clear(); },
+    forget: () => { epoch++; refreshed = true; readKeys.clear(); dropped.clear(); },
   };
 }
 
