@@ -139,7 +139,7 @@
   --fulcrum-warn: var(--g1-warn);
   --fulcrum-danger: var(--g1-danger);
   --fulcrum-panel: var(--g1-bg);
-  --fulcrum-font: var(--g1-font-mono);
+  --fulcrum-font: var(--achilles-ui-font, var(--g1-font-ui));
   --fulcrum-cursor: var(--g1-accent);
   --fulcrum-live: var(--g1-accent);
   --fulcrum-gap: var(--g1-space-3);

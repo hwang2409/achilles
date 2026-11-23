@@ -89,6 +89,7 @@ export function applySettings(settings: Settings): void {
   if (settings.uiFont === "jetbrains-mono" || settings.codeFont === "jetbrains-mono") {
     void import("./fonts-jetbrains.css");
   }
+  root.dataset.codeFont = settings.codeFont;
   root.dataset.density = settings.density;
   root.style.setProperty("--achilles-ui-font", uiFontValues[settings.uiFont]);
   root.style.setProperty("--achilles-code-font", codeFontValues[settings.codeFont]);

@@ -27,6 +27,7 @@
           document.documentElement.dataset.achillesTheme = theme;
           document.documentElement.dataset.fulcrumTheme = theme === "g1-dark" ? "github-dark" : "github-light";
         }
+        document.documentElement.dataset.codeFont = settings.codeFont;
         document.documentElement.dataset.density = settings.density;
         document.documentElement.style.setProperty("--achilles-ui-font", uiFonts[settings.uiFont]);
         document.documentElement.style.setProperty("--achilles-code-font", codeFonts[settings.codeFont]);
