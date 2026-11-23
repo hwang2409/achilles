@@ -85,17 +85,23 @@ export async function gateTranscript(
     root.style.setProperty("--achilles-ui-size", "16px");
     root.dataset.density = "compact";
     const transcript = getComputedStyle(document.querySelector(".transcript")!);
+    const prose = getComputedStyle(document.querySelector('.transcript [data-part="message"][data-format="markdown"]')!);
     const code = getComputedStyle(document.querySelector(".transcript pre code")!);
     return {
       font: transcript.fontFamily,
+      proseFont: prose.fontFamily,
+      proseSize: prose.fontSize,
+      proseLineHeight: prose.lineHeight,
+      rowMaxWidth: getComputedStyle(document.querySelector('.transcript [data-part="timeline"] > [data-virtual-id]')!).maxWidth,
       size: transcript.fontSize,
       lineHeight: transcript.lineHeight,
       codeFont: code.fontFamily,
     };
   });
   if (
-    !typography.font.includes("IBM Plex Sans") || typography.size !== "16px" ||
-    typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono")
+    !typography.font.includes("IBM Plex Sans") || !typography.proseFont.includes("IBM Plex Sans") || typography.size !== "16px" ||
+    typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono") ||
+    typography.proseSize !== "15px" || typography.proseLineHeight !== "24px" || typography.rowMaxWidth !== "720px"
   )
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);
   await capture("markdown-rendered-1440x900.png");

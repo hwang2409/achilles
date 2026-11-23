@@ -211,3 +211,21 @@ export function createAgentRunsReader(client: ZetaClient, advertised = (method: 
     stop() { pending?.abort(); pending = undefined; },
   };
 }
+
+/** A control result needs a complete, exact-root read, not a partial display snapshot. */
+export async function readControlRoot(client: ZetaClient, root: string, signal: AbortSignal) {
+  const rows = new Map<string, AgentRun>();
+  const seen = new Set<Cursor>();
+  let cursor: Cursor | undefined;
+  do {
+    signal.throwIfAborted();
+    const result = page(await client.request("agent_run_catalog", { root_session_id: root, limit: 100,
+      ...(cursor === undefined ? {} : { cursor }) }, { signal, timeoutMs: 5000 }), "catalog", root);
+    if (result.omitted || (result.next !== undefined && seen.has(result.next))) throw bad();
+    for (const run of result.rows) rows.set(run.runId, run);
+    cursor = result.next;
+    if (cursor !== undefined) seen.add(cursor);
+  } while (cursor !== undefined && seen.size < 20);
+  if (cursor !== undefined) throw bad();
+  return [...rows.values()];
+}

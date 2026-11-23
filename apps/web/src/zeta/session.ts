@@ -1,5 +1,6 @@
 import { fromZetaEvent, fromZetaHistory, statusTurnOutcome, type SessionLease, type ZetaClient } from "@fulcrum/zeta";
 import type { RunEvent } from "@fulcrum/core";
+import { sessionOwned } from "../chat/continuation";
 import { supportsFeature } from "./connection";
 
 type Status = { session?: { session_id: string } | null; state: "idle" | "running" | "tool"; pending_approvals?: Array<{ request_id: string; tool_call: unknown; delegated: boolean; resolution_pending?: string }>; last_turn_outcome?: { turn_id?: unknown; reason?: unknown } | null };
@@ -59,7 +60,9 @@ export async function openHomeSession(client: ZetaClient, id: string, credential
       name = resumed.session?.name ?? null;
       break;
     } catch (caught) {
-      if ((caught as { data?: { code?: string } }).data?.code === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
+      const reason = (caught as { data?: { code?: string } }).data?.code;
+      if (reason === "session_not_found") throw new SessionNotFoundError("this chat no longer exists");
+      if (reason === "session_owned") throw new Error(sessionOwned);
       if ((caught as { code?: unknown }).code !== -32004) throw caught;
       const running = await runningSession(client);
       rebind = running === id;

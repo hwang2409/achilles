@@ -1,10 +1,10 @@
-/* telemetry pages. gruvbox dark only: the root sets data-fulcrum-theme, so every --fulcrum-* below is gruvbox. */
+/* Telemetry inherits the browser theme. */
 .telemetry-module {
-  --tm-mono: var(--achilles-code-font, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --tm-mono: var(--achilles-code-font, var(--g1-font-mono));
   --tm-line: color-mix(in srgb, var(--fulcrum-border) 70%, transparent);
-  --tm-bar: #665c54;
-  --tm-bar-hover: #7c6f64;
-  --tm-tool: #8ec07c;
+  --tm-bar: var(--g1-fg-3);
+  --tm-bar-hover: var(--g1-fg-2);
+  --tm-tool: var(--g1-ok);
   --tm-pad: 40px;
   height: 100%;
   overflow: auto;
@@ -15,7 +15,7 @@
   font: var(--achilles-ui-size, 14px) / 1.5 var(--tm-mono);
   -webkit-font-smoothing: antialiased;
 }
-.telemetry-module :focus-visible { outline: 2px solid var(--fulcrum-accent); outline-offset: 2px; }
+.telemetry-module :focus-visible { outline: var(--g1-focus-ring); outline-offset: 2px; }
 .telemetry-module .tm-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .telemetry-module .tm-dim { color: var(--fulcrum-muted); }
 .telemetry-module .tm-ok { color: var(--fulcrum-ok); }
@@ -39,10 +39,10 @@
 .tm-tabs a[aria-current="page"] { color: var(--fulcrum-fg); font-weight: 700; border-bottom-color: var(--fulcrum-accent); }
 .tm-tabs a:focus-visible { outline-offset: -2px; }
 
-.tm-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 0 14px; border: 1px solid var(--fulcrum-border); border-radius: 0; background: none; color: var(--fulcrum-fg); cursor: pointer; font: inherit; white-space: nowrap; }
+.tm-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); background: none; color: var(--fulcrum-fg); cursor: pointer; font: inherit; white-space: nowrap; }
 .tm-button:hover:not(:disabled) { border-color: var(--fulcrum-muted); }
-.tm-button:disabled { color: var(--fulcrum-muted); opacity: .6; cursor: default; }
-.tm-primary { border-color: var(--fulcrum-accent); color: var(--fulcrum-accent); }
+.tm-button:disabled { color: var(--fulcrum-muted); cursor: default; }
+.tm-primary:not(:disabled) { border-color: var(--g1-primary); background: var(--g1-primary); color: var(--g1-primary-text); }
 .tm-link { min-height: 36px; padding: 0 4px; border: 0; background: none; color: var(--fulcrum-accent); cursor: pointer; font: inherit; }
 /* achilles' EnumListbox, fitted to the boards: range is a bare bordered button; a filter shows its label inside the frame */
 .telemetry-module .enum-listbox-button { width: auto; min-height: 36px; gap: 10px; padding: 0 12px; background: none; }
@@ -50,16 +50,15 @@
 .tm-range .enum-listbox-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tm-range .enum-listbox-menu { left: auto; right: 0; }
 
-.tm-main { flex: 1 0 auto; box-sizing: border-box; width: 100%; min-width: 0; max-width: 1920px; padding: 24px var(--tm-pad) 40px 24px; }
+.tm-main { flex: 1 0 auto; box-sizing: border-box; width: 100%; min-width: 0; max-width: 1920px; padding: var(--g1-page-padding); font-family: var(--achilles-ui-font, var(--g1-font-ui)); }
 
 /* states */
 .tm-loading { margin: 0 0 24px; padding-bottom: 16px; border-bottom: 1px solid var(--tm-line); color: var(--fulcrum-muted); }
-.tm-banner { display: flex; align-items: center; gap: 16px 24px; margin: 0 0 24px; padding: 14px 18px; border: 1px solid color-mix(in srgb, var(--fulcrum-danger) 35%, transparent); border-left: 3px solid var(--fulcrum-danger); background: color-mix(in srgb, var(--fulcrum-danger) 8%, transparent); }
+.tm-banner { display: flex; align-items: center; gap: 16px 24px; margin: 0 0 24px; padding: 14px 18px; border: 1px dashed var(--g1-control-border); }
 .tm-banner h2 { margin: 0 0 2px; font-size: 1em; color: var(--fulcrum-danger); }
+.tm-banner h2::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: var(--g1-space-2); vertical-align: .1em; background: var(--g1-danger-mark); }
 .tm-banner p { margin: 0; }
 .tm-danger-button { margin-left: auto; border-color: var(--fulcrum-danger); color: var(--fulcrum-danger); }
-/* dim the cells, not the rows, so a focused row keeps a full-strength ring over stale data */
-.tm-stale > :not(.tm-sessions), .tm-stale .tm-sessions > :not(.tm-table), .tm-stale .tm-table :is(caption, th, td) { opacity: .55; }
 .tm-skeleton i, .tm-skeleton b { display: block; background: var(--fulcrum-surface); }
 .tm-skeleton-metrics { display: flex; flex-wrap: wrap; gap: 24px 40px; margin-bottom: 40px; }
 .tm-skeleton-metrics i { width: 100px; height: 12px; margin-bottom: 12px; }
@@ -75,8 +74,8 @@
 
 /* off and needs-a-newer-zeta: one centered column */
 .tm-intro { max-width: 560px; margin: 0 auto; padding: 72px 0 40px; }
-.tm-eyebrow { margin: 0 0 12px; color: var(--fulcrum-muted); text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }
-.tm-intro h1 { margin: 0 0 18px; font-size: 26px; line-height: 1.25; }
+.tm-eyebrow { margin: 0 0 12px; color: var(--fulcrum-muted); font-size: 12px; }
+.tm-intro h1 { margin: 0 0 18px; font-size: var(--g1-type-page-title); font-weight: var(--g1-weight-title); letter-spacing: var(--g1-tracking-page-title); line-height: 1.25; }
 .tm-lead { margin: 0 0 24px; color: var(--fulcrum-muted); }
 .tm-records { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 20px 0; margin-bottom: 24px; border-top: 1px solid var(--fulcrum-border); border-bottom: 1px solid var(--fulcrum-border); }
 .tm-records ul { margin: 0; padding: 0; list-style: none; line-height: 1.8; }
@@ -95,13 +94,16 @@
 .tm-meter span { display: block; height: 100%; background: var(--fulcrum-muted); }
 .tm-metrics { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 20px 48px; margin-bottom: 28px; }
 .tm-metric { display: grid; gap: 4px; }
-.tm-metric-label { color: var(--fulcrum-muted); text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }
+.tm-metric-label { color: var(--fulcrum-muted); font-size: 12px; }
 .tm-metric-value-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.tm-main :is(.tm-num, .tm-tick, .tm-time, .tm-id, .tm-metric-value, .tm-tooltip dd) { font-family: var(--tm-mono); }
 .tm-metric-value { font-variant-numeric: tabular-nums; font-size: 40px; font-weight: 700; line-height: 1.1; }
 .tm-metric-detail { color: var(--fulcrum-muted); white-space: nowrap; }
-.tm-toggle { display: flex; margin-left: auto; border: 1px solid var(--fulcrum-border); }
-.tm-toggle button { min-height: 36px; padding: 0 14px; border: 0; background: none; color: var(--fulcrum-muted); cursor: pointer; font: inherit; }
-.tm-toggle button[aria-pressed="true"] { background: var(--fulcrum-surface); color: var(--fulcrum-fg); }
+.tm-toggle { display: flex; margin-left: auto; border: 1px solid var(--g1-control-border); }
+.tm-toggle button { min-height: 40px; border-radius: 0; padding: 0 14px; border: 0; background: none; color: var(--fulcrum-muted); cursor: pointer; font: inherit; }
+.tm-toggle button + button { border-inline-start: 1px solid var(--g1-control-border); }
+.tm-toggle button:hover { background: var(--g1-hover); }
+.tm-toggle button[aria-pressed="true"] { background: var(--g1-selected); color: var(--g1-fg); box-shadow: inset 0 calc(-1 * var(--g1-selection-width)) var(--g1-selection); }
 
 .tm-chart { margin: 0; }
 .tm-chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 24px; margin-bottom: 16px; color: var(--fulcrum-muted); }
@@ -115,21 +117,21 @@
 .tm-tick { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); color: var(--fulcrum-muted); font-size: 12px; white-space: nowrap; }
 .tm-col:first-child .tm-tick { left: 0; transform: none; }
 .tm-tick-now { display: none; left: auto; right: 0; transform: none; }
-.tm-tooltip { position: absolute; top: 12px; z-index: 1; min-width: 210px; padding: 10px 14px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); box-shadow: 0 6px 20px rgb(0 0 0 / .35); pointer-events: none; }
+.tm-tooltip { position: absolute; top: 12px; z-index: 1; min-width: 210px; padding: 10px 14px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); box-shadow: var(--g1-shadow-overlay); pointer-events: none; }
 .tm-tooltip[data-side="right"] { transform: translateX(12px); }
 .tm-tooltip[data-side="left"] { transform: translateX(calc(-100% - 12px)); }
 .tm-tooltip b { display: block; margin-bottom: 4px; }
 .tm-tooltip dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 24px; margin: 0; }
 .tm-tooltip dt { color: var(--fulcrum-muted); }
 .tm-coming { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--tm-line); color: var(--fulcrum-muted); font-size: 12px; }
-.tm-coming h2 { margin: 0; font-size: inherit; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
+.tm-coming h2 { margin: 0; font-size: inherit; font-weight: 400; }
 .tm-coming ul { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 0; padding: 0; list-style: none; }
 .tm-coming code { color: var(--fulcrum-muted); }
 .tm-tooltip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* sessions */
 .tm-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 22px; }
-.tm-heading h1 { margin: 0; font-size: 32px; font-weight: 700; }
+.tm-heading h1 { margin: 0; font-size: var(--g1-type-page-title); font-weight: var(--g1-weight-title); letter-spacing: var(--g1-tracking-page-title); }
 .tm-heading p { margin: 0; }
 .tm-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 22px; }
 .tm-select { border: 1px solid var(--fulcrum-border); }
@@ -150,7 +152,7 @@
 .tm-table th.tm-num { text-align: right; }
 .tm-table td { padding: 14px 12px; border-bottom: 1px solid var(--tm-line); white-space: nowrap; }
 .tm-table td.tm-num { text-align: right; }
-.tm-table tbody tr:hover { background: color-mix(in srgb, var(--fulcrum-surface) 70%, transparent); }
+.tm-table tbody tr:hover { background: var(--g1-hover); }
 .tm-table .tm-time { color: var(--fulcrum-muted); }
 .tm-table .tm-id { color: var(--fulcrum-accent); }
 .tm-table .tm-model { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; color: var(--fulcrum-muted); }
@@ -160,7 +162,7 @@
 .tm-row-link { color: inherit; }
 .tm-row-link::after { content: ""; position: absolute; inset: 0; }
 .tm-row-link:focus-visible { outline: none; }
-.tm-row:has(.tm-row-link:focus-visible) { outline: 2px solid var(--fulcrum-accent); outline-offset: -2px; }
+.tm-row:has(.tm-row-link:focus-visible) { outline: var(--g1-focus-ring); outline-offset: -2px; }
 .tm-table .tm-profile { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; }
 .tm-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 24px 0 0; color: var(--fulcrum-muted); }
 .tm-pager p { margin: 0; }
@@ -193,7 +195,6 @@
   .tm-banner { flex-wrap: wrap; }
   .tm-danger-button { margin-left: 0; }
   .tm-intro { padding-top: 40px; }
-  .tm-intro h1 { font-size: 26px; }
   .tm-records { grid-template-columns: 1fr; }
   .tm-empty { margin: 48px 0; }
   .tm-table, .tm-table tbody { display: block; }
@@ -225,7 +226,6 @@
   .telemetry-module .tm-narrow-only { display: inline; }
   .telemetry-module .tm-wide-only { display: none; }
   .tm-heading { display: block; }
-  .tm-heading h1 { font-size: 30px; }
   .tm-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .tm-filters .tm-select { min-width: 0; }
   .tm-filters .tm-select .enum-listbox-button { flex: 1; min-width: 0; max-width: none; }
@@ -239,4 +239,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .telemetry-module * { transition: none !important; animation-duration: 0s !important; }
+}
+
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) {
+  .tm-button, .tm-toggle button { min-width: 44px; min-height: 44px; }
 }

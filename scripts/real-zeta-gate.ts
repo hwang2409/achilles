@@ -11,6 +11,8 @@ import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, 
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
+import { gateAgentControls, agentControlArtifacts } from "./gate-agent-controls";
+import { gateMcpAdd, mcpAddArtifacts } from "./gate-mcp-add";
 import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
@@ -206,6 +208,7 @@ try {
   const authApp = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], authEnv);
   let authZeta = await serveAuth(false);
   await waitFor(async () => await fetch(origin).then(r => r.ok, () => false), "idle accounts achilles");
+  const mcpAddSurfaceId = await gateMcpAdd(browser, origin, authHome, cwd, screenshotDir, () => `${logs.get(authApp)}\n${logs.get(authZeta)}`);
   const accountsPage = await browser.newPage();
   try { await gateAccountsPlace(accountsPage, origin); }
   finally { await accountsPage.close(); }
@@ -555,6 +558,16 @@ with _database() as db:
   // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
   const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
+  const agentsHome = join(temp, "agents-zeta");
+  const agentsDiscovery = join(agentsHome, "agents-ws.json");
+  await mkdir(agentsHome, { mode: 0o700 });
+  const agentsServer = start("uv", ["run", "--project", zeta, "python", join(root, "scripts/agent-controls-server.py")], {
+    ...env, ZETA_HOME: agentsHome, ZETA_ACCOUNT_HOME: agentsHome, ZETA_PROOF_DISCOVERY: agentsDiscovery,
+  });
+  await waitFor(async () => await Bun.file(agentsDiscovery).exists(), "agent controls zeta discovery");
+  const agentDiscovery = await readDiscovery(agentsDiscovery);
+  const agentWriteSurfaceIds = await gateAgentControls(browser, origin, { ...agentDiscovery, url: `ws://127.0.0.1:${agentDiscovery.port}` }, waitFor, screenshotDir);
+  await stop(agentsServer);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -604,7 +617,7 @@ with _database() as db:
     // Let attachment win the race on old builds so the assertion names the side effect, not missing copy.
     await waitFor(async () => Boolean(forbiddenHttp()) || await newerZeta.isVisible(), "telemetry route milestone");
     await telemetryPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "telemetry") throw new Error("telemetry child URL did not select telemetry");
+    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "Telemetry") throw new Error("telemetry child URL did not select telemetry");
     if (telemetryConnections !== 1) throw new Error(`telemetry child opened ${telemetryConnections} connections`);
     const attachment = forbiddenHttp();
     if (attachment) throw new Error(`telemetry route started page attachment: ${attachment}`);
@@ -791,7 +804,7 @@ with _database() as db:
         await observerTelemetry.screenshot({ path: join(screenshotDir, name), animations: "disabled" });
         telemetryArtifacts.push(name);
       };
-      for (const viewport of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
+      for (const viewport of [{ width: 360, height: 740 }, { width: 360, height: 780 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 1440, height: 900 }]) {
         const size = `${viewport.width}x${viewport.height}`;
         await observerTelemetry.setViewportSize(viewport);
         if (!await banner.isVisible()) throw new Error(`telemetry recovery ${size}: read-only banner is hidden`);
@@ -815,7 +828,7 @@ with _database() as db:
             const row = element.querySelector(".telemetry-actions")!.getBoundingClientRect();
             return { scrollTop: element.scrollTop, stepTop: step.top, stepBottom: step.bottom, rowTop: row.top, visible: step.top >= Math.max(0, pane.top) && step.bottom <= Math.min(innerHeight, pane.bottom, row.top) };
           });
-          if (viewport.width === 360 && (!geometry.scrollTop || !geometry.visible)) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
+          if (viewport.width === 360 && (!geometry.visible || (viewport.height === 740 && !geometry.scrollTop))) throw new Error(`telemetry recovery ${size}: last step not fully visible above actions after scrolling: ${JSON.stringify(geometry)}`);
           await captureRecovery(`${size}-bottom`);
           await notice.evaluate(element => { element.scrollTop = 0; });
         }
@@ -1624,9 +1637,9 @@ with _database() as db:
     JSON.stringify(homeInspectValue).includes(achillesHome)
   )
     throw new Error(`home inspect_page summary mismatch: ${JSON.stringify(homeInspectValue)}`);
-  const theme = process.env.GATE_THEME ?? "gruvbox-dark";
+  const theme = process.env.GATE_THEME ?? "g1-dark";
   await page.goto(`${origin}/reading?theme=${encodeURIComponent(theme)}`);
-  const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.fulcrumTheme ?? "auto" }));
+  const themeProof = await page.evaluate(() => ({ requested: new URL(location.href).searchParams.get("theme"), applied: document.documentElement.dataset.achillesTheme ?? "auto" }));
   if (themeProof.applied !== theme) throw new Error(`requested theme ${theme} was not applied: ${JSON.stringify(themeProof)}`);
   if (screenshotDir) await writeFile(join(screenshotDir, "run-proof.txt"), [
     `private temp homes: true`,
@@ -3315,7 +3328,7 @@ with _database() as db:
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
-  const renderedWriteSurfaceIds = new Set<string>(mcpWriteSurfaceIds);
+  const renderedWriteSurfaceIds = new Set<string>([...mcpWriteSurfaceIds, mcpAddSurfaceId, ...agentWriteSurfaceIds]);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
     for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
   };
@@ -3595,7 +3608,7 @@ with _database() as db:
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
       routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts, ...mcpAddArtifacts, ...agentControlArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

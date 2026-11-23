@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import { focusable } from "../apps/web/src/focusable";
 import { appShortcut, type GateWait } from "./gate-diagnostics";
 
-const theme = (page: Page) => page.locator("html").getAttribute("data-fulcrum-theme");
+const theme = (page: Page) => page.locator("html").getAttribute("data-achilles-theme");
 const openSettings = async (page: Page, gateWait: GateWait) => {
   await page.keyboard.press(appShortcut("Comma"));
   await gateWait.playwright(page.getByRole("dialog", { name: "settings" }), "waitFor", { state: "visible" });
@@ -11,6 +11,32 @@ const openSettings = async (page: Page, gateWait: GateWait) => {
 export async function gateSettings(page: Page, origin: string, gateWait: GateWait): Promise<void> {
   const screenshots = process.env.SETTINGS_SCREENSHOT_DIR ?? process.env.SCREENSHOT_DIR;
   await page.setViewportSize({ width: 1440, height: 900 });
+  const assertAppearance = async (scheme: "light" | "dark") => {
+    const appearance = await page.locator("html").evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        scheme: style.colorScheme,
+        background: style.backgroundColor,
+        syntax: style.getPropertyValue("--fulcrum-tok-function").trim(),
+        ansi: style.getPropertyValue("--fulcrum-ansi-blue").trim(),
+      };
+    });
+    const background = scheme === "light" ? "rgb(255, 255, 255)" : "rgb(11, 11, 13)";
+    if (appearance.scheme !== scheme || appearance.background !== background || !appearance.syntax || !appearance.ansi)
+      throw new Error(`wrong ${scheme} appearance: ${JSON.stringify(appearance)}`);
+  };
+  const fresh = await page.locator("html").evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { ui: style.fontFamily, mono: style.getPropertyValue("--achilles-code-font"), size: style.fontSize };
+  });
+  if (!fresh.ui.includes("Geist") || fresh.mono.trim() !== 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace' || fresh.size !== "14px")
+    throw new Error(`wrong fresh typography: ${JSON.stringify(fresh)}`);
+  const jetBrainsFaces = () => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("JetBrains Mono")).length);
+  if (await jetBrainsFaces()) throw new Error("JetBrains Mono was registered with default settings");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await assertAppearance(colorScheme);
+  }
   if (screenshots) await page.screenshot({ path: `${screenshots}/default.png` });
   await openSettings(page, gateWait);
   const unnamedControls = await page.getByRole("dialog", { name: "settings" }).locator("button, input, select, textarea").evaluateAll((controls) => controls.filter((control) => !(control.getAttribute("aria-label") || control.getAttribute("aria-labelledby") || control.textContent?.trim())).map((control) => control.outerHTML));
@@ -20,21 +46,36 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   const switchSizes = await page.getByRole("switch").evaluateAll((switches) => switches.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
   if (switchSizes.some(({ width, height }) => width !== 38 || height < 24)) throw new Error(`settings switches have the wrong target size: ${JSON.stringify(switchSizes)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/04-settings-dialog.png` });
-  await page.getByRole("option", { name: /gruvbox-light/ }).click();
+  await page.getByRole("option", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "IBM Plex Sans" }).click();
-  if (await theme(page) !== "gruvbox-light") throw new Error("gruvbox-light did not apply live");
+  await page.getByRole("button", { name: "JetBrains Mono", exact: true }).last().click();
+  const checkSavedMono = async () => {
+    await page.waitForFunction(() => [...document.fonts].some(face => face.family.includes("JetBrains Mono")));
+    const loaded = await page.evaluate(async () => {
+      const faces = await document.fonts.load('14px "JetBrains Mono"', "text");
+      return faces.some(face => face.status === "loaded") && getComputedStyle(document.documentElement).getPropertyValue("--achilles-code-font").includes("JetBrains Mono");
+    });
+    if (!loaded) throw new Error("saved JetBrains Mono did not load and apply");
+  };
+  await checkSavedMono();
+  if (await theme(page) !== "g1-light") throw new Error("g1-light did not apply live");
+  await assertAppearance("light");
   await page.getByRole("button", { name: "esc" }).click();
-  if (screenshots) await page.screenshot({ path: `${screenshots}/12-gruvbox-light-plex-sans.png` });
+  if (screenshots) await page.screenshot({ path: `${screenshots}/12-g1-light-plex-sans.png` });
 
   await page.reload();
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
-  if (await theme(page) !== "gruvbox-light") throw new Error("stored theme did not survive reload");
+  if (await theme(page) !== "g1-light") throw new Error("stored theme did not survive reload");
   const uiFont = await page.locator("html").evaluate((node) => getComputedStyle(node).getPropertyValue("--achilles-ui-font"));
   if (!uiFont.includes("IBM Plex Sans")) throw new Error("stored UI font did not survive reload");
+  await checkSavedMono();
 
-  await page.goto(`${origin}/allow?theme=dracula`);
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto(`${origin}/allow?theme=g1-dark`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
-  if (await theme(page) !== "dracula") throw new Error("query theme did not override stored theme");
+  if (await theme(page) !== "g1-dark") throw new Error("query theme did not override stored theme");
+  await assertAppearance("dark");
+  await page.emulateMedia({ colorScheme: null });
 
   await page.goto(`${origin}/allow`);
   await gateWait.playwright(page.getByRole("textbox", { name: "message" }), "waitFor", { timeout: 20_000 });
@@ -47,7 +88,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
     await page.getByRole("button", { name: "reset to defaults" }).click();
     if (await theme(page) !== null) throw new Error("reset did not restore the automatic theme");
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("achilles-settings") ?? "null"));
-    if (saved?.theme !== "auto" || saved?.autoApproveDefault !== autoApproveDefault) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
+    if (saved?.theme !== "auto" || saved.uiFont !== "geist" || saved.codeFont !== "system-mono" || saved.size !== 14 || saved.autoApproveDefault !== autoApproveDefault) throw new Error(`reset saved the wrong defaults: ${JSON.stringify(saved)}`);
     if (await focused() !== "reset to defaults") throw new Error(`reset dropped focus to ${await focused()}`);
   };
   await page.getByRole("switch", { name: "auto-approve default" }).click();
@@ -56,7 +97,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   await page.getByRole("switch", { name: "auto-approve default" }).click();
   await settingsDialog.getByRole("group").getByRole("button", { name: "allow without asking" }).click();
   if (await focused() !== "auto-approve default") throw new Error(`confirming auto-approve dropped focus to ${await focused()}`);
-  await page.getByRole("option", { name: /gruvbox-light/ }).click();
+  await page.getByRole("option", { name: "Light", exact: true }).click();
   await resetKeeps(true);
   await page.getByRole("button", { name: "esc" }).click();
   await page.keyboard.press(appShortcut("Comma"));
@@ -106,7 +147,7 @@ export async function gateSettings(page: Page, origin: string, gateWait: GateWai
   const narrowDialog = page.getByRole("dialog", { name: "settings" });
   if (await narrowDialog.count() !== 1) throw new Error("narrow settings button did not expose a named dialog");
   const narrowTargets = await narrowDialog.locator("button").evaluateAll((controls) => controls.map((control) => ({ width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })));
-  if (narrowTargets.some(({ width, height }) => width < 40 || height < 40)) throw new Error(`narrow settings target is smaller than 40px: ${JSON.stringify(narrowTargets)}`);
+  if (narrowTargets.some(({ width, height }) => width < 44 || height < 44)) throw new Error(`narrow settings target is smaller than 44px: ${JSON.stringify(narrowTargets)}`);
   if (screenshots) await page.screenshot({ path: `${screenshots}/settings-narrow-390x844.png` });
   const enabledControls = narrowDialog.locator("button:not(:disabled):not([tabindex='-1']), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])");
   const firstControl = enabledControls.first();

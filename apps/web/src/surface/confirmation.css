@@ -1,20 +1,22 @@
 .confirmation-inline, .confirmation-dialog, .confirmation-activity, .confirmation-trigger {
-  font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, "JetBrains Mono", monospace);
-  color: var(--fulcrum-fg);
+  font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, var(--g1-font-ui));
+  color: var(--g1-fg);
   overflow-wrap: anywhere;
 }
 .confirmation-dialog {
-  --confirmation-accent: var(--fulcrum-accent);
+  --confirmation-action: var(--g1-primary);
+  --confirmation-action-text: var(--g1-primary-text);
   width: min(34rem, calc(100% - 2rem));
   max-width: none;
   max-height: calc(100dvh - 2rem);
   padding: 0;
-  border: 1px solid var(--fulcrum-border);
-  background: var(--fulcrum-surface);
-  box-shadow: 0 1rem 3rem rgb(0 0 0 / 35%);
+  border: 1px solid var(--g1-border);
+  background: var(--g1-bg);
+  box-shadow: var(--g1-shadow-overlay);
 }
-.confirmation-dialog[data-proof="name"] { --confirmation-accent: var(--fulcrum-danger); }
-.confirmation-dialog::backdrop { background: rgb(0 0 0 / 24%); }
+.confirmation-dialog[data-proof="name"] { --confirmation-action: var(--g1-danger);
+  --confirmation-action-text: var(--g1-bg); }
+.confirmation-dialog::backdrop { background: rgb(0 0 0 / 32%); }
 .confirmation-dialog > form { display: flex; flex-direction: column; max-height: inherit; }
 .confirmation-dialog header, .confirmation-dialog footer {
   flex: none;
@@ -23,28 +25,29 @@
   gap: 8px;
   padding: 10px 16px;
 }
-.confirmation-dialog header { justify-content: space-between; border-bottom: 1px solid var(--fulcrum-border); }
-.confirmation-heading-actions { display: flex; align-items: center; gap: 8px; color: var(--fulcrum-muted); }
+.confirmation-dialog header { justify-content: space-between; border-bottom: 1px solid var(--g1-rule); }
+.confirmation-heading-actions { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--g1-type-meta); display: flex; align-items: center; gap: 8px; color: var(--g1-muted); }
 .confirmation-dialog h2 { margin: 0; font-size: 1.125em; text-wrap: balance; }
-.confirmation-dialog .confirmation-close { flex: none; border-color: transparent; font-size: 1.25em; }
+.confirmation-dialog .confirmation-close { flex: none; border-color: var(--g1-control-border); font-size: var(--g1-type-ui); }
 .confirmation-body { min-height: calc(3lh + 16px); overflow-y: auto; padding: 16px 16px 0; }
 .confirmation-body dl { margin: 0 0 12px; }
 .confirmation-body dl > div {
   display: grid;
-  grid-template-columns: 7.5em minmax(0, 1fr);
+  grid-template-columns: 8rem minmax(0, 1fr);
   gap: 4px 12px;
   padding: 8px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--fulcrum-border) 55%, transparent);
+  border-bottom: 1px solid var(--g1-rule);
 }
-.confirmation-body dt, .confirmation-current { color: var(--fulcrum-muted); }
+.confirmation-body dt, .confirmation-current { color: var(--g1-muted); }
+.confirmation-body dt { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-size: var(--g1-type-meta); }
 .confirmation-body dd { margin: 0; }
-.confirmation-dialog[data-proof="name"] .confirmation-body dl > div:last-child dd { color: var(--fulcrum-warn); }
+.confirmation-dialog[data-proof="name"] .confirmation-body dl > div:last-child dd { color: var(--g1-warn); }
 .confirmation-proof { flex: none; min-height: calc(1lh + 8px); overflow-y: auto; padding: 0 16px 8px; }
-.confirmation-proof p { margin: 0; color: var(--fulcrum-muted); }
+.confirmation-proof p { margin: 0; color: var(--g1-muted); }
 .confirmation-name { display: grid; gap: 8px; }
-.confirmation-name input { width: 100%; padding: 8px 12px; border: 1px solid var(--fulcrum-border); background: transparent; }
-.confirmation-scope { display: flex; gap: 10px; align-items: center; width: fit-content; cursor: pointer; }
-.confirmation-scope input { accent-color: var(--fulcrum-accent); margin: 0; }
+.confirmation-name input { width: 100%; padding: 8px 12px; border: 1px solid var(--g1-control-border); background: var(--g1-bg); }
+.confirmation-scope { display: flex; gap: 10px; align-items: center; padding: 4px 8px; border: 1px solid var(--g1-control-border); border-radius: var(--g1-radius-control); cursor: pointer; }
+.confirmation-scope input { accent-color: var(--g1-accent); margin: 0; }
 /* Long feedback scrolls here instead of shrinking the details below three lines. */
 .confirmation-dialog form > .confirmation-status:not(:empty) {
   flex: none;
@@ -53,7 +56,7 @@
   overflow-y: auto;
   margin: 8px 16px;
 }
-.confirmation-dialog footer { border-top: 1px solid var(--fulcrum-border); }
+.confirmation-dialog footer { border-top: 1px solid var(--g1-rule); background: var(--g1-bg-subtle); }
 .confirmation-actions, .confirmation-row, .confirmation-activity {
   display: flex;
   flex-wrap: wrap;
@@ -61,8 +64,8 @@
   gap: 8px;
 }
 .confirmation-actions { justify-content: flex-end; }
-.confirmation-inline { --confirmation-accent: var(--fulcrum-accent); }
-.confirmation-row { border: 1px solid var(--fulcrum-border); padding: 4px 10px; }
+.confirmation-inline { --confirmation-action: var(--g1-primary); --confirmation-action-text: var(--g1-primary-text); }
+.confirmation-row { border: 1px solid var(--g1-rule); padding: 4px 10px; }
 .confirmation-current { margin-inline-start: auto; }
 .confirmation-bar {
   display: flex;
@@ -71,8 +74,8 @@
   justify-content: space-between;
   gap: 8px 12px;
   padding: 8px 10px;
-  border-inline-start: 2px solid var(--fulcrum-warn);
-  background: color-mix(in srgb, var(--fulcrum-warn) 7%, transparent);
+  border-inline-start: 2px solid var(--g1-warn);
+  background: color-mix(in srgb, var(--g1-warn) 7%, transparent);
 }
 .confirmation-bar > p, .confirmation-activity p { margin: 0; }
 .confirmation-bar .confirmation-status { flex-basis: 100%; }
@@ -80,30 +83,32 @@
 .confirmation-status:not(:empty), .confirmation-activity p {
   margin-block: 8px 0;
   padding: 8px 10px;
-  border-inline-start: 2px solid var(--fulcrum-accent);
-  background: color-mix(in srgb, var(--fulcrum-accent) 8%, transparent);
+  --confirmation-feedback: var(--g1-accent);
+  border: 1px solid var(--g1-border);
+  border-inline-start: var(--g1-selection-width) solid var(--confirmation-feedback);
+  background: var(--g1-bg-subtle);
 }
-.confirmation-status[data-phase="unknown"] { border-inline-start-color: var(--fulcrum-warn); }
+.confirmation-status[data-phase="unknown"] { --confirmation-feedback: var(--g1-warn); }
+.confirmation-activity p { --confirmation-feedback: var(--g1-ok); }
 .confirmation-status[role="alert"] {
-  border-inline-start-color: var(--fulcrum-danger);
-  background: color-mix(in srgb, var(--fulcrum-danger) 9%, transparent);
+  --confirmation-feedback: var(--g1-danger);
 }
-.confirmation-activity time { font-variant-numeric: tabular-nums; }
+.confirmation-activity time { font: var(--g1-type-meta) var(--achilles-code-font, var(--g1-font-mono)); font-variant-numeric: tabular-nums; }
 :is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button, button.confirmation-trigger,
 .confirmation-name input, .confirmation-scope { min-width: 44px; min-height: 44px; }
 :is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button, button.confirmation-trigger { padding: 4px 12px; }
 :is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) button:hover:not(:disabled),
-button.confirmation-trigger:hover { border-color: var(--fulcrum-accent); }
+button.confirmation-trigger:hover { border-color: var(--g1-accent); }
 :is(.confirmation-inline, .confirmation-dialog) button:disabled { cursor: default; opacity: .48; }
 :is(.confirmation-inline, .confirmation-dialog) button.confirmation-primary:not(:disabled) {
-  color: var(--fulcrum-bg);
-  background: var(--confirmation-accent);
-  border-color: var(--confirmation-accent);
+  color: var(--confirmation-action-text);
+  background: var(--confirmation-action);
+  border-color: var(--confirmation-action);
 }
-:is(.confirmation-inline, .confirmation-dialog) button.confirmation-primary:hover:not(:disabled) { filter: brightness(1.12); }
-.confirmation-dialog button.confirmation-primary:disabled { border-style: dashed; color: var(--confirmation-accent); }
+:is(.confirmation-inline, .confirmation-dialog) button.confirmation-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--confirmation-action) 89%, var(--confirmation-action-text)); }
+.confirmation-dialog button.confirmation-primary:disabled { border-style: dashed; color: var(--g1-muted); }
 :is(.confirmation-inline, .confirmation-dialog, .confirmation-activity) :focus-visible, .confirmation-trigger:focus-visible {
-  outline: 2px solid var(--fulcrum-accent);
+  outline: var(--g1-focus-ring);
   outline-offset: 2px;
 }
 
