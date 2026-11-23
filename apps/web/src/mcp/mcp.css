@@ -53,3 +53,14 @@
 .mcp-actions { margin-block: 16px; }
 .mcp-review-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-block-start: 8px; }
 .mcp-actions button { min-height: 44px; padding-inline: 12px; }
+
+.mcp-add { padding: 8px 16px; border-bottom: 1px solid var(--fulcrum-border); }
+.mcp-add-form { display: grid; gap: 16px; max-width: 44rem; padding-block: 8px; }
+.mcp-add-form :is(h2, p) { margin: 0; text-wrap: pretty; }
+.mcp-add-field { display: grid; gap: 4px; min-width: 0; }
+.mcp-add-field :is(input, select) { min-width: 0; min-height: 44px; width: 100%; }
+.mcp-add-entry { display: grid; gap: 8px 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
+.mcp-add-entries { min-inline-size: 0; display: grid; gap: 8px; margin: 0; padding: 8px; border: 1px solid var(--fulcrum-border); }
+.mcp-add-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.mcp-add button { min-height: 44px; padding-inline: 12px; }
+.mcp-add-limits { color: var(--fulcrum-muted); }

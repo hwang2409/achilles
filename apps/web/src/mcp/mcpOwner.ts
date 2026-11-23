@@ -3,11 +3,27 @@ import { createWriteForms } from "../writeForms";
 import { supportsRequest } from "../zeta";
 import { createMcpReads, projectMcpSnapshot, type McpRow } from "./mcpReads";
 
-export const mcpMethods = { enabled: "mcp_server_set_enabled", trusted: "mcp_server_set_trusted", remove: "mcp_server_remove" } as const;
+export const mcpMethods = { add: "mcp_server_add", enabled: "mcp_server_set_enabled", trusted: "mcp_server_set_trusted", remove: "mcp_server_remove" } as const;
 export type McpAction = keyof typeof mcpMethods;
 export type McpAttempt = Readonly<{ revision: string; scope: McpRow["scope"]; name: string } & (
   { action: "enabled" | "trusted"; value: boolean } | { action: "remove" }
 )>;
+export type McpAddMutation = { scope: McpRow["scope"]; name: string; enabled: boolean; env: Record<string, string> } & (
+  { command: string; args: string[] } | { url: string; headers: Record<string, string>; oauth: boolean; client_id?: string; client_secret?: string }
+);
+export type McpAddAttempt = Readonly<{ action: "add"; revision: string; scope: McpRow["scope"]; name: string; existed: boolean;
+  enabled: boolean; config: McpRow["config"] }>;
+type Attempt = McpAttempt | McpAddAttempt;
+type TakeMutation = () => McpAddMutation | null;
+
+export function projectAdd(mutation: McpAddMutation): McpRow["config"] {
+  const env = Object.keys(mutation.env).length;
+  return "command" in mutation
+    ? { transport: "stdio", commandProvided: true, urlProvided: false, args: mutation.args.length, env, headers: 0, oauth: null }
+    : { transport: "streamable-http", commandProvided: false, urlProvided: true, args: 0, env, headers: Object.keys(mutation.headers).length,
+      oauth: mutation.oauth ? { secretProvided: Boolean(mutation.client_secret) } : null };
+}
+
 type Restart = { sessions: string[]; complete: boolean };
 export type McpOutcome =
   | { status: "committed"; restart: Restart | null }
@@ -41,9 +57,22 @@ function projectRestart(value: unknown): Restart | null {
   return { sessions: [...restart.sessions], complete: restart.complete };
 }
 
-function matches(attempt: McpAttempt, rows: readonly McpRow[]) {
+function matches(attempt: Attempt, rows: readonly McpRow[]) {
   const row = rows.find(({ name }) => name === attempt.name);
+  if (attempt.action === "add") return !attempt.existed && row?.enabled === attempt.enabled
+    && sameConfig(row.config, attempt.config);
   return attempt.action === "remove" ? !row : row?.[attempt.action] === attempt.value;
+}
+
+function sameConfig(row: McpRow["config"], expected: McpRow["config"]) {
+  return row.transport === expected.transport && row.commandProvided === expected.commandProvided && row.urlProvided === expected.urlProvided
+    && row.args === expected.args && row.env === expected.env && row.headers === expected.headers
+    && row.oauth?.secretProvided === expected.oauth?.secretProvided;
+}
+
+function matchesDraft(attempt: McpAddAttempt, mutation: McpAddMutation) {
+  return mutation.name === attempt.name && mutation.scope === attempt.scope && mutation.enabled === attempt.enabled
+    && sameConfig(projectAdd(mutation), attempt.config);
 }
 
 /** One global flight: the revision spans user, project, and trust. A new socket is only used to read, never to retry a write. */
@@ -56,54 +85,61 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
   wait?: typeof waitFor;
 }) {
   const reads = createMcpReads(canRead);
-  const { run, ...forms } = createWriteForms<McpOutcome, McpAttempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
-  const outcomes = new WeakMap<McpAttempt, McpOutcome>();
+  const { run, ...forms } = createWriteForms<McpOutcome, Attempt>({ inProgress: { status: "conflict" }, unexpected: UNKNOWN });
+  const outcomes = new WeakMap<Attempt, McpOutcome>();
   const refresh = (signal?: AbortSignal) => {
     const client = live();
     return client && !signal?.aborted ? reads.refresh(client, signal) : null;
   };
-  async function settle(attempt: McpAttempt, signal: AbortSignal): Promise<McpOutcome> {
+  async function settle(attempt: Attempt, signal: AbortSignal): Promise<McpOutcome> {
     const view = await refresh(signal);
     const concrete = view?.[attempt.scope];
     if (signal.aborted || !concrete || !("rows" in concrete)) return UNKNOWN;
-    if (matches(attempt, concrete.rows)) return { status: "committed", restart: null };
+    if ((attempt.action !== "add" || concrete.revision !== attempt.revision) && matches(attempt, concrete.rows)) return { status: "committed", restart: null };
     return concrete.revision === attempt.revision ? UNKNOWN : { status: "changed" };
   }
-  async function send(client: ZetaClient, attempt: McpAttempt, signal: AbortSignal): Promise<McpOutcome> {
+  async function send(client: ZetaClient, attempt: Attempt, signal: AbortSignal, take?: TakeMutation): Promise<McpOutcome> {
     const { action, name, scope, revision } = attempt;
     if (action === "trusted" && scope !== "project") return { status: "invalid" };
     const method = mcpMethods[action];
     if (!supports(client, method)) return { status: "unsupported" };
-    const mutation = action === "trusted" ? { name, trusted: attempt.value }
-      : action === "enabled" ? { name, scope, enabled: attempt.value } : { name, scope };
+    const add = action === "add" ? take?.() : null;
+    if (action === "add" && (!add || !matchesDraft(attempt, add))) return { status: "invalid" };
+    const mutation = add ?? (action === "trusted" ? { name, trusted: attempt.value }
+      : action === "enabled" ? { name, scope, enabled: attempt.value } : { name, scope });
+    const response = await write(client, method, revision, mutation, signal);
+    if ("status" in response) return response;
+    const next = projectMcpSnapshot(response.result, scope);
+    const restart = projectRestart(response.result);
+    if (!next || !restart || !matches(attempt, next.rows)) return UNKNOWN;
+    reads.apply(scope, next);
+    return { status: "committed", restart };
+  }
+  async function write(client: ZetaClient, method: typeof mcpMethods[McpAction], revision: string,
+    mutation: Record<string, unknown>, signal: AbortSignal): Promise<McpOutcome | { result: unknown }> {
     for (let retry = 0; ; retry++) {
       if (signal.aborted) return CANCELLED;
       if (live() !== client) return { status: "refused" };
-      let result: unknown;
       try {
         // Do not abort a sent write: closing the review does not undo it.
-        result = await client.request(method, { revision, mutation }, { timeoutMs: 5_000 });
+        return { result: await client.request(method, { revision, mutation }, { timeoutMs: 5_000 }) };
       } catch (error) {
         const failure = rpcFailure(error);
+        if (method === mcpMethods.add && failure?.status === "busy"
+          && (error as { data?: { reason?: unknown } }).data?.reason !== "operation_busy") return UNKNOWN;
         if (!failure) return UNKNOWN;
         if (failure.status !== "busy" || retry === BACKOFF.length) return failure;
         if (signal.aborted) return CANCELLED;
         await wait(BACKOFF[retry]!, signal);
-        continue;
       }
-      const next = projectMcpSnapshot(result, scope);
-      const restart = projectRestart(result);
-      if (!next || !restart || !matches(attempt, next.rows)) return UNKNOWN;
-      reads.apply(scope, next);
-      return { status: "committed", restart };
     }
   }
-  async function execute(attempt: McpAttempt, signal: AbortSignal): Promise<McpOutcome> {
+  async function execute(attempt: Attempt, signal: AbortSignal, take?: TakeMutation): Promise<McpOutcome> {
     let client: ZetaClient | null = null;
     let outcome: McpOutcome = { status: "refused" };
     try {
       client = await acquire();
-      if (client) outcome = signal.aborted ? CANCELLED : await send(client, attempt, signal);
+      if (client) outcome = signal.aborted ? CANCELLED : await send(client, attempt, signal, take);
     } finally {
       if (client) await release().catch(() => {});
     }
@@ -111,15 +147,16 @@ export function createMcpOwner({ live, acquire, release, supports = supportsRequ
     else if (["committed", "stale", "unavailable"].includes(outcome.status)) await refresh(signal);
     return outcome;
   }
-  const submit = (form: string, attempt: McpAttempt, check: boolean) => run(form, "mcp", JSON.stringify(attempt), attempt, async (signal) => {
+  const submit = (form: string, attempt: Attempt, check: boolean, take?: TakeMutation) => run(form, "mcp", JSON.stringify(attempt), attempt, async (signal) => {
     const prior = outcomes.get(attempt);
     const outcome = check ? prior?.status === "unknown" ? await settle(attempt, signal) : prior ?? UNKNOWN
-      : prior ?? await execute(attempt, signal);
+      : prior ?? await execute(attempt, signal, take);
     outcomes.set(attempt, outcome);
     return outcome;
   });
   return { reads, ...forms, execute: (form: string, attempt: McpAttempt) => submit(form, attempt, false),
-    check: (form: string, attempt: McpAttempt) => submit(form, attempt, true) };
+    add: (form: string, attempt: McpAddAttempt, take: TakeMutation) => submit(form, attempt, false, take),
+    check: (form: string, attempt: Attempt) => submit(form, attempt, true) };
 }
 
 export type McpOwner = ReturnType<typeof createMcpOwner>;
