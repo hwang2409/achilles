@@ -31,8 +31,8 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
     await link.evaluate((anchor) => anchor.setAttribute("target", "_blank"));
     const [settingsPage] = await Promise.all([page.context().waitForEvent("page", { timeout: 10_000 }), link.click()]);
     try {
-      await gateWait.playwright(settingsPage.getByText("theme, fonts, text size, density and vim mode. they apply to this browser only.", { exact: true }), "waitFor");
-      const displaySettings = settingsPage.getByRole("button", { name: "display settings", exact: true });
+      await gateWait.playwright(settingsPage.getByText("Theme, fonts, text size, density and Vim mode. They apply to this browser only.", { exact: true }), "waitFor");
+      const displaySettings = settingsPage.getByRole("button", { name: "Display settings", exact: true });
       if (process.env.SCREENSHOT_DIR) await settingsPage.screenshot({ path: join(process.env.SCREENSHOT_DIR, "v5-settings-entry.png") });
       await displaySettings.click();
       const dialog = settingsPage.getByRole("dialog", { name: "settings" });
@@ -43,7 +43,7 @@ export async function gateVim(page: Page, control: string, waitFor: WaitFor, whi
       await dialog.getByRole("option", { name: "Dark", exact: true }).click();
       await dialog.getByRole("button", { name: "esc" }).click();
       await gateWait.playwright(dialog, "waitFor", { state: "hidden", timeout: 10_000 });
-      await gateWait.playwright(settingsPage, "waitForFunction", () => document.activeElement?.textContent === "display settings");
+      await gateWait.playwright(settingsPage, "waitForFunction", () => document.activeElement?.textContent === "Display settings");
     } finally {
       await settingsPage.close();
       await page.bringToFront();

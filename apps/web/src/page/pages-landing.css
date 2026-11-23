@@ -1,30 +1,30 @@
-.pages-landing { max-width: 928px; margin: 0 auto; padding: 40px 24px; }
+.pages-landing { padding: var(--g1-page-padding); }
 .pages-landing .module-state { padding: 0; }
-.pages-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 0; margin: 0; list-style: none; }
+.pages-grid { border-top: 1px solid var(--g1-border); padding: 0; margin: 0; list-style: none; }
 .pages-card {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, .7fr) minmax(0, 1fr);
+  align-items: baseline;
   padding: 16px;
-  gap: 4px;
-  border: 1px solid var(--fulcrum-border);
+  gap: 4px 16px;
+  border-bottom: 1px solid var(--g1-rule);
   color: inherit;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
-.pages-card:hover, .pages-card:focus-visible { border-color: var(--fulcrum-accent); background: var(--fulcrum-surface); }
+.pages-card:hover, .pages-card:focus-visible { background: var(--g1-hover); }
 .pages-card h2 { margin: 0; font-size: 16px; line-height: 1.3; }
+.pages-route, .pages-facts time { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 .pages-route { color: var(--fulcrum-accent); font-size: 13px; }
-.pages-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.pages-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-variant-numeric: tabular-nums; }
 .pages-facts, .pages-origin { color: var(--fulcrum-muted); font-size: 12px; }
 .pages-mode[data-on="true"] { color: var(--fulcrum-accent); }
 .pages-more { min-height: 44px; margin-top: 16px; padding-inline: 16px; }
 .pages-more[aria-disabled="true"] { color: var(--fulcrum-muted); cursor: default; }
 
-@media (max-width: 900px) {
-  .pages-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @media (max-width: 599px) {
-  .pages-landing { padding: 24px 16px; }
-  .pages-grid { grid-template-columns: minmax(0, 1fr); }
+  .pages-landing { padding: var(--g1-space-4); }
+  .pages-card { grid-template-columns: minmax(0, 1fr); }
 }
+
+.pages-mode::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: var(--g1-space-1); vertical-align: .12em; background: currentColor; }
