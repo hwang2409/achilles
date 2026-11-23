@@ -12,7 +12,7 @@ export async function gateShell(
   await page.evaluate(() => { const url = new URL(location.href); url.searchParams.set("theme", "g1-light"); history.replaceState({}, "", url); });
   const places = page.getByRole("navigation", { name: "places" });
   const grouped = await places.locator("section").evaluateAll((sections) => sections.map((section) => [section.getAttribute("aria-label"), [...section.querySelectorAll("a")].map((link) => link.querySelector("span")?.textContent)]));
-  const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "mcp connections"]]];
+  const expected = [["work", ["chats", "pages", "agents", "sessions", "projects", "telemetry"]], ["library", ["skills", "agent profiles"]], ["manage", ["settings", "accounts", "connections"]]];
   if (JSON.stringify(grouped) !== JSON.stringify(expected)) throw new Error(`unexpected place order: ${JSON.stringify(grouped)}`);
   if (!(await places.getByRole("link", { name: "chats", exact: true }).getAttribute("aria-current"))) throw new Error("home did not select chats");
   if (await page.locator(".sidebar .page-list").count() || await page.locator(".sidebar").getByRole("button", { name: "settings", exact: true }).count()) throw new Error("sidebar duplicated a stable place");

@@ -2,33 +2,33 @@
 .sidebar-scroll { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: auto; scrollbar-width: thin; }
 .sidebar-destinations { display: contents; }
 .sidebar-destinations > .chat-list { flex: 0 0 auto; max-height: 170px; }
-.brand-row > .surface-connection { display: inline-flex; align-items: center; gap: var(--g1-space-1); margin-left: auto; padding: var(--g1-space-1) var(--g1-space-2); border: 1px solid var(--g1-border); background: var(--g1-bg); font: var(--g1-type-kbd) var(--achilles-code-font, var(--g1-font-mono)); }
+.brand-row > .surface-connection { display: inline-flex; align-items: center; gap: var(--g1-space-1); margin-left: auto; padding: 0; font: var(--g1-type-kbd) var(--achilles-code-font, var(--g1-font-mono)); }
 .surface-connection i { width: var(--g1-status-mark); height: var(--g1-status-mark); border: 1px solid var(--fulcrum-muted); }
 .surface-connection[data-connected="true"] i { border-color: var(--g1-ok); background: var(--g1-ok); }
 .surface-actions, .surface-search { flex: none; display: grid; gap: var(--g1-space-2); margin: 0 var(--g1-sidebar-padding); }
-.surface-actions { padding-block: var(--g1-space-3) var(--g1-space-2); }
-.surface-actions > :is(.new-chat, .place-link) { display: flex; align-items: center; min-width: 0; min-height: 36px; gap: 10px; padding: 0 10px; font-size: 13px; }
+.surface-actions { padding-block: var(--g1-space-2) var(--g1-space-1); row-gap: 0; }
+.surface-actions > :is(.new-chat, .place-link) { display: flex; align-items: center; min-width: 0; min-height: var(--g1-nav-row-height); gap: var(--g1-space-2); padding: 0 var(--g1-space-2); font-size: var(--g1-type-small); }
 .surface-actions > .place-link { border: 1px solid var(--fulcrum-border); }
 .surface-actions kbd, .surface-actions small { margin-left: auto; color: var(--fulcrum-muted); font-size: 11px; }
-.surface-actions b { font-weight: 600; }
-.new-chat:not(:disabled, [aria-disabled="true"]) kbd { color: inherit; }
+.surface-actions b { font-weight: 400; }
 .surface-search { position: relative; }
-.surface-search .chat-search { background: var(--g1-bg); min-height: 36px; display: flex; align-items: center; gap: 8px; padding-left: 10px; padding-right: 44px; }
-.surface-search .chat-search kbd { display: none; }
+.surface-search .chat-search { background: transparent; border-color: transparent; min-height: var(--g1-nav-row-height); display: flex; align-items: center; padding-inline: var(--g1-space-2) 44px; font-size: var(--g1-type-small); }
+.surface-search .chat-search > :is(span, kbd) { display: none; }
 .surface-search .chat-search:focus-within { outline: var(--g1-focus-ring); outline-offset: -2px; box-shadow: var(--g1-focus-halo); }
-.surface-search .palette-button { position: absolute; right: 0; top: 0; height: 36px; min-width: 48px; color: var(--fulcrum-muted); border-color: transparent; border-inline-start-color: var(--g1-control-border); }
+.surface-search .palette-button { position: absolute; right: 0; top: 0; height: var(--g1-nav-row-height); min-width: 44px; color: var(--fulcrum-muted); border-color: transparent; }
 .surface-search .palette-button > span { display: none; }
 .place-nav { flex: none; margin: 0 var(--g1-sidebar-padding) var(--g1-space-3); }
-.place-nav h2 { margin: var(--g1-space-4) 0 var(--g1-space-2); padding-inline: var(--g1-space-3); font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
+.place-nav h2 { margin: var(--g1-space-3) 0 var(--g1-space-1); padding-inline: var(--g1-space-2); font-size: var(--g1-type-meta); font-weight: 600; color: var(--g1-muted); }
 .place-nav h2::first-letter, .place-link > span::first-letter { text-transform: uppercase; }
 .place-link > span { display: block; }
-.place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-3); font-size: var(--g1-type-ui); line-height: 1.25; }
+.place-link { display: flex; align-items: center; gap: var(--g1-space-2); min-height: var(--g1-nav-row-height); padding: 0 var(--g1-space-2); font-size: var(--g1-type-small); line-height: 1.25; }
 .place-nav .place-link small { margin-left: auto; color: var(--fulcrum-muted); font: var(--g1-type-kbd) var(--achilles-code-font, var(--g1-font-mono)); }
 .place-link .waiting-count { color: var(--fulcrum-warn); }
 .place-link .waiting-count::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: 4px; vertical-align: .1em; background: currentColor; }
-.place-link svg { flex: none; color: var(--fulcrum-muted); }
+.place-link svg { display: none; }
+.sidebar-collapsed .place-link svg { display: block; flex: none; color: var(--fulcrum-muted); }
 .place-link:hover { background: var(--g1-hover); }
-.place-link[aria-current="page"] { background: var(--g1-selected); font-weight: 600; }
+.place-link[aria-current="page"] { background: var(--g1-selected); }
 .place-link[aria-current="page"] svg { color: var(--fulcrum-fg); }
 .sidebar :is(a, button):focus-visible { outline-offset: -2px; }
 .sidebar > footer { flex: none; display: flex; gap: 4px; border-top: 1px solid var(--fulcrum-border); }
@@ -59,6 +59,7 @@
 @media (min-width: 761px) and (min-height: 501px) {
   .surface-search { position: sticky; top: 0; z-index: 3; }
   .sidebar-scroll { scroll-padding-top: 36px; }
+  .sidebar-collapsed .create-split .place-link span { display: block; font-size: var(--g1-type-kbd); }
   .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
   .sidebar-collapsed .sidebar-scroll { scrollbar-width: none; }
   .sidebar-collapsed .sidebar :is(.brand-row strong, .surface-connection, .new-chat b, .new-chat kbd, .surface-search .chat-search, .search-skeleton, .place-link span, .place-link small, .place-nav h2, .chat-list, .collapse-label, footer kbd) { display: none; }
@@ -76,7 +77,7 @@
   .main-pane { isolation: isolate; }
   .brand-row > .surface-connection { margin-left: 0; }
   .brand-row > .drawer-close { width: 44px; height: 44px; flex: none; }
-  .surface-actions { display: flex; }
+  .surface-actions { display: grid; }
   .surface-actions > :is(.new-chat, .place-link) { flex: 1; min-height: 44px; }
   .surface-actions kbd, .surface-actions small { display: none; }
   .surface-search :is(.chat-search, .palette-button, .search-skeleton), .place-nav .place-link, .sidebar :is(.list-head, .chat-row, .chat-row-rename, .load-older, .page-list-error button) { min-height: 44px; }
