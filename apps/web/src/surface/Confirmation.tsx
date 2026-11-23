@@ -31,6 +31,7 @@ type Committed = { status: "committed"; receipt: ReviewText };
 type Common = { action: ReviewText; keep: ReviewText; effect: ReviewText; surface?: string };
 type Inline = Common & Operation<Committed & { value: ReviewText }> & {
   level: 1;
+  disabled?: boolean;
   label: ReviewText;
   value: ReviewText;
   onCommitted(value: ReviewText): void;
@@ -45,8 +46,8 @@ type Review = Common & Operation<Committed> & {
   undo: ReviewText;
   fields?: readonly { label: ReviewText; value: ReviewText | { provided: boolean } }[];
   proof: { kind: "name"; name: ReviewText } | { kind: "scope"; name?: never; label?: ReviewText };
-  // An adapter with its own trigger, receipt, and focus return mounts the review already open.
-  external?: { onKeep(): void };
+  // An external trigger mounts the review already open. A supplied opener is resolved after close.
+  external?: { onKeep?(): void; opener?(): HTMLElement | null };
   activity?: HTMLElement;
 };
 export type ConfirmationProps = Inline | Review;
@@ -94,9 +95,10 @@ export function Confirmation(props: ConfirmationProps) {
     const request = nextFocus.current;
     if (!request) return;
     nextFocus.current = null;
-    const mode = attempt.level === 1 ? "inline" : attempt.external ? "external-dialog" : "dialog";
+    const external = attempt.level === 2 ? attempt.external : undefined;
+    const mode = attempt.level === 1 ? "inline" : external && !external.opener ? "external-dialog" : "dialog";
     const target = focusDestination(mode, request.outcome, request.cause);
-    if (target === "opener") opener.current?.focus();
+    if (target === "opener") (external?.opener?.() ?? opener.current)?.focus();
     if (target === "result") {
       status.current?.focus({ preventScroll: true });
       status.current?.scrollIntoView({ block: "nearest" });
@@ -114,7 +116,7 @@ export function Confirmation(props: ConfirmationProps) {
     if (phaseRef.current !== "review") return;
     nextFocus.current = { outcome: failure ? "refusal" : "none", cause };
     transition("idle");
-    if (attempt.level === 2) attempt.external?.onKeep();
+    if (attempt.level === 2) attempt.external?.onKeep?.();
   };
   const run = async (check: boolean) => {
     if (check ? phaseRef.current !== "unknown" : phaseRef.current !== "review" || !proved || failure?.final) return;
@@ -160,7 +162,7 @@ export function Confirmation(props: ConfirmationProps) {
     <div className="confirmation-row">
       <span id={`${id}-label`}>{props.label}</span>
       <span className="confirmation-current">{props.value}</span>
-      <button ref={opener} type="button" data-write-surface={props.surface} disabled={open} onClick={start}>{props.action}</button>
+      <button ref={opener} type="button" data-write-surface={props.surface} disabled={open || props.disabled} onClick={start}>{props.action}</button>
     </div>
     {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep("Escape"); } }}>
