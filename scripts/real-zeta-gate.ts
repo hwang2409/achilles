@@ -11,6 +11,7 @@ import { approvalModeWaiter, assertServerAskWins, gateCreationApprovalDefaults, 
 import { gatePalette } from "./gate-palette";
 import { gateVim } from "./gate-vim";
 import { gateHomeSettings } from "./gate-home-settings";
+import { gateMcpWrites, mcpWriteArtifacts } from "./gate-mcp-writes";
 
 import { writeSurfaceIds as registryWriteSurfaceIds } from "../apps/web/src/writeSurfaces";
 import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
@@ -161,6 +162,7 @@ try {
   await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
   const env = {
     ...process.env,
+    ZETA_TOOL_SUBPROCESS: undefined,
     PYTHONPATH: zeta,
     ZETA_HOME: zetaHome,
     ZETA_ACCOUNT_HOME: zetaHome,
@@ -409,6 +411,7 @@ with _database() as db:
   console.log("metric strips fit at 320px, 360px, 390px, 1440px and effective 200% zoom");
   // before any chat tab opens: a chat tab keeps control, and the settings change borrows it
   await gateHomeSettings(browser, origin, zetaHome, waitFor, screenshotDir);
+  const mcpWriteSurfaceIds = await gateMcpWrites(browser, origin, zetaHome, cwd, screenshotDir);
   const telemetryPage = await browser.newPage();
   const telemetryChatPage = await browser.newPage();
   const telemetryFailures: string[] = [];
@@ -3169,7 +3172,7 @@ with _database() as db:
   const observerLatestSource = await page.locator('[data-part="message"]').last().innerText();
   if (!observerLatestSource.trim()) throw new Error("controller had no source-derived latest chat text");
   const observerPage = await browser.newPage();
-  const renderedWriteSurfaceIds = new Set<string>();
+  const renderedWriteSurfaceIds = new Set<string>(mcpWriteSurfaceIds);
   const recordRenderedWriteSurfaces = async (target: typeof observerPage) => {
     for (const id of await target.locator("[data-write-surface]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-write-surface")).filter((id): id is string => Boolean(id)))) renderedWriteSurfaceIds.add(id);
   };
@@ -3447,9 +3450,9 @@ with _database() as db:
       zeta: zetaRef,
       timestamps: { started: new Date().toISOString(), completed: new Date().toISOString() },
       viewports: ["390x760", "390x844", "1280x900", "1440x900", "1920x900"],
-      routes: [new URL(observerPage.url()).pathname, "/telemetry"],
+      routes: [new URL(observerPage.url()).pathname, "/telemetry", "/connections"],
       states: ["observer-a", "observer-b-after-failed-takeover", "controller-c-restored", "telemetry-observer"],
-      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts],
+      artifacts: ["page-chat-closed-390x844.png", "page-chat-open-390x760.png", "state-page-chat-closed-1280.png", "state-page-chat-closed-1440.png", "state-page-chat-closed-1920.png", "observer-active-chat-390x760.png", "observer-active-chat-1440x900.png", "observer-controller-restored-1440x900.png", "observer-takeover-no-reload-1440x900.png", ...telemetryArtifacts, ...mcpWriteArtifacts],
       writeSurfaceRegistry: registry,
       renderedWriteSurfaceIds: observed,
       unobservedWriteSurfaceIds: registry.filter((id) => !renderedWriteSurfaceIds.has(id)),

@@ -31,7 +31,8 @@ function receipt(outcome: Extract<McpOutcome, { status: "committed" }>) {
   return `${base}${sessions}${restart.complete ? "" : " the restart scan was incomplete; other running sessions may need restart."}` as ReviewText;
 }
 
-function operation(owner: McpOwner, sent: McpAttempt) {
+function operation(owner: McpOwner, reviewed: McpAttempt) {
+  let sent = reviewed;
   async function perform(check: boolean): Promise<Result<{ status: "committed"; receipt: ReviewText; value: ReviewText }>> {
     const form = owner.open();
     let outcome: McpOutcome = { status: "unknown" };
@@ -43,7 +44,7 @@ function operation(owner: McpOwner, sent: McpAttempt) {
     if (result.status === "unknown") return { status: "unknown" };
     return { status: "failed", reason: "not-applied", message: reviewText(copy[result.status]), final: true };
   }
-  return { execute: () => perform(false), checkResult: () => perform(true) };
+  return { execute: () => { sent = { ...reviewed }; return perform(false); }, checkResult: () => perform(true) };
 }
 
 type Review = { sent: McpAttempt; origin: HTMLButtonElement };
