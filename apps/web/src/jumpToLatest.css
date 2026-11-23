@@ -16,19 +16,23 @@
   min-height: 0;
 }
 .transcript [data-part="jump-to-latest-lane"]:not([data-jump-owned="true"]) { display: none !important; }
+/* Reserve the lane when no jump control is needed, keeping the scrollport stable. */
+.transcript:has(> [data-part="timeline-frame"]):not(:has(> [data-jump-owned="true"])) { padding-block-end: 48px; }
 .transcript > [data-part="jump-to-latest-lane"] {
   display: flex;
   flex: none;
   min-height: 48px;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 max(12px, calc((100% - 880px) / 2));
+  padding: 0 max(12px, calc((100% - var(--g1-transcript-width)) / 2));
 }
 .transcript > [data-part="jump-to-latest-lane"] [data-part="jump-to-latest"] {
   padding: 8px 12px;
-  color: var(--fulcrum-bg);
-  background: var(--fulcrum-fg);
-  border: 1px solid var(--fulcrum-border);
+  margin-inline: 0;
+  color: var(--g1-fg);
+  background: var(--g1-bg);
+  border: 1px solid var(--g1-control-border);
+  border-radius: var(--g1-radius-control);
   white-space: nowrap;
 }
 [data-jump-label="compact"] { display: none; }
