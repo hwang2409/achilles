@@ -1363,13 +1363,16 @@ with _database() as db:
     await gateWait.playwright(page.locator(".run-state.state-running"), "waitFor", { timeout: 20_000 });
     const firstPageChat = await homeSessionId();
     await gateWait.playwright(page.locator(`[data-chat-id="${firstPageChat}"]`), "waitFor", { timeout: 20_000 });
+    const mcpConfigPath = join(zetaHome, "mcp.json");
+    const baselineMcp = await readFile(mcpConfigPath);
+    const config = JSON.parse(baselineMcp.toString());
     const oauth = oauthFixture();
     try {
-      await Bun.write(join(zetaHome, "mcp.json"), JSON.stringify(oauth.config));
+      await Bun.write(mcpConfigPath, JSON.stringify({ ...config, servers: { ...config.servers, ...oauth.config.servers } }));
       await refuseMcpOAuth(browser, origin);
     } finally {
       oauth.stop();
-      await rm(join(zetaHome, "mcp.json"), { force: true });
+      await writeFile(mcpConfigPath, baselineMcp);
     }
     if (!zetaProcess.kill("SIGUSR2")) throw new Error("could not release the first page turn");
     await waitFor(async () => Boolean(heldAttach), "old selected-chat attach catalogue held");
