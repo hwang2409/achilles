@@ -27,6 +27,7 @@
 @media (max-width: 760px), (max-height: 500px) {
   .accounts-place { padding: var(--g1-space-4); }
 }
+
 .account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .account-action { width: fit-content; max-width: 100%; min-height: 44px; padding: 8px 12px; text-align: start; }
 .account-login { max-width: 40rem; margin-block: 24px; padding: 16px; border: 1px solid var(--fulcrum-border); border-inline-start: 2px solid var(--fulcrum-accent); overflow-wrap: anywhere; }

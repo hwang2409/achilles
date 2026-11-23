@@ -285,6 +285,7 @@ test("an open edit survives a socket drop that unmounts the library", async () =
   const again = render(createElement(LibraryModule, { client: zeta.client(), kind: "skills", reads: { catalog: true, read: true }, write }));
   expect(textarea(again, /^alpha · file text/).value).toBe(`${fileText}draft\n`);
   await press(again, "save skill");
+  expect(await again.findByText(/^saved alpha to home · skills\./)).toBeTruthy();
   expect(zeta.writes()).toEqual([{ name: "alpha", scope: "home", revision: await sha(fileText), mutation: { document: `${fileText}draft\n` } }]);
 });
 
