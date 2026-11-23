@@ -23,6 +23,8 @@ ZETA_CHECKOUT=$PWD/.cache/zeta bun scripts/real-zeta-gate.ts
 start the web app with `uv run achilles serve --host 127.0.0.1 --port 5190` after building the web assets.
 ```
 
+local real-zeta gates are parallel-safe: each uses its own temporary home and a free port, with no lock needed.
+
 clone fulcrum once into the ignored cache; never use a fulcrum worktree or the user's fulcrum checkout. use the pin in `fulcrum.rev`.
 
 worktrees live only under `.worktrees/<name>` under the checkout. integrate with `git merge`, not rebase, and never force-push.
