@@ -108,6 +108,7 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     await inspect(tab, mcpAddArtifacts[2]);
     await confirm(tab);
     await receipt(tab).waitFor(opts);
+    await tab.getByRole("link", { name: /fixture-add-http/ }).click(opts);
     await tab.getByText("oauth configured · sign-in state not checked", { exact: true }).waitFor(opts);
     await assertCleared(tab);
     await inspect(tab);
@@ -156,10 +157,10 @@ export async function gateMcpAdd(browser: Browser, origin: string, home: string,
     await writeFile(userFile, JSON.stringify(outOfBand));
     await confirm(tab);
     await tab.getByRole("alert").filter({ hasText: "configuration changed elsewhere" }).waitFor(opts);
-    await tab.getByRole("link", { name: /fixture-outside/ }).waitFor(opts);
     await assertCleared(tab);
     if (!errors.includes(-32009) || (await Bun.file(userFile).text()).includes("fixture-stale-add")) throw new Error("stale add unexpectedly wrote");
     await button(tab, "back to fields").click(opts);
+    await tab.getByRole("link", { name: /fixture-outside/ }).waitFor(opts);
     await fill(tab, { command: mark("command") });
     await review(tab);
     await confirm(tab);
