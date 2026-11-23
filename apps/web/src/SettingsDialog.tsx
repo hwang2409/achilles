@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import {
-  AUTO_THEME,
+  themeChoices,
   resetSettings,
   resetTarget,
   updateSettings,
@@ -17,13 +17,13 @@ import { WRITE_SURFACE } from "./writeSurfaces";
 import "./settings-dialog.css";
 
 const swatches = ["bg", "fg", "accent", "ok", "warn", "danger"];
-const uiFonts: Array<[UiFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "system"]];
-const codeFonts: Array<[CodeFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "system mono"]];
-const densities: Array<[Density, string]> = [["comfortable", "comfortable"], ["compact", "compact"]];
-const displayedThemes: readonly ThemeChoice[] = ["auto", "github-dark", "gruvbox-dark", "gruvbox-light", "dracula", "nord", "tokyo-night", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "github-light", "one-dark"];
+const uiFonts: Array<[UiFont, string]> = [["geist", "Geist"], ["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-sans", "IBM Plex Sans"], ["inter", "Inter"], ["system", "System"]];
+const codeFonts: Array<[CodeFont, string]> = [["jetbrains-mono", "JetBrains Mono"], ["ibm-plex-mono", "IBM Plex Mono"], ["system-mono", "System monospace"]];
+const densities: Array<[Density, string]> = [["comfortable", "Comfortable"], ["compact", "Compact"]];
+const themeLabels: Record<ThemeChoice, string> = { auto: "System", "g1-light": "Light", "g1-dark": "Dark" };
 
 function Swatch({ theme }: { theme: ThemeChoice }) {
-  return <span className="settings-swatch" aria-hidden="true" data-fulcrum-theme={theme === AUTO_THEME ? undefined : theme}>
+  return <span className="settings-swatch" aria-hidden="true" data-achilles-theme={theme}>
     {swatches.map((name) => <span key={name} style={{ background: `var(--fulcrum-${name})` }} />)}
   </span>;
 }
@@ -32,7 +32,7 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
   const options = useRef<Array<HTMLButtonElement | null>>([]);
   const focus = (index: number) => options.current[index]?.focus();
   const onKeyDown = (event: KeyboardEvent, index: number) => {
-    const last = displayedThemes.length - 1;
+    const last = themeChoices.length - 1;
     const next: Record<string, number> = {
       ArrowDown: Math.min(last, index + 2),
       ArrowUp: Math.max(0, index - 2),
@@ -44,7 +44,7 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
     if (event.key in next) { event.preventDefault(); focus(next[event.key]!); }
   };
   return <div className="theme-options" role="listbox" aria-label="theme">
-    {displayedThemes.map((theme, index) => <button
+    {themeChoices.map((theme, index) => <button
       key={theme}
       ref={(node) => { options.current[index] = node; }}
       type="button"
@@ -55,7 +55,7 @@ function ThemeList({ value, onChange }: { value: ThemeChoice; onChange(value: Th
       onKeyDown={(event) => onKeyDown(event, index)}
       onClick={() => onChange(theme)}
     >
-      <span>{theme}</span><Swatch theme={theme} />
+      <span>{themeLabels[theme]}</span><Swatch theme={theme} />
     </button>)}
   </div>;
 }
@@ -127,8 +127,8 @@ export function SettingsDialog({ open, onClose, serverForcesAsk = false, canWrit
     <div className="settings-panel">
       <div className="settings-titlebar"><div><span className="settings-mark" /><h2 id="settings-title">settings</h2></div><div><span>saved in this browser</span><button type="button" onClick={onClose}>esc</button></div></div>
       <div className="settings-content">
-        <Row title="theme" description="fulcrum palettes. auto follows the OS."><div data-write-surface={WRITE_SURFACE.settingsTheme}><ThemeList value={settings.theme} onChange={(theme) => updateSettings({ theme })} /></div></Row>
-        <Row title="fonts" description="self-hosted. code stays mono."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} surface={WRITE_SURFACE.settingsUiFont} onChange={(uiFont) => updateSettings({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} surface={WRITE_SURFACE.settingsCodeFont} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
+        <Row title="theme" description="System follows your device’s light or dark appearance."><div data-write-surface={WRITE_SURFACE.settingsTheme}><ThemeList value={settings.theme} onChange={(theme) => updateSettings({ theme })} /></div></Row>
+        <Row title="fonts" description="Code uses a monospace font."><div className="font-options"><span>ui</span><Segments label="UI font" value={settings.uiFont} choices={uiFonts} surface={WRITE_SURFACE.settingsUiFont} onChange={(uiFont) => updateSettings({ uiFont })} /><span>code</span><Segments label="code font" value={settings.codeFont} choices={codeFonts} surface={WRITE_SURFACE.settingsCodeFont} onChange={(codeFont) => updateSettings({ codeFont })} /></div></Row>
         <Row title="size" description="app text and composers."><div className="size-density"><Segments label="font size" value={settings.size} choices={([13, 14, 15, 16] as Settings["size"][]).map((size) => [size, String(size)])} surface={WRITE_SURFACE.settingsSize} onChange={(size) => updateSettings({ size })} /><span>density</span><Segments label="density" value={settings.density} choices={densities} surface={WRITE_SURFACE.settingsDensity} onChange={(density) => updateSettings({ density })} /></div></Row>
         <Row title="vim mode" description="desktop only, in the composer."><div className="setting-explanation"><Toggle label="vim mode" checked={settings.vim} surface={WRITE_SURFACE.settingsVim} onChange={(vim) => updateSettings({ vim })} /><span>starts in INSERT. esc goes to NORMAL; esc in NORMAL leaves the composer.</span></div></Row>
       </div>

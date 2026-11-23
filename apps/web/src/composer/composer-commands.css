@@ -5,7 +5,7 @@
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px 12px;
   padding: 8px 12px; border: 1px solid var(--fulcrum-border);
   background: var(--fulcrum-surface); color: var(--fulcrum-fg);
-  font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, monospace);
+  font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui));
 }
 .composer-command-output p { margin: 8px 0; }
 .composer-command-output p[role="alert"] { color: var(--fulcrum-danger); }

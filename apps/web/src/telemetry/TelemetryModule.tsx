@@ -163,7 +163,7 @@ function Tools({ status, refreshing, range, chooseRange, refresh }: { status?: T
 /** Only the interior: the achilles shell draws the sidebar, top bar, and route title around it. */
 function Frame({ tools, tabs, children, detail }: { tools?: ReactNode; tabs?: ReactNode; children: ReactNode; detail?: boolean }) {
   return (
-    <div className={detail ? "telemetry-module tm-detail-frame" : "telemetry-module"} data-fulcrum-theme="gruvbox-dark">
+    <div className={detail ? "telemetry-module tm-detail-frame" : "telemetry-module"}>
       {tabs && <div className="tm-tabs-row">{tabs}{tools}</div>}
       <ShellDockSlot />
       <main className="tm-main">{children}</main>
