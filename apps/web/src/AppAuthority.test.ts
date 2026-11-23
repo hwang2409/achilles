@@ -12,7 +12,7 @@ const { fireEvent, render } = await import("@testing-library/react");
 
 const chat = { session_id: "session", page_id: "page", page_route: "/", title: "Fixture chat", message_sent: true, titled_by_user: true, last_state: "idle", updated_at: "2026-01-01" };
 const page = { id: "page", route: "/", title: "Fixture page", zeta_session_id: null, workspace: "/fixture", create_mode: false, layout: { blocks: [] } };
-const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "agent_run_catalog", "list_sessions"]);
+const reads = new Set(["hello", "status", "session_settings", "session_history_and_subscribe", "session_history", "unsubscribe", "delivery_status", "account_list", "login_status", "skill_catalog", "skill_read", "home_settings_get", "state_settings", "mcp_server_list", "agent_run_catalog", "list_sessions"]);
 const pendingRecord = JSON.stringify([{ sessionId: "session", pageId: "page", mode: "allow", stage: "created" }]);
 type Authority = "observer" | "controller";
 // `path`: the route to open (default the chats route). `observerBanner: false`: this route shows no observer banner.
@@ -278,6 +278,40 @@ const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "vi
   }
 } });
 
+function mcpWrite(id: "mcp.enabled" | "mcp.trusted" | "mcp.remove", method: string): Row {
+  const fixture = { name: "fixture-project", scope: "project", enabled: true, trusted: false, status: "pending trust",
+    auth: "none", tool_count: 0, config: { transport: "stdio", command: "<redacted>" } };
+  const view = (items: object[] = [fixture]) => ({ revision: "a".repeat(64), data: { items } });
+  const roles: string[] = [];
+  return { kind: "visible", options: { path: "/connections/project/fixture-project", observerBanner: false, roles, rpc: {
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: ["mcp_server_list", ...(params.role === "controller" ? [method] : [])] } } }),
+    mcp_server_list: ({ scope }) => ({ result: view(scope === "user" ? [] : [fixture]) }),
+    [method]: () => ({ result: { ...view(id === "mcp.remove" ? [] : [{ ...fixture, enabled: false, trusted: true }]),
+      restart: { serve: false, sessions: [], complete: true } } }),
+  } }, check: async (app, authority, writes) => {
+    const requestStart = roles.length;
+    expect(roles.at(-1)).toBe("observer");
+    const trigger = select(app, tag(id));
+    await click(trigger);
+    expect(writes).toEqual([]);
+    expect(roles).toHaveLength(requestStart);
+    if (id !== "mcp.enabled") await change(app.getByRole("textbox", { name: "type fixture-project to confirm" }), "fixture-project");
+    const confirm = document.querySelector<HTMLButtonElement>(".confirmation-primary")!;
+    expect(confirm.disabled).toBe(false);
+    if (id === "mcp.enabled") await click(confirm);
+    else await act(async () => { fireEvent.submit(confirm.form!); });
+    if (authority === "observer") {
+      expect(app.getByRole("alert").textContent).toContain("a chat tab keeps control");
+      expect(roles.slice(requestStart)).toEqual(["controller"]);
+      expect(writes).toEqual([]);
+    } else {
+      expect(roles.slice(requestStart)).toEqual(["controller", "observer"]);
+      expect(writes).toEqual([method]);
+    }
+  } };
+}
+
 const rows: Record<WriteSurfaceId, Row> = {
   "agents.send": { kind: "visible", options: { path: "/agents/session/fixture-run", observerBanner: false, rpc: {
     hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: ["agent_run_catalog_v1", "child_runs"],
@@ -460,6 +494,9 @@ const rows: Record<WriteSurfaceId, Row> = {
     expect(await app.findByText(/^saved fixture-skill to home · skills\. running sessions pick up the change at their next catalog refresh\.$/)).toBeTruthy();
     didWrite(writes, "skill_write");
   } },
+  "mcp.enabled": mcpWrite("mcp.enabled", "mcp_server_set_enabled"),
+  "mcp.trusted": mcpWrite("mcp.trusted", "mcp_server_set_trusted"),
+  "mcp.remove": mcpWrite("mcp.remove", "mcp_server_remove"),
   "settings.telemetry": { kind: "visible", options: homeSettings, check: async (app, authority, writes) => {
     // the settings place browses as an observer; confirming the change borrows control for the one update.
     await click(await app.findByText("turn on telemetry", { selector: tag("settings.telemetry") }));

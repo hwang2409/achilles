@@ -59,7 +59,7 @@ function projectRow(value: unknown) {
 export type McpRow = NonNullable<ReturnType<typeof projectRow>>;
 
 // Ignore additive fields; never keep the wire document or silently drop an unreadable row.
-export function projectMcpList(value: unknown, scope: McpScope): McpRow[] | null {
+export function projectMcpSnapshot(value: unknown, scope: McpScope) {
   const list = record(value);
   if (typeof list?.revision !== "string" || !/^[a-f0-9]{64}$/.test(list.revision)) return null;
   const items = record(list.data)?.items;
@@ -72,7 +72,11 @@ export function projectMcpList(value: unknown, scope: McpScope): McpRow[] | null
     names.add(row.name);
     rows.push(row);
   }
-  return rows;
+  return { rows, revision: list.revision };
+}
+
+export function projectMcpList(value: unknown, scope: McpScope) {
+  return projectMcpSnapshot(value, scope)?.rows ?? null;
 }
 
 export function mcpReadFailure(error: unknown) {
@@ -84,32 +88,42 @@ export function mcpReadFailure(error: unknown) {
 }
 
 type Failure = ReturnType<typeof mcpReadFailure> | { method: typeof METHOD; reason: "invalid_response" };
-type ScopeRead = { rows: McpRow[]; at: number } | { failure: Failure };
+type ScopeRead = { rows: McpRow[]; revision: string; at: number } | { failure: Failure };
 export const canReadMcp = (client: ZetaClient) => supportsFeature(client, "mcp_management_v1") && supportsRequest(client, METHOD);
 
-export function createMcpReads() {
+export function createMcpReads(canRead = canReadMcp) {
   let snapshot: Record<McpScope, ScopeRead> | null = null;
   const listeners = new Set<() => void>();
+  let generation = 0;
+  const publish = () => listeners.forEach((listener) => listener());
   return {
     snapshot: () => snapshot,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    async refresh(client: ZetaClient, signal: AbortSignal) {
-      if (!canReadMcp(client)) {
+    apply(scope: McpRow["scope"], result: NonNullable<ReturnType<typeof projectMcpSnapshot>>) {
+      generation++;
+      if (!snapshot) return;
+      snapshot = { ...snapshot, [scope]: { ...result, at: Date.now() } };
+      publish();
+    },
+    async refresh(client: ZetaClient, signal?: AbortSignal) {
+      const current = ++generation;
+      if (!canRead(client)) {
         snapshot = null;
       } else {
         const read = async (scope: McpScope): Promise<ScopeRead> => {
           try {
-            const rows = projectMcpList(await client.request(METHOD, { scope }, { signal }), scope);
-            return rows ? { rows, at: Date.now() } : { failure: { method: METHOD, reason: "invalid_response" } };
+            const result = projectMcpSnapshot(await client.request(METHOD, { scope }, { signal, timeoutMs: 5_000 }), scope);
+            return result ? { ...result, at: Date.now() } : { failure: { method: METHOD, reason: "invalid_response" } };
           } catch (error: unknown) {
             return { failure: mcpReadFailure(error) };
           }
         };
         const [effective, user, project] = await Promise.all(mcpScopes.map(read));
-        if (signal.aborted) return;
+        if (signal?.aborted || current !== generation) return null;
         snapshot = { effective, user, project };
       }
-      listeners.forEach((listener) => listener());
+      publish();
+      return snapshot;
     },
   };
 }
