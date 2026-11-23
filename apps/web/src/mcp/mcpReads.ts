@@ -43,12 +43,15 @@ function projectConfig(value: unknown, malformed: boolean) {
   };
 }
 
+// Names are protocol identities. Reject non-displayable or non-round-tripping path segments.
+export const isMcpName = (name: unknown): name is string => typeof name === "string" && !!name.trim()
+  && [...name].length <= 256 && name !== "." && name !== ".." && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(name);
+
 function projectRow(value: unknown) {
   const row = record(value);
   if (!row) return null;
   const { name, scope, enabled, trusted, status, auth, tool_count: toolCount } = row;
-  // Names are protocol identities. Reject non-displayable or non-round-tripping path segments.
-  if (typeof name !== "string" || !name.trim() || [...name].length > 256 || name === "." || name === ".." || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(name)) return null;
+  if (!isMcpName(name)) return null;
   if (!oneOf(CONCRETE, scope) || typeof enabled !== "boolean" || typeof trusted !== "boolean" || !oneOf(STATUSES, status) || !oneOf(AUTH, auth)) return null;
   if (typeof toolCount !== "number" || !Number.isSafeInteger(toolCount) || toolCount < 0) return null;
   const config = projectConfig(row.config, status === "malformed");

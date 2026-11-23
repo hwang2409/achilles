@@ -21,7 +21,7 @@ const yes = reviewText("enabled"), no = reviewText("disabled");
 const running = "running sessions are unchanged until restart.";
 const trustEffect = reviewText("zeta will fingerprint the exact current project definition when you trust it. changing its command, arguments, environment, URL, headers, OAuth, or client settings clears this trust.");
 
-function receipt(outcome: Extract<McpOutcome, { status: "committed" }>) {
+export function mcpReceipt(outcome: Extract<McpOutcome, { status: "committed" }>) {
   const base = "new sessions use this configuration. running sessions are unchanged. zeta serve does not need to restart.";
   const restart = outcome.restart;
   if (!restart) return reviewText(`${base} the current configuration matches; restart details were not available.`);
@@ -29,6 +29,11 @@ function receipt(outcome: Extract<McpOutcome, { status: "committed" }>) {
     : restart.complete ? " no running sessions were reported as needing restart." : "";
   // The owner projects only validated session identities into the receipt.
   return `${base}${sessions}${restart.complete ? "" : " the restart scan was incomplete; other running sessions may need restart."}` as ReviewText;
+}
+
+export function mcpFailure(result: Exclude<McpOutcome, { status: "committed" }>): Result<never> {
+  if (result.status === "unknown") return { status: "unknown" };
+  return { status: "failed", reason: "not-applied", message: reviewText(copy[result.status]), final: true };
 }
 
 function operation(owner: McpOwner, reviewed: McpAttempt) {
@@ -40,9 +45,8 @@ function operation(owner: McpOwner, reviewed: McpAttempt) {
     try { await (check ? owner.check : owner.execute)(form, sent); }
     finally { detach(); owner.close(form); }
     const result = outcome as McpOutcome;
-    if (result.status === "committed") return { status: "committed", receipt: receipt(result), value: sent.action === "enabled" && sent.value ? yes : no };
-    if (result.status === "unknown") return { status: "unknown" };
-    return { status: "failed", reason: "not-applied", message: reviewText(copy[result.status]), final: true };
+    if (result.status === "committed") return { status: "committed", receipt: mcpReceipt(result), value: sent.action === "enabled" && sent.value ? yes : no };
+    return mcpFailure(result);
   }
   return { execute: () => { sent = { ...reviewed }; return perform(false); }, checkResult: () => perform(true) };
 }
