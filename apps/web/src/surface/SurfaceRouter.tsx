@@ -7,6 +7,8 @@ import { LibraryModule } from "../library/LibraryModule";
 import { TelemetryModule } from "../telemetry/TelemetryModule";
 import { ProjectsModule } from "../projects/ProjectsModule";
 import { SessionsModule } from "../sessions/SessionsModule";
+import { McpModule } from "../mcp/McpModule";
+import { createMcpReads } from "../mcp/mcpReads";
 import { SettingsModule } from "../settings/SettingsModule";
 import { HOME_SETTINGS_FEATURE } from "../settings/homeSettings";
 import { createConnection, isObserverPresentation, supportsFeature, supportsRequest, type Connection } from "../zeta";
@@ -44,6 +46,7 @@ export function SurfaceRouter() {
   const [projectsDropped] = useState(() => new Set<string>());
   // the one library writer: a save and its outcome outlive the remount; it settles reads on the current client.
   const [libraryWriter] = useState(() => createLibraryWriter(undefined, () => connection.client));
+  const [mcpReads] = useState(createMcpReads);
   const [liveClient] = useState(() => () => connection.client);
   const takeLibraryControl = async () => {
     setLibraryControl(null);
@@ -69,6 +72,8 @@ export function SurfaceRouter() {
       {connecting ? <ModuleState kind="loading" title="connecting to zeta…" />
         : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: () => connection.retryNow() }} />}
     </ModuleFrame>;
+  } else if (route.id === "connections") {
+    content = <McpModule client={client} reads={mcpReads} pathname={pathname} connecting={connecting} retryConnection={() => connection.retryNow()} />;
   } else if (route.id === "settings") {
     content = <SettingsModule client={client} connecting={connecting} withControl={(read) => connection.withControl(read)} live={liveClient} />;
   } else if (route.id !== "pages") {

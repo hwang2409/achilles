@@ -21,7 +21,7 @@ export const surfaceRoutes = ([
   { id: "agent-profiles", label: "agent profiles", group: "library", capability: "read", icon: "M10 5a2 2 0 1 1-4 0 2 2 0 1 1 4 0z M3 13a5 5 0 0 1 10 0" },
   { id: "settings", label: "settings", group: "manage", capability: "manage", icon: "M2 5h12 M2 11h12 M6 3v4 M10 9v4" },
   { id: "accounts", label: "accounts", group: "manage", capability: "manage", icon: "M2 4h12v8H2z M4 7h3 M4 9h6" },
-  { id: "mcp", label: "mcp connections", group: "manage", capability: "manage", icon: "M5 2v3 M11 2v3 M4 5h8v3a4 4 0 0 1-8 0z M8 12v2" },
+  { id: "connections", label: "mcp connections", group: "manage", capability: "manage", icon: "M5 2v3 M11 2v3 M4 5h8v3a4 4 0 0 1-8 0z M8 12v2", children: true },
   { id: "create", label: "create", capability: "agent", icon: "m8 2 6 6-6 6-6-6z" },
 ] satisfies Entry[]).map((entry, order) => {
   const path = `/${entry.id}`;
@@ -31,6 +31,7 @@ export const surfaceRoutes = ([
 export type SurfaceRoute = (typeof surfaceRoutes)[number];
 export const matchSurfaceRoute = (pathname: string) => surfaceRoutes.find((route) => route.match(pathname));
 export const chatsRoute = surfaceRoutes[0];
+export const connectionsRoute = surfaceRoutes.find((route) => route.id === "connections")!;
 export const createRoute = surfaceRoutes.find((route) => route.id === "create")!;
 
 export const surfaceHref = (path: string) => {
