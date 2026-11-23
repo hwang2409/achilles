@@ -5,6 +5,7 @@ const account = (id: string, flags: Partial<Account> = {}): Account => ({
   account: id,
   label: id.split(":")[1] ?? id,
   detail: null,
+  usage: null,
   available: true,
   current: false,
   default: false,
