@@ -8,15 +8,15 @@
 .create-heading a, .create-landing a { color: inherit; text-decoration: none; }
 .create-heading a:hover, .create-landing a:hover { color: var(--fulcrum-accent); }
 .create-scroll { min-height: 0; overflow: auto; flex: 1; }
-.create-landing { max-width: 928px; margin: 0 auto; padding: 40px 24px; font-size: 14px; }
-.create-landing h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.25; text-wrap: balance; }
+.create-landing { max-width: 928px; margin: 0 auto; padding: var(--g1-page-padding); font-size: 14px; }
+.create-landing h1 { margin: 0 0 8px; font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); line-height: 1.25; text-wrap: balance; }
 .create-landing p { margin: 0 0 16px; color: var(--fulcrum-muted); text-wrap: pretty; }
-.create-landing form { border: 1px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-fg) 4%, transparent); padding: 10px 12px 0; }
+.create-landing form { border: 1px solid var(--g1-control-border); background: var(--g1-bg-subtle); padding: 10px 12px 0; }
 .create-landing textarea { display: block; width: 100%; resize: vertical; min-height: 56px; padding: 4px; color: inherit; background: transparent; border: 0; font: inherit; }
-.create-landing textarea:focus-visible { outline: 1px solid var(--fulcrum-accent); }
+.create-landing textarea:focus-visible { outline: var(--g1-focus-ring); }
 .create-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
 .create-form-actions span, .create-build-status { color: var(--fulcrum-muted); font-size: 12px; }
-.create-form-actions button { flex: 0 0 112px; min-height: 36px; white-space: nowrap; background: var(--fulcrum-accent); color: var(--fulcrum-bg); padding-inline: 12px; }
+.create-form-actions button { flex: 0 0 112px; min-height: 36px; white-space: nowrap; background: var(--g1-primary); color: var(--g1-primary-text); padding-inline: 12px; }
 .create-form-actions button[aria-disabled="true"] { color: var(--fulcrum-muted); background: transparent; border-color: var(--fulcrum-border); cursor: default; }
 .create-build-status { min-height: 24px; padding-top: 4px; }
 .create-build-status[role="alert"] { color: var(--fulcrum-danger); }
@@ -28,16 +28,17 @@
 .create-landing section header button { min-height: 24px; }
 .create-refresh { display: flex; align-items: baseline; gap: 8px; }
 .create-landing h2 { margin: 0; font-size: 15px; }
-.create-landing ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.create-landing ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.create-landing li > a:hover { background: var(--g1-hover); }
 .create-landing li > a { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; }
-.create-landing li[data-state] { border-left: 2px solid var(--fulcrum-accent); background: color-mix(in srgb, var(--fulcrum-accent) 6%, transparent); }
+.create-landing li[data-state] { border-inline-start: var(--g1-selection-width) solid var(--g1-selection); background: var(--g1-selected); }
 .create-landing li[data-state="needs you"] { border-color: var(--fulcrum-warn); background: color-mix(in srgb, var(--fulcrum-warn) 9%, transparent); }
 .create-landing li[data-state="failed"] { border-color: var(--fulcrum-danger); }
 .create-landing li span, .create-landing .create-made a { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .create-landing li span + span { text-align: right; }
 .create-landing li b { font-size: 12px; }
-.create-landing .create-made { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.create-made li { border: 1px solid var(--fulcrum-border); }
+.create-landing section ul > li { border-bottom: 1px solid var(--g1-rule); }
+.create-landing .build-meta, .create-made small { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
 @media (min-width: 761px) and (min-height: 501px) {
   .sidebar-collapsed .create-split button { display: none; }
 }
@@ -47,15 +48,14 @@
   .create-split button span { display: none; }
   .create-heading { min-height: 48px; padding-inline: 16px; }
   .create-heading a { min-height: 40px; display: flex; align-items: center; }
-  .create-landing { padding: 24px 16px; }
+  .create-landing { padding: var(--g1-space-4); }
   .create-landing textarea { font-size: 16px; }
   .create-landing button { min-height: 44px; }
-  .create-landing .create-made { grid-template-columns: 1fr; }
 }
 
 .build-status { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; color: var(--fulcrum-muted); font-size: 11px; white-space: nowrap; }
 .build-status :is(a, span) { color: var(--fulcrum-accent); text-decoration: none; }
-.build-status :is(a, span)::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: currentColor; }
+.build-status :is(a, span)::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-right: 6px; background: currentColor; }
 .build-status .build-needs-you, .create-landing li[data-state="needs you"]:not([data-last-known]) > a { color: var(--fulcrum-warn); }
 .create-split .build-status-nav { padding-inline: 8px; border-left: 1px solid var(--fulcrum-border); }
 @media (min-width: 761px) and (min-height: 501px) {
@@ -71,7 +71,7 @@
 .build-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 8px 16px; border-inline-start: 2px solid var(--fulcrum-accent); font-size: 12px; }
 .build-receipt span { margin-inline-end: auto; overflow-wrap: anywhere; }
 .build-receipt strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.build-receipt .build-open { display: inline-flex; align-items: center; min-height: 32px; padding-inline: 12px; background: var(--fulcrum-accent); color: var(--fulcrum-bg); text-decoration: none; }
+.build-receipt .build-open { display: inline-flex; align-items: center; min-height: 32px; padding-inline: 12px; background: var(--g1-primary); color: var(--g1-primary-text); text-decoration: none; }
 .build-receipt button { min-height: 32px; padding-inline: 8px; border-color: transparent; color: var(--fulcrum-muted); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .create-landing .build-meta { display: flex; flex-wrap: wrap; gap: 0 6px; }
