@@ -1,0 +1,90 @@
+/* Host skin for Fulcrum's public parts. Keep its scroll roots, cursor gutter and state text. */
+.transcript [data-part="timeline"] > :is([data-virtual-id], [data-id]) {
+  max-width: var(--g1-transcript-width);
+}
+[data-part="message"] {
+  --fulcrum-measure: var(--g1-transcript-width);
+}
+[data-part="message"], [data-part="item"][data-kind="user"] {
+  font-size: var(--g1-type-chat);
+  line-height: var(--g1-leading-chat);
+}
+[data-part="message"][data-role="user"], [data-part="item"][data-kind="user"] {
+  border-inline-start-color: var(--g1-selection);
+  font-weight: 500;
+}
+[data-part="message-prompt"],
+[data-part="delivery-note"],
+[data-part="run-end-marker"] {
+  font-family: var(--achilles-code-font, var(--g1-font-mono));
+}
+
+/* The same card skin applies in live chat and agent timelines. Leave the pinned
+   per-tool viewers, syntax colors, and disclosure sizing in charge of their bodies. */
+:is([data-part="tool"], [data-part="approval"]) {
+  border-radius: var(--g1-radius-container);
+  box-shadow: var(--g1-shadow-rest);
+  font-family: var(--achilles-code-font, var(--g1-font-mono));
+  font-size: var(--g1-type-small);
+}
+[data-part="tool"][data-state="done"] { --rail: var(--g1-ok); }
+[data-part="approval"][data-decision="approve"] { --rail: var(--g1-ok); }
+[data-part="approval"][data-decision="deny"] { --rail: var(--g1-danger); }
+[data-part="tool-header"] {
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 36px;
+  column-gap: var(--g1-space-2);
+  background: var(--g1-bg-subtle);
+}
+[data-part="tool"][data-state="streaming"] > [data-part="tool-header"] { background: var(--g1-accent-tint); }
+[data-part="approval"] > [data-part="tool-header"] { background: color-mix(in srgb, var(--g1-warn-fill) 6%, var(--g1-bg)); }
+[data-part="tool-name"] { color: var(--g1-fg); }
+[data-part="tool-summary"] { color: var(--g1-muted); }
+[data-part="tool-status"] { font-size: var(--g1-type-meta); }
+:is([data-part="tool-status"], [data-part="text-viewer-status"], [data-part="delivery-note"])::before {
+  width: var(--g1-status-mark);
+  height: var(--g1-status-mark);
+}
+[data-part="approval-actions"] button {
+  border-radius: var(--g1-radius-control);
+  border-color: var(--g1-control-border);
+}
+[data-part="approval-actions"] button[data-action="approve"]:not(:disabled, [aria-disabled="true"]) {
+  background: var(--g1-primary);
+  border-color: var(--g1-primary);
+  color: var(--g1-primary-text);
+}
+[data-part="approval-actions"] button[data-action="deny"]:not(:disabled, [aria-disabled="true"]) { color: var(--g1-danger); }
+[data-part="approval-actions"]:has(> [data-action="approve-always"]) { display: flex; }
+[data-part="approval-actions"] button:focus-visible { outline: var(--g1-focus-ring); }
+
+.main-pane [data-part="composer"] {
+  max-width: var(--g1-transcript-width);
+  background: var(--g1-bg);
+}
+.main-pane [data-part="composer"][data-error] { border-color: var(--g1-danger); }
+[data-part="composer"] button, [data-part="jump-to-approval"] { border-radius: var(--g1-radius-control); }
+[data-part="composer"] :is([data-part="composer-reason"], [data-part="composer-message"])::before {
+  width: var(--g1-status-mark);
+  height: var(--g1-status-mark);
+}
+
+.empty-chat h1 {
+  font-size: var(--g1-type-page-title);
+  font-weight: var(--g1-weight-title);
+  letter-spacing: var(--g1-tracking-page-title);
+}
+.empty-chat p { font-size: var(--g1-type-chat); line-height: var(--g1-leading-chat); }
+.chat-starters button { border-block-end-color: var(--g1-control-border); }
+.chat-starters :is(b, i) { font-family: var(--achilles-code-font, var(--g1-font-mono)); }
+.chat-starters i {
+  justify-self: start;
+  padding-inline: var(--g1-space-1);
+  border: 1px solid var(--g1-border);
+  border-radius: var(--g1-radius-chip);
+  background: var(--g1-bg-subtle);
+}
+@media (width > 760px) and (height > 500px) {
+  .empty-chat { padding-inline: max(var(--g1-space-6), calc((100% - var(--g1-transcript-width)) / 2)); }
+}

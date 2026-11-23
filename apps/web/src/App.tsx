@@ -31,8 +31,9 @@ import { trackQueuedSteer, useActiveChat, type Page } from "./useActiveChat";
 import { useInlineRename } from "./useInlineRename";
 import { watchJumpToLatest } from "./jumpToLatest";
 import "./style.css";
-import "./chat/markdown.css";
 import "./shell.css";
+import "./chat/markdown.css";
+import "./chat/fulcrum-g1.css";
 import { READ_ONLY_REASON, WRITE_SURFACE } from "./writeSurfaces";
 import "./jumpToLatest.css";
 
