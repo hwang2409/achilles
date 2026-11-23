@@ -364,6 +364,8 @@ export async function gateAccountsPlace(tab: Page, origin: string) {
   await tab.goto(`${origin}/accounts`);
   const show = tab.getByRole("button", { name: "show accounts", exact: true });
   await show.waitFor({ timeout: 10_000 });
+  await tab.getByText("no chat is active.", { exact: true }).waitFor({ timeout: 10_000 });
+  if (await tab.getByRole("button", { name: "switch chat", exact: true }).isEnabled()) throw new Error("the idle catalog enabled a chat switch with no active chat");
   if (reads.length || roles.join() !== "observer") throw new Error("accounts did not wait as an observer for the show accounts click");
   await show.click({ timeout: 10_000 });
   await tab.getByRole("heading", { name: "no model accounts yet", exact: true }).waitFor({ timeout: 10_000 });
