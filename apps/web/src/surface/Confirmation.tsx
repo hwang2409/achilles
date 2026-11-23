@@ -31,6 +31,7 @@ type Committed = { status: "committed"; receipt: ReviewText };
 type Common = { action: ReviewText; keep: ReviewText; effect: ReviewText; surface?: string };
 type Inline = Common & Operation<Committed & { value: ReviewText }> & {
   level: 1;
+  disabled?: boolean;
   label: ReviewText;
   value: ReviewText;
   onCommitted(value: ReviewText): void;
@@ -152,7 +153,7 @@ export function Confirmation(props: ConfirmationProps) {
     <div className="confirmation-row">
       <span id={`${id}-label`}>{props.label}</span>
       <span className="confirmation-current">{props.value}</span>
-      <button ref={opener} type="button" data-write-surface={props.surface} disabled={open} onClick={start}>{props.action}</button>
+      <button ref={opener} type="button" data-write-surface={props.surface} disabled={open || props.disabled} onClick={start}>{props.action}</button>
     </div>
     {open && <div role="group" className="confirmation-bar" aria-labelledby={`${id}-effect`}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keep(); } }}>

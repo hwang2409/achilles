@@ -55,8 +55,8 @@ export function ConnectionList({ snapshot, scope, selectScope, activeScope, row,
   </section>;
 }
 
-export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, detailList, project, go, failure }: ViewProps & {
-  heading: Ref<HTMLHeadingElement>; detailList: Snapshot[McpScope] | null | undefined; project: boolean;
+export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, detailList, project, go, failure, children }: ViewProps & {
+  heading: Ref<HTMLHeadingElement>; detailList: Snapshot[McpScope] | null | undefined; project: boolean; children: ReactNode;
 }) {
   return <section className="mcp-detail" aria-label="connection detail">
     {!offline && detailOpen && <a className="mcp-back" href={surfaceHref(LIST)} onClick={(event) => go(event, LIST)}>‹ back to connections</a>}
@@ -66,6 +66,7 @@ export function ConnectionDetail({ row, detailOpen, offline, heading, shadows, d
         {detailList && "failure" in detailList ? failure(detailList.failure, project)
           : <ModuleState kind="empty" title="connection not found" detail="choose a connection from the list" />}
       </> : null}
+    {children}
   </section>;
 }
 

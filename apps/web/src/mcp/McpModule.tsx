@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } fr
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleFrame, ModuleState } from "../surface/ModuleState";
 import { connectionsRoute, surfaceHref } from "../surface/routes";
-import { canReadMcp, mcpScopes, type McpReads, type McpRow, type McpScope } from "./mcpReads";
+import { canReadMcp, mcpScopes, type McpRow, type McpScope } from "./mcpReads";
 import { ConnectionDetail, ConnectionList, FailedRead, type Failure } from "./McpViews";
+import { McpActions } from "./McpActions";
+import type { McpOwner } from "./mcpOwner";
 import "./mcp.css";
 
 const LIST = connectionsRoute.path;
@@ -14,9 +16,10 @@ const detailOf = (path: string) => {
   catch { return null; }
 };
 
-export function McpModule({ client, reads, pathname, connecting, retryConnection }: {
-  client: ZetaClient | null; reads: McpReads; pathname: string; connecting: boolean; retryConnection: () => void;
+export function McpModule({ client, owner, pathname, connecting, retryConnection }: {
+  client: ZetaClient | null; owner: McpOwner; pathname: string; connecting: boolean; retryConnection: () => void;
 }) {
+  const { reads } = owner;
   const snapshot = useSyncExternalStore(reads.subscribe, reads.snapshot);
   const [path, setPath] = useState(pathname);
   const [scope, setScope] = useState<McpScope>(() => detailOf(pathname)?.scope ?? "effective");
@@ -25,6 +28,7 @@ export function McpModule({ client, reads, pathname, connecting, retryConnection
   const focus = useRef(false);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const activeScope = useRef<HTMLButtonElement>(null);
+  const connected = client !== null;
   const supported = client !== null && canReadMcp(client);
   useEffect(() => {
     if (!client) return;
@@ -34,7 +38,8 @@ export function McpModule({ client, reads, pathname, connecting, retryConnection
       if (!abort.signal.aborted) setReading(false);
     });
     return () => abort.abort();
-  }, [client, reads, retry]);
+    // A control handoff replaces the socket without going offline. The owner refreshes after it writes.
+  }, [connected, supported, reads, retry]);
   useEffect(() => {
     const back = () => { focus.current = true; setPath(location.pathname); };
     window.addEventListener("popstate", back);
@@ -64,7 +69,9 @@ export function McpModule({ client, reads, pathname, connecting, retryConnection
     if (target) { target.focus(); focus.current = false; }
   }, [detailOpen, path, row]);
 
-  const offline = client === null;
+  const rowRead = detailOpen ? detailList : list;
+  const revision = rowRead && "revision" in rowRead ? rowRead.revision : undefined;
+  const offline = !connected;
   const retained = offline && snapshot && mcpScopes.some((view) => "rows" in snapshot[view]);
   const shadows = (item: McpRow) => {
     if (item.scope === "user") return snapshot && "rows" in snapshot.effective
@@ -88,7 +95,9 @@ export function McpModule({ client, reads, pathname, connecting, retryConnection
             <ConnectionList snapshot={snapshot} scope={scope} selectScope={(view) => { setScope(view); if (detailOpen) navigate(LIST); }}
               activeScope={activeScope} row={row} detailOpen={detailOpen} offline={offline} shadows={shadows} go={go} failure={failure} />
             <ConnectionDetail row={row} detailOpen={detailOpen} offline={offline} heading={detailHeading} shadows={shadows}
-              detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure} />
+              detailList={detailList} project={detail?.scope === "project"} go={go} failure={failure}>
+              <McpActions key={path} owner={owner} row={row ?? null} revision={revision} online={supported} />
+            </ConnectionDetail>
           </div>
         </>}
     </div>

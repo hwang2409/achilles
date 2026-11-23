@@ -50,3 +50,7 @@
   .mcp-detail dl { grid-template-columns: minmax(0, 34%) minmax(0, 1fr); }
   .mcp-back { display: inline-flex; min-height: 44px; align-items: center; color: var(--fulcrum-accent); margin-bottom: 8px; }
 }
+.mcp-actions { margin-block: 16px; }
+.mcp-review-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-block-start: 8px; }
+.mcp-actions button { min-height: 44px; padding-inline: 12px; }
+.mcp-receipt { margin-block: 16px; padding: 12px; border-inline-start: 2px solid var(--fulcrum-accent); }
