@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Locator, Page, Request, Route } from "../apps/web/node_modules/playwright";
 import { appShortcut, controlSnapshot, desktopPageChatProof, writeControl, createFrameRing, createGateWait, diagnostic, redactArtifact } from "./gate-diagnostics";
@@ -20,6 +20,7 @@ import { TELEMETRY_FEATURE } from "../apps/web/src/zeta/connection";
 import { surfaceRoutes } from "../apps/web/src/surface/routes";
 import { focusable } from "../apps/web/src/focusable";
 import { expectBrowserErrors } from "./browser-errors";
+import { freeGatePort } from "./gate-port";
 
 const root = new URL("..", import.meta.url).pathname;
 
@@ -60,16 +61,16 @@ const ownDiscovery = join(achillesHome, "run/serve.json");
 const sharedDiscovery = join(zetaHome, "run/serve.ws.json");
 const cwd = join(temp, "cwd");
 const control = join(temp, "control.json");
-// Stay below port 6000, which Chromium blocks (X11).
-const port = Number(process.env.GATE_PORT ?? (5200 + Math.floor(Math.random() * 800)));
-const origin = `http://127.0.0.1:${port}`;
+const configuredPort = process.env.GATE_PORT;
+let port!: number;
+let origin!: string;
 const screenshotDir = process.env.SCREENSHOT_DIR;
 if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
 const children: ChildProcess[] = [];
 const logs = new Map<ChildProcess, string>();
 const secrets: string[] = [];
-// failure-only CI artifacts: one stamped log per process instance and the full websocket frame log.
-const artifactDir = process.env.GATE_ARTIFACT_DIR ?? join(root, ".cache/gate-artifacts");
+// Failure logs must not overwrite a concurrent run's diagnostics.
+const artifactDir = process.env.GATE_ARTIFACT_DIR ?? join(root, ".cache/gate-artifacts", basename(temp));
 const artifactSecrets: string[] = [];
 const artifactLogs: { name: string; lines: [string, string][]; partial: { stdout: string; stderr: string } }[] = [];
 const frameLog: [string, number, string, string][] = [];
@@ -157,12 +158,33 @@ const waitForExit = (child: ChildProcess, timeoutMs: number) =>
     }, timeoutMs);
     child.once("exit", onExit);
   });
+const startAchilles = async (env: NodeJS.ProcessEnv, label: string, initial = false) => {
+  for (let attempt = 0; ; attempt++) {
+    if (initial) {
+      port = configuredPort === undefined ? await freeGatePort() : Number(configuredPort);
+      origin = `http://127.0.0.1:${port}`;
+    }
+    const child = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], {
+      ...env, ZETA_PROOF_ORIGIN: origin,
+    });
+    const exited = () => child.exitCode !== null || child.signalCode !== null;
+    // A different listener can answer HTTP if it takes the port after the probe.
+    await waitFor(async () => exited() || (logs.get(child)!.includes("Uvicorn running on") &&
+      await fetch(origin).then((r) => r.ok, () => false)), label);
+    if (!exited()) return child;
+    const collision = /EADDRINUSE|address already in use/i.test(logs.get(child)!);
+    if (configuredPort !== undefined || !collision || attempt >= 4)
+      throw new Error(`${label} exited during startup: ${redact(logs.get(child)!)}`);
+    // Restarts must retain the origin used by the browser and Zeta.
+    if (!initial) await Bun.sleep(100);
+  }
+};
 let browser;
 try {
   await Bun.spawn(["git", "init", cwd]).exited;
   await mkdir(join(achillesHome, "run"), { recursive: true, mode: 0o700 });
   await Bun.write(join(cwd, "fixture.txt"), "synthetic fixture\n");
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     ZETA_TOOL_SUBPROCESS: undefined,
     PYTHONPATH: zeta,
@@ -173,7 +195,6 @@ try {
     ZETA_PROOF_CWD: cwd,
     ZETA_PROOF_CONTROL: control,
     ZETA_PROOF_DISCOVERY: ownDiscovery,
-    ZETA_PROOF_ORIGIN: origin,
     ACHILLES_ZETA_DISCOVERY: ownDiscovery,
     ACHILLES_APPROVAL: "ask",
   };
@@ -182,7 +203,7 @@ try {
   const authDiscovery = join(authHome, "run/serve.ws.json");
   const authAccounts = join(temp, "auth-accounts");
   const oauthPath = (name: string) => join(authAccounts, "accounts/anthropic", name, "oauth.json");
-  const authEnv = {
+  const authEnv: NodeJS.ProcessEnv = {
     ...env,
     ZETA_HOME: authHome,
     ZETA_ACCOUNT_HOME: authAccounts,
@@ -203,9 +224,10 @@ try {
     if (!await waitForExit(child, 15_000)) throw new Error("switch-then-reply process did not exit");
   };
   await mkdir(authAccounts, { recursive: true, mode: 0o700 });
-  const authApp = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], authEnv);
+  const authApp = await startAchilles(authEnv, "idle accounts achilles", true);
+  env.ZETA_PROOF_ORIGIN = origin;
+  authEnv.ZETA_PROOF_ORIGIN = origin;
   let authZeta = await serveAuth(false);
-  await waitFor(async () => await fetch(origin).then(r => r.ok, () => false), "idle accounts achilles");
   const mcpAddSurfaceId = await gateMcpAdd(browser, origin, authHome, cwd, screenshotDir, () => `${logs.get(authApp)}\n${logs.get(authZeta)}`);
   const accountsPage = await browser.newPage();
   try { await gateAccountsPlace(accountsPage, origin); }
@@ -326,19 +348,7 @@ with _database() as db:
     env,
   );
   if (!await waitForExit(seed, 15_000) || seed.exitCode !== 0) throw new Error("could not seed gate fixtures");
-  let app = start(
-    "uv",
-    ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)],
-    appEnv,
-  );
-  await waitFor(
-    async () =>
-      await fetch(origin).then(
-        (r) => r.ok,
-        () => false,
-      ),
-    "achilles",
-  );
+  let app = await startAchilles(appEnv, "achilles");
   if (process.env.GATE_VERIFY_LISTENER === "1") {
     const info = (await Bun.$`lsof -nP -iTCP:${port} -sTCP:LISTEN`.text()).trim();
     const pids = [...new Set(info.split("\n").slice(1).map((line) => Number(line.trim().split(/\s+/)[1])))];
@@ -2647,8 +2657,7 @@ with _database() as db:
   await waitCreateMode(false);
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
-  app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], appEnv);
-  await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "achilles restart");
+  app = await startAchilles(appEnv, "achilles restart");
   const homeAfterRestart = (await (await fetch(`${origin}/api/pages/home`)).json()).zeta_session_id;
   const createdAfterRestart = await (await fetch(`${origin}/api/pages/reading`)).json();
   if (homeAfterRestart !== homeAfterCreate || createdAfterRestart.zeta_session_id !== reconnectPage.zeta_session_id) throw new Error("page sessions changed across achilles restart");
@@ -2709,8 +2718,7 @@ with _database() as db:
 
   app.kill("SIGTERM");
   await new Promise<void>((resolve) => app.once("exit", () => resolve()));
-  app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: "allow" });
-  await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), "allow-mode achilles restart");
+  app = await startAchilles({ ...env, ACHILLES_APPROVAL: "allow" }, "allow-mode achilles restart");
   await page.goto(`${origin}/allow`);
   const allowField = page.getByRole("textbox", { name: "message" });
   await gateWait.playwright(allowField, "waitFor", { timeout: 20000 });
@@ -2847,8 +2855,7 @@ with _database() as db:
   const restartAchilles = async (approval: "allow" | "ask") => {
     app.kill("SIGTERM");
     if (!(await waitForExit(app, 15_000))) throw new Error("achilles did not stop after SIGTERM");
-    app = start("uv", ["run", "achilles", "serve", "--host", "127.0.0.1", "--port", String(port)], { ...env, ACHILLES_APPROVAL: approval });
-    await waitFor(async () => (await fetch(origin).then((r) => r.ok, () => false)), `achilles restart in ${approval} mode`);
+    app = await startAchilles({ ...env, ACHILLES_APPROVAL: approval }, `achilles restart in ${approval} mode`);
   };
   await restartAchilles("ask");
   const framesBeforeWakeReload = requests().length;
