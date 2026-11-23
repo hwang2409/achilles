@@ -47,7 +47,7 @@
   --g1-border-width: 1px;
   --g1-selection-width: 2px;
   --g1-shadow-rest: none;
-  --g1-shadow-overlay: 0 8px 24px -8px rgb(17 17 19 / .18);
+  --g1-shadow-overlay: none;
   --g1-accent: var(--g1-fg-3);
   --g1-accent-tint: var(--g1-hover);
   --g1-focus-glow: color-mix(in srgb, var(--g1-fg) 14%, transparent);
@@ -64,7 +64,9 @@
   --g1-space-10: 40px;
   --g1-sidebar-padding: var(--g1-space-3);
   --g1-nav-row-height: var(--g1-space-8);
-  --g1-page-padding: var(--g1-space-7) var(--g1-space-10);
+  --g1-page-gutter: var(--g1-space-6);
+  --g1-page-padding: var(--g1-space-6) var(--g1-page-gutter);
+  --g1-list-row-height: 52px;
   --g1-content-max: 944px;
   --g1-page-max: calc(var(--g1-content-max) + 336px);
 }

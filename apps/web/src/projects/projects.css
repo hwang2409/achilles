@@ -8,10 +8,9 @@
 .projects-inbox li + li, .projects-group li + li { border-top: 1px solid var(--g1-rule); }
 .projects-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) auto; column-gap: var(--g1-space-4); }
 .projects-list :is(li, a) { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
-.projects-list a { align-items: center; row-gap: 4px; padding: 10px 16px; min-height: 52px; border-bottom: 1px solid var(--g1-rule); text-decoration: none; }
+.projects-list a { align-items: center; row-gap: 4px; padding: 10px 16px; min-height: var(--g1-list-row-height); border-bottom: 1px solid var(--g1-rule); text-decoration: none; }
 .projects-list span { font-size: var(--g1-type-meta); text-align: start; }
 .projects-list small { text-align: end; }
-.projects-list a:hover { box-shadow: inset var(--g1-selection-width) 0 var(--g1-accent); }
 .projects-list :is(span, small), .projects-note, .projects-group small, .projects-inbox small { color: var(--fulcrum-muted); }
 .projects-list small, .projects-note, .projects-group small, .projects-inbox small { font-size: 12px; }
 .projects-note { margin: 0; text-wrap: pretty; }
@@ -40,7 +39,6 @@
 .projects-flag { margin: 6px 0 0; font-size: 12px; color: var(--fulcrum-warn); }
 /* names, ids and paths stay on one line; the full text is in the title. */
 .module-frame:has(> .module-body > .projects) h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.module-frame:has(.projects-tab) > header h1 { font-size: var(--g1-type-page-title); letter-spacing: var(--g1-tracking-page-title); font-weight: var(--g1-weight-title); }
 .projects-list :is(strong, span), .projects-path, .projects-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .projects-error, .projects-more span { margin: 0; color: var(--fulcrum-danger); }
 .projects-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

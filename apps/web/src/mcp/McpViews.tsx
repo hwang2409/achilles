@@ -45,7 +45,7 @@ export function ConnectionList({ snapshot, scope, selectScope, activeScope, row,
       : rows.length === 0 ? <ModuleState kind="empty" title="no mcp connections for this scope" />
       : <ul className="mcp-rows">{rows.map((item) => {
         const current = row?.name === item.name && row.scope === item.scope;
-        const contents = <><span className="mcp-row-title"><strong>{item.name}</strong><small>{item.scope} · {transportOf(item)}{shadows(item) && ` · ${shadows(item)}`}</small></span>
+        const contents = <><span className="mcp-row-title"><strong title={item.name}>{item.name}</strong><small>{item.scope} · {transportOf(item)}{shadows(item) && ` · ${shadows(item)}`}</small></span>
           <Status row={item} /></>;
         const next = detailPath(item);
         return <li key={next} data-current={current}>

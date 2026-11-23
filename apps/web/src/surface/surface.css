@@ -28,7 +28,7 @@
 .place-link .waiting-count::before { content: ""; display: inline-block; width: var(--g1-status-mark); height: var(--g1-status-mark); margin-inline-end: 4px; vertical-align: .1em; background: currentColor; }
 .place-link svg { flex: none; color: var(--fulcrum-muted); }
 .place-link:hover { background: var(--g1-hover); }
-.place-link[aria-current="page"] { box-shadow: inset var(--g1-selection-width) 0 var(--g1-selection); background: var(--g1-selected); font-weight: 600; }
+.place-link[aria-current="page"] { background: var(--g1-selected); font-weight: 600; }
 .place-link[aria-current="page"] svg { color: var(--fulcrum-fg); }
 .sidebar :is(a, button):focus-visible { outline-offset: -2px; }
 .sidebar > footer { flex: none; display: flex; gap: 4px; border-top: 1px solid var(--fulcrum-border); }
@@ -38,11 +38,12 @@
 .sidebar > footer > button kbd { margin-left: auto; }
 
 .module-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; border-bottom: 1px solid var(--g1-border); padding: 0 var(--g1-space-7); }
-.module-frame h1 { margin: 0; font-size: 16px; font-weight: 600; }
-.module-body > :not(.module-state), .agents-split { width: 100%; max-width: var(--g1-page-max); }
+.module-frame > header { min-height: 56px; flex: none; display: flex; align-items: center; border-bottom: 1px solid var(--g1-border); padding: 0 var(--g1-page-gutter); }
+.module-frame > header h1 { margin: 0; font-size: var(--g1-type-chat); font-weight: 600; }
+.module-frame > header h1::first-letter, .module-state h2::first-letter { text-transform: uppercase; }
+.module-body > :not(.module-state), .agents-split, .sessions-split { width: 100%; max-width: var(--g1-page-max); }
 .module-body { flex: 1; min-height: 0; overflow: auto; }
-.module-state { max-width: 56rem; padding: var(--g1-space-4); border: 1px dashed var(--g1-border); background: var(--g1-bg-subtle); }
+.module-state { max-width: 56rem; padding: var(--g1-space-4); border: 1px solid var(--g1-border); border-radius: var(--g1-radius-control); background: var(--g1-bg-subtle); }
 .module-state h2 { font-size: var(--g1-type-ui); margin: 0; }
 .module-state p { max-width: 55ch; margin: 8px 0 0; color: var(--g1-muted); overflow-wrap: anywhere; }
 .module-state button { min-height: 44px; margin-top: 16px; padding: 0 12px; }
@@ -71,6 +72,7 @@
 }
 
 @media (max-width: 760px), (max-height: 500px) {
+  :root { --g1-page-gutter: var(--g1-space-4); }
   .main-pane { isolation: isolate; }
   .brand-row > .surface-connection { margin-left: 0; }
   .brand-row > .drawer-close { width: 44px; height: 44px; flex: none; }

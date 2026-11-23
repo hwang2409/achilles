@@ -1,5 +1,5 @@
 .mcp-place { min-height: 100%; display: flex; flex-direction: column; }
-.mcp-context { margin: 0; padding: 10px 24px; border-bottom: 1px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-size: .86em; }
+.mcp-context { margin: 0; padding: var(--g1-space-3) var(--g1-page-gutter); border-bottom: 1px solid var(--fulcrum-border); color: var(--fulcrum-muted); font-size: .86em; }
 .mcp-grid { flex: 1; display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); }
 .mcp-list { border-right: 1px solid var(--fulcrum-border); }
 .mcp-list-head { min-height: 56px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--fulcrum-border); }
@@ -12,11 +12,12 @@
 .mcp-scopes span, .mcp-list-head time, .mcp-rule h3 { font-family: var(--achilles-code-font, var(--g1-font-mono)); font-variant-numeric: tabular-nums; }
 .mcp-rows { list-style: none; padding: 0; margin: 0; }
 .mcp-rows li { border-bottom: 1px solid var(--g1-rule); }
-.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(40%); align-items: center; gap: 8px 14px; min-height: 54px; padding: 8px 16px; border-left: var(--g1-selection-width) solid transparent; }
+.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(40%); align-items: center; gap: 8px 14px; min-height: var(--g1-list-row-height); padding: 8px 16px; border-left: var(--g1-selection-width) solid transparent; }
 a.mcp-row:hover { background: var(--g1-hover); }
-.mcp-rows [data-current="true"] .mcp-row { border-left-color: var(--g1-selection); background: var(--g1-selected); }
+.mcp-rows [data-current="true"] .mcp-row { background: var(--g1-selected); }
 .mcp-row-title { display: grid; gap: 2px; }
-.mcp-row-title :is(strong, small), .mcp-status { overflow-wrap: anywhere; }
+.mcp-row-title :is(strong, small) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-status { overflow-wrap: anywhere; }
 .mcp-row-title strong { font-weight: 600; }
 .mcp-row-title small { color: var(--fulcrum-muted); font-size: .84em; }
 .mcp-row .mcp-status { justify-self: end; text-align: right; }

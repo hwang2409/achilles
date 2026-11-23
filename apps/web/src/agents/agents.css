@@ -25,7 +25,7 @@
 .agents-lane h2 small { white-space: nowrap; }
 .agents-lane h3 { margin: 8px 16px 4px; font-size: .85em; }
 .agents-lane ul { margin: 0 0 8px; padding: 0; list-style: none; }
-.agents-row { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px 16px 4px 14px; border-inline-start: var(--g1-selection-width) solid transparent; border-bottom: 1px solid var(--g1-rule); }
+.agents-row { display: flex; align-items: center; gap: 8px; min-height: var(--g1-list-row-height); padding: 4px 16px 4px 14px; border-inline-start: var(--g1-selection-width) solid transparent; border-bottom: 1px solid var(--g1-rule); }
 .agents-row[data-nested="true"] { box-shadow: inset 1px 0 var(--fulcrum-border); }
 .agents-row:hover { background: var(--g1-hover); }
 .agents-row[aria-current="page"] { border-inline-start-color: var(--g1-selection); background: var(--g1-selected); }
