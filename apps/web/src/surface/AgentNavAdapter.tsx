@@ -74,7 +74,7 @@ export function useOnScreen(id: string | undefined, report: ((id: string, shown:
   return setNode;
 }
 
-export const chatHref = (chat: Chat) => {
+export const chatHref = (chat: Pick<Chat, "page_route" | "session_id">) => {
   const url = new URL(surfaceHref(chat.page_route), location.href);
   url.searchParams.set("chat", chat.session_id);
   return `${url.pathname}${url.search}`;
@@ -101,7 +101,7 @@ export function timeLabel(value: string) {
 }
 
 // the one GET /api/chats loader: the sidebar list and the palette each own a list over it
-const chatPage = (include: () => string | null) => async (search: string, before: string | null, signal: AbortSignal, limit = 50) => {
+const chatPage = (include: () => string | null) => async (search: string, before: string | null, signal: AbortSignal | undefined, limit = 50) => {
   const params = new URLSearchParams({ limit: String(limit) });
   // the server lists only chats with a sent message, plus the open chat named here
   const open = include();
@@ -113,6 +113,19 @@ const chatPage = (include: () => string | null) => async (search: string, before
   const result = await response.json() as { chats: Chat[]; next: string | null; approval_count: number };
   return { items: result.chats, next: result.next, meta: result.approval_count };
 };
+
+// `include` makes unsent chats eligible, but does not move them ahead of the other rows.
+export async function findChat(sessionId: string, signal?: AbortSignal) {
+  const read = chatPage(() => sessionId);
+  let before: string | null = null;
+  do {
+    const { items, next } = await read("", before, signal, 200);
+    const chat = items.find((row) => row.session_id === sessionId);
+    if (chat) return chat;
+    before = items.length ? next : null;
+  } while (before);
+  return null;
+}
 
 const emptyChats: readonly Chat[] = [];
 const initialPageListState = initialListState<PageLink, null>(null);
