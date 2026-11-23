@@ -479,7 +479,7 @@ with _database() as db:
     // Let attachment win the race on old builds so the assertion names the side effect, not missing copy.
     await waitFor(async () => Boolean(forbiddenHttp()) || await newerZeta.isVisible(), "telemetry route milestone");
     await telemetryPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "telemetry") throw new Error("telemetry child URL did not select telemetry");
+    if (await telemetryPage.locator('.place-nav [aria-current="page"]').innerText() !== "Telemetry") throw new Error("telemetry child URL did not select telemetry");
     if (telemetryConnections !== 1) throw new Error(`telemetry child opened ${telemetryConnections} connections`);
     const attachment = forbiddenHttp();
     if (attachment) throw new Error(`telemetry route started page attachment: ${attachment}`);

@@ -1,8 +1,8 @@
 .chat-continuation {
-  margin: 12px 0;
-  padding-block: 10px;
-  border-top: 1px solid var(--fulcrum-border);
-  color: var(--fulcrum-muted);
-  font-size: .875em;
+  margin: var(--g1-space-3) 0;
+  padding-block: var(--g1-space-3);
+  border-top: var(--g1-border-width) solid var(--g1-rule);
+  color: var(--g1-muted);
+  font-size: var(--g1-type-small);
   overflow-wrap: anywhere;
 }

@@ -26,20 +26,20 @@ export function SettingsModule(props: Props) {
   return <ModuleFrame title="settings">
     <div className="sp">
       <nav className="sp-subnav" aria-label="settings sections">
-        {section("browser", "this browser")}
-        {section("zeta-defaults", "zeta defaults")}
-        <a href={surfaceHref("/accounts")}>accounts <span aria-hidden="true">→</span></a>
-        <a href={surfaceHref(connectionsRoute.path)}>mcp connections <span aria-hidden="true">→</span></a>
+        {section("browser", "This browser")}
+        {section("zeta-defaults", "Zeta defaults")}
+        <a href={surfaceHref("/accounts")}>Accounts <span aria-hidden="true">→</span></a>
+        <a href={surfaceHref(connectionsRoute.path)}>MCP connections <span aria-hidden="true">→</span></a>
       </nav>
       <div className="sp-content">
         <section id="browser" aria-labelledby="settings-browser">
-          <h2 id="settings-browser" tabIndex={-1}>this browser</h2>
-          <p className="sp-dim">theme, fonts, text size, density and vim mode. they apply to this browser only.</p>
-          <button type="button" onClick={openBrowserSettings}>display settings</button>
+          <h2 id="settings-browser" tabIndex={-1}>This browser</h2>
+          <p className="sp-dim">Theme, fonts, text size, density and Vim mode. They apply to this browser only.</p>
+          <button type="button" onClick={openBrowserSettings}>Display settings</button>
         </section>
         <section id="zeta-defaults" aria-labelledby="settings-zeta">
-          <h2 id="settings-zeta" tabIndex={-1}>zeta defaults</h2>
-          <p className="sp-dim">these apply to every zeta on this computer.</p>
+          <h2 id="settings-zeta" tabIndex={-1}>Zeta defaults</h2>
+          <p className="sp-dim">These apply to every Zeta on this computer.</p>
           {props.client ? <ZetaDefaults {...props} client={props.client} />
             : <p className="sp-dim" role="status">{props.connecting ? "connecting to zeta…" : "zeta is not connected. retrying automatically."}</p>}
         </section>
@@ -51,7 +51,7 @@ export function SettingsModule(props: Props) {
 function ZetaDefaults({ client, withControl, live }: Props & { client: ZetaClient }) {
   return <>
     {supportsFeature(client, HOME_SETTINGS_FEATURE) ? <TelemetryRow client={client} withControl={withControl} live={live} />
-      : <Row id="telemetry" title="telemetry" detail={RECORDS}><p className="sp-note">this zeta cannot change settings here. update zeta.</p></Row>}
+      : <Row id="telemetry" title="Telemetry" detail={RECORDS}><p className="sp-note">this zeta cannot change settings here. update zeta.</p></Row>}
     {supportsFeature(client, "state_read_v1") && <Defaults client={client} />}
   </>;
 }
@@ -178,7 +178,7 @@ function TelemetryRow({ client, withControl, live }: { client: ZetaClient; withC
       </div>;
     }
   }
-  return <Row id="telemetry" title="telemetry" detail={RECORDS}>
+  return <Row id="telemetry" title="Telemetry" detail={RECORDS}>
     {control}
     <div ref={setActivity} className="sp-activity" />
     {note && <p ref={noteRef} className="sp-note sp-result" tabIndex={-1} role={stale ? "alert" : "status"}>{note}</p>}
@@ -232,10 +232,10 @@ function Defaults({ client }: { client: ZetaClient }) {
   if (defaults === "loading") return <p className="sp-dim" role="status">reading zeta defaults…</p>;
   if ("failed" in defaults) return <p className="sp-note">{defaults.failed}</p>;
   const rows: [string, string, string][] = [
-    ["model", defaults.model ?? "not set in settings.toml", "change it in the terminal (model in settings.toml). a chat can change its own model."],
-    ["provider", defaults.provider ?? "not set in settings.toml", "change it in the terminal (provider in settings.toml)."],
-    ["approval mode", defaults.approval === "allow" ? "allow without asking" : defaults.approval ?? "not set in settings.toml", "change it in the terminal (yolo in settings.toml). a chat can change its own approvals."],
-    ["agent nesting depth", String(defaults.depth), "change it in the terminal (max_depth under [agents] in settings.toml)."],
+    ["Model", defaults.model ?? "not set in settings.toml", "change it in the terminal (model in settings.toml). a chat can change its own model."],
+    ["Provider", defaults.provider ?? "not set in settings.toml", "change it in the terminal (provider in settings.toml)."],
+    ["Approval mode", defaults.approval === "allow" ? "allow without asking" : defaults.approval ?? "not set in settings.toml", "change it in the terminal (yolo in settings.toml). a chat can change its own approvals."],
+    ["Agent nesting depth", String(defaults.depth), "change it in the terminal (max_depth under [agents] in settings.toml)."],
   ];
   return <dl className="sp-defaults">
     {rows.map(([label, value, where]) => <div key={label}>
