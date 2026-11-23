@@ -184,7 +184,7 @@ export async function gateStablePlace(tab: Page, origin: string, gateWait: GateW
   await gateWait.playwright(tab.locator('.surface-connection[data-connected="true"]'), "waitFor");
   if (sockets !== 1) throw new Error(`agents opened ${sockets} zeta connections`);
   if (await frame.getByRole("heading", { name: "not available in this build" }).count() || await tab.getByText("page not found", { exact: true }).count()) throw new Error("agents rendered a placeholder or page-not-found state");
-  if (await tab.locator('.place-nav [aria-current="page"]').innerText() !== "agents") throw new Error("agents route did not select agents");
+  if (await tab.locator('.place-nav [aria-current="page"]').innerText() !== "Agents") throw new Error("agents route did not select agents");
   if (!process.env.SCREENSHOT_DIR) return;
   for (const theme of ["dark", "light"]) {
     if (theme === "light") await tab.goto(`${origin}/agents?theme=g1-light`);
@@ -310,7 +310,7 @@ export async function gateCreatePlace(tab: Page, origin: string, gateWait: GateW
     mode.push(route.request().postDataJSON());
     if (mode.length === 1) {
       if (await facts.innerText() !== expectedFacts) throw new Error("pending build omitted or changed its execution facts");
-      if (!await build.isDisabled() || !await newChat.isDisabled() || await build.innerText() !== "starting…" || !(await newChat.innerText()).includes("starting…")) throw new Error("pending build did not show both actions are busy");
+      if (!await build.isDisabled() || !await newChat.isDisabled() || await build.innerText() !== "starting…" || await newChat.locator("b").innerText() !== "Starting…") throw new Error("pending build did not show both actions are busy");
       await capture("pending", 1440);
       for (const width of [1440, 390]) {
         await tab.setViewportSize({ width, height: width === 390 ? 844 : 900 });
