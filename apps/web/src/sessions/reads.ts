@@ -135,6 +135,23 @@ function historyReaders(client: ZetaClient, request: HistoryRequest) {
   };
 }
 
+function readSessionMetadata(client: ZetaClient, signal: AbortSignal) {
+  const paged = supportsFeature(client, paging);
+  return walk(async (offset: number | null) => {
+    signal.throwIfAborted();
+    const v = await client.request("list_sessions", paged ? { offset: offset ?? 0, limit: 50 } : {}, { signal, timeoutMs: 12000 });
+    if (!isObject(v) || !Array.isArray(v.sessions) || (v.truncated !== undefined && typeof v.truncated !== "boolean")) throw invalid();
+    if (!paged) return { rows: v.sessions, next: null, warning: v.truncated ? "zeta returned only the first sessions; update zeta for paging" : undefined };
+    if (v.next_offset !== null && (!count(v.next_offset) || v.next_offset <= (offset ?? 0))) throw invalid();
+    return { rows: v.sessions, next: v.next_offset };
+  }, metadata);
+}
+
+export async function readSessionTitles(client: ZetaClient, signal: AbortSignal) {
+  const { items } = await readSessionMetadata(client, signal);
+  return new Map([...items].flatMap(([id, row]) => row.title !== id ? [[id, row.title] as const] : []));
+}
+
 export function createSessionsReader(client: ZetaClient, advertised = (method: string) => supportsRequest(client, method)) {
   const grant = (feature: string, method: string) => supportsFeature(client, feature) && advertised(method);
   const request = async (method: string, params: Record<string, unknown>, signal: AbortSignal): Promise<unknown> => {
@@ -162,15 +179,8 @@ export function createSessionsReader(client: ZetaClient, advertised = (method: s
     transcriptMode,
     async catalog(signal: AbortSignal) {
       const mine = ++generation;
-      const paged = supportsFeature(client, paging);
       const [durable, overlay] = await Promise.all([
-        walk(async (offset: number | null) => {
-          const v = await request("list_sessions", paged ? { offset: offset ?? 0, limit: 50 } : {}, signal);
-          if (!isObject(v) || !Array.isArray(v.sessions) || (v.truncated !== undefined && typeof v.truncated !== "boolean")) throw invalid();
-          if (!paged) return { rows: v.sessions, next: null, warning: v.truncated ? "zeta returned only the first sessions; update zeta for paging" : undefined };
-          if (v.next_offset !== null && (!count(v.next_offset) || v.next_offset <= (offset ?? 0))) throw invalid();
-          return { rows: v.sessions, next: v.next_offset };
-        }, metadata),
+        readSessionMetadata(client, signal),
         grant(stateRead, "state_sessions") ? walk(async (cursor: string | null) => cursorPage(await request("state_sessions", { cursor, limit: 100 }, signal)), state)
           .then((result) => ({ result, warning: undefined }), (e: unknown) => ({ result: undefined, warning: rpcCode(e) === -32601 ? oldState : readError(e) }))
           : Promise.resolve({ result: undefined, warning: oldState }),
