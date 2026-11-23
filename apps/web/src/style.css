@@ -1,6 +1,9 @@
 :root {
   font-family: var(--achilles-ui-font, var(--g1-font-ui));
-  font-size: var(--achilles-ui-size, var(--g1-type-ui));
+  font-size: var(--achilles-ui-size, var(--g1-type-chat));
+  line-height: var(--g1-leading-chat);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
   color: var(--fulcrum-fg);
   background: var(--fulcrum-bg);
@@ -46,7 +49,7 @@ fieldset[disabled] { min-width: 0; border: 0; margin: 0; padding: 0; }
 .approval-control button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 .approval-control span { color: var(--fulcrum-muted); text-wrap: pretty; }
 @media (max-width: 600px) { .observer-banner { align-items: flex-start; flex-direction: column; flex-wrap: nowrap; gap: 8px; } .observer-banner > div:first-child, #take-control-feedback { flex: none; } .observer-action { width: 100%; justify-items: start; } .observer-banner button { min-height: 44px; width: 100%; } }
-.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, 14px) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); }
+.sidebar, .chat-header, .empty-chat, .connection-banner, .full-state, .record-list, .record-detail, .record-form { font: var(--achilles-ui-size, var(--g1-type-chat)) / var(--g1-leading-chat) var(--achilles-ui-font, var(--g1-font-ui)); }
 .page-view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 @media (width >= 1280px) {
   .page-view.docked { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }

@@ -27,14 +27,14 @@
 }
 
 :root, [data-achilles-theme] {
-  --g1-font-ui: "Geist", system-ui, sans-serif;
+  --g1-font-ui: -apple-system, BlinkMacSystemFont, sans-serif;
   --g1-font-mono: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
   --g1-type-kbd: 11px;
   --g1-type-meta: 12px;
   --g1-type-small: 13px;
   --g1-type-ui: 14px;
-  --g1-type-chat: 14px;
-  --g1-leading-chat: 22px;
+  --g1-type-chat: 15px;
+  --g1-leading-chat: 1.6;
   --g1-type-reply-h2: 20px;
   --g1-tracking-reply-h2: -.02em;
   --g1-type-page-title: 26px;
