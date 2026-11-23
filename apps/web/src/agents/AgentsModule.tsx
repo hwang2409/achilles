@@ -4,6 +4,8 @@ import type { ZetaClient } from "@fulcrum/zeta";
 import { readSessionTitles } from "../sessions/reads";
 import { ModuleState, ShellDockSlot } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
+import { ChildComposer } from "./ChildComposer";
+import type { ChildSendOwner } from "./childSend";
 import { childHistorySupported, createChildRunsController, newerHistory } from "./childRuns";
 import { groupAgentRuns, type RunBranch } from "./groupAgentRuns";
 import { AGENT_REFRESH_MS, agentStatuses, catalogStatuses, createAgentRunsReader, rowKey, sourceNote, unavailable, type AgentFilters, type AgentRun } from "./reads";
@@ -27,7 +29,7 @@ function StateTag({ row }: { row: AgentRun }) {
   return <span className="agents-state" data-status={row.status}>{row.status}</span>;
 }
 
-export function AgentsModule({ client, connecting, retry }: { client: ZetaClient | null; connecting: boolean; retry: () => void }) {
+export function AgentsModule({ client, connecting, retry, send }: { client: ZetaClient | null; connecting: boolean; retry: () => void; send: ChildSendOwner }) {
   const reader = useMemo(() => client ? createAgentRunsReader(client) : undefined, [client]);
   const [snapshot, setSnapshot] = useState<ReturnType<NonNullable<typeof reader>["snapshot"]>>({ refreshing: true });
   const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
@@ -157,10 +159,13 @@ export function AgentsModule({ client, connecting, retry }: { client: ZetaClient
           {!report.complete && <button type="button" className="agents-more" disabled={!client || refreshing || paging} onClick={() => void reader?.more()}>{paging ? "loading more…" : "load more runs"}</button>}
         </section>
         <section className="agents-detail" aria-label="agent run detail">
+          <div className="agents-detail-scroll">
           {(id || invalid) && <a className="agents-back" ref={back} href={runHref()} data-back="true" onClick={follow}>‹ all runs</a>}
           {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={rootTitle(chosen.sessionId)} client={client} />
             : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
               detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
+          </div>
+          {chosen && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={report.reportedAt} refreshing={refreshing} refresh={refresh} />}
         </section>
       </div>
     </>}

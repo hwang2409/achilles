@@ -67,3 +67,19 @@
   .agents-run-head dl { display: block; }
   .agents-run-head dl > div { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px; padding-block: 6px; border-top: 1px solid var(--fulcrum-border); }
 }
+
+.agents-detail { display: flex; flex-direction: column; overflow: hidden; }
+.agents-detail-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.agents-composer { margin: 8px 24px 16px; padding: 8px; border: 1px solid var(--fulcrum-border); background: var(--fulcrum-surface); }
+.agents-composer textarea { display: block; width: 100%; min-height: 44px; max-height: 20dvh; padding: 8px; resize: vertical; border: 0; color: var(--fulcrum-text); background: var(--fulcrum-surface); font: inherit; }
+.agents-composer textarea::placeholder { color: var(--fulcrum-muted); }
+.agents-composer textarea:focus-visible { outline: 1px solid var(--fulcrum-accent); outline-offset: -1px; }
+.agents-composer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+.agents-composer-actions span { flex: 1 1 16ch; color: var(--fulcrum-muted); font-size: .85em; }
+.agents-composer-actions button { min-height: 44px; max-width: 100%; margin-inline-start: auto; }
+@media (max-width: 760px), (max-height: 500px) {
+  .agents-split[data-detail="true"] { display: flex; }
+  .agents-detail { flex: 1; }
+  .agents-composer { margin: 0; border-width: 1px 0 0; padding: 8px 12px; }
+  .agents-composer textarea { font-size: max(16px, 1em); }
+}
