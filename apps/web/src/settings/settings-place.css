@@ -11,7 +11,7 @@
 .sp-subnav a[aria-current] { border-inline-start-color: var(--fulcrum-accent); font-weight: 600; }
 .sp-content { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
 .sp-content section { display: flex; flex-direction: column; gap: 12px; scroll-margin-top: 16px; }
-.sp-content section > button { align-self: flex-start; min-height: 44px; }
+.sp-content section > button { align-self: flex-start; min-height: 44px; border-color: var(--g1-control-border); }
 .sp h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .sp h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .sp p { margin: 0; }
@@ -19,7 +19,7 @@
 .sp-note { color: var(--fulcrum-warn); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .sp-row { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--fulcrum-border); scroll-margin-top: 16px; }
 .sp-row-text { display: flex; flex-direction: column; gap: 4px; }
-.sp-switch { font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, "JetBrains Mono", monospace); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sp-switch { font: var(--achilles-ui-size, 0.875rem) / 1.5 var(--achilles-ui-font, var(--g1-font-ui)); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* the row is the only box: the state word sits left of its button, with no inner border */
 .sp-row .confirmation-row { border: 0; padding: 0; }
 .sp-row .confirmation-current { margin-inline-start: 0; }

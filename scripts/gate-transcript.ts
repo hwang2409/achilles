@@ -85,16 +85,18 @@ export async function gateTranscript(
     root.style.setProperty("--achilles-ui-size", "16px");
     root.dataset.density = "compact";
     const transcript = getComputedStyle(document.querySelector(".transcript")!);
+    const prose = getComputedStyle(document.querySelector('.transcript [data-part="md-paragraph"]')!);
     const code = getComputedStyle(document.querySelector(".transcript pre code")!);
     return {
       font: transcript.fontFamily,
+      proseFont: prose.fontFamily,
       size: transcript.fontSize,
       lineHeight: transcript.lineHeight,
       codeFont: code.fontFamily,
     };
   });
   if (
-    !typography.font.includes("IBM Plex Sans") || typography.size !== "16px" ||
+    !typography.font.includes("IBM Plex Sans") || !typography.proseFont.includes("IBM Plex Sans") || typography.size !== "16px" ||
     typography.lineHeight !== "21.6px" || !typography.codeFont.includes("IBM Plex Mono")
   )
     throw new Error(`transcript did not apply configured typography: ${JSON.stringify(typography)}`);

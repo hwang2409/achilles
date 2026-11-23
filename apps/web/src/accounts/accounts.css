@@ -22,3 +22,12 @@
 @container (min-width: 35rem) {
   .account-rows > li { grid-template-columns: 1fr 1fr; gap: 32px; }
 }
+
+.account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-action { width: fit-content; max-width: 100%; min-height: 44px; padding: 8px 12px; text-align: start; }
+.account-login { max-width: 40rem; margin-block: 24px; padding: 16px; border: 1px solid var(--fulcrum-border); border-inline-start: 2px solid var(--fulcrum-accent); overflow-wrap: anywhere; }
+.account-login:is([data-state="failed"], [data-state="blocked"], [data-state="unknown"]) { border-inline-start-color: var(--fulcrum-danger); }
+.account-login[data-state="succeeded"] { border-inline-start-color: var(--fulcrum-warn); }
+.account-login h3 { font-size: 1em; margin: 0; }
+.account-login p { margin: 8px 0; text-wrap: pretty; }
+.account-login button { min-height: 44px; }
