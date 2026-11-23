@@ -39,6 +39,13 @@ function outcome(wire: unknown): Terminal | { state: "pending" } {
   return { state: "unknown" };
 }
 
+function startFailure(error: unknown): Terminal {
+  const { code, data } = record(error);
+  if (code === -32005 && record(data).code === "login_in_progress") return { state: "contention" };
+  if (code === -32602 || code === -32005 || code === -32008) return { state: "failed", detail: "zeta did not accept the sign-in request." };
+  return { state: "unknown" };
+}
+
 function sendToPopup(popup: Popup, wire: unknown): boolean {
   const value = record(wire).authorization_url;
   if (typeof value !== "string") return false;
@@ -124,6 +131,27 @@ export function createAccountLogin(
   }
   const schedule = (attempt: Attempt) => { attempt.timer = setTimeout(() => void poll(attempt), pollMs); };
 
+  async function dispatchStart(attempt: Attempt) {
+    const { target } = attempt;
+    let result: Terminal | { state: "pending" };
+    try {
+      const wire: unknown = await attempt.client!.request("login_start", target, options(attempt));
+      if (active !== attempt || attempt.settling) return;
+      result = outcome(wire);
+      if (result.state === "pending") {
+        if (!sendToPopup(attempt.popup!, wire)) return await cancelAttempt(attempt, true);
+        // The detached provider tab is no longer ours to close.
+        attempt.popup = null;
+      }
+    } catch (error) {
+      if (active !== attempt || attempt.settling) return;
+      result = startFailure(error);
+    }
+    if (result.state !== "pending") return await settle(attempt, result, result.state !== "unknown");
+    publish({ state: "pending", target });
+    schedule(attempt);
+  }
+
   return {
     snapshot: () => snapshot,
     catalog: () => refreshed,
@@ -152,27 +180,7 @@ export function createAccountLogin(
       if (!client || connection.state.phase !== "connected" || connection.state.authority !== "controller") return await settle(attempt, { state: "unknown" });
       attempt.client = client;
       attempt.unsubscribe = client.onClose(() => void settle(attempt, { state: "unknown" }, false));
-      let result: Terminal | { state: "pending" };
-      try {
-        const wire: unknown = await client.request("login_start", target.account === undefined ? { provider: target.provider } : { provider: target.provider, account: target.account }, options(attempt));
-        if (active !== attempt || attempt.settling) return;
-        result = outcome(wire);
-        if (result.state === "pending") {
-          if (!sendToPopup(attempt.popup!, wire)) return await cancelAttempt(attempt, true);
-          // The detached provider tab is no longer ours to close.
-          attempt.popup = null;
-        }
-      } catch (error) {
-        if (active !== attempt || attempt.settling) return;
-        const { code, data } = record(error);
-        const reason = record(data).code;
-        if (code === -32005 && reason === "login_in_progress") result = { state: "contention" };
-        else if (code === -32602 || code === -32005 || code === -32008) result = { state: "failed", detail: "zeta did not accept the sign-in request." };
-        else result = { state: "unknown" };
-      }
-      if (result.state !== "pending") return await settle(attempt, result, result.state !== "unknown");
-      publish({ state: "pending", target });
-      schedule(attempt);
+      await dispatchStart(attempt);
     },
     async cancel() { if (active && snapshot?.state === "pending") await cancelAttempt(active); },
     stop() { if (active) clean(active); active = null; },
