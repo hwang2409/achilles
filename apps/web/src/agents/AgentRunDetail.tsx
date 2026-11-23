@@ -3,6 +3,8 @@ import { RunProvider, Timeline } from "@fulcrum/react";
 import type { ZetaClient } from "@fulcrum/zeta";
 import { ModuleState } from "../surface/ModuleState";
 import { surfaceHref } from "../surface/routes";
+import { AgentCancel } from "./AgentControlViews";
+import { runDisplayId, type ChildControls } from "./childControls";
 import { ChildComposer } from "./ChildComposer";
 import { childHistorySupported, createChildRunsController, newerHistory } from "./childRuns";
 import type { ChildSendOwner } from "./childSend";
@@ -16,24 +18,26 @@ export function StateTag({ row }: { row: AgentRun }) {
   return <span className="agents-state" data-status={row.status}>{row.status}</span>;
 }
 
-export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, reportedAt, refreshing, refresh }: {
+export function AgentRunDetail({ chosen, parent, title, id, invalid, back, follow, client, send, controls, reportedAt, refreshing, refresh }: {
   chosen?: AgentRun; parent?: AgentRun; title?: string; id?: string; invalid?: boolean;
   back: Ref<HTMLAnchorElement>; follow: (event: MouseEvent<HTMLAnchorElement>) => void;
-  client: ZetaClient | null; send: ChildSendOwner; reportedAt: number; refreshing: boolean; refresh: () => void;
+  client: ZetaClient | null; send: ChildSendOwner; controls: ChildControls; reportedAt: number; refreshing: boolean; refresh: () => void;
 }) {
   return <section className="agents-detail" aria-label="agent run detail">
-  <div className="agents-detail-scroll">
-  {(id || invalid) && <a className="agents-back" ref={back} href={surfaceHref("/agents")} data-back="true" onClick={follow}>‹ all runs</a>}
-  {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={title!} client={client} />
-    : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
-      detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
-  </div>
-  {chosen && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
-</section>;
+    <div className="agents-detail-scroll">
+      {(id || invalid) && <a className="agents-back" ref={back} href={surfaceHref("/agents")} data-back="true" onClick={follow}>‹ all runs</a>}
+      {chosen ? <RunDetail key={id} row={chosen} parent={parent} rootTitle={title!} />
+        : <ModuleState kind="empty" title={id || invalid ? "run not in this view" : "select a run"}
+          detail={invalid ? "this link is not an agent run address." : id ? "clear the filters or load more runs to find it." : "see what the run was doing when zeta last reported it."} />}
+      <AgentCancel key={`cancel-${id}`} client={client} row={chosen} parent={parent} title={title} owner={controls} refresh={refresh}
+        elapsed={chosen?.elapsedSeconds === undefined ? "elapsed unavailable" : `${duration(chosen.elapsedSeconds)} at last refresh`} />
+      {chosen && <RunActivity client={client} row={chosen} />}
+    </div>
+    {chosen && <ChildComposer key={id} client={client} row={chosen} owner={send} reportedAt={reportedAt} refreshing={refreshing} refresh={refresh} />}
+  </section>;
 }
 
-function RunDetail({ row, parent, rootTitle, client }: { row: AgentRun; parent?: AgentRun; rootTitle: string; client: ZetaClient | null }) {
-  const supported = client && childHistorySupported(client);
+function RunDetail({ row, parent, rootTitle }: { row: AgentRun; parent?: AgentRun; rootTitle: string }) {
   const fields: [string, ReactNode][] = [
     ["session", <a href={sessionHref(row.sessionId)} title={row.sessionId}>{rootTitle}</a>],
     ["parent", row.parentRunId ? <span title={row.parentRunId}>{parent?.agentType ? `${parent.agentType} · ` : ""}{short(row.parentRunId)}</span> : undefined],
@@ -43,17 +47,18 @@ function RunDetail({ row, parent, rootTitle, client }: { row: AgentRun; parent?:
     ["turns", row.turnsUsed], ["tool calls", row.toolCount], ["current step", row.currentStep],
     ["execution", row.background === undefined ? undefined : row.background ? "background" : "foreground"],
   ];
-  return <>
-    <header className="agents-run-head">
+  return <header className="agents-run-head">
       <h2>{row.agentType && row.description && <span>{row.agentType}</span>} {row.description || row.agentType || "agent run"}</h2>
-      <p><StateTag row={row} /> <span title={row.runId}>· run {short(row.runId)}</span></p>
+      <p><StateTag row={row} /> <span title={row.runId}>· run {runDisplayId(row.agentType, row.runId)}</span></p>
       <dl>{fields.filter(([, value]) => value !== undefined && value !== false && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-    </header>
-    <section aria-label="child activity" className="agents-activity">
+    </header>;
+}
+
+function RunActivity({ client, row }: { client: ZetaClient | null; row: AgentRun }) {
+  return <section aria-label="child activity" className="agents-activity">
       <h3>activity <small>stored transcript</small></h3>
-      {client && supported ? <RunHistory client={client} row={row} /> : <p>{client ? newerHistory : "connect to zeta to read this transcript."}</p>}
-    </section>
-  </>;
+      {client && childHistorySupported(client) ? <RunHistory client={client} row={row} /> : <p>{client ? newerHistory : "connect to zeta to read this transcript."}</p>}
+  </section>;
 }
 
 function RunHistory({ client, row }: { client: ZetaClient; row: AgentRun }) {

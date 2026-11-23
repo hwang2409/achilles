@@ -6,6 +6,8 @@ import { surfaceHref } from "../surface/routes";
 import type { ChildSendOwner } from "./childSend";
 import { groupAgentRuns, type RunBranch } from "./groupAgentRuns";
 import { AGENT_REFRESH_MS, agentStatuses, catalogStatuses, createAgentRunsReader, rowKey, sourceNote, unavailable, type AgentFilters, type AgentRun } from "./reads";
+import type { ChildControls } from "./childControls";
+import { AgentSpawn } from "./AgentControlViews";
 import { AgentRunDetail, duration, short, stamp, StateTag } from "./AgentRunDetail";
 import "./agents.css";
 
@@ -19,7 +21,7 @@ function selection() {
   catch { return { invalid: true }; }
 }
 
-export function AgentsModule({ client, connecting, retry, send }: { client: ZetaClient | null; connecting: boolean; retry: () => void; send: ChildSendOwner }) {
+export function AgentsModule({ client, connecting, retry, send, controls }: { client: ZetaClient | null; connecting: boolean; retry: () => void; send: ChildSendOwner; controls: ChildControls }) {
   const reader = useMemo(() => client ? createAgentRunsReader(client) : undefined, [client]);
   const [snapshot, setSnapshot] = useState<ReturnType<NonNullable<typeof reader>["snapshot"]>>({ refreshing: true });
   const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
@@ -114,6 +116,7 @@ export function AgentsModule({ client, connecting, retry, send }: { client: Zeta
   return <section className="module-frame agents-frame">
     <header className="agents-head"><h1>agents</h1>{report && <span>{client ? "reported" : "offline · reported"} <time dateTime={new Date(report.reportedAt).toISOString()}>{stamp(report.reportedAt)}</time></span>}</header>
     <ShellDockSlot />
+    <AgentSpawn client={client} owner={controls} refresh={refresh} />
     {!report ? <div className="module-body">
       {!client ? connecting ? <ModuleState kind="loading" title="connecting to zeta" /> : <ModuleState kind="offline" title="could not connect to zeta" detail="retrying automatically" action={{ label: "retry now", run: retry }} />
         : unsupported ? <ModuleState kind="unsupported" title={unavailable} />
@@ -149,7 +152,7 @@ export function AgentsModule({ client, connecting, retry, send }: { client: Zeta
           {!report.complete && <button type="button" className="agents-more" disabled={!client || refreshing || paging} onClick={() => void reader?.more()}>{paging ? "loading more…" : "load more runs"}</button>}
         </section>
         <AgentRunDetail chosen={chosen} parent={parent} title={chosen && rootTitle(chosen.sessionId)}
-          id={id} invalid={invalid} back={back} follow={follow} client={client} send={send}
+          id={id} invalid={invalid} back={back} follow={follow} client={client} send={send} controls={controls}
           reportedAt={report.reportedAt} refreshing={refreshing} refresh={refresh} />
       </div>
     </>}
