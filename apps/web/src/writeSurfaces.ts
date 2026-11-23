@@ -1,6 +1,7 @@
 export const READ_ONLY_REASON = "this tab is read-only; take control to make changes";
 
 export const WRITE_SURFACE = {
+  agentsSend: "agents.send",
   emptySend: "empty.send",
   emptyCreate: "empty.create",
   emptyContinue: "empty.continue",
@@ -34,6 +35,9 @@ export const WRITE_SURFACE = {
   recordInsert: "record.insert",
   recordUpdate: "record.update",
   recordAdd: "record.add",
+  mcpEnabled: "mcp.enabled",
+  mcpTrusted: "mcp.trusted",
+  mcpRemove: "mcp.remove",
   libraryCreate: "library.create",
   libraryEdit: "library.edit",
   settingsTheme: "settings.theme",
@@ -56,12 +60,14 @@ export type WriteSurfaceId = (typeof WRITE_SURFACE)[keyof typeof WRITE_SURFACE];
 export type WriteSurfaceMetadata = { readonly id: WriteSurfaceId; readonly channel: "websocket" | "http" | "storage" | "storage-and-shared-default" | "http-and-storage" | "http-and-websocket" | "persistence"; readonly observer?: "browser-only"; readonly visibility: "visible" | "command" | "passive" };
 
 export const WRITE_SURFACES: readonly WriteSurfaceMetadata[] = [
+  ["agentsSend", "websocket", "visible"],
   ["emptySend", "websocket", "visible"], ["emptyCreate", "websocket", "visible"], ["emptyContinue", "websocket", "visible"],
   ["busyRetry", "websocket", "visible"], ["createRetry", "websocket", "visible"], ["createDiscard", "websocket", "visible"], ["missingNewChat", "websocket", "visible"],
   ["approvalApprove", "websocket", "visible"], ["approvalDeny", "websocket", "visible"], ["composerSend", "websocket", "visible"], ["composerSteer", "websocket", "visible"], ["composerAbort", "websocket", "visible"], ["deliveryRetry", "websocket", "visible"],
   ["accountLogin", "websocket", "visible"], ["accountLoginCancel", "websocket", "visible"],
   ["authLogin", "websocket", "visible"], ["authSwitch", "websocket", "visible"], ["authNewChat", "http-and-websocket", "visible"], ["composerAccountSwitch", "websocket", "command"],
   ["headerCreate", "http", "visible"], ["headerRename", "http", "visible"], ["sidebarRename", "http", "visible"], ["shellNewChat", "http", "visible"], ["keyboardCommands", "http", "command"], ["paletteCommands", "http-and-storage", "command", "browser-only"], ["pageChat", "websocket", "visible"], ["historyRestore", "http", "visible"], ["recordInsert", "http", "visible"], ["recordUpdate", "http", "visible"], ["recordAdd", "http", "visible"], ["libraryCreate", "websocket", "visible"], ["libraryEdit", "websocket", "visible"],
+  ["mcpEnabled", "websocket", "visible"], ["mcpTrusted", "websocket", "visible"], ["mcpRemove", "websocket", "visible"],
   ["pageChatNew", "http-and-websocket", "visible"], ["pageChatAutoApprove", "websocket", "visible"], ["pageChatCreateMode", "http-and-websocket", "visible"],
   ["settingsTheme", "storage", "visible", "browser-only"], ["settingsUiFont", "storage", "visible", "browser-only"], ["settingsCodeFont", "storage", "visible", "browser-only"], ["settingsSize", "storage", "visible", "browser-only"], ["settingsDensity", "storage", "visible", "browser-only"], ["settingsVim", "storage", "visible", "browser-only"], ["settingsAutoApprove", "storage-and-shared-default", "visible"], ["settingsReset", "storage-and-shared-default", "visible"], ["settingsTelemetry", "websocket", "visible"],
   ["passiveLastState", "persistence", "passive"], ["passiveFirstMessage", "persistence", "passive"], ["passiveTitle", "persistence", "passive"], ["passiveAttachment", "persistence", "passive"], ["passiveRepair", "persistence", "passive"],
