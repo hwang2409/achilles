@@ -44,6 +44,11 @@ for (const declaration of pinnedProtocol.matchAll(/\b[A-Z_]+\s*=\s*\(([^)]*)\)/g
   const wire = body.match(/^\s*"([^"]+)"/s)?.[1];
   if (wire && /Access\.(?:SESSION_MUTATION|DELIVERY|CONTROLLER_WRITE)/.test(body)) protocolMutationMethods.add(wire);
 }
+const resourceDir = join(zeta, "src/zeta/server/handlers/resources");
+for await (const file of new Bun.Glob("*.py").scan(resourceDir)) {
+  const source = await readFile(join(resourceDir, file), "utf8");
+  for (const [, wire] of source.matchAll(/ResourceMethod\(\s*"([^"]+)",\s*Access\.CONTROLLER_WRITE\b/g)) protocolMutationMethods.add(wire!);
+}
 if (!protocolMutationMethods.size) throw new Error(`pinned zeta ${zetaRef} has no mutation declarations`);
 const temp = await mkdtemp(join(tmpdir(), "achilles-v3-"));
 const zetaHome = join(temp, "zeta-home");
@@ -3170,7 +3175,7 @@ with _database() as db:
   };
   await recordRenderedWriteSurfaces(page);
   const observerFrames: { direction: "sent" | "received"; payload: string }[] = [];
-  const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; helloAccepted?: boolean }> = [];
+  const observerSockets: Array<{ socketId: number; attempt: number; role: string | null; lifecycle: "open" | "closed"; direction?: "sent" | "received"; method?: string; helloAccepted?: boolean; helloFeatures?: string[] }> = [];
   const observerHttp: { method: string; path: string; body: string | null }[] = [];
   let observerSocketId = 0;
   observerPage.on("websocket", (socket) => {
@@ -3191,10 +3196,10 @@ with _database() as db:
     });
     socket.on("framereceived", (event) => {
       const payload = String(event.payload); observerFrames.push({ direction: "received", payload });
-      const frame = decodeFrame(payload);
+      const frame = decodeFrame(payload) as { id?: string | number; method?: string; result?: { capabilities?: { features?: string[] } } } | null;
       if (!frame) return;
       const helloReply = helloId !== undefined && frame.id === helloId;
-      observerSockets.push({ ...row, direction: "received", method: helloReply ? "hello" : frame.method, ...(helloReply ? { helloAccepted: Object.hasOwn(frame, "result") } : {}) });
+      observerSockets.push({ ...row, direction: "received", method: helloReply ? "hello" : frame.method, ...(helloReply ? { helloAccepted: Object.hasOwn(frame, "result"), helloFeatures: frame.result?.capabilities?.features } : {}) });
     });
     socket.on("close", () => observerSockets.push({ ...row, lifecycle: "closed" }));
   });
@@ -3384,7 +3389,11 @@ with _database() as db:
   const takeoverStart = observerSockets.length;
   await takeControl.click();
   await waitFor(async () => await observerComposer.isVisible() && await observerComposer.isEditable({ timeout: 1_000 }), "editable composer after take control without reload");
-  if (!observerSockets.slice(takeoverStart).some((row) => row.role === "controller" && row.helloAccepted)) throw new Error("controller hello was not accepted after closing the controller tab");
+  const controllerHello = observerSockets.slice(takeoverStart).find((row) => row.role === "controller" && row.helloAccepted);
+  if (!controllerHello) throw new Error("controller hello was not accepted after closing the controller tab");
+  const missingFeatures = ["library_read_v1", "library_write_v1", "session_history_read_v1", "state_read_v1", "home_settings_v1", TELEMETRY_FEATURE]
+    .filter((feature) => !controllerHello.helloFeatures?.includes(feature));
+  if (missingFeatures.length) throw new Error(`pinned zeta did not negotiate: ${missingFeatures.join(", ")}`);
   if (await observerBanner.isVisible() || await takeoverReason.isVisible()) throw new Error("observer banner or refusal reason remained after take control");
   if (screenshotDir) await observerPage.screenshot({ path: join(screenshotDir, "observer-takeover-no-reload-1440x900.png") });
   await waitFor(async () => observerSockets.some((row) => row.role === "observer" && row.lifecycle === "closed"), "promoted controller released its observer socket");
