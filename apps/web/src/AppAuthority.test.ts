@@ -272,35 +272,121 @@ const approval = (action: "approve" | "deny"): Row => button(`[data-part="approv
 const modify = { ...insert, name: "edit_book", operation: "update" };
 const existingBook = { record_id: "book-id", revision: 1, title: "Old book" };
 
-const accountFixture: Options = {
+const fromAccount = "anthropic:fixture-expired";
+const toAccount = "anthropic:fixture-ready";
+const accountFixture = (requests: { method: string; params: Record<string, unknown> }[], state: { account: string } = { account: fromAccount }): Options => ({
   attached: true,
   joined: { messages: [{ id: "prompt", role: "user", content: [{ type: "text", text: "fixture prompt" }], failed_turn: { code: "auth_error", message: "fixture login failed" } }] },
   rpc: {
-    hello: (params) => params.role === "observer"
-      ? { result: { protocol_version: "1.2", capabilities: { features: params.features } } }
-      : { result: { protocol_version: "1.2", capabilities: { features: params.features, requests: ["account_list", "account_switch", "login_start", "login_status"] } } },
-    account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [
-      { account: "anthropic:default", label: "default", current: true, available: true, default: true, detail: null, usage: { freshness: "usage unknown", error: null, snapshot: null } },
-      { account: "anthropic:personal", label: "personal", current: false, available: true, default: false, detail: null, usage: { freshness: "usage unknown", error: null, snapshot: null } },
-    ] } } }),
-    login_start: (params) => ({ result: params.provider === "claude" ? { state: "succeeded" } : { state: "failed" } }),
+    hello: (params) => ({ result: { protocol_version: "1.2", capabilities: { features: params.features,
+      requests: params.role === "observer" ? ["status"] : ["account_list", "account_switch", "login_start", "login_status"] } } }),
+    status: () => ({ result: { session: { session_id: "session", name: "Fixture chat" }, state: "idle" } }),
+    account_list: () => ({ result: { revision: "a".repeat(64), data: { accounts: [fromAccount, toAccount].map(account => ({
+      account, label: account.slice(10), current: state.account === account, available: account === toAccount, default: false, detail: null,
+      usage: { freshness: "usage unknown", error: null, snapshot: null },
+    })) } } }),
+    login_start: params => { requests.push({ method: "login_start", params }); return { result: { state: "succeeded" } }; },
+    account_switch: params => { requests.push({ method: "account_switch", params }); state.account = String(params.account); return { result: { account: state.account, replay: false } }; },
   },
-};
-const recoveryWrite = (id: WriteSurfaceId, request: string): Row => ({ kind: "visible", options: accountFixture, check: async (app, authority, writes, requests) => {
-  const card = select(app, ".transcript .chat-auth-error");
-  const control = select(app, tag(id));
-  expect(disabled(control)).toBe(authority === "observer");
-  await click(control);
-  if (authority === "observer") {
-    expect(card.textContent).toContain("this chat is pinned to its account, which failed to sign in.");
-    expect(card.textContent).toContain("read-only");
-    expect(card.textContent).not.toContain("anthropic:");
-    expect(requests).not.toContain("account_list");
-  } else {
+});
+
+async function proveSwitch(app: RenderResult, writes: string[]) {
+  const dialog = app.getByRole("dialog", { name: "review chat account switch" });
+  const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(dialog.textContent).toContain("Fixture chat");
+  expect(dialog.textContent).toContain(fromAccount);
+  expect(dialog.textContent).toContain("the failed request is not retried");
+  expect(writes).not.toContain("account_switch");
+  expect(disabled(submit)).toBe(true);
+  await change(dialog.querySelector("input")!, toAccount);
+  expect(disabled(submit)).toBe(false);
+  return submit;
+}
+
+const recoveryWrite = (id: WriteSurfaceId, request: string): Row => {
+  const calls: { method: string; params: Record<string, unknown> }[] = [];
+  return { kind: "visible", options: accountFixture(calls), check: async (app, authority, writes, requests) => {
+    const card = select(app, ".transcript .chat-auth-error");
+    expect(card.querySelector('a[href="/accounts"]')).not.toBeNull();
+    const control = select(app, tag(id));
+    expect(disabled(control)).toBe(authority === "observer");
+    if (authority === "observer") {
+      await click(control);
+      expect(card.textContent).toContain("this chat is pinned to its account, which failed to sign in.");
+      if (id !== "auth.new-chat") expect(requests).not.toContain("account_list");
+      return;
+    }
+    if (id === "auth.login") {
+      const originalOpen = window.open;
+      window.open = (() => ({ opener: window, closed: false, close() {} })) as typeof window.open;
+      try {
+        await click(control);
+        const dialog = app.getByRole("dialog", { name: "review browser sign-in" });
+        await click(dialog.querySelector("input")!);
+        await click(dialog.querySelector('button[type="submit"]')!);
+        expect(calls).toContainEqual({ method: "login_start", params: { provider: "claude", account: fromAccount } });
+        expect(card.textContent).toContain("send your message again to retry.");
+      } finally { window.open = originalOpen; }
+    } else if (id === "auth.switch") {
+      await click(control);
+      await click(await proveSwitch(app, writes));
+      expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
+      expect(calls).toEqual([{ method: "account_switch", params: { session_id: "session", account: toAccount } }]);
+    } else await click(control);
     didWrite(writes, request);
-    if (id === "auth.login") expect(card.textContent).toContain("logged in. send your message again");
-  }
-} });
+  } };
+};
+
+const pageSwitch = (): Row => {
+  const options = accountFixture([]);
+  return { kind: "visible", options: { ...options, path: "/accounts", attached: false, observerBanner: false, slot: true }, check: async (app, authority, writes) => {
+    await click(app.getByRole("button", { name: "show accounts" }));
+    const control = select(app, tag("accounts.switch"));
+    expect(disabled(control)).toBe(authority === "observer");
+    if (authority === "observer") {
+      expect(app.getByText(/another tab had control/, { selector: "#account-switch-reason" })).toBeTruthy();
+      return;
+    }
+    await click(control);
+    await click(await proveSwitch(app, writes));
+    didWrite(writes, "account_switch");
+    expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
+  } };
+};
+
+test("chat account switch busy refusal permits one retry; a dropped reply is settled only by reading", async () => {
+  const sockets: EventTarget[] = [];
+  const state = { account: fromAccount };
+  const options = accountFixture([], state);
+  let attempts = 0;
+  let readsAfterDrop = 0;
+  const read = options.rpc!.account_list!;
+  await withApp("controller", { ...options, sockets, rpc: { ...options.rpc,
+    account_list: (params, requests) => {
+      if (attempts >= 2) readsAfterDrop++;
+      return read(params, requests);
+    },
+    account_switch: params => {
+      if (++attempts === 1) return { error: { code: -32004, message: "fixture busy" } };
+      if (attempts === 2) {
+        state.account = String(params.account);
+        (sockets.at(-1)! as EventTarget & { close(): void }).close();
+      }
+      return {};
+    },
+  } }, async (app, writes) => {
+    await click(select(app, tag("auth.switch")));
+    const submit = await proveSwitch(app, writes);
+    await click(submit);
+    expect(app.getByText(/not changed. zeta is busy/)).toBeTruthy();
+    expect(attempts).toBe(1);
+    await click(submit);
+    expect(await app.findByText(/current account confirmed as anthropic:fixture-ready/, {}, { timeout: 3_000 })).toBeTruthy();
+    expect(readsAfterDrop).toBeGreaterThan(0);
+    expect(attempts).toBe(2);
+    expect(writes).not.toContain("send");
+  });
+});
 
 const browserLogin = (cancel: boolean): Row => {
   const sentinel = "https://signin.invalid/browser-only-fixture";
@@ -340,7 +426,7 @@ const browserLogin = (cancel: boolean): Row => {
         expect(writes).toEqual(["login_start", "login_cancel"]);
         expect(app.getByText(/^signed in at/)).toBeTruthy();
         expect(requests.filter(method => method === "account_list")).toHaveLength(2);
-        expect(requests.at(-1)).toBe("hello");
+        expect(requests.filter(method => method !== "status" && !method.includes(" ")).at(-1)).toBe("hello");
       }
       const contents = [document.documentElement.outerHTML, location.href, history.state,
         ...[localStorage, sessionStorage].map(store => Array.from({ length: store.length }, (_, i) => [store.key(i), store.getItem(store.key(i)!)])),
@@ -554,10 +640,11 @@ const rows: Record<WriteSurfaceId, Row> = {
     if (authority === "controller") didWrite(writes, "POST /api/pages/page/tools/edit_book/invoke");
   } },
 
+  "accounts.switch": pageSwitch(),
   "auth.login": recoveryWrite("auth.login", "login_start"),
   "auth.switch": recoveryWrite("auth.switch", "account_switch"),
   "auth.new-chat": recoveryWrite("auth.new-chat", "new_session"),
-  "composer.account-switch": { kind: "command", options: accountFixture, check: async (app, authority, writes, requests) => {
+  "composer.account-switch": { kind: "command", options: accountFixture([]), check: async (app, authority, writes, requests) => {
     const run = async (text: string) => {
       const field = select(app, '[data-part="composer"] textarea');
       await change(field, text);
@@ -569,10 +656,12 @@ const rows: Record<WriteSurfaceId, Row> = {
       return;
     }
     await run("/accounts");
-    await click(select(app, tag("composer.account-switch")));
-    expect(writes.filter((write) => write === "account_switch")).toHaveLength(1);
-    await run("/accounts anthropic:personal");
-    expect(writes.filter((write) => write === "account_switch")).toHaveLength(2);
+    expect(app.queryByRole("dialog", { name: "review chat account switch" })).toBeNull();
+    expect(writes).not.toContain("account_switch");
+    await run(`/accounts ${toAccount}`);
+    await click(await proveSwitch(app, writes));
+    expect(writes.filter(write => write === "account_switch")).toHaveLength(1);
+    expect(app.getByText(/Fixture chat: switched to/)).toBeTruthy();
     expect(writes).not.toContain("send");
   } },
   "settings.theme": setting("settings.theme", "theme", ' button[aria-selected="false"]'),
